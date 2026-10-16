@@ -134,18 +134,19 @@ export interface EffectConfig<
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
-   * Called when a Collection fails before the effect's initial-query readiness, or
-   * is cleaned up. The effect is automatically disposed after this callback
-   * fires. If not provided, the error is logged to console.error.
+   * Called when a source fails its first load before the effect's
+   * initial-query readiness, crashes, or is cleaned up. The effect is
+   * automatically disposed after this callback fires. If not provided, the
+   * error is logged to console.error.
    */
   onSourceError?: (error: Error) => void
 
   /**
-   * Called after the effect's initial-query readiness whenever a Collection's status or health
-   * changes. A Collection health problem after initial-query readiness does not dispose the
+   * Called after the effect's initial-query readiness whenever its error tree
+   * changes. A sync problem after initial-query readiness does not dispose the
    * effect; read the error tree to decide what to do.
    */
-  onHealthChange?: (errors: ErrorTreeNode) => void
+  onErrorsChange?: (errors: ErrorTreeNode) => void
 
   /**
    * Skip deltas during initial collection load.
@@ -315,7 +316,7 @@ export function createEffect<
     query: config.query,
     skipInitial: config.skipInitial ?? false,
     onBatchProcessed,
-    onHealthChange: config.onHealthChange,
+    onErrorsChange: config.onErrorsChange,
     onSourceError: (error: Error) => {
       if (disposed) return
 
@@ -386,7 +387,7 @@ interface EffectPipelineRunnerConfig<
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
-  onHealthChange?: (errors: ErrorTreeNode) => void
+  onErrorsChange?: (errors: ErrorTreeNode) => void
 }
 
 /**
@@ -472,11 +473,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private initialLoadComplete = false
   // The Effect's initial gate: latched when every
   // initial load has settled, with or without skipInitial. After it,
-  // a Collection health problem does not dispose the Effect.
+  // a sync problem does not dispose the Effect.
   private reachedReady = false
   private readonly requests = new RequestErrors()
   private reportedTree: ErrorTreeNode | undefined
-  private readonly onHealthChange: ((errors: ErrorTreeNode) => void) | undefined
+  private readonly onErrorsChange: ((errors: ErrorTreeNode) => void) | undefined
 
   // Scheduler integration
   private subscribedToAllCollections = false
@@ -496,7 +497,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.skipInitial = config.skipInitial
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
-    this.onHealthChange = config.onHealthChange
+    this.onErrorsChange = config.onErrorsChange
 
     // Parse query
     this.query = buildQueryFromConfig({ query: config.query })
@@ -739,14 +740,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
         const { status } = event
 
-        // A source in error ends the effect, before or after its gate: an
-        // initial error or a crash. Health errors never change the status.
-        if (status === `error`) {
+        // A crash ends the effect at any time. A failed first load ends it
+        // before its gate; after the gate it is a sync problem in the tree.
+        if (
+          status === `crashed` ||
+          (status === `error` && !this.reachedReady)
+        ) {
           this.onSourceError(
             new Error(
               devBuild() && process.env.NODE_ENV !== `production`
-                ? `Source collection '${collectionId}' entered error state`
-                : codedMessage(135, { collectionId }),
+                ? `Source collection '${collectionId}' entered ${status} state`
+                : codedMessage(135, { collectionId, status }),
             ),
           )
           return
@@ -766,12 +770,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         ) {
           this.initialLoadComplete = true
         }
-        // health:change follows every status change and reports the tree.
+        // errors:change follows every status change and reports the tree.
         this.latchReady()
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
       this.unsubscribeCallbacks.add(
-        collection.on(`health:change`, () => this.reportHealth()),
+        collection.on(`errors:change`, () => this.reportErrors()),
       )
       const cleanupStartUnsubscribe =
         collection._onCleanupStart(handleSourceCleanup)
@@ -1078,7 +1082,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private failLoad(sourceId: string, error: Error): void {
     if (!this.reachedReady) return this.onSourceError(error)
     this.requests.fail(sourceId, error)
-    this.reportHealth()
+    this.reportErrors()
   }
 
   /** A load that later succeeds clears the source's request error. */
@@ -1090,7 +1094,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private settleLoad(sourceId: string): void {
-    if (this.requests.settle(sourceId)) this.reportHealth()
+    if (this.requests.settle(sourceId)) this.reportErrors()
   }
 
   /** The error tree for this effect's sources, in query order. */
@@ -1100,6 +1104,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       collectionId: `effect`,
       kind: `live-query`,
       status: this.reachedReady ? `ready` : `loading`,
+      failureReason: null,
       error: this.requests.problem,
       sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
         buildErrorTree(collection, { alias, id: sourceId }, this),
@@ -1107,13 +1112,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
   }
 
-  private reportHealth(): void {
-    if (this.disposed || !this.reachedReady || !this.onHealthChange) return
+  private reportErrors(): void {
+    if (this.disposed || !this.reachedReady || !this.onErrorsChange) return
     // An unchanged tree keeps its identity; report each change once.
     const tree = this.errorTree()
     if (tree === this.reportedTree) return
     this.reportedTree = tree
-    this.onHealthChange(tree)
+    this.onErrorsChange(tree)
   }
 
   private canCompleteInitialLoad(): boolean {

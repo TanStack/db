@@ -547,7 +547,7 @@ async function runRejectedDurablePrefixWitness(
     subscriber!([secondMessage, upToDate])
     if (acceptedPrefix) {
       await atCheckpoint(rejectedAttempt.promise, `second durability rejection`)
-      await vi.waitFor(() => expect(collection.status).toBe(`error`))
+      await vi.waitFor(() => expect(collection.status).toBe(`crashed`))
       // A later source callback may arrive after the failed durability turn.
       // It cannot become part of the accepted prefix or start another write.
       subscriber!([change(`insert`, 3, `retired`), upToDate])
@@ -576,7 +576,7 @@ async function runRejectedDurablePrefixWitness(
     // A rejected durability boundary is terminal: it cannot retry, admit the
     // later source commit, or publish a resume claim for an undurable prefix.
     // Clearing the accepted prefix on a later rejection is also a wrong rule.
-    expect(statusAtTerminalCut).toBe(`error`)
+    expect(statusAtTerminalCut).toBe(`crashed`)
     expect(durableOffset).toBe(acceptedPrefix ? `21_0` : undefined)
     expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(acceptedRows))
   }, [() => collection.cleanup()])
@@ -1851,14 +1851,15 @@ type ProcessCommand =
 
 /**
  * After Collection readiness, an Electric sync adapter that gives up reports a
- * final health error. Status and rows stay, and only a restart recovers; the
+ * stopped sync: the Collection's `error`. Status and rows stay, and only a restart recovers; the
  * reset resume state is what lets that restart refetch.
  */
 function expectGaveUpAfterReadiness(
   collection: Collection<OracleRow, string | number>,
 ) {
   expect(collection.status).toBe(`ready`)
-  expect(collection.health.error).toMatchObject({ phase: `sync`, final: true })
+  expect(collection.errors.failureReason).toBeNull()
+  expect(collection.errors.error).toBeTruthy()
 }
 
 type ProcessRuntime = {
@@ -1874,7 +1875,7 @@ type ProcessRuntime = {
   // delivered snapshot or batch carries one, so the model records it there.
   reachedReadiness: boolean
   terminalError: boolean
-  // A give-up after readiness is a final health error, not status `error`.
+  // A give-up after readiness is the Collection's `error`, not status `error`.
   terminalAfterReadiness: boolean
   active: boolean
   retired: boolean
@@ -2165,9 +2166,9 @@ async function runPersistenceFailureCrashOnlyWitness(
         publicationsBeforeRetiredWork,
       ),
     }).toEqual({
-      statusAtAdmissionCut: `error`,
+      statusAtAdmissionCut: `crashed`,
       publicErrorNameAtAdmissionCut: `PersistedCollectionDurabilityError`,
-      status: `error`,
+      status: `crashed`,
       publicErrorName: `PersistedCollectionDurabilityError`,
       hasNamedPersistenceSemantics: true,
       preservesCause: true,

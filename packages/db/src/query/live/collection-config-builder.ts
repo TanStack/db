@@ -497,7 +497,7 @@ export class CollectionConfigBuilder<
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
     if (this.reportFailedRequest(planId, normalized)) return
-    this.transitionToError(
+    this.failQuery(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Subset demand '${planId}' failed: ${normalized.message}`
         : codedMessage(228, { planId, cause: normalized.message }),
@@ -516,7 +516,7 @@ export class CollectionConfigBuilder<
       this.orderedLoadFailed = true
     }
     if (fatalBeforeReady) {
-      this.transitionToError(
+      this.failQuery(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Initial subset load failed: ${normalized.message}`
           : codedMessage(229, { cause: normalized.message }),
@@ -700,8 +700,13 @@ export class CollectionConfigBuilder<
             try {
               syncState.graph.run()
             } catch (error) {
-              if (isCurrentSyncRun()) {
-                this.transitionToError(
+              // A first load that already failed in this run, such as a lazy
+              // load that threw, reported its error.
+              if (
+                isCurrentSyncRun() &&
+                this.liveQueryCollection?.status !== `error`
+              ) {
+                this.crashQuery(
                   devBuild() && process.env.NODE_ENV !== `production`
                     ? `Live query graph failed`
                     : codedMessage(212),
@@ -999,7 +1004,7 @@ export class CollectionConfigBuilder<
           (count) => {
             syncState.messagesCount += count
           },
-          () => this.liveQueryCollection?._emitHealthChange(),
+          () => this.liveQueryCollection?._emitErrorsChange(),
         )
       : undefined
     this.bucketFacades = bucketFacades
@@ -1184,15 +1189,27 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // A source in error ends this query's sync run, for every shape. Before
-    // initial-query readiness it is an initial error. After it, a source can
-    // reach error only by crashing, and a query cannot keep serving rows from
-    // a Collection that cannot serve reads.
-    if (status === `error`) {
-      this.transitionToError(
+    // A crashed source cannot serve reads, so it ends this query at any time.
+    if (status === `crashed`) {
+      this.crashQuery(
         devBuild() && process.env.NODE_ENV !== `production`
-          ? `Source collection '${collectionId}' entered error state`
+          ? `Source collection '${collectionId}' crashed`
           : codedMessage(172, { collectionId }),
+        event.collection._lifecycle.getSyncError(),
+      )
+      return
+    }
+
+    // A source whose first load failed fails this query's first load. Once
+    // the query has shown data, the failure is a sync problem on the source's
+    // node: the query keeps its status and rows.
+    if (status === `error`) {
+      if (this.liveQueryCollection?.status === `ready`) return
+      this.failQuery(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Source collection '${collectionId}' failed its first load`
+          : codedMessage(248, { collectionId }),
+        event.collection._lifecycle.getSyncError(),
       )
       return
     }
@@ -1226,7 +1243,7 @@ export class CollectionConfigBuilder<
             `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
         : codedMessage(152, { collectionId, id: this.id }),
     )
-    this.transitionToError(error.message, error)
+    this.crashQuery(error.message, error)
     return error
   }
 
@@ -1260,28 +1277,34 @@ export class CollectionConfigBuilder<
   }
 
   /**
-   * Transition the live query to error state
+   * The query's first load failed: status `error`. A sync problem or a
+   * request error after the first ready never reaches here.
    */
-  private transitionToError(message: string, error?: unknown) {
-    this.fatalQueryError = true
-    this.setErrorState(message, error)
+  private failQuery(message: string, error?: unknown) {
+    if (!this.enterErrorState(message)) return
+    this.liveQueryCollection?._lifecycle.fail(error ?? new Error(message))
   }
 
-  private setErrorState(message: string, error?: unknown) {
-    this.isInErrorState = true
+  /**
+   * The query can no longer serve reads: a crashed source, a graph failure,
+   * or a contract violation such as a source cleaned up under this query.
+   */
+  private crashQuery(message: string, error?: unknown) {
+    this.enterErrorState(message)
+    this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message))
+  }
 
-    // Log error to console for debugging
+  /** Returns false when the query already ended. */
+  private enterErrorState(message: string): boolean {
+    if (this.fatalQueryError) return false
+    this.fatalQueryError = true
+    this.isInErrorState = true
     console.error(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `[Live Query Error] ${message}`
         : message,
     )
-
-    // These are query failures, crashed sources, or contract violations such
-    // as a source cleaned up under this query, so they end the query even
-    // after initial-query readiness. A source's health error and a request
-    // error are health metadata and never reach here.
-    this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message))
+    return true
   }
 
   private allRequiredSourcesReady() {
@@ -1329,10 +1352,10 @@ export class CollectionConfigBuilder<
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
-      // Relay health changes so this query's error tree stays current.
+      // Relay error tree changes so this query's tree stays current.
       syncState.unsubscribeCallbacks.add(
-        collection.on(`health:change`, () =>
-          this.liveQueryCollection?._emitHealthChange(),
+        collection.on(`errors:change`, () =>
+          this.liveQueryCollection?._emitErrorsChange(),
         ),
       )
       let cleanupStartError: Error | undefined
@@ -1353,12 +1376,12 @@ export class CollectionConfigBuilder<
       // The source may have failed before this live query subscribed. Register
       // the listener first, then reconcile that current state so no transition
       // can be missed between observation and subscription.
-      if (collection.status === `error`) {
+      if (collection.status === `error` || collection.status === `crashed`) {
         this.handleSourceStatusChange(config, sourceId, collectionId, {
           type: `status:change`,
           collection,
-          status: `error`,
-          previousStatus: `error`,
+          status: collection.status,
+          previousStatus: collection.status,
         })
       }
 

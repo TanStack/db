@@ -22,6 +22,7 @@ import type {
   ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
+  CollectionStatus,
   LoadSubsetFn,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
@@ -320,8 +321,8 @@ export class CollectionSyncManager<
             // transaction holds still publish with the drop of its state.
             if (isCurrentSync()) this.lifecycle.markReady()
           },
-          markError: (error?: unknown) => {
-            if (isCurrentSync()) this.lifecycle.markError(error)
+          fail: (error: unknown) => {
+            if (isCurrentSync()) this.lifecycle.fail(error)
           },
           reportError: (error: unknown) => {
             if (isCurrentSync()) this.lifecycle.reportError(error)
@@ -396,7 +397,10 @@ export class CollectionSyncManager<
       this.completePendingSyncEntryCleanup()
       finishReadyFailures()
       // A throwing sync function is a programming error, even after ready.
-      if (isCurrentSync()) this.lifecycle.crash(error)
+      // A first load that already failed in this run reported its error.
+      // The sync function can change the status before it throws.
+      const status = this.lifecycle.status as CollectionStatus
+      if (isCurrentSync() && status !== `error`) this.lifecycle.crash(error)
       throw error
     }
     if (readyFailure) throw readyFailure.error
@@ -621,7 +625,10 @@ export class CollectionSyncManager<
         return
       }
 
-      if (this.lifecycle.status === `error`) {
+      if (
+        this.lifecycle.status === `error` ||
+        this.lifecycle.status === `crashed`
+      ) {
         reject(this.getPreloadError())
         return
       }
@@ -658,12 +665,18 @@ export class CollectionSyncManager<
       // when GC has already queued the destructive idle callback.
       this.lifecycle.cancelGCTimer()
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
-      unsubscribeError = this.collection.on(`status:error`, () => {
+      const onFailure = () => {
         if (syncStartState.active) {
           return
         }
         rejectError(this.getPreloadError())
-      })
+      }
+      const unsubscribeFailed = this.collection.on(`status:error`, onFailure)
+      const unsubscribeCrashed = this.collection.on(`status:crashed`, onFailure)
+      unsubscribeError = () => {
+        unsubscribeFailed()
+        unsubscribeCrashed()
+      }
 
       // Start sync if collection hasn't started yet or was cleaned up
       if (
@@ -679,7 +692,10 @@ export class CollectionSyncManager<
         } finally {
           syncStartState.active = false
         }
-        if (this.collection.status === `error`) {
+        if (
+          this.collection.status === `error` ||
+          this.collection.status === `crashed`
+        ) {
           rejectError(this.getPreloadError())
         } else if (syncStartState.ready) {
           // A first-ready listener can throw after readiness is established.

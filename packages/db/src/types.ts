@@ -451,20 +451,23 @@ export interface SyncConfig<
     /** Signal that a usable initial snapshot is available for this attempt. */
     markReady: () => void
     /**
-     * Signal that the sync adapter stopped trying. Before Collection readiness
-     * this is the initial error of the sync run: `preload()` rejects with
-     * `error`, and `markReady()` afterward throws. After it, this is a final
-     * health error: the status and rows stay, and only a restart clears it.
-     * While the sync adapter retries, call nothing.
-     */
-    markError: (error?: unknown) => void
-    /**
-     * Report a problem after Collection readiness while the sync adapter
-     * keeps trying. The status and rows do not change. Throws before
-     * Collection readiness.
+     * Report a problem after the first ready while the sync adapter keeps
+     * trying. It shows as the node's `failureReason`; the status and rows do
+     * not change. Throws before the first ready and after `fail()`.
      */
     reportError: (error: unknown) => void
-    /** Report that sync works again after `reportError`. */
+    /**
+     * The sync adapter stopped. Before the first ready the status becomes
+     * `error` and `preload()` rejects with `error`. After it, the rows stay and
+     * the node shows `error` until a reload. Throws after an earlier `fail()`.
+     * While the sync adapter retries, call nothing or `reportError()`.
+     */
+    fail: (error: unknown) => void
+    /**
+     * Sync works again: clears a `failureReason`. With nothing to clear it does
+     * nothing, so it can follow every commit. Throws before the first ready
+     * and after `fail()`.
+     */
     reportHealthy: () => void
     /**
      * Replace the synced rows. By default the replacement also marks the
@@ -731,9 +734,9 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // loading → error when the initial sync of an attempt fails for good
- * // An initial error is final for its sync attempt. cleanup() and a new
- * // preload() or subscriber start a fresh attempt.
+ * // loading → error when the sync adapter calls fail() before the first ready
+ * // any active status → crashed when local storage or an invariant breaks
+ * // After the first ready, sync problems appear in `errors`, not in `status`.
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -742,8 +745,13 @@ export type CollectionStatus =
   | `loading`
   /** Collection has been explicitly marked ready via markReady() */
   | `ready`
-  /** An error occurred during sync initialization */
+  /** The first load of the sync run failed: there is nothing to show. */
   | `error`
+  /**
+   * Local storage or an internal invariant broke. The Collection cannot serve
+   * reads or accept writes again; recovery is a new Collection.
+   */
+  | `crashed`
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
@@ -755,15 +763,6 @@ export type SyncMode = `eager` | `on-demand`
  * and is omitted from JSON.
  */
 export interface CollectionErrorInfo {
-  /**
-   * `initial`: the source gave up before its first ready, so `status` is
-   * `error`. `sync`: the source reported a problem after its first ready.
-   * `request`: loading data for a live query failed while its sources stayed
-   * healthy.
-   */
-  readonly phase: `initial` | `sync` | `request`
-  /** The source has stopped trying; only a restart clears this problem. */
-  readonly final: boolean
   readonly name: string
   readonly message: string
   readonly code?: string
@@ -772,16 +771,15 @@ export interface CollectionErrorInfo {
   readonly cause: unknown
 }
 
-/** A Collection's health after its first ready. Status still gates the initial load. */
-export interface CollectionHealth {
-  readonly isError: boolean
-  readonly error: CollectionErrorInfo | null
-}
-
 /**
- * One node of a live query's error tree. A live query has one node for itself
- * and one for each source alias in query order; the shape is fixed by the
- * query, and healthy nodes are present with `isError: false`.
+ * One node of an error tree. A Collection's tree is one node; a live query's
+ * has one node for itself and one for each source alias in query order. The
+ * shape is fixed by the query, and nodes without a problem are present too.
+ *
+ * A node shows at most one problem. `failureReason`: something went wrong and
+ * the sync adapter is still trying, so the problem clears by itself.
+ * `error`: the first load failed, the sync adapter stopped, the Collection
+ * crashed, or, on a live query's own node, a request for more data failed.
  */
 export interface ErrorTreeNode {
   /** The query alias, or `root` for the Collection the tree was read from. */
@@ -789,15 +787,13 @@ export interface ErrorTreeNode {
   readonly collectionId: string
   /** `include` is an include's source; its rows feed per-row child Collections. */
   readonly kind: `source` | `live-query` | `include`
-  /** The node's initial-load gate. */
   readonly status: CollectionStatus
-  /** This node has a problem now: a gate error, a health error, or a request error. */
-  readonly isError: boolean
-  /** This node or any node below it has a problem. */
+  /** This node or any node below it has a `failureReason` or an `error`. */
   readonly hasErrors: boolean
+  readonly failureReason: CollectionErrorInfo | null
   readonly error: CollectionErrorInfo | null
   /** For an include node: its per-row child Collections, and how many have a problem. */
-  readonly instances?: { readonly total: number; readonly inError: number }
+  readonly instances?: { readonly total: number; readonly withErrors: number }
   readonly sources: ReadonlyArray<ErrorTreeNode>
 }
 

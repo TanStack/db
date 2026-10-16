@@ -2732,8 +2732,8 @@ it.each([`unknown`, `remote-durability`, `local-durability`] as const)(
         durableCursor: adapter.collectionMetadata.get(`probe:cursor`),
         durableTxCount: adapter.applyCommittedTxCalls.length,
       }).toEqual({
-        sourceStatus: `error`,
-        liveStatus: `error`,
+        sourceStatus: `crashed`,
+        liveStatus: `crashed`,
         syncRuns: 1,
         durableIds: [],
         durableCursor: undefined,
@@ -2886,7 +2886,7 @@ async function runRejectedHydrationBufferWitness(
       durableRows: rows.filter((row) => adapter.rows.has(row.id)),
       durabilityCalls: adapter.applyCommittedTxCalls.length,
     }).toEqual({
-      status: `error`,
+      status: `crashed`,
       exactPublicError: true,
       receiptOutcomes: rows.map(() => ({
         status: `rejected`,
@@ -3021,7 +3021,7 @@ function expectAbortGraphObservation(
           predecessorName: `AbortError`,
           successorStatus: `rejected`,
           sameFailure: true,
-          status: `error`,
+          status: `crashed`,
           publicSuccessor: undefined,
           durableSuccessor: undefined,
           pendingMarkers: 0,
@@ -3073,7 +3073,7 @@ function expectOpenTransactionBoundaryObservation(
         ? `cleaned-up`
         : boundary === `abort`
           ? `ready`
-          : `error`,
+          : `crashed`,
     pendingMarkers: 0,
   })
 }
@@ -4230,7 +4230,7 @@ describeDurabilityOracles(`generated persistence durability oracles`, () => {
               predecessorName: `AbortError`,
               successorStatus: `rejected`,
               sameFailure: true,
-              status: `error`,
+              status: `crashed`,
               publicSuccessor: undefined,
               durableSuccessor: undefined,
               pendingMarkers: 0,
@@ -4252,7 +4252,7 @@ describeDurabilityOracles(`generated persistence durability oracles`, () => {
         name: `open-transaction boundary leaks one core marker`,
         reject: () =>
           expectOpenTransactionBoundaryObservation(
-            { status: `error`, pendingMarkers: 1 },
+            { status: `crashed`, pendingMarkers: 1 },
             `terminal-failure`,
           ),
       },
@@ -4424,7 +4424,7 @@ async function createTerminalFailureHarness(
     ).toBe(adapterError)
   }
 
-  expect(collection.status).toBe(`error`)
+  expect(collection.status).toBe(`crashed`)
   expect(collection._lifecycle.getSyncError()).toBe(terminalError)
 
   return {
@@ -6131,8 +6131,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  // A sync adapter that gives up after Collection readiness reports a final
-  // health error, and the sync run continues. A later persistence failure
+  // A sync adapter that gives up after Collection readiness sets the
+  // Collection's `crashed`, and the sync run continues. A later persistence failure
   // must still crash the Collection, so the first-error latch may hold only
   // failures that end the sync run.
   it.each([false, true])(
@@ -6163,9 +6163,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           getKey: (todo) => todo.id,
           syncMode: `on-demand`,
           sync: {
-            sync: ({ markReady, markError }) => {
+            sync: ({ markReady, fail }) => {
               markReady()
-              giveUp = markError
+              giveUp = fail
               return {
                 loadSubset: () => true,
                 unloadSubset: sourceUnload,
@@ -6192,7 +6192,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           giveUp!(gaveUp)
           await flushAsyncWork()
           expect(collection.status).toBe(`ready`)
-          expect(collection.health.error?.cause).toBe(gaveUp)
+          expect(collection.errors.error?.cause).toBe(gaveUp)
         }
         collection._sync.unloadSubset(failing)
         collection._sync.unloadSubset(sibling)
@@ -6209,7 +6209,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           lifecycleErrors: crash.mock.calls.map(([error]) => error),
           unhandled,
         }).toEqual({
-          status: `error`,
+          status: `crashed`,
           error: unloadError,
           unloadThenCalls: 1,
           unloadOptions: [failing, sibling],
@@ -7009,7 +7009,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         receiptErrorCode: `SQLITE_FULL`,
         receiptErrorPath: `adapter.applyCommittedTx`,
         publicErrorIsReceipt: true,
-        status: `error`,
+        status: `crashed`,
         visible: { id: `failed`, title: `Not durable` },
         durable: undefined,
       })
@@ -7098,7 +7098,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         cause: persistenceError,
       })
       expect(adapter.rows.get(`failed`)).toBeUndefined()
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       rejectPersistence?.(persistenceError)
@@ -7161,7 +7161,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         cause: persistenceResponse,
       })
       expect(String(rejection)).not.toContain(`CONFLICT`)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       await collection.cleanup()
@@ -7384,7 +7384,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         namedDurability: true,
         cause: storageError,
         exactPublicError: true,
-        status: `error`,
+        status: `crashed`,
         durable: undefined,
       })
     } catch (error) {
@@ -7529,7 +7529,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         firstStatus: `rejected`,
         siblingStatus: `rejected`,
         sameTerminal: true,
-        status: `error`,
+        status: `crashed`,
         publicErrorIsFirst: true,
         visibleSibling: undefined,
         durableSibling: undefined,
@@ -7707,7 +7707,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         sameSibling: true,
         sameLoad: true,
         namedDurability: true,
-        status: `error`,
+        status: `crashed`,
         publicError: terminalError,
         publicSibling: undefined,
         applyCalls: 1,
@@ -7850,7 +7850,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         abortedName: `AbortError`,
         dependentStatus: `rejected`,
         dependentExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         visibleDependent: undefined,
         durableDependent: undefined,
@@ -9855,7 +9855,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         status: collection.status,
         exactPublicError: collection._lifecycle.getSyncError() === receiptError,
       }).toEqual({
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -9939,7 +9939,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         status: collection.status,
         exactPublicError: collection._lifecycle.getSyncError() === receiptError,
       }).toEqual({
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -10042,7 +10042,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }).toEqual({
         transactionStatus: `rejected`,
         transactionExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -10429,7 +10429,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         errorName: `PersistedCollectionDurabilityError`,
         cause: adapterError,
         publicErrorIsReceipt: true,
-        status: `error`,
+        status: `crashed`,
         firstVisible: {
           id: `first`,
           title: `published before persistence`,
@@ -10466,7 +10466,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         receiptStatus: `rejected`,
         exactReceipt: true,
         publicErrorIsTerminal: true,
-        status: `error`,
+        status: `crashed`,
         lateVisible: undefined,
         lateDurable: undefined,
         applyCalls: 1,
@@ -10570,7 +10570,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             collectionMetadata: `collection-metadata-before-failure`,
             applyCalls: applyCallsBefore,
             publishCalls: publishCallsBefore,
-            status: `error`,
+            status: `crashed`,
             exactPublicError: true,
           })
         }
@@ -10645,7 +10645,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         publishCalls: publishCallsBefore,
         visibleLate: undefined,
         durableLate: undefined,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -10788,7 +10788,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         secondVisible: undefined,
         secondDurable: undefined,
         publishCalls: 0,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -10926,7 +10926,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         forceVisible: undefined,
         lateStatus: `rejected`,
         lateErrorName: `CollectionStateError`,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         applyCalls: 1,
         firstVisible: undefined,
@@ -10967,7 +10967,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           `loopback hydration rejected`,
         ),
       ).rejects.toBe(hydrationError)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(hydrationError)
 
       restoreBaselineRows()
@@ -11039,7 +11039,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         directExact: true,
         localStatus: `rejected`,
         localErrorName: `CollectionStateError`,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         applyCalls: 0,
         directVisible: undefined,
@@ -11161,7 +11161,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         path: `todos.sqlite`,
         cause: persistenceError,
       })
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       releaseHydration?.()
@@ -12566,7 +12566,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       readyExact: true,
       lateStatus: `rejected`,
       lateExact: true,
-      status: `error`,
+      status: `crashed`,
       exactPublicError: true,
       visibleLate: undefined,
       durableLate: undefined,
@@ -12628,7 +12628,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }).toEqual({
           startupStatus: `rejected`,
           startupExact: true,
-          status: `error`,
+          status: `crashed`,
           exactPublicError: true,
           visibleRows: [],
           durableRows:
@@ -12739,7 +12739,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         readyExact: true,
         lateStatus: `rejected`,
         lateExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         visibleBad: undefined,
         visibleLate: undefined,
@@ -14050,7 +14050,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         sameTerminal: true,
         durabilityCalls: 1,
         suffixDurable: undefined,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -14332,7 +14332,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         abortedName: `AbortError`,
         dependentStatus: `rejected`,
         dependentExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         publicRow: undefined,
         durableRow: undefined,
@@ -14450,7 +14450,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect({
         status: collection.status,
         pendingMarkers: collection._state.pendingSyncedTransactions.length,
-      }).toEqual({ status: `error`, pendingMarkers: 0 })
+      }).toEqual({ status: `crashed`, pendingMarkers: 0 })
     } catch (error) {
       hasPrimaryFailure = true
       throw error
@@ -14732,7 +14732,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let hasPrimaryFailure = false
     try {
       await expect(collection.stateWhenReady()).rejects.toBe(startupError)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(startupError)
     } catch (error) {
       hasPrimaryFailure = true
@@ -18345,7 +18345,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           }),
       },
     })
-    const unsubscribeError = collection.on(`status:error`, () => {
+    const unsubscribeError = collection.on(`status:crashed`, () => {
       terminal.resolve()
     })
     let hasPrimaryFailure = false
@@ -18420,7 +18420,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         loadCalls,
       }).toEqual({
         outcome: `terminal`,
-        status: `error`,
+        status: `crashed`,
         publicError: receiptError,
         loadCalls: 0,
       })
@@ -18500,7 +18500,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           }),
       },
     })
-    const unsubscribeError = collection.on(`status:error`, () => {
+    const unsubscribeError = collection.on(`status:crashed`, () => {
       terminal.resolve()
     })
     let hasPrimaryFailure = false
@@ -18574,7 +18574,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         loadCalls,
       }).toEqual({
         outcome: `terminal`,
-        status: `error`,
+        status: `crashed`,
         publicError: loadError,
         loadCalls: 1,
       })
@@ -19556,7 +19556,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(reacquired).not.toBe(true)
       await expect(Promise.resolve(reacquired)).rejects.toBe(failure)
       expect(adapter.loadSubsetCalls).toHaveLength(readsBeforeReacquire)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(failure)
     } finally {
       warn.mockRestore()
@@ -19917,7 +19917,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         durableRow: adapter.rows.get(`shared`),
         durabilityCalls: adapter.applyCommittedTxCalls.length,
       }).toEqual({
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         publicRow: undefined,
         durableRow: {
@@ -20984,7 +20984,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
       ).rejects.toBe(hydrationFailure)
 
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure)
       expect([...collection.values()]).toEqual([])
       expect(adapter.rows.size).toBe(0)
@@ -21071,7 +21071,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await vi.waitFor(() =>
         expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure),
       )
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
 
       let laterAdapterCalls = 0
       adapter.loadSubset = () => {
@@ -21172,7 +21172,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await vi.waitFor(() =>
         expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure),
       )
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure)
 
       remoteBegin!()
@@ -21203,7 +21203,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         receiptStatus: `rejected`,
         exactReceipt: true,
         publicErrorIsHydration: true,
-        status: `error`,
+        status: `crashed`,
         lateVisible: undefined,
         lateDurable: undefined,
         applyCalls: 0,
@@ -22149,7 +22149,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           expect(collection.status).toBe(`ready`)
           expect(ensure).toHaveBeenCalledTimes(1)
         } else {
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           await expect(
             Promise.resolve().then(async () => {
               await collection._sync.loadSubset(options)
@@ -22278,7 +22278,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         // Recording-adapter I/O is immediate. Drain the turn while transport
         // remains held; this is not a real-host timing or latency assertion.
         await flushAsyncWork()
-        expect(collection.status).toBe(terminal ? `error` : `ready`)
+        expect(collection.status).toBe(terminal ? `crashed` : `ready`)
         if (terminal) {
           await atPersistedOracleCheckpoint(
             errorReported.promise,
@@ -22751,7 +22751,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             path: [`database`, `wal`],
             cause: persistenceResponse,
           })
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(collection._lifecycle.getSyncError()).toBe(rejection)
         } else {
           expect(rejection).toMatchObject({
@@ -23885,7 +23885,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           expect(currentStorageId).toBe(`startup-rejected-new`)
         } else {
           await expect(ready).rejects.toBe(ioFailure)
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(sourceStarts).toBe(0)
           expect(rotations).toBe(0)
         }
@@ -25885,7 +25885,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (ownerRead === `fails`) {
           // Not settled(): a terminal runtime rejects the checkpoint scan.
           await flushAsyncWork()
-          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          await vi.waitFor(() => expect(collection.status).toBe(`crashed`))
           expectExactSnapshot(publicRows(), visible)
         } else {
           await settled(`owner update processed`)
@@ -26079,7 +26079,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         history.consumer === `live-query`
           ? applied
             ? { outcome: `fulfilled`, rows: [`remote`], status: `ready` }
-            : { outcome: `rejected`, rows: undefined, status: `error` }
+            : { outcome: `rejected`, rows: undefined, status: `crashed` }
           : applied
             ? {
                 outcome: `fulfilled`,
@@ -26090,7 +26090,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             : {
                 outcome: `rejected`,
                 rows: undefined,
-                status: `error`,
+                status: `crashed`,
                 releases: 1,
               },
     }
@@ -26411,7 +26411,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             : history.consumer === `live-query` &&
                 expected.settled.status === `ready`
               ? query.status
-              : expected.settled.status === `error`
+              : expected.settled.status === `crashed`
                 ? history.consumer === `live-query`
                   ? `${query.status}/${tab.source.status}`
                   : tab.source.status
@@ -26423,9 +26423,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           ? { releases: expected.settled.releases }
           : {}),
         status:
-          expected.settled.status === `error` &&
+          expected.settled.status === `crashed` &&
           history.consumer === `live-query`
-            ? `error/error`
+            ? `crashed/crashed`
             : expected.settled.status,
       })
     } finally {
@@ -26510,7 +26510,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         releases: tab.releases(),
         ensures: tab.ensures(),
         rows: Array.from(tab.source.values()).map((row) => row.id),
-        status: tab.source.status === `error` ? `error` : `healthy`,
+        status: tab.source.status === `crashed` ? `crashed` : `healthy`,
       }).toEqual({
         outcome: `rejected`,
         releases: 0,
@@ -26638,7 +26638,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     rows: Record<`a` | `b` | `c`, number | undefined>
     // The new demand's load, when the history has one.
     newLoad?: `pending` | `fulfilled` | `rejected`
-    status: `error` | `healthy`
+    status: `crashed` | `healthy`
   }
   const expectedReacquisition = (
     history: RotatedReacquisitionHistory,
@@ -26669,7 +26669,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 : (`rejected` as const),
           }
         : {}),
-      status: failed ? `error` : `healthy`,
+      status: failed ? `crashed` : `healthy`,
     }
   }
 
@@ -26863,7 +26863,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         c: source.get(`c-row`)?.v,
       },
       ...(history.newDemand ? { newLoad } : {}),
-      status: source.status === `error` ? `error` : `healthy`,
+      status: source.status === `crashed` ? `crashed` : `healthy`,
     })
     const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
     const settle = async () => {
@@ -27541,12 +27541,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           expect(
             persistenceCapability?.resumeSnapshot.getKeySetEvidence(),
           ).toEqual({ status: `incompatible` })
-          expect(collection.status).not.toBe(`error`)
+          expect(collection.status).not.toBe(`crashed`)
         } else {
           expect(outcome).toEqual([{ status: `rejected`, reason: ioFailure }])
           expect(rotations).toBe(0)
           expect(storageId).toBe(oldStorageId)
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
         }
       } finally {
         releaseRead.resolve()
@@ -27659,14 +27659,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await flushAsyncWork()
 
         if (failure === `io`) {
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(collection.get(`old`)?.title).toBe(`Initial row`)
           expect(rotations).toBe(0)
           await expect(collection._sync.loadSubset({})).rejects.toBe(readError)
           return
         }
         expect(collection.get(`old`)?.title).not.toBe(`Expired peer row`)
-        expect(collection.status).not.toBe(`error`)
+        expect(collection.status).not.toBe(`crashed`)
         await vi.waitFor(() => expect(rotations).toBe(1))
         expect(collection.get(`old`)).toBeUndefined()
       } finally {
@@ -28658,7 +28658,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         queuedExact: true,
         lateStatus: `rejected`,
         lateExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         visibleSeed: undefined,
         durableSeed: seed,
@@ -28812,7 +28812,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         reloadVisible: undefined,
         targetedDurable: undefined,
         reloadDurable: undefined,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -30055,7 +30055,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
         await entered.promise
         await flushAsyncWork()
-        expect(collection.status).not.toBe(`error`)
+        expect(collection.status).not.toBe(`crashed`)
         if (phase === `runtime`) {
           expect(collection.status).toBe(`ready`)
           expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
@@ -31675,7 +31675,7 @@ describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
               status: `rejected`,
               reason: rejected.reason,
             })
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(collection._lifecycle.getSyncError()).toBe(rejected.reason)
           expect((rejected.reason as Error).cause).toBe(storageError)
           await expect(

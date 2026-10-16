@@ -331,7 +331,7 @@ function createPowerSyncCollectionConfig<
         collection,
         commit,
         markReady,
-        markError,
+        fail,
         reportError,
         reportHealthy,
       } = params
@@ -635,7 +635,7 @@ function createPowerSyncCollectionConfig<
             error,
           })
           if (collection.status === `loading`) {
-            markError(error)
+            fail(error)
           }
         })
 
@@ -836,13 +836,13 @@ function createPowerSyncCollectionConfig<
               .catch((error) => {
                 // A rebuild may already have removed every active diff trigger,
                 // so rows can grow stale. Later demand rebuilds again, so after
-                // Collection readiness this is a health error that is not final.
+                // Collection readiness this is a failureReason, not fail().
                 if (stopped) {
                   // Cleanup owns the outcome.
                 } else if (collection.status === `ready`) {
                   trackingOutage = true
                   reportError(error)
-                } else markError(error)
+                } else if (collection.status === `loading`) fail(error)
                 throw error
               })
               .finally(() => {

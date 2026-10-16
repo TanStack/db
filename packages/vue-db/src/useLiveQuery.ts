@@ -50,10 +50,10 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isLoading - True while initial query data is loading
  * @property isReady - True when query has received first data and is ready
  * @property isIdle - True when query hasn't started yet
- * @property isError - True when query encountered an error
+ * @property isLoadingError - True when the first load failed
  * @property isCleanedUp - True when query has been cleaned up
  */
-/** Status, persistence, and health refs every `useLiveQuery` result has. */
+/** Status, persistence, and error refs every `useLiveQuery` result has. */
 export interface UseLiveQueryFlags {
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
@@ -62,8 +62,13 @@ export interface UseLiveQueryFlags {
   isPersistedReady: ComputedRef<boolean>
   persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: ComputedRef<boolean>
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: ComputedRef<boolean>
   errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
@@ -151,13 +156,13 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
  *
  * @example
  * // Handle loading and error states in template
- * const { data, isLoading, isError, status } = useLiveQuery((q) =>
+ * const { data, isLoading, isLoadingError, status } = useLiveQuery((q) =>
  *   q.from({ todos: todoCollection })
  * )
  *
  * // In template:
  * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Error: {{ status }}</div>
+ * // <div v-else-if="isLoadingError">Error: {{ status }}</div>
  * // <ul v-else>
  * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
  * // </ul>
@@ -198,13 +203,13 @@ export function useLiveQuery<TContext extends Context>(
  *
  * @example
  * // Handle all states uniformly
- * const { data, isLoading, isReady, isError } = useLiveQuery({
+ * const { data, isLoading, isReady, isLoadingError } = useLiveQuery({
  *   query: (q) => q.from({ items: itemCollection })
  * })
  *
  * // In template:
  * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Something went wrong</div>
+ * // <div v-else-if="isLoadingError">Something went wrong</div>
  * // <div v-else-if="!isReady">Preparing...</div>
  * // <div v-else>{{ data.length }} items loaded</div>
  */
@@ -244,11 +249,11 @@ export function useLiveQuery<TContext extends Context>(
  *
  * @example
  * // Handle states consistently
- * const { data, isLoading, isError } = useLiveQuery(sharedQuery)
+ * const { data, isLoading, isLoadingError } = useLiveQuery(sharedQuery)
  *
  * // In template:
  * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Error loading data</div>
+ * // <div v-else-if="isLoadingError">Error loading data</div>
  * // <div v-else>
  * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
  * // </div>
@@ -459,8 +464,12 @@ export function useLiveQuery(
     isPersistedReady: computed(() => persistedStatus.value === `ready`),
     persistedError: computed(() => persistedError.value),
     isIdle: computed(() => status.value === `idle`),
-    isError: computed(() => status.value === `error`),
+    isLoadingError: computed(() => status.value === `error`),
+    isCrashed: computed(() => status.value === `crashed`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
+    isSyncError: computed(
+      () => status.value === `ready` && errors.value?.hasErrors === true,
+    ),
     errors: computed(() => errors.value),
   }
 }

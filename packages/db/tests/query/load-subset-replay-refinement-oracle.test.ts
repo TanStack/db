@@ -196,7 +196,7 @@ describe(`loadSubset replay refinement`, () => {
         publications.length = 0
 
         await source.cleanup()
-        if (live) expect(live.status).toBe(`error`)
+        if (live) expect(live.status).toBe(`crashed`)
         source.startSyncImmediate()
         await flushPromises()
         expect(loads).toBe(2)
@@ -224,7 +224,7 @@ describe(`loadSubset replay refinement`, () => {
         expect(read()).toEqual(expected)
         expect(readEvents()).toEqual(expected)
         expect(publications).toEqual(publishes ? [replacement] : [])
-        if (live) expect(live.status).toBe(`error`)
+        if (live) expect(live.status).toBe(`crashed`)
       } catch (error) {
         primaryFailure = { error }
         throw error

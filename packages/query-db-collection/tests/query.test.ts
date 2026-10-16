@@ -44,17 +44,20 @@ import type {
 import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 
 /**
- * The Query failure a Collection reports: its initial error while it is in
- * `error`, or the cause of its health error after readiness.
+ * The Query failure a Collection reports: its failed first load while it is
+ * in `error`, or the cause of its failure reason after readiness.
  */
 function reportedError(collection: {
   status: string
-  health: { error: { cause: unknown } | null }
+  errors: {
+    failureReason: { cause: unknown } | null
+    error: { cause: unknown } | null
+  }
   _lifecycle: { getSyncError: () => unknown }
 }): unknown {
   return collection.status === `error`
     ? collection._lifecycle.getSyncError()
-    : collection.health.error?.cause
+    : (collection.errors.failureReason ?? collection.errors.error)?.cause
 }
 
 interface TestItem {
@@ -433,7 +436,7 @@ describe(`QueryCollection`, () => {
     expect(() => malformedCollection.startSyncImmediate()).toThrow(
       /expected null or a complete capability object.*forward metadata\.persistence unchanged/i,
     )
-    expect(malformedCollection.status).toBe(`error`)
+    expect(malformedCollection.status).toBe(`crashed`)
     expect(queryFn).not.toHaveBeenCalled()
     await malformedCollection.cleanup()
   })

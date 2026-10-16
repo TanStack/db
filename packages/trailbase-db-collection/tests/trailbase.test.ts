@@ -268,15 +268,11 @@ describe(`TrailBase Integration`, () => {
       await collection.preload()
       controller.enqueue({ Insert: { id: 1, updated: 0, data: `invalid` } })
       await new Promise((resolve) => setTimeout(resolve, 0))
-      // After Collection readiness the stream failure is a final health
-      // error, not a log line; the rows and status stay.
+      // After Collection readiness the stream failure is the Collection's
+      // `error`, not a log line; the rows and status stay.
       expect(reported).not.toHaveBeenCalled()
       expect(collection.status).toBe(`ready`)
-      expect(collection.health.error).toMatchObject({
-        phase: `sync`,
-        final: true,
-        cause: failure,
-      })
+      expect(collection.errors.error).toMatchObject({ cause: failure })
       expect(cancel).toHaveBeenCalledOnce()
       expect(stream.locked).toBe(false)
       await collection.cleanup()
@@ -333,13 +329,11 @@ describe(`TrailBase Integration`, () => {
         expect(recordApi.subscribe).toHaveBeenCalledOnce()
         expect(recordApi.list).toHaveBeenCalledOnce()
         // The adapter does not resubscribe, so every end of the stream is a
-        // final health error; a stream failure is its cause.
+        // stop: the Collection's `error`; a stream failure is its cause.
         expect(reported).not.toHaveBeenCalled()
-        expect(collection.health.error).toMatchObject({
-          phase: `sync`,
-          final: true,
-          ...(ending === `error` ? { cause: failure } : {}),
-        })
+        expect(collection.errors.error).toMatchObject(
+          ending === `error` ? { cause: failure } : {},
+        )
 
         await collection.cleanup()
         await new Promise((resolve) => setTimeout(resolve, 0))

@@ -1,58 +1,56 @@
 /**
- * # Source failure and health
+ * # Source failure and the error tree
  *
  * A Collection answers two questions on two separate axes:
  *
- * - **The initial gate (`status`)** says whether the data can be shown yet. It is
- *   decided only by the initial sync of a sync run. While the sync adapter retries
- *   it stays `loading`. When the sync adapter gives up before Collection readiness
- *   (`markError`), the sync run fails for good: the status is `error`, and a
- *   later `markReady()` in the same sync run is a contract violation that
- *   throws. Only a restart (`cleanup()`, then a new preload or subscriber)
- *   begins a new sync run.
- * - **Health** says whether the data is still kept up to date. It is metadata
- *   after Collection readiness: `reportError(error)` records a problem while
- *   the sync adapter keeps trying, `reportHealthy()` clears it, and
- *   `markError()` after Collection readiness records a final problem, because
- *   the sync adapter gave up. The status and the rows do not change. Only the
- *   sync adapter clears its problem, and nothing clears a final problem
- *   except a restart.
+ * - **Status** says whether the data can be shown. It is decided by the first
+ *   load of a sync run. While the sync adapter retries it stays `loading`.
+ *   When the sync adapter stops before Collection readiness (`fail`), the
+ *   status is `error`: the first load failed, and a later `markReady()` in the
+ *   same sync run is a contract violation that throws. When local storage or
+ *   an invariant breaks, the status is `crashed`, from any active status and
+ *   for good. Only a new sync run leaves `error`.
+ * - **The error tree** says whether the data on screen is still kept current.
+ *   After Collection readiness, `reportError(error)` sets the Collection's
+ *   `failureReason` while the sync adapter keeps trying, `reportHealthy()`
+ *   clears it, and `fail()` sets its `error`: the sync adapter stopped. The
+ *   status and the rows do not change. A node shows at most one problem, and
+ *   nothing clears an `error` within a sync run. Once the adapter called
+ *   `fail()`, every later report from it is a contract violation that throws.
+ *   After a crash, adapter calls do nothing: core ended the run.
  *
  * A live query exposes both axes for everything it depends on through
  * `collection.errors`: one node for itself and one per source alias in query
  * order, recursing through nested live queries. The tree always has the same
  * shape for a given query. Each node mirrors its Collection at the moment it
- * is read, and the live query emits `health:change` when a node below it
+ * is read, and the live query emits `errors:change` when a node below it
  * changes, so a reader knows to read the tree again. When a status changes,
- * `status:change` fires first and `health:change` follows at once, and the
+ * `status:change` fires first and `errors:change` follows at once, and the
  * tree is current when either fires. A reader can compare trees with `===`:
  * a node keeps its identity until something in its subtree changes, and a
  * change replaces only the nodes on its path.
  *
  * An include's source node has `kind: 'include'` and rolls up the include's
- * per-row child Collections as `instances: { total, inError }`. A pooled
- * live query shows its source's gate and the same tree a live-query
+ * per-row child Collections as `instances: { total, withErrors }`. A pooled
+ * live query shows its source's status and the same tree a live-query
  * Collection over that source would have, so its tree also reaches through
  * a nested live query.
  *
- * A crash is not health either. When a Collection can no longer serve reads
- * or admit writes, as after IndexedDB closure or a terminal local persistence
- * failure, it moves to `error` even after Collection readiness. The IndexedDB
- * and persistence oracles own those causes; this oracle drives the transition
- * directly.
+ * The IndexedDB and persistence oracles own the causes of a crash; this
+ * oracle drives the transition directly.
  *
- * A live query's own gate follows its sources: it becomes ready when every
- * Collection is ready, and a Collection that fails before the query's initial-query readiness
- * fails the query's sync run, whatever the query's shape. After the query's
- * initial-query readiness, its sources report problems only as health, and
- * the query keeps its status and rows. The one exception is a crash: a query
- * cannot keep serving rows from a Collection that cannot serve reads, so a
- * crashed Collection ends every live query above it, as cleanup does.
+ * A live query's own status follows its sources until it is ready: it becomes
+ * ready when every Collection is ready, fails its first load when one fails
+ * its first load, and crashes when one crashes. After the query has shown
+ * data, only a crash changes its status: a query cannot keep serving rows
+ * from a Collection that cannot serve reads. Every other source problem stays
+ * on the source's node, and the query keeps its status and rows.
  *
  * ## The model
  *
- * The model keeps, for each Collection, its initial gate and its health problem (none,
- * non-final, or final), with a serial for each reported problem. It derives
+ * The model keeps, for each Collection, its status and its problem after
+ * readiness (none, a failure reason, or an error), with a serial for each
+ * reported problem. It derives
  * each live query's gate from its Collections, using only the rules above, and
  * the include's parent rows from whether `B` synced its row while the
  * sync run was running. It builds the expected tree from those facts. It does
@@ -61,13 +59,13 @@
  * ## The history grammar
  *
  * Steps act on Collection `A` or `B`: `ready` writes the Collection's row and calls
- * `markReady()`; `fail` calls `markError()`; `report` calls `reportError()`;
- * `healthy` calls `reportHealthy()`; `crash` moves the
- * Collection to `error` through its lifecycle, as a crash cause would. `restart` cleans up the
+ * `markReady()`; `fail` calls `fail()`; `report` calls `reportError()`;
+ * `healthy` calls `reportHealthy()`; `crash` crashes the Collection through
+ * its lifecycle, as a crash cause would. `restart` cleans up the
  * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
- * for `markReady()` after `markError()`, and for a health report before
- * Collection readiness. Six shapes cross the grammar: a direct Collection, a join, a
+ * for `markReady()` after `fail()`, for any report after `fail()`, and for a
+ * report before Collection readiness. Six shapes cross the grammar: a direct Collection, a join, a
  * self-join of one Collection under two aliases, a nested live query, an
  * include child that materializes a Collection per parent row, and a pooled
  * live query over a nested live query.
@@ -79,9 +77,9 @@
  * error class. It also checks identity: reading twice gives the same tree,
  * and between steps a node is the same object exactly when its expected
  * facts, including problem serials, did not change. At every event it checks
- * that no `health:change` shows a status that `status:change` has not
+ * that no `errors:change` shows a status that `status:change` has not
  * announced, and that each `status:change` is followed at once by
- * `health:change`. When the expected tree changed, the last event must show
+ * `errors:change`. When the expected tree changed, the last event must show
  * the current tree. Request lanes check that a lazy load or a root Collection's
  * load that fails after initial-query readiness is a request error on the query's
  * node, and that it clears. Effect lanes check the Effect's gate and its
@@ -90,7 +88,7 @@
  * ## Limits
  *
  * Collections are eager, so a live query cannot become ready while a Collection is
- * still loading. The on-demand case, where a Collection can fail its initial sync
+ * still loading. The on-demand case, where a Collection fails its first load
  * after the live query is ready, is not generated here. Per-row child
  * Collections are rolled up, not nodes, and no grammar step fails one; the
  * include-instances lane fails one and checks the roll-up, the relay, and
@@ -137,15 +135,21 @@ type Step =
 // Independent model
 // ---------------------------------------------------------------------------
 
-type Gate = `loading` | `ready` | `error`
+type Gate = `loading` | `ready` | `error` | `crashed`
 // `serial` names one reported problem. A new report is a new problem even
-// when it has the same finality, so the node that shows it is a new node.
-type Problem = null | { final: boolean; serial: number }
-type SourceModel = { gate: Gate; problem: Problem }
+// when it has the same field, so the node that shows it is a new node.
+type Problem = null | {
+  field: `failureReason` | `error`
+  message: string
+  serial: number
+}
+// `cause` is the message of what put the gate in `error` or `crashed`.
+type GateModel = { gate: Gate; cause: string | null }
+type SourceModel = GateModel & { problem: Problem }
 type Model = {
   sources: Record<SourceName, SourceModel>
-  query: Gate
-  inner: Gate
+  query: GateModel
+  inner: GateModel
   serial: number
   // Parent rows the include query's sync run has received from `B`.
   parentRows: number
@@ -161,34 +165,47 @@ const shapeSources: Record<Shape, ReadonlyArray<SourceName>> = {
 }
 
 function freshModel(): Model {
-  const source = (): SourceModel => ({ gate: `loading`, problem: null })
+  const source = (): SourceModel => ({
+    gate: `loading`,
+    cause: null,
+    problem: null,
+  })
   return {
     sources: { A: source(), B: source() },
-    query: `loading`,
-    inner: `loading`,
+    query: { gate: `loading`, cause: null },
+    inner: { gate: `loading`, cause: null },
     serial: 0,
     parentRows: 0,
   }
 }
 
-// A live query's gate follows its sources and never leaves error within a
-// sync run. An input in `error` ends the query's sync run whenever it appears.
-// After the query is ready, an input reaches `error` only by crashing, since
-// `fail` after Collection readiness is health.
-function deriveGate(current: Gate, inputs: ReadonlyArray<Gate>): Gate {
-  if (current === `error`) return `error`
-  if (inputs.some((gate) => gate === `error`)) return `error`
-  if (current === `ready`) return `ready`
-  if (inputs.every((gate) => gate === `ready`)) return `ready`
-  return `loading`
+// A live query's status follows its sources until it is ready, and never
+// leaves `error` or `crashed` within a sync run. A crashed input crashes the
+// query at any time, even after its first load failed, as a crash does to a
+// Collection; after the query is ready, nothing else changes it. The query
+// takes the cause of the input that ended its sync run.
+function deriveGate(
+  current: GateModel,
+  inputs: ReadonlyArray<GateModel>,
+): GateModel {
+  if (current.gate === `crashed`) return current
+  const crashed = inputs.find(({ gate }) => gate === `crashed`)
+  if (crashed) return { gate: `crashed`, cause: crashed.cause }
+  if (current.gate === `error`) return current
+  if (current.gate === `ready`) return current
+  const failed = inputs.find(({ gate }) => gate === `error`)
+  if (failed) return { gate: `error`, cause: failed.cause }
+  if (inputs.every(({ gate }) => gate === `ready`))
+    return { gate: `ready`, cause: null }
+  return current
 }
 
 function deriveQueries(shape: Shape, model: Model): void {
   const gates = (names: ReadonlyArray<SourceName>) =>
-    names.map((name) => model.sources[name].gate)
+    names.map((name) => model.sources[name])
   if (shape === `nested`) {
     model.inner = deriveGate(model.inner, gates([`A`]))
-    model.query = deriveGate(model.query, [model.inner, model.sources.B.gate])
+    model.query = deriveGate(model.query, [model.inner, model.sources.B])
   } else if (shape === `pooled-nested`) {
     // A pooled view has no gate of its own: it shows its source's.
     model.inner = deriveGate(model.inner, gates([`A`]))
@@ -198,7 +215,7 @@ function deriveQueries(shape: Shape, model: Model): void {
     // sync run receives nothing more.
     if (
       shape === `include` &&
-      model.query !== `error` &&
+      (model.query.gate === `loading` || model.query.gate === `ready`) &&
       model.sources.B.gate === `ready`
     ) {
       model.parentRows = 1
@@ -207,8 +224,15 @@ function deriveQueries(shape: Shape, model: Model): void {
   }
 }
 
-/** Apply a step. Returns `throws` when the contract forbids it. */
-function applyModel(shape: Shape, model: Model, step: Step): `ok` | `throws` {
+/**
+ * Apply a step. Returns `throws` when the contract forbids it, and
+ * `bad-transition` when it forbids `markReady()` because the first load failed.
+ */
+function applyModel(
+  shape: Shape,
+  model: Model,
+  step: Step,
+): `ok` | `throws` | `bad-transition` {
   if (step.kind === `restart`) {
     Object.assign(model, freshModel())
     return `ok`
@@ -216,44 +240,70 @@ function applyModel(shape: Shape, model: Model, step: Step): `ok` | `throws` {
   // A step on a source this shape does not read has no effect.
   if (!shapeSources[shape].includes(step.source)) return `ok`
   const source = model.sources[step.source]
-  let outcome: `ok` | `throws` = `ok`
+  let outcome: `ok` | `throws` | `bad-transition` = `ok`
+  // After a crash, adapter calls do nothing. After fail(), they throw.
+  const stopped = source.gate === `error` || source.problem?.field === `error`
+  if (step.kind !== `crash` && source.gate === `crashed`) {
+    deriveQueries(shape, model)
+    return outcome
+  }
   switch (step.kind) {
     case `ready`:
-      if (source.gate === `error`) outcome = `throws`
+      if (source.gate === `error`) outcome = `bad-transition`
+      else if (stopped) outcome = `throws`
       else source.gate = `ready`
       break
     case `fail`:
-      // Before Collection readiness the sync run fails; after it, a final problem.
-      if (source.gate !== `ready`) source.gate = `error`
-      else if (!source.problem?.final)
-        source.problem = { final: true, serial: ++model.serial }
+      // Before Collection readiness the first load fails; after it, the
+      // rows stay and the node shows the error.
+      if (stopped) outcome = `throws`
+      else if (source.gate !== `ready`) {
+        source.gate = `error`
+        source.cause = `${step.source} gave up`
+      } else
+        source.problem = {
+          field: `error`,
+          message: `${step.source} gave up`,
+          serial: ++model.serial,
+        }
       break
     case `report`:
-      if (source.gate !== `ready`) outcome = `throws`
-      else if (!source.problem?.final)
-        source.problem = { final: false, serial: ++model.serial }
+      if (stopped || source.gate !== `ready`) outcome = `throws`
+      else
+        source.problem = {
+          field: `failureReason`,
+          message: `${step.source} problem`,
+          serial: ++model.serial,
+        }
       break
     case `healthy`:
-      if (source.gate !== `ready`) outcome = `throws`
-      else if (source.problem && !source.problem.final) source.problem = null
+      if (stopped || source.gate !== `ready`) outcome = `throws`
+      else source.problem = null
       break
     case `crash`:
-      // From any active status; a Collection already in error stays there.
-      source.gate = `error`
+      // From any active status, for good.
+      if (source.gate !== `crashed`) {
+        source.gate = `crashed`
+        source.cause = `${step.source} crashed`
+        source.problem = null
+      }
       break
   }
   deriveQueries(shape, model)
   return outcome
 }
 
+// A problem's message says which cause the node shows; `serial` (identity
+// only) says which report.
+type ExpectedProblem = null | { message: string; serial?: number }
 type ExpectedNode = {
   alias: string
   kind: `source` | `live-query` | `include`
   status: Gate
-  isError: boolean
   hasErrors: boolean
-  error: null | { phase: `initial` | `sync`; final: boolean; serial?: number }
-  instances?: { total: number; inError: number }
+  failureReason: ExpectedProblem
+  error: ExpectedProblem
+  instances?: { total: number; withErrors: number }
   sources: Array<ExpectedNode>
 }
 
@@ -265,22 +315,24 @@ function sourceNode(
   identity: boolean,
   kind: ExpectedNode[`kind`] = `source`,
 ): ExpectedNode {
+  const reported = (field: `failureReason` | `error`): ExpectedProblem =>
+    source.problem?.field === field
+      ? {
+          message: source.problem.message,
+          ...(identity ? { serial: source.problem.serial } : {}),
+        }
+      : null
   const error =
-    source.gate === `error`
-      ? { phase: `initial` as const, final: true }
-      : source.problem
-        ? {
-            phase: `sync` as const,
-            final: source.problem.final,
-            ...(identity ? { serial: source.problem.serial } : {}),
-          }
-        : null
+    source.gate === `error` || source.gate === `crashed`
+      ? { message: source.cause! }
+      : reported(`error`)
+  const failureReason = error ? null : reported(`failureReason`)
   return {
     alias,
     kind,
     status: source.gate,
-    isError: error !== null,
-    hasErrors: error !== null,
+    hasErrors: error !== null || failureReason !== null,
+    failureReason,
     error,
     sources: [],
   }
@@ -288,17 +340,17 @@ function sourceNode(
 
 function queryNode(
   alias: string,
-  gate: Gate,
+  { gate, cause }: GateModel,
   sources: Array<ExpectedNode>,
 ): ExpectedNode {
   const error =
-    gate === `error` ? { phase: `initial` as const, final: true } : null
+    gate === `error` || gate === `crashed` ? { message: cause! } : null
   return {
     alias,
     kind: `live-query`,
     status: gate,
-    isError: error !== null,
     hasErrors: error !== null || sources.some((node) => node.hasErrors),
+    failureReason: null,
     error,
     sources,
   }
@@ -336,7 +388,7 @@ function expectedTree(
         source(`b`, B),
         {
           ...sourceNode(`a`, A, identity, `include`),
-          instances: { total: model.parentRows, inError: 0 },
+          instances: { total: model.parentRows, withErrors: 0 },
         },
       ])
     case `pooled-nested`:
@@ -468,18 +520,15 @@ type PooledView = Subject[`query`] & {
 
 // The public tree, projected onto the fields the model owns.
 function project(node: ErrorTreeNode): ExpectedNode {
+  const problem = (info: ErrorTreeNode[`error`]): ExpectedProblem =>
+    info ? { message: info.message } : null
   return {
     alias: node.alias,
     kind: node.kind,
     status: node.status as Gate,
-    isError: node.isError,
     hasErrors: node.hasErrors,
-    error: node.error
-      ? {
-          phase: node.error.phase as `initial` | `sync`,
-          final: node.error.final,
-        }
-      : null,
+    failureReason: problem(node.failureReason),
+    error: problem(node.error),
     ...(node.instances ? { instances: node.instances } : {}),
     sources: node.sources.map(project),
   }
@@ -550,7 +599,7 @@ async function runHistory(
       })
     }
     const stopStatus = query.on(`status:change`, () => record(`status`))
-    const stopHealth = query.on(`health:change`, () => record(`health`))
+    const stopHealth = query.on(`errors:change`, () => record(`health`))
     stop = () => {
       stopStatus()
       stopHealth()
@@ -595,7 +644,7 @@ async function runHistory(
             }
             params.markReady()
           } else if (step.kind === `fail`) {
-            params.markError(new Error(`${step.source} gave up`))
+            params.fail(new Error(`${step.source} gave up`))
           } else if (step.kind === `healthy`) {
             params.reportHealthy()
           } else if (step.kind === `crash`) {
@@ -611,9 +660,9 @@ async function runHistory(
       }
       await flushPromises()
 
-      if (expected === `throws`) {
+      if (expected !== `ok`) {
         expect(thrown, `${label}: contract violation throws`).toBeDefined()
-        if (step.kind === `ready`) {
+        if (expected === `bad-transition`) {
           expect(thrown, label).toBeInstanceOf(
             InvalidCollectionStatusTransitionError,
           )
@@ -622,9 +671,9 @@ async function runHistory(
         expect(thrown, `${label}: legal step`).toBeUndefined()
       }
       expect(query.status, `${label}: gate`).toBe(
-        model.query as CollectionStatus,
+        model.query.gate as CollectionStatus,
       )
-      if (model.query === `ready`) {
+      if (model.query.gate === `ready`) {
         expect(size(), `${label}: rows stay while ready`).toBe(1)
       }
       const tree = expectedTree(shape, model)
@@ -641,8 +690,8 @@ async function runHistory(
       }
       previous = next
 
-      // Order: `status:change` comes first and `health:change` follows it at
-      // once, so no `health:change` shows a status that `status:change` has
+      // Order: `status:change` comes first and `errors:change` follows it at
+      // once, so no `errors:change` shows a status that `status:change` has
       // not announced. The last event leaves a reader with the current tree.
       if (step.kind !== `restart`) {
         for (const [at, event] of events.entries()) {
@@ -699,13 +748,13 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
-  'a non-final problem clears when the sync adapter reports healthy': [
+  'a failure reason clears when the sync adapter reports healthy': [
     on(`ready`, `A`),
     on(`ready`, `B`),
     on(`report`, `A`),
     on(`healthy`, `A`),
   ],
-  'markError after Collection readiness stays until a restart': [
+  'fail after Collection readiness keeps the rows, and later reports throw': [
     on(`ready`, `A`),
     on(`ready`, `B`),
     on(`report`, `A`),
@@ -727,17 +776,18 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`ready`, `A`),
     on(`ready`, `B`),
   ],
-  'a crash after initial-query readiness ends the query': [
-    on(`ready`, `A`),
-    on(`ready`, `B`),
-    on(`report`, `A`),
-    on(`crash`, `A`),
-    on(`healthy`, `A`),
-    restart,
-    on(`ready`, `A`),
-    on(`ready`, `B`),
-  ],
-  'a health report before Collection readiness throws': [
+  'a crash after initial-query readiness crashes the query, and adapter calls do nothing':
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`report`, `A`),
+      on(`crash`, `A`),
+      on(`healthy`, `A`),
+      restart,
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+    ],
+  'a report before Collection readiness throws': [
     on(`report`, `A`),
     on(`healthy`, `B`),
     on(`ready`, `A`),
@@ -866,23 +916,23 @@ describe(`request errors`, () => {
         writeParent(`insert`, 1)
         markParentsReady()
         await preload
-        expect(query.errors.isError).toBe(false)
+        expect(query.errors.hasErrors).toBe(false)
 
         outcomes.push(`fail`)
         writeParent(`insert`, 2)
         await flushPromises()
         expect(query.status).toBe(`ready`)
         expect(query.errors.error).toMatchObject({
-          phase: `request`,
-          final: false,
+          message: `child load failed`,
         })
-        expect(children.health.isError).toBe(false)
+        expect(query.errors.failureReason).toBeNull()
+        expect(children.errors.hasErrors).toBe(false)
 
         // The demand changes again and its new load settles.
         outcomes.push(`ok`)
         writeParent(`insert`, 3)
         await flushPromises()
-        expect(query.errors.isError).toBe(false)
+        expect(query.errors.hasErrors).toBe(false)
       },
     ))
 
@@ -896,12 +946,12 @@ describe(`request errors`, () => {
       outcomes.push(`fail`)
       writeParent(`insert`, 2)
       await flushPromises()
-      expect(query.errors.error?.phase).toBe(`request`)
+      expect(query.errors.error).toMatchObject({ message: `child load failed` })
 
       writeParent(`delete`, 1)
       writeParent(`delete`, 2)
       await flushPromises()
-      expect(query.errors.isError).toBe(false)
+      expect(query.errors.hasErrors).toBe(false)
       expect(query.status).toBe(`ready`)
     }))
 
@@ -914,10 +964,7 @@ describe(`request errors`, () => {
       markParentsReady()
       await flushPromises()
       expect(query.status).toBe(`error`)
-      expect(query.errors.error).toMatchObject({
-        phase: `initial`,
-        final: true,
-      })
+      expect(query.errors.error).toMatchObject({ message: `child load failed` })
       await expect(preload).rejects.toBeDefined()
     }))
 })
@@ -953,7 +1000,7 @@ describe(`root request errors`, () => {
     console.error = () => {}
     try {
       await query.preload()
-      expect(query.errors.isError).toBe(false)
+      expect(query.errors.hasErrors).toBe(false)
 
       outcomes.push(`fail`)
       await Promise.resolve(
@@ -961,15 +1008,12 @@ describe(`root request errors`, () => {
       ).catch(() => undefined)
       await flushPromises()
       expect(query.status).toBe(`ready`)
-      expect(query.errors.error).toMatchObject({
-        phase: `request`,
-        final: false,
-      })
-      expect(source.health.isError).toBe(false)
+      expect(query.errors.error).toMatchObject({ message: `root load failed` })
+      expect(source.errors.hasErrors).toBe(false)
 
       await query.utils.setWindow({ offset: 8, limit: 2 })
       await flushPromises()
-      expect(query.errors.isError).toBe(false)
+      expect(query.errors.hasErrors).toBe(false)
     } finally {
       console.error = consoleError
       await query.cleanup()
@@ -987,31 +1031,30 @@ describe(`root request errors`, () => {
  * initial load: every
  * initial load has settled and every eager source is ready, whether or not it
  * has `skipInitial`. `skipInitial` only decides whether the initial rows are
- * delivered. As for a live query, a source in `error` ends the Effect
- * through `onSourceError`, before or after its initial-query readiness. A source reaches `error`
- * by an initial error or by a crash. An on-demand source can have its initial
- * error after initial-query readiness, because that readiness follows the Effect's settled loads.
- * Every other source problem after it is a health error: it does not
- * dispose the Effect, and `onHealthChange` receives the error tree, with one
- * node per source alias.
+ * delivered. As for a live query, a crashed source ends the Effect through
+ * `onSourceError` at any time, and a source whose first load fails ends it
+ * before its initial-query readiness. An on-demand source can fail its first
+ * load after that readiness, because the readiness follows the Effect's
+ * settled loads; like every other source problem after it, that is a sync
+ * problem on the source's node: it does not dispose the Effect, and
+ * `onErrorsChange` receives the error tree, with one node per source alias.
  *
  * The lane crosses `skipInitial`, the source mode, and when the source fails.
  * Before initial-query readiness, an eager source has not called `markReady()`, and an
  * on-demand source still has its first load pending. After it, the
- * source calls `markError()`, which is an initial error for an on-demand
- * source still in its initial sync and a final health error for an eager
- * source after Collection readiness, or it crashes, or it reaches Collection
- * readiness (on-demand only) and then reports a health error that is not
- * final. Every history also checks that one change reaches
- * `onHealthChange` once: no two reported trees are the same object.
+ * source calls `fail()`, which fails the first load of an on-demand source
+ * still in its initial sync and sets the `error` of an eager source after
+ * Collection readiness, or it crashes, or it reaches Collection readiness
+ * (on-demand only) and then reports a `failureReason`. Every history also checks that one change reaches
+ * `onErrorsChange` once: no two reported trees are the same object.
  */
-describe(`effect health`, () => {
+describe(`effect errors`, () => {
   type EffectHistory = {
     skipInitial: boolean
     syncMode: `eager` | `on-demand`
     failure:
       | `before gate`
-      | `markError after gate`
+      | `fail after gate`
       | `crash after gate`
       | `report after gate`
   }
@@ -1020,7 +1063,7 @@ describe(`effect health`, () => {
       (
         [
           `before gate`,
-          `markError after gate`,
+          `fail after gate`,
           `crash after gate`,
           `report after gate`,
         ] as const
@@ -1067,14 +1110,14 @@ describe(`effect health`, () => {
         delivered.push(...events.map((event) => event.key))
       },
       onSourceError: (error) => sourceErrors.push(error),
-      onHealthChange: (errors) => trees.push(errors),
+      onErrorsChange: (errors) => trees.push(errors),
     })
     const consoleError = console.error
     console.error = () => {}
     try {
       await flushPromises()
       if (failure === `before gate`) {
-        params.markError(new Error(`gave up`))
+        params.fail(new Error(`gave up`))
         await flushPromises()
         // Model: the Effect never reached initial-query readiness, so the failure
         // ends it.
@@ -1097,7 +1140,7 @@ describe(`effect health`, () => {
 
       if (failure === `report after gate`) {
         // An on-demand source reaches its own Collection readiness after the
-        // Effect's: a status change that must reach onHealthChange once.
+        // Effect's: a status change that must reach onErrorsChange once.
         if (syncMode === `on-demand`) params.markReady()
         await flushPromises()
         params.reportError(new Error(`stalled`))
@@ -1105,7 +1148,13 @@ describe(`effect health`, () => {
         expect(effect.disposed).toBe(false)
         expect(trees.at(-1)).toMatchObject({
           hasErrors: true,
-          sources: [{ alias: `row`, error: { phase: `sync`, final: false } }],
+          sources: [
+            {
+              alias: `row`,
+              failureReason: { message: `stalled` },
+              error: null,
+            },
+          ],
         })
         expect(new Set(trees).size, `one report per change`).toBe(trees.length)
         return
@@ -1113,14 +1162,13 @@ describe(`effect health`, () => {
       if (failure === `crash after gate`) {
         params.collection._lifecycle.crash(new Error(`crashed`))
       } else {
-        params.markError(new Error(`gave up`))
+        params.fail(new Error(`gave up`))
       }
       await flushPromises()
-      // Model: the source reaches `error` by a crash, or by an initial
-      // error while an on-demand source is still in its initial sync. Either
-      // ends the Effect. An eager source's markError after Collection
-      // readiness is a final health error instead.
-      const ends = failure === `crash after gate` || syncMode === `on-demand`
+      // Model: only a crash ends the Effect after its gate. A failed first
+      // load of an on-demand source and an eager source's fail after
+      // Collection readiness are both the source node's `error`.
+      const ends = failure === `crash after gate`
       expect(effect.disposed).toBe(ends)
       expect(sourceErrors).toHaveLength(ends ? 1 : 0)
       expect(new Set(trees).size, `one report per change`).toBe(trees.length)
@@ -1131,8 +1179,9 @@ describe(`effect health`, () => {
           sources: [
             {
               alias: `row`,
-              isError: true,
-              error: { phase: `sync`, final: true },
+              status: syncMode === `on-demand` ? `error` : `ready`,
+              failureReason: null,
+              error: { message: `gave up` },
             },
           ],
         })
@@ -1147,7 +1196,7 @@ describe(`effect health`, () => {
 
 /**
  * A load that fails after the Effect's gate is a request error, as it is on
- * a live query's node: the Effect is not disposed, `onHealthChange` receives
+ * a live query's node: the Effect is not disposed, `onErrorsChange` receives
  * a tree whose root node has a `request` error, and a later successful load
  * of the same source clears it. The parents lead the Effect, and a lazy join
  * loads the children each new parent row reaches. The lane crosses
@@ -1219,7 +1268,7 @@ describe(`effect request errors`, () => {
       skipInitial,
       onBatch: () => {},
       onSourceError: (error) => sourceErrors.push(error),
-      onHealthChange: (errors) => trees.push(errors),
+      onErrorsChange: (errors) => trees.push(errors),
     })
     const consoleError = console.error
     console.error = () => {}
@@ -1236,8 +1285,7 @@ describe(`effect request errors`, () => {
       expect(effect.disposed).toBe(false)
       expect(sourceErrors).toEqual([])
       expect(trees.at(-1)?.error).toMatchObject({
-        phase: `request`,
-        final: false,
+        message: `child load failed`,
       })
       expect(trees.at(-1)?.hasErrors).toBe(true)
 
@@ -1261,11 +1309,11 @@ describe(`effect request errors`, () => {
  * An include node rolls up the include's own per-row child Collections. A
  * child Collection that fails, here because an index the reader created on
  * it throws on a new row, counts in `inError` and makes the include node
- * `hasErrors`; the live query emits `health:change` for it and keeps its own
+ * `hasErrors`; the live query emits `errors:change` for it and keeps its own
  * status. Two includes that read one Collection under the same alias are
  * two nodes, and each counts only its own children. A healthy child that
  * starts does not change any node's error state, so it emits no
- * `health:change`; otherwise every new parent row would rebuild the tree.
+ * `errors:change`; otherwise every new parent row would rebuild the tree.
  */
 describe(`include instances`, () => {
   it(`a failing child Collection counts in its own include only`, async () => {
@@ -1311,20 +1359,20 @@ describe(`include instances`, () => {
       await preload
       const includes = () => query.errors.sources.slice(1)
       expect(includes().map((node) => [node.kind, node.instances])).toEqual([
-        [`include`, { total: 2, inError: 0 }],
-        [`include`, { total: 2, inError: 0 }],
+        [`include`, { total: 2, withErrors: 0 }],
+        [`include`, { total: 2, withErrors: 0 }],
       ])
 
       let events = 0
-      const stop = query.on(`health:change`, () => {
+      const stop = query.on(`errors:change`, () => {
         events++
       })
       // New parent rows start healthy child Collections.
       B.write({ id: 3, parentId: 3 })
       B.write({ id: 4, parentId: 4 })
       await flushPromises()
-      expect(events, `healthy children emit no health:change`).toBe(0)
-      expect(includes()[0]!.instances).toEqual({ total: 4, inError: 0 })
+      expect(events, `healthy children emit no errors:change`).toBe(0)
+      expect(includes()[0]!.instances).toEqual({ total: 4, withErrors: 0 })
       // One child Collection of `items` fails: its index throws on row 9.
       class FailingIndex extends BasicIndex<number> {
         override add(key: number, item: any): void {
@@ -1338,20 +1386,20 @@ describe(`include instances`, () => {
       await flushPromises()
       stop()
 
-      expect(items.status).toBe(`error`)
+      expect(items.status).toBe(`crashed`)
       expect(query.status).toBe(`ready`)
-      expect(events, `health:change relay`).toBeGreaterThan(0)
+      expect(events, `errors:change relay`).toBeGreaterThan(0)
       const [itemsNode, sameNode] = includes()
-      expect(itemsNode!.instances).toEqual({ total: 4, inError: 1 })
+      expect(itemsNode!.instances).toEqual({ total: 4, withErrors: 1 })
       expect(itemsNode!.hasErrors).toBe(true)
-      expect(sameNode!.instances).toEqual({ total: 4, inError: 0 })
+      expect(sameNode!.instances).toEqual({ total: 4, withErrors: 0 })
       expect(sameNode!.hasErrors).toBe(false)
       expect(query.errors.hasErrors).toBe(true)
 
       // Removing the failing child's parent row retires that child, so it
       // leaves the count and the query reports the change.
       let retireEvents = 0
-      const stopRetire = query.on(`health:change`, () => {
+      const stopRetire = query.on(`errors:change`, () => {
         retireEvents++
       })
       B.write({ id: 1, parentId: 1 }, `delete`)
@@ -1360,7 +1408,7 @@ describe(`include instances`, () => {
       expect(retireEvents, `retiring a child in error relays`).toBeGreaterThan(
         0,
       )
-      expect(includes()[0]!.instances).toEqual({ total: 3, inError: 0 })
+      expect(includes()[0]!.instances).toEqual({ total: 3, withErrors: 0 })
       expect(query.errors.hasErrors).toBe(false)
     } finally {
       console.error = consoleError

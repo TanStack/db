@@ -31,7 +31,6 @@ import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
-  CollectionHealth,
   CollectionStatus,
   CurrentStateAsChangesOptions,
   ErrorTreeNode,
@@ -558,24 +557,18 @@ export class CollectionImpl<
   }
 
   /**
-   * The Collection's health after its first ready. `status` only gates the
-   * initial load; a later sync problem appears here and the rows stay.
-   */
-  public get health(): CollectionHealth {
-    return this._lifecycle.health
-  }
-
-  /**
    * The error tree for this Collection and every Collection it depends on.
-   * It always has the same shape for a given query, so apps can parse it.
+   * A base Collection's tree is one node. It always has the same shape for a
+   * given query, so apps can parse it. After the first ready, sync problems
+   * appear here and the rows stay.
    */
   public get errors(): ErrorTreeNode {
     return buildErrorTree(this)
   }
 
   /** @internal A Collection this one depends on changed its error tree. */
-  public _emitHealthChange(): void {
-    this._events.emitHealthChange()
+  public _emitErrorsChange(): void {
+    this._events.emitErrorsChange()
   }
 
   /**

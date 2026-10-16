@@ -248,7 +248,7 @@ describe(`Collection Error Handling`, () => {
 
   describe(`Sync Run Isolation`, () => {
     it(`preserves an asynchronous sync error and removes its first-ready waiter`, async () => {
-      let markError: (error?: unknown) => void = () => {
+      let fail: (error?: unknown) => void = () => {
         throw new Error(`Sync has not started`)
       }
       const collection = createCollection<{ id: string }>({
@@ -257,7 +257,7 @@ describe(`Collection Error Handling`, () => {
         startSync: false,
         sync: {
           sync: (sync) => {
-            markError = sync.markError
+            fail = sync.fail
           },
         },
       })
@@ -268,7 +268,7 @@ describe(`Collection Error Handling`, () => {
       expect(collection._lifecycle.onFirstReadyCallbacks).toHaveLength(1)
 
       const syncError = new Error(`Asynchronous sync failed exactly`)
-      markError(syncError)
+      fail(syncError)
       await expect(preload).rejects.toBe(syncError)
       await expect(stateWhenReady).rejects.toBe(syncError)
       await expect(arrayWhenReady).rejects.toBe(syncError)
@@ -279,7 +279,7 @@ describe(`Collection Error Handling`, () => {
     })
 
     it(`uses the generic state error when asynchronous sync supplies no cause`, async () => {
-      let markError: (error?: unknown) => void = () => {
+      let fail: (error?: unknown) => void = () => {
         throw new Error(`Sync has not started`)
       }
       const collection = createCollection<{ id: string }>({
@@ -288,13 +288,13 @@ describe(`Collection Error Handling`, () => {
         startSync: false,
         sync: {
           sync: (sync) => {
-            markError = sync.markError
+            fail = sync.fail
           },
         },
       })
 
       const preload = collection.preload()
-      markError()
+      fail()
 
       await expect(preload).rejects.toBeInstanceOf(
         CollectionIsInErrorStateError,
@@ -303,7 +303,7 @@ describe(`Collection Error Handling`, () => {
     })
 
     it(`ignores an error callback retained after cleanup`, async () => {
-      let markError: () => void = () => {
+      let fail: (error: unknown) => void = () => {
         throw new Error(`Sync has not started`)
       }
       const collection = createCollection<{ id: string }>({
@@ -312,7 +312,7 @@ describe(`Collection Error Handling`, () => {
         startSync: false,
         sync: {
           sync: (sync) => {
-            markError = sync.markError
+            fail = sync.fail
           },
         },
       })
@@ -322,14 +322,14 @@ describe(`Collection Error Handling`, () => {
       })
       await collection.cleanup()
       await cancelled
-      markError()
+      fail(new Error(`late`))
 
       expect(collection.status).toBe(`cleaned-up`)
     })
 
     it(`ignores an error callback retained by an earlier sync run`, async () => {
       const syncRuns: Array<{
-        markError: () => void
+        fail: (error: unknown) => void
         markReady: () => void
       }> = []
       const collection = createCollection<{ id: string }>({
@@ -337,8 +337,8 @@ describe(`Collection Error Handling`, () => {
         getKey: (item) => item.id,
         startSync: false,
         sync: {
-          sync: ({ markError, markReady }) => {
-            syncRuns.push({ markError, markReady })
+          sync: ({ fail, markReady }) => {
+            syncRuns.push({ fail, markReady })
           },
         },
       })
@@ -356,7 +356,7 @@ describe(`Collection Error Handling`, () => {
       expect(syncRuns).toHaveLength(2)
       const second = syncRuns[1]!
 
-      first.markError()
+      first.fail(new Error(`stale`))
       expect(collection.status).toBe(`loading`)
 
       second.markReady()
@@ -423,7 +423,7 @@ describe(`Collection Error Handling`, () => {
       })
 
       await expect(collection.preload()).rejects.toBe(startupError)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
     })
 
     it(`should throw helpful errors when trying to use operations on error status collection`, async () => {
@@ -443,7 +443,7 @@ describe(`Collection Error Handling`, () => {
       } catch {
         // Expected to throw
       }
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
 
       // Now operations should be blocked with helpful messages
       expect(() => {
@@ -612,7 +612,7 @@ describe(`Collection Error Handling`, () => {
         ),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`ready`, `error`),
+        collectionImpl._lifecycle.validateStatusTransition(`ready`, `crashed`),
       ).not.toThrow()
 
       // Valid transitions from error. An initial error is final for its sync

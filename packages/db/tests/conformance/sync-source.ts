@@ -1,24 +1,24 @@
 import type { Collection } from '@tanstack/db'
-import type { HealthSourceHandle } from './contract'
+import type { SyncSourceHandle } from './contract'
 
 /**
- * Builds the `HealthSourceHandle` fixture from the adapter's own
+ * Builds the `SyncSourceHandle` fixture from the adapter's own
  * `createCollection`, so the Collection lives in the adapter's realm. Every
  * driver uses this one fixture, so the five bindings face the same sync
  * adapter reports.
  */
-export function makeHealthSource<T extends { id: string }>(
+export function makeSyncSource<T extends { id: string }>(
   createCollection: (options: any) => Collection<any, any, any>,
   id: string,
   initialData: ReadonlyArray<T>,
-): HealthSourceHandle<T> {
+): SyncSourceHandle<T> {
   let controls:
     | {
         begin: () => void
         write: (message: { type: string; value: T }) => void
         commit: () => void
         markReady: () => void
-        markError: (error: unknown) => void
+        fail: (error: unknown) => void
         reportError: (error: unknown) => void
         reportHealthy: () => void
       }
@@ -48,7 +48,7 @@ export function makeHealthSource<T extends { id: string }>(
     update: (row) => writeRows(`update`, [row]),
     remove: (row) => writeRows(`delete`, [row]),
     reportError: (error) => controls!.reportError(error),
-    markError: (error) => controls!.markError(error),
+    fail: (error) => controls!.fail(error),
     reportHealthy: () => controls!.reportHealthy(),
   }
 }

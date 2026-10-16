@@ -1473,7 +1473,7 @@ Source collection '${collectionId}' was cleaned up while effect depends on it
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Source collection '${collectionId}' entered error state
+Source collection '${collectionId}' entered ${status} state
 ```
 
 <a id="error-136"></a>
@@ -1843,7 +1843,7 @@ No secure random number generator available: neither crypto.randomUUID nor crypt
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Source collection '${collectionId}' entered error state
+Source collection '${collectionId}' crashed
 ```
 
 <a id="error-173"></a>
@@ -2477,7 +2477,7 @@ A windowed or findOne result row has no include route
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-${operation}() reports a problem after Collection readiness, but Collection "${this.id}" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.
+${operation}() reports on sync after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.
 ```
 
 <a id="error-246"></a>
@@ -2488,4 +2488,24 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 The pooled live query's source ended
+```
+
+<a id="error-247"></a>
+
+## Error 247: `collection/lifecycle.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${operation}() was called after fail() in the same sync run of Collection "${this.id}". fail() means the sync adapter stopped; a reload starts a new sync run.
+```
+
+<a id="error-248"></a>
+
+## Error 248: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source collection '${collectionId}' failed its first load
 ```

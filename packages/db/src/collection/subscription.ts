@@ -339,6 +339,7 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `error` ||
+      this.collection.status === `crashed` ||
       this.collection._sync.syncLoadSubsetFn === null
     ) {
       this.setReadyIfIdle()
@@ -1044,6 +1045,7 @@ export class CollectionSubscription
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&
         (this.collection.status === `error` ||
+          this.collection.status === `crashed` ||
           (this.collection.status !== `idle` &&
             this.collection._sync.syncLoadSubsetFn === null)))
     ) {

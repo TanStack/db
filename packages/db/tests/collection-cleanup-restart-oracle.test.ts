@@ -481,7 +481,7 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(observeCleanupSettlement(cleanupSettled)).toBe(
         atCleanupStart.cleanup,
       )
-      expect(observeDependent(live.status !== `error`)).toBe(
+      expect(observeDependent(live.status !== `crashed`)).toBe(
         atCleanupStart.dependent,
       )
       expect(await preload).toMatchObject({
@@ -533,7 +533,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
       const cleanup = source.cleanup()
 
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       expect(reports).toHaveBeenCalledTimes(1)
 
       cleanupGate.resolve()
@@ -894,7 +894,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
         await expect(live.preload()).rejects.toThrow(message)
 
-        expect(live.status).toBe(`error`)
+        expect(live.status).toBe(`crashed`)
         expect({
           cleaning: cleaningSource.subscriberCount,
           healthy: healthySource.subscriberCount,
@@ -1015,12 +1015,12 @@ describe(`Collection cleanup admission oracle`, () => {
       publications.length = 0
 
       await source.cleanup()
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
 
       source.startSyncImmediate()
       expect(source.status).toBe(`ready`)
       expect(starts).toBe(2)
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       expect(live.get(1)?.rank).toBe(1)
       expect(publications).toEqual([])
       expect(reports).toHaveBeenCalledTimes(1)
@@ -1075,23 +1075,22 @@ describe(`Collection cleanup admission oracle`, () => {
         await live.preload()
         expect(live.get(1)?.rank).toBe(1)
 
-        // After the first ready a source failure is final health: the
+        // After the first ready a source's fail() stops its sync: the
         // status and rows stay, and the live query's error tree reports it.
-        sourceSync.markError(new Error(`source sync failed`))
+        sourceSync.fail(new Error(`source sync failed`))
         expect(source.status).toBe(`ready`)
-        expect(source.health.error).toMatchObject({
-          phase: `sync`,
-          final: true,
+        expect(source.errors.error).toMatchObject({
+          message: `source sync failed`,
         })
         expect(live.status).toBe(`ready`)
         expect(live.get(1)?.rank).toBe(1)
-        expect(live.errors.sources[0]?.isError).toBe(true)
+        expect(live.errors.sources[0]?.error).toBeTruthy()
 
-        // Only a restart clears a final problem.
+        // Only a new sync run clears the error.
         await live.cleanup()
         await source.cleanup()
         await live.preload()
-        expect(source.health.isError).toBe(false)
+        expect(source.errors.hasErrors).toBe(false)
         expect(live.errors.hasErrors).toBe(false)
 
         expect(starts).toBe(2)

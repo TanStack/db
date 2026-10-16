@@ -1009,7 +1009,7 @@ describe(`Query Collections`, () => {
           })
           methods.commit()
           methods.markReady()
-          failSource = () => methods.markError(new Error(`source sync failed`))
+          failSource = () => methods.fail(new Error(`source sync failed`))
         },
       },
     })
@@ -1028,7 +1028,7 @@ describe(`Query Collections`, () => {
       act(() => failSource())
       await waitFor(() => expect(result.current.errors?.hasErrors).toBe(true))
       expect(result.current.status).toBe(`ready`)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
       await act(async () => {
@@ -2236,7 +2236,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
       // Enable the query
@@ -2275,7 +2275,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
     })
 
@@ -2313,7 +2313,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
       // Enable the query

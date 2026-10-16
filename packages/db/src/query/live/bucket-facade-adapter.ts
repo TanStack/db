@@ -7,6 +7,7 @@ import {
   transformPublicContainers,
 } from '../compiler/route-metadata.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { hasOwnProblem } from '../../collection/error-tree.js'
 import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
@@ -34,7 +35,7 @@ type FacadeEntry = {
   sync: FacadeSync | undefined
   order: WeakMap<object, string>
   /** Whether the include node counts this facade as in error. */
-  readonly inError: boolean
+  readonly withError: boolean
 }
 
 type SnapshotRow = {
@@ -82,7 +83,7 @@ export class BucketFacadeAdapter {
     private readonly compilations: Array<BucketFacadeCompilation>,
     onMessages: (count: number) => void,
     // A per-row child Collection's health is part of the parent's error tree.
-    private readonly onInstanceHealthChange: () => void = () => {},
+    private readonly onInstanceErrorsChange: () => void = () => {},
   ) {
     for (const compilation of compilations) {
       compilation.rows.pipe(
@@ -425,7 +426,7 @@ export class BucketFacadeAdapter {
     const retired = getOrCreate(this.retiredEntries, edgeId, () => new Map())
     retired.set(bucketKey, entry)
     // A retired facade leaves the include node's count.
-    if (entry.inError) this.onInstanceHealthChange()
+    if (entry.withError) this.onInstanceErrorsChange()
   }
 
   private getEntry(edgeId: string, bucketKey: string): FacadeEntry {
@@ -470,14 +471,14 @@ export class BucketFacadeAdapter {
       startSync: true,
       gcTime: 0,
     })
-    // The include node counts the children in error, so only a change in
-    // that state concerns the parent; startup status changes do not.
-    let inError = false
-    collection.on(`health:change`, () => {
-      const next = collection.status === `error` || collection.health.isError
-      if (next === inError) return
-      inError = next
-      this.onInstanceHealthChange()
+    // The include node counts the children with a problem, so only a change
+    // in that state concerns the parent; startup status changes do not.
+    let withError = false
+    collection.on(`errors:change`, () => {
+      const next = hasOwnProblem(collection)
+      if (next === withError) return
+      withError = next
+      this.onInstanceErrorsChange()
     })
     const dispose = collection.cleanup.bind(collection)
     // Other parent rows can share this facade, so a holder must not end it.
@@ -495,8 +496,8 @@ export class BucketFacadeAdapter {
       get sync() {
         return sync
       },
-      get inError() {
-        return inError
+      get withError() {
+        return withError
       },
       order,
     }

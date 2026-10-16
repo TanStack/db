@@ -528,9 +528,12 @@ export interface LiveQueryWindowSnapshot<
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  isLoadingError: boolean
+  isCrashed: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  /** The data is shown, and a sync problem or failed page load is in `errors`. */
+  isSyncError: boolean
   /** The error tree for the collection and its dependencies, or `undefined` when disabled. */
   errors: ErrorTreeNode | undefined
 }
@@ -690,9 +693,11 @@ class LiveQueryWindowControllerImpl<
       isPersistedReady: observerSnapshot.isPersistedReady,
       persistedError: observerSnapshot.persistedError,
       isIdle: observerSnapshot.isIdle,
-      isError: observerSnapshot.isError,
+      isLoadingError: observerSnapshot.isLoadingError,
+      isCrashed: observerSnapshot.isCrashed,
       isCleanedUp: observerSnapshot.isCleanedUp,
       isEnabled: observerSnapshot.isEnabled,
+      isSyncError: observerSnapshot.isSyncError,
       errors: observerSnapshot.errors,
     }
     this.cachedFrom = {

@@ -511,10 +511,10 @@ describe(`createLiveQueryWindowController`, () => {
     })
 
     await expect(controller.preload()).rejects.toBe(failure)
-    expect(controller.getSnapshot().isError).toBe(false)
+    expect(controller.getSnapshot().isLoadingError).toBe(false)
 
     await controller.preload()
-    expect(controller.getSnapshot().isError).toBe(false)
+    expect(controller.getSnapshot().isLoadingError).toBe(false)
     controller.dispose()
   })
 
@@ -602,7 +602,7 @@ describe(`createLiveQueryWindowController`, () => {
         expect(await expansionOutcome).toBe(failure)
         expect(await preloadOutcome).toBe(failure)
         expect(controller.getSnapshot().pages).toHaveLength(1)
-        expect(controller.getSnapshot().isError).toBe(false)
+        expect(controller.getSnapshot().isLoadingError).toBe(false)
         await controller.fetchNextPage()
       } else {
         resolveExpansion()
@@ -710,9 +710,10 @@ describe(`createLiveQueryWindowController`, () => {
     await expect(controller.fetchNextPage()).rejects.toBe(failure)
     expect(controller.getSnapshot().pages).toHaveLength(1)
     // The failed load is a request error; the window keeps its status.
-    expect(controller.getSnapshot().isError).toBe(false)
+    expect(controller.getSnapshot().isLoadingError).toBe(false)
+    expect(controller.getSnapshot().isSyncError).toBe(true)
     expect(controller.getSnapshot().errors?.error).toMatchObject({
-      phase: `request`,
+      message: failure.message,
     })
     expect(lq.utils.lastSubsetError).toBe(failure)
     expect(lq.utils.customUtility()).toBe(`custom`)
@@ -859,7 +860,7 @@ describe(`createLiveQueryWindowController`, () => {
         if (outcome === `reject`) {
           expect(await resetOutcome).toBe(failure)
           expect(await expansionOutcome).toBe(failure)
-          expect(controller.getSnapshot().isError).toBe(false)
+          expect(controller.getSnapshot().isLoadingError).toBe(false)
           expect(ids(controller.getSnapshot())).toEqual([`1`, `2`])
           await controller.reset()
         } else {
@@ -867,7 +868,7 @@ describe(`createLiveQueryWindowController`, () => {
           expect(await expansionOutcome).toBeUndefined()
         }
         expect(controller.getSnapshot().pages).toHaveLength(1)
-        expect(controller.getSnapshot().isError).toBe(false)
+        expect(controller.getSnapshot().isLoadingError).toBe(false)
         expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
         await controller.fetchNextPage()
         expect(ids(controller.getSnapshot())).toEqual([`1`, `2`, `3`, `4`])
@@ -1267,7 +1268,7 @@ describe(`createLiveQueryWindowController`, () => {
     rejectFirst(new Error(`stale attachment failed`))
     await flush()
 
-    expect(controller.getSnapshot().isError).toBe(false)
+    expect(controller.getSnapshot().isLoadingError).toBe(false)
     controller.dispose()
   })
 
@@ -1448,7 +1449,7 @@ describe(`createLiveQueryWindowController`, () => {
       isLoading: false,
       isReady: true,
       isIdle: false,
-      isError: false,
+      isLoadingError: false,
       isCleanedUp: false,
     })
     controller.dispose()

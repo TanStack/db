@@ -11,7 +11,9 @@ function disabled(
     state: representation === `absent` ? undefined : new Map(),
     status: `disabled`,
     isReady: true,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
     errors: undefined,
   }
@@ -46,7 +48,7 @@ const faults: Array<[string, (value: ConformanceResult) => void]> = [
   [
     `error`,
     (value) => {
-      value.isError = true
+      value.isLoadingError = true
     },
   ],
   [
@@ -57,8 +59,8 @@ const faults: Array<[string, (value: ConformanceResult) => void]> = [
         collectionId: `stale`,
         kind: `live-query`,
         status: `ready`,
-        isError: false,
         hasErrors: false,
+        failureReason: null,
         error: null,
         sources: [],
       }

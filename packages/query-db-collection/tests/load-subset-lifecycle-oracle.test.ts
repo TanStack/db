@@ -15,17 +15,20 @@ import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
 
 /**
- * The Query failure a Collection reports: its initial error while it is in
- * `error`, or the cause of its health error after readiness.
+ * The Query failure a Collection reports: its failed first load while it is
+ * in `error`, or the cause of its failure reason after readiness.
  */
 function reportedError(collection: {
   status: string
-  health: { error: { cause: unknown } | null }
+  errors: {
+    failureReason: { cause: unknown } | null
+    error: { cause: unknown } | null
+  }
   _lifecycle: { getSyncError: () => unknown }
 }): unknown {
   return collection.status === `error`
     ? collection._lifecycle.getSyncError()
-    : collection.health.error?.cause
+    : (collection.errors.failureReason ?? collection.errors.error)?.cause
 }
 
 /**
@@ -1173,7 +1176,7 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
 }
 
 /**
- * After Collection readiness, a failed refetch is a health error that is not
+ * After Collection readiness, a failed refetch is a failure reason, which is not
  * final, because TanStack Query fetches again, and the status and rows stay.
  * The next successful application clears it. The model is that one rule; it
  * does not read the adapter's per-key bookkeeping.
@@ -1200,34 +1203,34 @@ async function expectRefetchFailureIsHealth(): Promise<void> {
   )
   const observe = () => ({
     status: collection.status,
-    health: collection.health.error && {
-      phase: collection.health.error.phase,
-      final: collection.health.error.final,
-      cause: collection.health.error.cause,
-    },
+    failureReason: collection.errors.failureReason?.cause ?? null,
+    error: collection.errors.error?.cause ?? null,
     rows: collection.toArray.map((row) => row.id),
   })
   try {
     await collection.preload()
     expect(observe()).toEqual({
       status: `ready`,
-      health: null,
+      failureReason: null,
+      error: null,
       rows: [`first`],
     })
 
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.health.isError).toBe(true))
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(true))
     expect(observe()).toEqual({
       status: `ready`,
-      health: { phase: `sync`, final: false, cause: error },
+      failureReason: error,
+      error: null,
       rows: [`first`],
     })
 
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.health.isError).toBe(false))
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(false))
     expect(observe()).toEqual({
       status: `ready`,
-      health: null,
+      failureReason: null,
+      error: null,
       rows: [`second`],
     })
   } finally {
@@ -1238,9 +1241,9 @@ async function expectRefetchFailureIsHealth(): Promise<void> {
 }
 
 /**
- * Collection health covers every Query the Collection observes. With two
- * on-demand subsets, one failing refetch is a health error even when the
- * other subset's refetch succeeds; the Collection is healthy again only once
+ * A Collection's failure reason covers every Query it observes. With two
+ * on-demand subsets, one failing refetch is a failure reason even when the
+ * other subset's refetch succeeds; it clears only once
  * no Query is failing. The model is the set of failing subsets.
  */
 async function expectHealthWaitsForEveryFailingQuery(): Promise<void> {
@@ -1270,22 +1273,22 @@ async function expectHealthWaitsForEveryFailingQuery(): Promise<void> {
     await collection._sync.loadSubset({ limit: 1 })
     await collection._sync.loadSubset({ limit: 2 })
     expect(collection.status).toBe(`ready`)
-    expect(collection.health.isError).toBe(false)
+    expect(collection.errors.hasErrors).toBe(false)
 
     failing.add(1)
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.health.isError).toBe(true))
-    expect(collection.health.error?.message).toBe(`subset 1 failed`)
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(true))
+    expect(collection.errors.failureReason?.message).toBe(`subset 1 failed`)
 
     // A subset that starts after the failure and succeeds does not make the
     // failing subset healthy.
     await collection._sync.loadSubset({ limit: 3 })
     await vi.waitFor(() => expect(collection.has(`row-3`)).toBe(true))
-    expect(collection.health.error?.message).toBe(`subset 1 failed`)
+    expect(collection.errors.failureReason?.message).toBe(`subset 1 failed`)
 
     failing.clear()
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.health.isError).toBe(false))
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(false))
     expect(collection.status).toBe(`ready`)
   } finally {
     loggedError.mockRestore()
@@ -1407,7 +1410,7 @@ async function expectLateDependentObservesInitialFailure(): Promise<void> {
 
 async function expectEveryFailedSourceToRecover(): Promise<void> {
   const createControlledSource = (id: string) => {
-    let fail: () => void = () => {
+    let failSync: () => void = () => {
       throw new Error(`Source '${id}' has not started`)
     }
     let recover: (row: Row) => void = (_row) => {
@@ -1420,8 +1423,8 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
       autoIndex: `eager`,
       defaultIndexType: BasicIndex,
       sync: {
-        sync: ({ begin, write, commit, markReady, markError }) => {
-          fail = markError
+        sync: ({ begin, write, commit, markReady, fail }) => {
+          failSync = () => fail(new Error(`Source '${id}' failed`))
           recover = (row) => {
             begin()
             write({ type: `insert`, value: row })
@@ -1433,7 +1436,7 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     })
     return {
       collection,
-      fail: () => fail(),
+      fail: () => failSync(),
       recover: (row: Row) => recover(row),
     }
   }

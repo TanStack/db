@@ -24,7 +24,7 @@
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
  * no-data, initial readiness over a lagging on-demand source, Collection
- * health after readiness, param recompilation, optimistic mutation, pre-created & config-object
+ * sync errors after readiness, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
  */
 import { describe, expect, it } from 'vitest'
@@ -86,11 +86,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeLaggingSource<T>()),
-    makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
-      sources!.track(rawDriver.makeHealthSource<T>(data)),
+    makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+      sources!.track(rawDriver.makeSyncSource<T>(data)),
     makePrecreated: (build, options) =>
       sources!.track(rawDriver.makePrecreated(build, options)),
-    makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
+    makeErrorSource: (kind) => sources!.track(rawDriver.makeErrorSource(kind)),
     mount: (build) => track(rawDriver.mount(build)),
     mountControllable: (build, initial) =>
       track(rawDriver.mountControllable(build, initial)),
@@ -1038,73 +1038,85 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
 
-    scenario(
-      `error-status`,
-      `a failing source surfaces an error (flag or boundary)`,
-      async () => {
-        const source = driver.makeErrorSource()
-        // Source ownership is registered before judging a failed setup.
-        expect(source.startup.returned, `source startup threw`).toBe(false)
-        if (!source.startup.returned)
-          expect(source.startup.error, `intended source startup error`).toBe(
-            source.expectedError,
+    // A failed first load and a crash both stop a fresh mount from showing
+    // data, and they need different handling: a failed first load is
+    // `status: 'error'` (`isLoadingError`), recovered by a new sync run; a
+    // crash is `status: 'crashed'` (`isCrashed`), permanent for the Collection
+    // instance. Both explain themselves on the mounted Collection's node with
+    // the exact error the source produced.
+    for (const kind of [`fail`, `crash`] as const) {
+      const status = kind === `fail` ? `error` : `crashed`
+      scenario(
+        kind === `fail` ? `error-status` : `crashed-status`,
+        kind === `fail`
+          ? `a source whose first load fails surfaces a loading error (flag or boundary)`
+          : `a crashed source surfaces a crash (flag or boundary)`,
+        async () => {
+          const source = driver.makeErrorSource(kind)
+          // Source ownership is registered before judging a failed setup.
+          // Only a crash makes startup throw.
+          expect(source.startup.returned, `source startup returned`).toBe(
+            kind === `fail`,
           )
-        const h = driver.mountCollection(source.collection)
-        await h.flush()
+          if (!source.startup.returned)
+            expect(source.startup.error, `intended source startup error`).toBe(
+              source.expectedError,
+            )
+          const h = driver.mountCollection(source.collection)
+          await h.flush()
 
-        if (driver.errorSurface === `throw`) {
-          // Boundary model: reading the errored result throws (for an error
-          // boundary to catch), rather than exposing a readable flag.
-          expect(() => h.current()).toThrow()
-        } else {
-          const result = h.current()
-          expect(result.status).toBe(`error`)
-          expect(result.isError).toBe(true)
-          // An initial error also explains itself in the error tree: the
-          // mounted Collection's own node carries it with phase `initial`.
-          expect(result.errors?.hasErrors).toBe(true)
-          expect(result.errors?.isError).toBe(true)
-          expect(result.errors?.error).toMatchObject({
-            phase: `initial`,
-            final: true,
-            message: source.expectedError.message,
-          })
-          // The binding exposes the exact value the sync adapter gave up with.
-          expect(result.errors?.error?.cause).toBe(source.expectedError)
-        }
-        h.unmount()
-      },
-    )
+          if (driver.errorSurface === `throw`) {
+            // Boundary model: reading the failed result throws (for an error
+            // boundary to catch), rather than exposing a readable flag.
+            expect(() => h.current()).toThrow()
+          } else {
+            const result = h.current()
+            expect(result.status).toBe(status)
+            expect(result.isLoadingError).toBe(kind === `fail`)
+            expect(result.isCrashed).toBe(kind === `crash`)
+            expect(result.isSyncError).toBe(false)
+            expect(result.errors?.hasErrors).toBe(true)
+            expect(result.errors?.failureReason).toBeNull()
+            expect(result.errors?.error).toMatchObject({
+              message: source.expectedError.message,
+            })
+            // The binding exposes the exact value the source failed with.
+            expect(result.errors?.error?.cause).toBe(source.expectedError)
+          }
+          h.unmount()
+        },
+      )
+    }
 
-    // Collection health after Collection readiness. The law (ARCHITECTURE.md
-    // law 16 and decisions 5, 6, and 10 of the source-failure PLAN): Collection
-    // status is only the initial gate, so health reports after readiness never
-    // change status, `isError`, or rows. They appear only in the error tree, on
-    // the node for the source alias. `reportHealthy()` clears a health error
-    // that is not final; a final health error stays until a restart. The tree
-    // keeps its object identity until its content changes.
+    // ---- sync problems after readiness -------------------------------
+    // After readiness a sync problem never changes status, rows, or the
+    // load flags. It appears only in the error tree, on the source alias's
+    // node, and sets `isSyncError`. `reportError()` sets the node's
+    // `failureReason` and `reportHealthy()` clears it; `fail()` sets its
+    // `error`, which only a new sync run clears, and after it every report
+    // from the sync adapter throws. The tree keeps its object identity until
+    // its content changes (ARCHITECTURE.md laws 16 and 17,
+    // docs/contributing/designs/source-failure-and-health/error-surface).
     //
     // The model below is the whole expectation: one optional problem with a
-    // serial number. A report is a new problem with a new serial, so the tree
-    // must be a new object; a call that changes nothing keeps the serial, so
-    // the tree must be the same object. Row writes do not touch the model.
-    // Each step is observed after the driver's `flush` cut.
+    // field and a serial number. A report is a new problem with a new serial,
+    // so the tree must be a new object; a call that changes nothing keeps the
+    // serial, so the tree must be the same object. Row writes do not touch
+    // the model. Each step is observed after the driver's `flush` cut.
     scenario(
-      `health-after-readiness`,
-      `health reports after readiness appear only in the error tree`,
+      `sync-errors-after-readiness`,
+      `sync problems after readiness appear only in the error tree`,
       async () => {
-        type Problem = { final: boolean; cause: Error; serial: number }
+        type Problem = {
+          field: `failureReason` | `error`
+          cause: Error
+          serial: number
+        }
         let problem: Problem | null = null
         let serial = 0
-        const report = (cause: Error, final: boolean) => {
-          if (problem?.final) return
-          problem = { final, cause, serial: ++serial }
-        }
-        const healthy = () => {
-          if (problem && !problem.final) problem = null
-        }
+        const stopped = () => problem?.field === `error`
 
-        const source = driver.makeHealthSource(SEED)
+        const source = driver.makeSyncSource(SEED)
         const h = driver.mount((q) =>
           q
             .from({ items: source.collection })
@@ -1118,46 +1130,49 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           const result = h.current()
           const tree = result.errors
           expect(result.status, step).toBe(`ready`)
-          expect(result.isError, `${step}: isError is the initial gate`).toBe(
-            false,
+          expect(
+            result.isLoadingError,
+            `${step}: isLoadingError is the first load`,
+          ).toBe(false)
+          expect(result.isSyncError, `${step}: isSyncError`).toBe(
+            problem !== null,
           )
           expectUnorderedRows(result.data, rows)
           expect(tree, step).toBeDefined()
           const node = tree!.sources.find(({ alias }) => alias === `items`)
+          const shown = (info: { message: string } | null | undefined) =>
+            info ? { message: info.message } : null
           expect(
             {
-              rootIsError: tree!.isError,
+              rootError: tree!.error,
               hasErrors: tree!.hasErrors,
               node: node && {
                 kind: node.kind,
                 status: node.status,
-                isError: node.isError,
-                error: node.error && {
-                  phase: node.error.phase,
-                  final: node.error.final,
-                  message: node.error.message,
-                },
+                failureReason: shown(node.failureReason),
+                error: shown(node.error),
               },
             },
             step,
           ).toEqual({
-            rootIsError: false,
+            rootError: null,
             hasErrors: problem !== null,
             node: {
               kind: `source`,
               status: `ready`,
-              isError: problem !== null,
-              error: problem && {
-                phase: `sync`,
-                final: problem.final,
-                message: problem.cause.message,
-              },
+              failureReason:
+                problem?.field === `failureReason`
+                  ? { message: problem.cause.message }
+                  : null,
+              error:
+                problem?.field === `error`
+                  ? { message: problem.cause.message }
+                  : null,
             },
           })
           // The binding exposes the exact value the sync adapter reported.
-          expect(node?.error?.cause, `${step}: error cause`).toBe(
-            problem?.cause,
-          )
+          const info = node?.failureReason ?? node?.error
+          expect(info?.cause, `${step}: error cause`).toBe(problem?.cause)
           const current = { tree, serial: problem?.serial ?? null }
           if (previous) {
             if (previous.serial === current.serial)
@@ -1181,48 +1196,49 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         await h.flush()
         observe(`a row write`)
 
+        // Each step either applies to the model or, after fail(), throws.
         const steps: Array<[string, () => void]> = [
           [
-            `a health error that is not final`,
+            `a failure reason`,
             () => {
               const stalled = new Error(`stream stalled`)
               source.reportError(stalled)
-              report(stalled, false)
+              problem = {
+                field: `failureReason`,
+                cause: stalled,
+                serial: ++serial,
+              }
             },
           ],
           [
             `reportHealthy clears it`,
             () => {
               source.reportHealthy()
-              healthy()
+              problem = null
             },
           ],
           [
-            `a final health error`,
+            `reportHealthy with nothing to clear changes nothing`,
+            () => source.reportHealthy(),
+          ],
+          [
+            `fail sets the error`,
             () => {
               const ended = new Error(`stream ended`)
-              source.markError(ended)
-              report(ended, true)
+              source.fail(ended)
+              problem = { field: `error`, cause: ended, serial: ++serial }
             },
           ],
+          [`reportHealthy after fail throws`, () => source.reportHealthy()],
           [
-            `reportHealthy cannot clear a final health error`,
-            () => {
-              source.reportHealthy()
-              healthy()
-            },
-          ],
-          [
-            `a later report cannot replace a final health error`,
-            () => {
-              const late = new Error(`late`)
-              source.reportError(late)
-              report(late, false)
-            },
+            `reportError after fail throws`,
+            () => source.reportError(new Error(`late`)),
           ],
         ]
         for (const [step, act] of steps) {
-          act()
+          const throws = stopped()
+          if (throws) expect(act, `${step}: throws`).toThrow()
+          else act()
           await h.flush()
           observe(step)
         }
@@ -1232,7 +1248,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           row.id === `1` ? { id: `1`, name: `Johnny Doe` } : row,
         )
         await h.flush()
-        observe(`rows still publish under a final health error`)
+        observe(`rows still publish after fail`)
         h.unmount()
       },
     )
@@ -1274,7 +1290,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(33)
+      expect(registry.size).toBe(34)
     })
   })
 }

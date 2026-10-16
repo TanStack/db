@@ -672,16 +672,24 @@ export function indexedDBCollectionOptions(
   }
 
   const internalSync: SyncConfig<Item>['sync'] = (params) => {
-    const { begin, write, commit, markError } = params
+    const { begin, write, commit } = params
     activeSync = params
     collection = params.collection
     let channel: BroadcastChannel | undefined
+    let stopped = false
+    // fail() ends this sync run's reporting, so stop listening for changes.
+    const fail = (error: unknown) => {
+      if (stopped || activeSync !== params) return
+      stopped = true
+      channel?.close()
+      params.fail(error)
+    }
     const retire = () => {
       channel?.close()
       if (activeSync === params) {
         broadcastChannel = undefined
         // Closure ends read and admission authority, even after ready, so the
-        // Collection retires instead of reporting health.
+        // Collection crashes instead of reporting a sync problem.
         params.collection._lifecycle.crash(connection?.error)
       }
     }
@@ -757,16 +765,14 @@ export function indexedDBCollectionOptions(
             commit()
           }
         } catch (error) {
-          if (activeSync === params) markError(error)
+          fail(error)
         }
       }
     } catch {
       // Persistence also works in environments without BroadcastChannel.
     }
 
-    void restore(params, false).catch((error: unknown) => {
-      if (activeSync === params) markError(error)
-    })
+    void restore(params, false).catch(fail)
 
     return {
       cleanup: () => {

@@ -133,7 +133,7 @@ function startEffect(
   const callbacks = {
     onBatch: () => {},
     onSourceError: (error: Error) => sourceErrors.push(error),
-    onHealthChange: (errors: ErrorTreeNode) => trees.push(errors),
+    onErrorsChange: (errors: ErrorTreeNode) => trees.push(errors),
   }
   if (path === `ordered`) {
     return createEffect({
@@ -346,9 +346,8 @@ describe(`loadSubset failure matrix`, () => {
             // its tree, as on a live query's node; the Effect keeps running.
             expect(sourceErrors).toEqual([])
             expect(effect.disposed).toBe(false)
+            expect(trees.at(-1)?.failureReason).toBeNull()
             expect(trees.at(-1)?.error).toMatchObject({
-              phase: `request`,
-              final: false,
               ...(failureValue === `error`
                 ? { message: (error as Error).message }
                 : {}),
@@ -370,8 +369,9 @@ describe(`loadSubset failure matrix`, () => {
             expect(live.status).toBe(`ready`)
             if (path === `lazy`) {
               expect(live.errors).toMatchObject({
-                isError: true,
-                error: { phase: `request`, final: false },
+                hasErrors: true,
+                failureReason: null,
+                error: expect.anything(),
               })
             }
             if (failureValue === `error`) {
@@ -451,7 +451,7 @@ describe(`loadSubset failure matrix`, () => {
                   ),
               onBatch: () => {},
               onSourceError: (error) => sourceErrors.push(error),
-              onHealthChange: (errors) => trees.push(errors),
+              onErrorsChange: (errors) => trees.push(errors),
             })
           : undefined
       const live =
@@ -482,7 +482,6 @@ describe(`loadSubset failure matrix`, () => {
           expect(sourceErrors).toEqual([])
           expect(effect.disposed).toBe(false)
           expect(trees.at(-1)?.error).toMatchObject({
-            phase: `request`,
             message: String(failure),
           })
         }

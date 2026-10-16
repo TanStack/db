@@ -93,8 +93,13 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed page load is in `errors`. */
+  isSyncError: boolean
   isEnabled: true
   pages: Array<Array<TResult>>
   pageParams: Array<number>
@@ -341,6 +346,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         ) &&
         rendered.collection.status !== `cleaned-up` &&
         rendered.collection.status !== `error` &&
+        rendered.collection.status !== `crashed` &&
         liveQueryWindowMatches(rendered.collection, requiredLimit)
       ) {
         // An earlier render built this collection and nothing has committed
@@ -460,8 +466,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     isPersistedReady: snapshot.isPersistedReady,
     persistedError: snapshot.persistedError,
     isIdle: snapshot.isIdle,
-    isError: snapshot.isError,
+    isLoadingError: snapshot.isLoadingError,
+    isCrashed: snapshot.isCrashed,
     isCleanedUp: snapshot.isCleanedUp,
+    isSyncError: snapshot.isSyncError,
     collection:
       snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`],
     isEnabled: snapshot.isEnabled,

@@ -93,14 +93,21 @@ export interface LiveQuerySnapshot<
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
   isEnabled: boolean
   /**
+   * The data is shown, and something keeps it from staying current: a sync
+   * problem or a failed request somewhere in `errors`.
+   */
+  isSyncError: boolean
+  /**
    * The error tree for the query and every Collection it depends on, or
-   * `undefined` for a disabled query. `isError` describes only the initial
-   * load; after the first ready, a source problem shows here and the data
-   * stays.
+   * `undefined` for a disabled query. After the first ready, a source
+   * problem shows here and the data stays.
    */
   errors: ErrorTreeNode | undefined
 }
@@ -189,9 +196,11 @@ const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   isPersistedReady: false,
   persistedError: undefined,
   isIdle: false,
-  isError: false,
+  isLoadingError: false,
+  isCrashed: false,
   isCleanedUp: false,
   isEnabled: false,
+  isSyncError: false,
   errors: undefined,
 }
 
@@ -317,6 +326,7 @@ class LiveQueryObserverImpl<
         this.layoutRevision++
       }
 
+      const errors = (collection as { errors?: ErrorTreeNode }).errors
       // Most consumers read only `data`; build the keyed view on first read.
       let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
@@ -332,7 +342,8 @@ class LiveQueryObserverImpl<
         isPersistedReady: persistedStatus === `ready`,
         persistedError: local.error,
         isEnabled: true,
-        errors: (collection as { errors?: ErrorTreeNode }).errors,
+        isSyncError: status === `ready` && errors?.hasErrors === true,
+        errors,
       }
       this.snapshotDirty = false
     }
@@ -760,16 +771,16 @@ class LiveQueryObserverImpl<
     // any status change publishes a synthetic notify so consumers re-read the
     // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
     // detached attachment leaves nothing behind.
-    // A health change below the query changes its error tree, not its rows.
-    // Each status change is followed by a health change; tree identity
-    // tells whether the health change has anything left to publish.
+    // An errors change below the query changes its error tree, not its rows.
+    // Each status change is followed by an errors change; tree identity
+    // tells whether the errors change has anything left to publish.
     const errorsOf = () => (collection as { errors?: ErrorTreeNode }).errors
     let publishedErrors = errorsOf()
     const statusUnsub = collection.on(`status:change`, ({ status }) => {
       publishedErrors = errorsOf()
       notify(undefined, status)
     })
-    const healthUnsub = collection.on(`health:change`, () => {
+    const errorsUnsub = collection.on(`errors:change`, () => {
       if (errorsOf() === publishedErrors) return
       publishedErrors = errorsOf()
       // No rows or status changed, so only this marks the snapshot stale.
@@ -831,7 +842,7 @@ class LiveQueryObserverImpl<
     const release = () => {
       clientUnsub()
       statusUnsub()
-      healthUnsub()
+      errorsUnsub()
       layoutUnsub()
       persistedUnsubs?.forEach((unsubscribe) => unsubscribe())
       subscription?.unsubscribe()

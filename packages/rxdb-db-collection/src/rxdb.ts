@@ -126,7 +126,7 @@ export function rxdbCollectionOptions(
   type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, fail, collection } = params
 
       let initialFetchComplete = false
       async function initialFetch() {
@@ -280,7 +280,7 @@ export function rxdbCollectionOptions(
       void start().catch((error: unknown) => {
         stopOngoingFetch()
         if (collection.status === `loading`) {
-          markError(error)
+          fail(error)
         }
       })
 

@@ -619,7 +619,7 @@ describe(`On-Demand Sync Mode`, () => {
             expect.objectContaining({ name: `AssertionError` }),
           )
           expect(collection.status).toBe(`cleaned-up`)
-          expect(electronics.status).toBe(`error`)
+          expect(electronics.status).toBe(`crashed`)
         }
       }, [
         resolvePersistence,
@@ -2697,7 +2697,7 @@ describe(`On-Demand Sync Mode`, () => {
         write,
         commit,
         markReady: vi.fn(),
-        markError: vi.fn(),
+        fail: vi.fn(),
         reportError: vi.fn(),
         reportHealthy: vi.fn(),
         truncate: vi.fn(),
@@ -3249,10 +3249,10 @@ describe(`On-Demand Sync Mode`, () => {
           ),
         ).rejects.toBe(failure)
         // After the first ready, failures don't change status. Instead, they're
-        // reported as health errors. Status stays ready; data stays available.
+        // reported as a failure reason. Status stays ready; data stays available.
         expect(collection.status).toBe(`ready`)
-        expect(collection.health.isError).toBe(true)
-        expect(collection.health.error?.message).toMatch(
+        expect(collection.errors.hasErrors).toBe(true)
+        expect(collection.errors.failureReason?.message).toMatch(
           `trigger installation failed`,
         )
       } finally {
@@ -3285,11 +3285,9 @@ describe(`On-Demand Sync Mode`, () => {
             .mockRejectedValueOnce(new Error(`release rebuild failed`))
           collection._sync.unloadSubset(first)
           // The outage keeps the rows and the ready status. The adapter retries
-          // the rebuild, so it reports a health error that is not final.
+          // the rebuild, so it reports a failure reason.
           await vi.waitFor(() =>
-            expect(collection.health.error).toMatchObject({
-              phase: `sync`,
-              final: false,
+            expect(collection.errors.failureReason).toMatchObject({
               message: `release rebuild failed`,
             }),
           )
@@ -3308,7 +3306,9 @@ describe(`On-Demand Sync Mode`, () => {
               expect(trigger.mock.calls.length).toBeGreaterThan(1),
             )
           // A rebuild whose baseline applied reports healthy again.
-          await vi.waitFor(() => expect(collection.health.isError).toBe(false))
+          await vi.waitFor(() =>
+            expect(collection.errors.hasErrors).toBe(false),
+          )
           expect(collection.status).toBe(`ready`)
           expect([...collection.keys()]).toEqual(
             change === `unchanged` ? [`retained`] : [],

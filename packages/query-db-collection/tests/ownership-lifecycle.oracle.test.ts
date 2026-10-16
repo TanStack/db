@@ -44,17 +44,20 @@ import type { NonSingleResult } from '../../db/src/types.js'
 import type { QueryCollectionUtils } from '../src/query.js'
 
 /**
- * The Query failure a Collection reports: its initial error while it is in
- * `error`, or the cause of its health error after readiness.
+ * The Query failure a Collection reports: its failed first load while it is
+ * in `error`, or the cause of its failure reason after readiness.
  */
 function reportedError(collection: {
   status: string
-  health: { error: { cause: unknown } | null }
+  errors: {
+    failureReason: { cause: unknown } | null
+    error: { cause: unknown } | null
+  }
   _lifecycle: { getSyncError: () => unknown }
 }): unknown {
   return collection.status === `error`
     ? collection._lifecycle.getSyncError()
-    : collection.health.error?.cause
+    : (collection.errors.failureReason ?? collection.errors.error)?.cause
 }
 
 /**
@@ -13122,7 +13125,7 @@ it(`reports a failed Query cache rotation as a terminal Collection error`, async
   await expect(outcome).rejects.toBe(failure)
   // A refused rotation is a persistence failure, so the Collection crashes
   // even after Collection readiness, and later demand rejects with its cause.
-  expect(collection.status).toBe(`error`)
+  expect(collection.status).toBe(`crashed`)
   await expect(collection._sync.loadSubset({ limit: 2 })).rejects.toBe(failure)
 })
 

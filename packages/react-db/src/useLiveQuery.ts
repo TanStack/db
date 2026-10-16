@@ -371,12 +371,12 @@ export function warnUnhashableDerivedIdentity(
  *
  * @example
  * // Handle loading and error states
- * const { data, isLoading, isError, status } = useLiveQuery({
+ * const { data, isLoading, isLoadingError, status } = useLiveQuery({
  *   query: (q) => q.from({ todos: todoCollection })
  * })
  *
  * if (isLoading) return <div>Loading...</div>
- * if (isError) return <div>Error: {status}</div>
+ * if (isLoadingError) return <div>Error: {status}</div>
  *
  * return (
  *   <ul>
@@ -384,7 +384,7 @@ export function warnUnhashableDerivedIdentity(
  *   </ul>
  * )
  */
-/** Status, persistence, and health fields every `useLiveQuery` result has. */
+/** Status, persistence, and error fields every `useLiveQuery` result has. */
 type UseLiveQueryFlags = {
   isLoading: boolean
   isReady: boolean
@@ -392,8 +392,13 @@ type UseLiveQueryFlags = {
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: boolean
   errors: ErrorTreeNode | undefined
 }
 
@@ -508,12 +513,12 @@ export function useLiveQuery<
  *
  * @example
  * // Handle all states uniformly
- * const { data, isLoading, isReady, isError } = useLiveQuery({
+ * const { data, isLoading, isReady, isLoadingError } = useLiveQuery({
  *   query: (q) => q.from({ items: itemCollection })
  * })
  *
  * if (isLoading) return <div>Loading...</div>
- * if (isError) return <div>Something went wrong</div>
+ * if (isLoadingError) return <div>Something went wrong</div>
  * if (!isReady) return <div>Preparing...</div>
  *
  * return <div>{data.length} items loaded</div>
@@ -586,10 +591,10 @@ export function useLiveQuery<TContext extends Context>(
  *
  * @example
  * // Handle states consistently
- * const { data, isLoading, isError } = useLiveQuery(sharedCollection)
+ * const { data, isLoading, isLoadingError } = useLiveQuery(sharedCollection)
  *
  * if (isLoading) return <div>Loading...</div>
- * if (isError) return <div>Error loading data</div>
+ * if (isLoadingError) return <div>Error loading data</div>
  *
  * return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
  */
@@ -882,10 +887,10 @@ function useLiveQueryImpl(
               collection,
             ),
           )
-          const removeErrorListener = collection.on(`status:error`, () => {
-            // Keep the failed collection through React's immediate retry so
-            // the hook can throw its actual load error to an ErrorBoundary.
-            // Retire it afterward so a later boundary reset starts fresh.
+          // Keep a failed or crashed collection through React's immediate
+          // retry so the hook can throw its actual error to an ErrorBoundary.
+          // Retire it afterward so a later boundary reset starts fresh.
+          const retireAfterRetry = () =>
             setTimeout(
               () =>
                 releaseSuspenseCollection(
@@ -895,12 +900,20 @@ function useLiveQueryImpl(
                 ),
               0,
             )
-          })
+          const removeErrorListener = collection.on(
+            `status:error`,
+            retireAfterRetry,
+          )
+          const removeCrashListener = collection.on(
+            `status:crashed`,
+            retireAfterRetry,
+          )
           const entry: SuspenseCollectionEntry = {
             collection,
             removeStatusListeners: () => {
               removeCleanupListener()
               removeErrorListener()
+              removeCrashListener()
             },
           }
           suspenseCollections.set(suspenseKey, entry)

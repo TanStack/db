@@ -948,7 +948,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
   truncate: ((options?: { markReady?: boolean }) => void) | null
   metadata: SyncMetadataApi<TKey> | null
-  markError: ((error: unknown) => void) | null
+  fail: ((error: unknown) => void) | null
 }
 
 /**
@@ -1551,7 +1551,7 @@ class PersistedCollectionRuntime<
     commit: null,
     truncate: null,
     metadata: null,
-    markError: null,
+    fail: null,
   }
   private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
@@ -1867,26 +1867,26 @@ class PersistedCollectionRuntime<
 
   /**
    * Reports one failure for the current sync run. The wrapped sync adapter's
-   * own markError keeps core's meaning: final before Collection readiness, a
-   * final health error after it. A failure raised by persistence itself means
+   * own fail() keeps core's meaning: a failed first load before Collection
+   * readiness, a stopped sync with the rows kept after it. A failure raised by persistence itself means
    * the Collection can no longer serve reads or admit writes, so it crashes.
    */
   reportSyncError(
     error: unknown,
     origin: `persistence` | `sync adapter` = `persistence`,
   ): unknown {
-    const markError = this.syncControls.markError
+    const fail = this.syncControls.fail
     if (this.syncErrorReported) return this.reportedSyncError
-    if (!markError) return error
+    if (!fail) return error
 
-    // After readiness the sync adapter's markError is a final health error
-    // and the run continues, so only a failure that ends the run latches.
+    // After readiness the sync adapter's fail() keeps the rows and the run
+    // continues, so only a failure that ends the run latches.
     if (origin === `persistence` || this.collection?.status !== `ready`) {
       this.syncErrorReported = true
       this.reportedSyncError = error
     }
     try {
-      if (origin === `sync adapter`) markError(error)
+      if (origin === `sync adapter`) fail(error)
       else this.collection?._lifecycle.crash(error)
     } catch {
       // Reporting must not replace the original asynchronous failure.
@@ -1965,7 +1965,7 @@ class PersistedCollectionRuntime<
       commit: null,
       truncate: null,
       metadata: null,
-      markError: null,
+      fail: null,
     }
   }
 
@@ -5834,7 +5834,7 @@ function createWrappedSyncConfig<
           commit: params.commit,
           truncate: params.truncate,
           metadata: params.metadata ?? null,
-          markError: params.markError,
+          fail: params.fail,
         },
       )
 
@@ -5894,7 +5894,7 @@ function createWrappedSyncConfig<
       }
 
       let sourceSession = 0
-      // Upstream health waits for persisted startup, as markReady does.
+      // Upstream reports wait for persisted startup, as markReady does.
       const afterStartup = (report: () => void) => {
         if (startupState.cleanedUp || getTerminalFailure()) return
         void (fullStartPromise ?? runtime.ensureStarted())
@@ -5905,7 +5905,7 @@ function createWrappedSyncConfig<
       }
       const wrappedParams = {
         ...params,
-        markError: reportUpstreamError,
+        fail: reportUpstreamError,
         reportError: (error: unknown) =>
           afterStartup(() => params.reportError(error)),
         reportHealthy: () => afterStartup(params.reportHealthy),
@@ -6345,8 +6345,8 @@ function createWrappedSyncConfig<
           markReady: () => {
             if (active()) wrappedParams.markReady()
           },
-          markError: (error?: unknown) => {
-            if (active()) wrappedParams.markError(error)
+          fail: (error: unknown) => {
+            if (active()) wrappedParams.fail(error)
           },
           begin: () => {
             if (active()) wrappedParams.begin()
@@ -6742,7 +6742,7 @@ function createLoopbackSyncConfig<
           commit: params.commit,
           truncate: params.truncate,
           metadata: params.metadata ?? null,
-          markError: params.markError,
+          fail: params.fail,
         },
       )
 

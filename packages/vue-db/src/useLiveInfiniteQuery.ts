@@ -61,8 +61,13 @@ export interface UseLiveInfiniteQueryReturn<
   isPersistedReady: ComputedRef<boolean>
   persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: ComputedRef<boolean>
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<InferResultType<TContext>[number]>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
@@ -86,8 +91,13 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
   isPersistedReady: ComputedRef<boolean>
   persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: ComputedRef<boolean>
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<TResult>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
@@ -259,8 +269,10 @@ export function useLiveInfiniteQuery<
     isPersistedReady: computed(() => snapshot.value.isPersistedReady),
     persistedError: computed(() => snapshot.value.persistedError),
     isIdle: computed(() => snapshot.value.isIdle),
-    isError: computed(() => snapshot.value.isError),
+    isLoadingError: computed(() => snapshot.value.isLoadingError),
+    isCrashed: computed(() => snapshot.value.isCrashed),
     isCleanedUp: computed(() => snapshot.value.isCleanedUp),
+    isSyncError: computed(() => snapshot.value.isSyncError),
     pages: computed(
       () =>
         snapshot.value.pages as Array<Array<InferResultType<TContext>[number]>>,

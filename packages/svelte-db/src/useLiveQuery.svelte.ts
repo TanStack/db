@@ -52,7 +52,9 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isLoading - True while initial query data is loading
  * @property isReady - True when query has received first data and is ready
  * @property isIdle - True when query hasn't started yet
- * @property isError - True when query encountered an error
+ * @property isLoadingError - True when the first load failed
+ * @property isCrashed - True when local storage or an invariant broke
+ * @property isSyncError - True when data is shown and `errors` has a problem
  * @property isCleanedUp - True when query has been cleaned up
  */
 export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
@@ -66,8 +68,13 @@ export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: boolean
   errors: ErrorTreeNode | undefined
 }
 
@@ -100,8 +107,13 @@ export interface UseLiveQueryReturnWithCollection<
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: boolean
   errors: ErrorTreeNode | undefined
 }
 
@@ -172,8 +184,8 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * const query = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  * )
- * const { data, isLoading, isError } = $derived(query)
- * // Now data, isLoading, and isError maintain reactivity
+ * const { data, isLoading, isLoadingError } = $derived(query)
+ * // Now data, isLoading, and isLoadingError maintain reactivity
  *
  * @example
  * // Join pattern
@@ -198,7 +210,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * // In template:
  * // {#if todosQuery.isLoading}
  * //   <div>Loading...</div>
- * // {:else if todosQuery.isError}
+ * // {:else if todosQuery.isLoadingError}
  * //   <div>Error: {todosQuery.status}</div>
  * // {:else}
  * //   <ul>
@@ -254,7 +266,7 @@ export function useLiveQuery<TContext extends Context>(
  * // In template:
  * // {#if itemsQuery.isLoading}
  * //   <div>Loading...</div>
- * // {:else if itemsQuery.isError}
+ * // {:else if itemsQuery.isLoadingError}
  * //   <div>Something went wrong</div>
  * // {:else if !itemsQuery.isReady}
  * //   <div>Preparing...</div>
@@ -303,7 +315,7 @@ export function useLiveQuery<TContext extends Context>(
  * // In template:
  * // {#if queryResult.isLoading}
  * //   <div>Loading...</div>
- * // {:else if queryResult.isError}
+ * // {:else if queryResult.isLoadingError}
  * //   <div>Error loading data</div>
  * // {:else}
  * //   {#each queryResult.data as item (item.id)}
@@ -570,11 +582,17 @@ export function useLiveQuery(
     get isIdle() {
       return status === `idle`
     },
-    get isError() {
+    get isLoadingError() {
       return status === `error`
+    },
+    get isCrashed() {
+      return status === `crashed`
     },
     get isCleanedUp() {
       return status === `cleaned-up`
+    },
+    get isSyncError() {
+      return status === `ready` && errors?.hasErrors === true
     },
     get errors() {
       return errors

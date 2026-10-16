@@ -288,13 +288,15 @@ export function useLiveSuspenseQuery(
     throw initialRenderError.error
   }
 
-  // Only throw errors during initial load (before first ready)
-  // After success, errors surface as stale data (matches TanStack Query behavior)
+  // A failed first load throws only before the first ready; later sync
+  // problems surface in `errors` with the data kept (as in TanStack Query).
+  // A crash throws at any time: the Collection can no longer serve reads.
   if (
-    collectionStatus === `error` &&
-    !hasBeenReadyRef.current &&
-    (result.persistedStatus === `unavailable` ||
-      result.persistedStatus === `error`)
+    collectionStatus === `crashed` ||
+    (collectionStatus === `error` &&
+      !hasBeenReadyRef.current &&
+      (result.persistedStatus === `unavailable` ||
+        result.persistedStatus === `error`))
   ) {
     promiseRef.current = null
     // TODO: Once collections hold a reference to their last error object (#671),
@@ -306,7 +308,8 @@ export function useLiveSuspenseQuery(
     !hasBeenReadyRef.current &&
     (result.isLoading ||
       result.isIdle ||
-      result.isError ||
+      result.isLoadingError ||
+      result.isCrashed ||
       (collectionStatus === `error` &&
         result.persistedStatus !== `unavailable`))
   ) {

@@ -51,10 +51,14 @@ export interface InjectLiveQueryFlags {
   persistedError: Signal<unknown | undefined>
   /** A signal indicating whether the collection is idle */
   isIdle: Signal<boolean>
-  /** A signal indicating whether the collection has an error */
-  isError: Signal<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: Signal<boolean>
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: Signal<boolean>
   /** A signal indicating whether the collection has been cleaned up */
   isCleanedUp: Signal<boolean>
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: Signal<boolean>
   /** A signal containing the error tree for the query and its dependencies */
   errors: Signal<ErrorTreeNode | undefined>
 }
@@ -310,8 +314,12 @@ export function injectLiveQuery(opts: any) {
     isPersistedReady: computed(() => persistedStatus() === `ready`),
     persistedError,
     isIdle: computed(() => status() === `idle`),
-    isError: computed(() => status() === `error`),
+    isLoadingError: computed(() => status() === `error`),
+    isCrashed: computed(() => status() === `crashed`),
     isCleanedUp: computed(() => status() === `cleaned-up`),
+    isSyncError: computed(
+      () => status() === `ready` && errors()?.hasErrors === true,
+    ),
     errors,
   }
 }

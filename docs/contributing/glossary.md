@@ -38,7 +38,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | sync run | One invocation of a Collection's sync function, plus the callbacks and resources installed by that invocation, until cleanup invalidates them. A run may own zero or more provider requests and may outlive any one request. Component-owned `syncRunGeneration` counters fence this lifetime in Collection state, sync ownership, and live-query graph work. | Provider session, replay, generation, or request. |
 | provider session | A provider-defined remote stream, connection, or SDK lifetime. Always qualify it with the provider. | Sync run. |
 | cleanup | The transition that ends the current sync run and releases its resources. Callback invalidation and local teardown begin synchronously. The public cleanup promise and final `cleaned-up` status settle after adapter cleanup settles. The Collection object remains available for cleanup or restart. | Collection destruction, restart, or replay. |
-| cleanup start | The internal boundary at which cleanup synchronously closes restart admission, invalidates the current sync run, puts dependent live queries in terminal error, and marks dependent Effects disposed. The public Collection status keeps its prior value while adapter cleanup is pending. | A Collection status, cleanup settlement, or proof that adapter resources or Effect handlers settled. |
+| cleanup start | The internal boundary at which cleanup synchronously closes restart admission, invalidates the current sync run, crashes dependent live queries, and marks dependent Effects disposed. The public Collection status keeps its prior value while adapter cleanup is pending. | A Collection status, cleanup settlement, or proof that adapter resources or Effect handlers settled. |
 | restart | Starting a new sync run after the prior sync run has ended. | Same-run recovery or replay. |
 | truncate replay | An authoritative source replacement after a truncate, inside the current sync run. The Collection subscription remains active; any dependent live-query graph remains active behind its publication barrier. | Restart, reload, retry, or repair. |
 | source snapshot | The source rows established by one snapshot operation within its declared predicate and window. It proves full-source state only when the provider says that scope is authoritative and exhausted. | Public snapshot or proof of full-source coverage. |
@@ -58,23 +58,22 @@ production queues, caches, or semantic helpers merely to share their names.
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
 
-## Collection health terms
+## Collection status and error terms
 
-Collection status and Collection health are separate axes. Status decides
-whether a sync run's initial sync may be shown; health reports what happens to
-sync after that. Neither one changes the other.
+Collection status and the error tree are separate axes. Status says whether the
+data can be shown; the error tree says whether the data on screen is still kept
+current. After Collection readiness, only a crash changes status.
 
 | Term | Meaning | Do not use as a synonym |
 | --- | --- | --- |
-| initial gate | The role of Collection status during a sync run's initial sync. The status stays `loading` while the sync adapter retries, then becomes `ready` through `markReady()` or `error` through `markError()`. After Collection readiness in a sync run, the status no longer reflects sync failures. | Collection health or a live query's request errors. |
-| initial error | The `markError()` failure that ends a sync run's initial gate in `error`, recorded with `phase: 'initial'`. It is final for its sync run: `markReady()` afterward throws, and only a restart can reach `ready`. | Health error or a retry. |
-| crash | Moving a Collection to `error` from any active status, including after Collection readiness, because the Collection can no longer serve reads or admit writes in its sync run. Core uses it for IndexedDB closure, terminal local persistence failures, and internal invariant failures. It is final for the sync run; only a restart recovers. | Initial error, final health error, or cleanup. |
-| Collection health | A Collection's report of problems after Collection readiness in the current sync run, read through `collection.health` and `health:change`. A sync adapter changes it only through `reportError()`, `reportHealthy()`, and `markError()`. A live-query Collection's health also carries its own request errors. It never changes Collection status or rows. Cleanup resets it. | Collection status, `persistedError`, or subscription status. |
-| health error | One problem reported through `reportError()` or, as a final health error, `markError()`, recorded as `CollectionErrorInfo` with `phase: 'sync'`. A health error that is not final means the sync adapter is still trying in the current sync run; `reportHealthy()` clears it. | Initial error or request error. |
-| final health error | A health error with `final: true`, from `markError()` after Collection readiness: the sync adapter stopped trying in the current sync run. Only a restart clears it; `reportHealthy()` does not. | A Collection status of `error`. |
-| request error | A rejected subset load for demand that a live query or Effect started after its initial-query readiness, recorded with `phase: 'request'` on that query's error tree node and, for a live query, in its live-query Collection's health. The source Collection's health does not change. The public name stays general on purpose: an application sees a failed request for more data, not the subset-load mechanism. It clears when a later subset load for that demand fulfills or the demand retires. | Health error or request data. |
-| error tree | The `errors` value of a live query or Effect: one error tree node per query alias, in query order, fixed by the query definition. It keeps stable object identity while its content is unchanged. | Collection health or an error list. |
-| error tree node | One `ErrorTreeNode` in an error tree, for a source Collection, a nested live-query Collection, or one include. An include node summarizes all its per-row child Collections in `instances`. A nested live-query node carries its own error tree in `sources`. | Bucket or Collection facade. |
+| initial gate | The role of Collection status during a sync run's first load. The status stays `loading` while the sync adapter retries, then becomes `ready` through `markReady()` or `error` through `fail()`. After Collection readiness in a sync run, sync problems never change the status. | The error tree or a live query's request errors. |
+| loading error | The `fail()` that ends a sync run's first load in status `error` (`isLoadingError`). It is final for its sync run: `markReady()` afterward throws, and only a new sync run can reach `ready`. | Sync error or a retry. |
+| crash | Moving a Collection to status `crashed` (`isCrashed`) from any active status, because it can no longer serve reads or admit writes. Core uses it for IndexedDB closure, terminal local persistence failures, a throwing sync function, and internal invariant failures. It is permanent for the Collection instance. After it, sync adapter calls do nothing. | Loading error, sync error, or cleanup. |
+| sync error | A problem after Collection readiness on a source's error tree node, from the sync adapter: a failure reason (`reportError()`, still trying; `reportHealthy()` clears it) or an error (`fail()`, stopped; it stays for the sync run, and every later report throws). A live query's `isSyncError` is `true` when it is `ready` and its tree has any problem. It never changes status or rows. Cleanup resets it. | Loading error, `persistedError`, or subscription status. |
+| failure reason | A node's `failureReason`: the latest problem while the sync adapter keeps trying, after TanStack Query's `failureReason`. | An error or a retry count. |
+| request error | A rejected subset load for demand that a live query or Effect started after its initial-query readiness, shown as the `error` on that query's own node. The source Collection's node does not change. The public name stays general on purpose: an application sees a failed request for more data, not the subset-load mechanism. It clears when a later subset load for that demand fulfills or the demand retires. | Sync error or request data. |
+| error tree | The `errors` value of a Collection, live query, or Effect: one node for a Collection; for a query, one error tree node per query alias, in query order, fixed by the query definition. It keeps stable object identity while its content is unchanged, and `errors:change` announces a change. | An error list. |
+| error tree node | One `ErrorTreeNode` in an error tree, for a source Collection, a nested live-query Collection, or one include. It shows at most one problem, `failureReason` or `error`. An include node summarizes all its per-row child Collections in `instances`. A nested live-query node carries its own error tree in `sources`. | Bucket or Collection facade. |
 
 ## Persistence coordination terms
 
@@ -227,10 +226,10 @@ Use nouns for state and verbs for transitions:
   `cleaned-up`. Restart then **starts** a new sync run.
 - Truncate replay **replaces** source state inside the current sync run and
   any current dependent graph.
-- A sync adapter **gives up** with `markError()`: an initial error before
-  Collection readiness, a final health error after it. While it keeps trying,
-  it **reports** a health error and **reports healthy**.
-  A restart **clears** a final health error.
+- A sync adapter **fails** with `fail()`: a loading error before Collection
+  readiness, a node `error` after it. While it keeps trying, it **reports an
+  error** (a failure reason) and **reports healthy**. A new sync run
+  **clears** a node `error`.
 - A Collection **crashes** when it can no longer serve reads or admit writes.
 
 Use `settled` for a promise that fulfilled or rejected. Use `complete` for named

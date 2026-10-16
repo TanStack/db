@@ -228,7 +228,7 @@ describe(`useLiveInfiniteQuery`, () => {
     await waitFor(() => {
       // A failed page request after readiness does not change the status.
       expect(result.current.isFetchingNextPage).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
     })
     expect(result.current.pages).toHaveLength(1)
     expect(result.current.hasNextPage).toBe(true)

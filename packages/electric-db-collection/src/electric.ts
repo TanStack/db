@@ -1758,11 +1758,19 @@ function createElectricSync<T extends Row<unknown>>(
       write,
       commit: commitSyncTransaction,
       markReady,
-      markError,
+      fail,
       truncate,
       collection,
       metadata,
     } = params
+    // The stream can give up from several places; the first one stops this
+    // sync run, and fail() may be called once.
+    let stopped = false
+    const giveUp = (error: unknown) => {
+      if (stopped) return
+      stopped = true
+      fail(error)
+    }
     let commitSequence = 0
     const pendingAppliedReceipts = new Map<number, Promise<void>>()
     const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
@@ -1939,13 +1947,13 @@ function createElectricSync<T extends Row<unknown>>(
     const failInitialSync = (cause: unknown) => {
       if (firstSnapshotCommitted) return
       initialSyncFailedFinally = true
-      markError(cause)
+      giveUp(cause)
     }
     const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
       if (sessionCleanedUp || collection.status !== `loading`) return
       if (failure !== undefined) {
         initialSyncFailedFinally = true
-        markError(failure)
+        giveUp(failure)
       } else if (isActiveLifecycle()) {
         wrappedMarkReady(isBuffering, streamErrorVersion)
       } else markReady()
@@ -1998,7 +2006,7 @@ function createElectricSync<T extends Row<unknown>>(
         // retry follows. A retry that succeeds is a success: waiting loads
         // settle on the snapshot it establishes.
         // Waiting loads and readiness waits reject with the same cause.
-        const fail = (cause: unknown) => {
+        const failWaits = (cause: unknown) => {
           rejectFullSnapshot(cause)
           if (collection.status === `loading`) failInitialSync(cause)
         }
@@ -2008,14 +2016,14 @@ function createElectricSync<T extends Row<unknown>>(
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
-            fail(error)
+            failWaits(error)
             throw error
           }
-          if (!retry || typeof retry !== `object`) fail(errorParams)
+          if (!retry || typeof retry !== `object`) failWaits(errorParams)
           return retry
         } else {
           const initialSyncFailed = collection.status === `loading`
-          fail(errorParams)
+          failWaits(errorParams)
           console.error(
             `An error occurred while syncing collection: ${collection.id}, \n` +
               (initialSyncFailed
@@ -2319,7 +2327,7 @@ function createElectricSync<T extends Row<unknown>>(
       streamErrorVersion++
       unsubscribeStream()
       abortController.abort()
-      markError(
+      giveUp(
         new Error(
           `Electric resume state referenced an unseen row; a full snapshot is required`,
         ),
@@ -2653,7 +2661,7 @@ function createElectricSync<T extends Row<unknown>>(
               streamErrorVersion++
               unsubscribeStream()
               abortController.abort()
-              if (collection.status !== `error`) markError(error)
+              giveUp(error)
             },
           )
         }
@@ -2712,7 +2720,7 @@ function createElectricSync<T extends Row<unknown>>(
         rejectFullSnapshot(error)
         if (isActiveLifecycle() && !abortController.signal.aborted) {
           if (collection.status === `loading`) failInitialSync(error)
-          else if (collection.status === `ready`) markError(error)
+          else if (collection.status === `ready`) giveUp(error)
         }
       },
     )
@@ -2737,7 +2745,7 @@ function createElectricSync<T extends Row<unknown>>(
           streamErrorVersion++
           unsubscribeStream()
           abortController.abort()
-          markError(error)
+          giveUp(error)
         },
       )
     }

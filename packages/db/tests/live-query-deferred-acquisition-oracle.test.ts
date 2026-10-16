@@ -696,7 +696,7 @@ describe(`preload answered by a DbClient stream`, () => {
  * The same options can be retried, but the failed source Collection remains
  * in error until explicitly restarted. That retry must report the source error
  * rather than wait on the failed query's former pending stream. A controlled
- * later `markError` crosses the asynchronous failure cut: the pending preload
+ * later `fail` crosses the asynchronous failure cut: the pending preload
  * rejects, its stream disappears, and a healthy replacement of the same
  * query hash can publish its own row while the peer source remains ready. A
  * failed stream has no reusable result, so a replacement observer may attach
@@ -720,9 +720,9 @@ describe(`DbClient preload releases independent source starts`, () => {
       getKey: (row: { id: string }) => row.id,
       startSync: true,
       sync: {
-        sync: ({ markError }) => {
+        sync: ({ fail }) => {
           firstStarts++
-          failFirst = () => markError(failure)
+          failFirst = () => fail(failure)
         },
       },
     }))
@@ -780,7 +780,8 @@ describe(`DbClient preload releases independent source starts`, () => {
       ).toHaveLength(1)
 
       failFirst()
-      await expect(pending).rejects.toThrow(/entered error state/)
+      // The live query reports its source's own failure.
+      await expect(pending).rejects.toThrow(/late source startup failure/)
       expect(
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
@@ -862,7 +863,7 @@ describe(`DbClient preload releases independent source starts`, () => {
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
       await expect(client.preloadLiveQuery(options)).rejects.toThrow(
-        /entered error state/,
+        /source start failed/,
       )
       expect(starts).toBe(1)
       expect(
@@ -1187,7 +1188,7 @@ describe(`a source whose start throws on resumption`, () => {
       )
       // The failed start puts the source and its live query in error, so the
       // supported recovery is cleanup and a new sync run, not a retry in place.
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       await live.cleanup()
       await flaky.cleanup()
       // A new preload after cleanup starts a new sync run and must resume.

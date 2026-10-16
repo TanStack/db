@@ -841,8 +841,8 @@ describe(`persisted-readiness oracle`, () => {
           networkTimeoutMs: 1_000,
         },
         sync: {
-          sync: ({ markError }) => {
-            markNetworkError = markError
+          sync: ({ fail }) => {
+            markNetworkError = fail
             return {}
           },
         },
@@ -989,7 +989,7 @@ describe(`persisted-readiness oracle`, () => {
     ])
   })
 
-  for (const failureMode of [`markError`, `throw`] as const) {
+  for (const failureMode of [`fail`, `throw`] as const) {
     it(`publishes restored query rows when ${failureMode} precedes the persisted read`, async () => {
       const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
       const networkFailure = new Error(`network failed before restore`)
@@ -1005,10 +1005,10 @@ describe(`persisted-readiness oracle`, () => {
             networkTimeoutMs: 1_000,
           },
           sync: {
-            sync: ({ markError }) => {
+            sync: ({ fail }) => {
               networkSyncStarted = true
               if (failureMode === `throw`) throw networkFailure
-              markNetworkError = markError
+              markNetworkError = fail
               return {}
             },
           },
@@ -1022,7 +1022,7 @@ describe(`persisted-readiness oracle`, () => {
       await checkWithCleanup(async () => {
         const initialRenderWait = observer.preloadForInitialRender()
         await vi.waitFor(() => expect(networkSyncStarted).toBe(true))
-        if (failureMode === `markError`) markNetworkError(networkFailure)
+        if (failureMode === `fail`) markNetworkError(networkFailure)
         expect(observer.getSnapshot()).toMatchObject({
           persistedStatus: `loading`,
           data: [],

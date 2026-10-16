@@ -1983,7 +1983,7 @@ describe(`createEffect`, () => {
             })),
         onBatch: () => {},
         onSourceError: (error) => sourceErrors.push(error),
-        onHealthChange: (errors) => trees.push(errors),
+        onErrorsChange: (errors) => trees.push(errors),
       })
 
       try {
@@ -2002,7 +2002,6 @@ describe(`createEffect`, () => {
         expect(sourceErrors).toEqual([])
         expect(effect.disposed).toBe(false)
         expect(trees.at(-1)?.error).toMatchObject({
-          phase: `request`,
           message: failure.message,
         })
       } finally {
@@ -2062,7 +2061,7 @@ describe(`createEffect`, () => {
             })),
         onBatch: () => {},
         onSourceError: (error) => sourceErrors.push(error),
-        onHealthChange: (errors) => trees.push(errors),
+        onErrorsChange: (errors) => trees.push(errors),
       })
 
       try {
@@ -2080,7 +2079,6 @@ describe(`createEffect`, () => {
         expect(sourceErrors).toEqual([])
         expect(effect.disposed).toBe(false)
         expect(trees.at(-1)?.error).toMatchObject({
-          phase: `request`,
           message: failure.message,
         })
         expect(unloadCount).toBe(1)

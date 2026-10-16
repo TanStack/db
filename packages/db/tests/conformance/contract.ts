@@ -80,15 +80,15 @@ export interface LaggingSourceHandle<
 
 /**
  * A source Collection that reaches Collection readiness at once with its
- * initial rows, then lets the scenario play its sync adapter's health reports.
+ * initial rows, then lets the scenario play its sync adapter's reports.
  */
-export interface HealthSourceHandle<
+export interface SyncSourceHandle<
   T extends { id: string } = Row,
 > extends SourceHandle<T> {
-  /** The sync adapter reports a health error and keeps trying. */
+  /** The sync adapter reports a problem and keeps trying: a `failureReason`. */
   reportError: (error: unknown) => void
-  /** The sync adapter gives up: a final health error after readiness. */
-  markError: (error: unknown) => void
+  /** The sync adapter stops after readiness: the node's `error`. */
+  fail: (error: unknown) => void
   /** The sync adapter reports that sync works again. */
   reportHealthy: () => void
 }
@@ -126,7 +126,11 @@ export interface ConformanceResult {
   persistedStatus?: string
   isPersistedReady?: boolean
   persistedError?: unknown
-  isError: boolean
+  isLoadingError: boolean
+  /** Local storage or an invariant broke: `status` is `crashed`. */
+  isCrashed: boolean
+  /** The data is shown and the error tree has a problem. */
+  isSyncError: boolean
   isEnabled: boolean
   /**
    * The hook's error tree, read without normalization so scenarios can judge
@@ -184,10 +188,10 @@ export interface LiveQueryDriver {
   ) => SourceHandle<T>
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
-  /** Create a ready source whose sync adapter health the scenario controls. */
-  makeHealthSource: <T extends { id: string }>(
+  /** Create a ready source whose sync adapter reports the scenario controls. */
+  makeSyncSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
-  ) => HealthSourceHandle<T>
+  ) => SyncSourceHandle<T>
   /** Create an on-demand source that lags behind its settled subset (keyed by `id`). */
   makeLaggingSource: <T extends { id: string }>() => LaggingSourceHandle<T>
   /**
@@ -198,8 +202,12 @@ export interface LiveQueryDriver {
     build: QueryBuild,
     opts?: { startSync?: boolean },
   ) => { collection: Collection<any, any, any> }
-  /** Create a source whose sync fails, driving it into `error` status. */
-  makeErrorSource: () => {
+  /**
+   * Create a source that fails during startup: `fail` calls `fail()` before
+   * the first ready (`status: 'error'`), `crash` throws from its sync function
+   * (`status: 'crashed'`).
+   */
+  makeErrorSource: (kind: `fail` | `crash`) => {
     collection: Collection<any, any, any>
     expectedError: Error
     startup: { returned: true } | { returned: false; error: unknown }
@@ -224,7 +232,7 @@ export interface LiveQueryDriver {
   knownGaps?: ReadonlyArray<never>
   /**
    * How the adapter surfaces a query error (see the `error-status` scenario):
-   * - `flag` (default): a readable `isError`/`status === 'error'` on the result.
+   * - `flag` (default): a readable `isLoadingError`/`status === 'error'` on the result.
    * - `throw`: reading the errored result throws, for a framework error boundary
    *   to catch (e.g. Solid's `createResource`/`<ErrorBoundary>` model).
    */

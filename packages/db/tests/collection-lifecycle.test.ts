@@ -117,10 +117,10 @@ describe(`Collection Lifecycle Management`, () => {
       const collection = createCollection<{ id: string }>({
         getKey: ({ id }) => id,
         sync: {
-          sync: ({ collection: source, markReady, markError }) => {
+          sync: ({ collection: source, markReady, fail }) => {
             starts++
             if (starts > 1 || phase === `ready`) markReady()
-            else if (phase === `failed`) markError(failure)
+            else if (phase === `failed`) fail(failure)
             else if (phase === `starting`) void source.cleanup()
           },
         },
@@ -765,7 +765,7 @@ describe(`Collection Lifecycle Management`, () => {
         }
         if (from === `error`) {
           collection._lifecycle.setStatus(`loading`)
-          collection._lifecycle.markError(syncFailure)
+          collection._lifecycle.fail(syncFailure)
           expect(collection._lifecycle.getSyncError()).toBe(syncFailure)
         } else if (from === `cleaned-up`) {
           collection._lifecycle.setStatus(`cleaned-up`)
@@ -888,7 +888,7 @@ describe(`Collection Lifecycle Management`, () => {
       const firstReady = vi.fn()
       collection.onFirstReady(firstReady)
       // An internal failure during the ready transition still ends it. A
-      // source's markError at this point would be health metadata instead.
+      // source's fail at this point would be health metadata instead.
       collection.on(`status:ready`, () => {
         collection._lifecycle.crash(failure)
       })
@@ -896,7 +896,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       collection._lifecycle.markReady()
 
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(failure)
       expect(collection._lifecycle.hasBeenReady).toBe(false)
       expect(firstReady).not.toHaveBeenCalled()
@@ -1171,7 +1171,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       try {
         await expect(collection.preload()).rejects.toBe(adapterFailure)
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
       } finally {
         await collection.cleanup()
       }
@@ -1196,7 +1196,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       try {
         expect(() => collection._sync.startSync()).toThrow(adapterFailure)
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
 
         let didThrow = false
         let thrown: unknown
@@ -1207,10 +1207,11 @@ describe(`Collection Lifecycle Management`, () => {
           thrown = error
         }
 
-        // The failed entry ended this sync attempt; it cannot become ready.
-        expect(didThrow).toBe(true)
-        expect(thrown).toBeInstanceOf(InvalidCollectionStatusTransitionError)
-        expect(collection.status).toBe(`error`)
+        // The failed entry crashed the Collection. Core ended the sync run,
+        // so the adapter's later markReady() does nothing and is no error.
+        expect(didThrow).toBe(false)
+        expect(thrown).toBeUndefined()
+        expect(collection.status).toBe(`crashed`)
       } finally {
         await collection.cleanup()
       }

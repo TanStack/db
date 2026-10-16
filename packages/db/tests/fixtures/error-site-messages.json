@@ -310,8 +310,8 @@
   },
   "135": {
     "file": "query/effect.ts",
-    "template": "Source collection '${collectionId}' entered error state",
-    "literals": ["Source collection '", "' entered error state"]
+    "template": "Source collection '${collectionId}' entered ${status} state",
+    "literals": ["Source collection '", "' entered ", " state"]
   },
   "136": {
     "file": "query/expression-helpers.ts",
@@ -535,8 +535,8 @@
   },
   "172": {
     "file": "query/live/collection-config-builder.ts",
-    "template": "Source collection '${collectionId}' entered error state",
-    "literals": ["Source collection '", "' entered error state"]
+    "template": "Source collection '${collectionId}' crashed",
+    "literals": ["Source collection '", "' crashed"]
   },
   "173": {
     "file": "collection/lifecycle.ts",
@@ -931,16 +931,29 @@
   },
   "245": {
     "file": "collection/lifecycle.ts",
-    "template": "${operation}() reports a problem after Collection readiness, but Collection \"${this.id}\" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.",
+    "template": "${operation}() reports on sync after the first ready, but Collection \"${this.id}\" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.",
     "literals": [
-      "() reports a problem after Collection readiness, but Collection \"",
+      "() reports on sync after the first ready, but Collection \"",
       "\" is ",
-      ". Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up."
+      ". Before the first ready, retry without reporting, or call fail() when the sync adapter stops."
     ]
   },
   "246": {
     "file": "query/pooled-live-query.ts",
     "template": "The pooled live query's source ended",
     "literals": ["The pooled live query's source ended"]
+  },
+  "247": {
+    "file": "collection/lifecycle.ts",
+    "template": "${operation}() was called after fail() in the same sync run of Collection \"${this.id}\". fail() means the sync adapter stopped; a reload starts a new sync run.",
+    "literals": [
+      "() was called after fail() in the same sync run of Collection \"",
+      "\". fail() means the sync adapter stopped; a reload starts a new sync run."
+    ]
+  },
+  "248": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Source collection '${collectionId}' failed its first load",
+    "literals": ["Source collection '", "' failed its first load"]
   }
 }

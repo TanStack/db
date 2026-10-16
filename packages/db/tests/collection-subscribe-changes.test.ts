@@ -2182,7 +2182,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     expect(() => collection.subscribeChanges(() => {})).toThrow(failure)
     expect(collection.subscriberCount).toBe(0)
-    expect(collection.status).toBe(`error`)
+    expect(collection.status).toBe(`crashed`)
   })
 
   it(`preserves setup failure when subscription cleanup also throws`, () => {

@@ -54,7 +54,7 @@ const acquisitionEntries = [
   `request`,
   `resume`,
   `markReady`,
-  `markError`,
+  `fail`,
   `syncReturn`,
 ] as const
 type AcquisitionPhase = (typeof acquisitionPhases)[number]
@@ -71,7 +71,7 @@ const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `the sync callback has not started and cannot mark ready`,
   },
-  'deferred:markError': {
+  'deferred:fail': {
     kind: `excluded`,
     reason: `the sync callback has not started and cannot mark error`,
   },
@@ -85,7 +85,7 @@ const acquisitionCellDefinitions = {
     reason: `resuming the deferred gate enters this phase only once`,
   },
   'starting:markReady': { kind: `covered` },
-  'starting:markError': { kind: `covered` },
+  'starting:fail': { kind: `covered` },
   'starting:syncReturn': { kind: `covered` },
   'on-demand:request': { kind: `covered` },
   'on-demand:resume': {
@@ -93,7 +93,7 @@ const acquisitionCellDefinitions = {
     reason: `an installed loader is no longer behind the deferred gate`,
   },
   'on-demand:markReady': { kind: `covered` },
-  'on-demand:markError': { kind: `covered` },
+  'on-demand:fail': { kind: `covered` },
   'on-demand:syncReturn': {
     kind: `excluded`,
     reason: `the sync callback already returned the installed loader`,
@@ -107,7 +107,7 @@ const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `eager readiness does not install a subset loader`,
   },
-  'eager:markError': {
+  'eager:fail': {
     kind: `excluded`,
     reason: `eager errors do not change subset acquisition availability`,
   },
@@ -124,7 +124,7 @@ const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `callbacks from a retiring sync run cannot restore availability`,
   },
-  'retiring:markError': {
+  'retiring:fail': {
     kind: `excluded`,
     reason: `callbacks from a retiring sync run are obsolete`,
   },
@@ -139,9 +139,9 @@ const acquisitionCellDefinitions = {
   },
   'unavailable:markReady': {
     kind: `excluded`,
-    reason: `markReady after markError in one sync attempt is a contract violation and throws`,
+    reason: `markReady after fail in one sync attempt is a contract violation and throws`,
   },
-  'unavailable:markError': {
+  'unavailable:fail': {
     kind: `excluded`,
     reason: `a repeated error leaves acquisition unavailable`,
   },
@@ -2046,7 +2046,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           includeInitialState: false,
         },
       )
-      const removeErrorListener = collection.on(`status:error`, () => {
+      const removeErrorListener = collection.on(`status:crashed`, () => {
         if (!requestOnError) return
         requestOnError = false
         subscription.requestSnapshot({
@@ -2061,7 +2061,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       requestOnError = true
       expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
       expect(observed).toEqual([expect.any(Promise)])
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(loads).toEqual([{ syncRunGeneration: 0, demand: `old` }])
 
       await collection.cleanup()
@@ -2757,7 +2757,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         reach(`starting:syncReturn`)
 
         expect(observed).toEqual([expect.any(Promise)])
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
         expect(loads.map(({ where }) => where)).toEqual([oldWhere])
         await flushPromises()
         expect(outcomes).toHaveLength(1)
@@ -2968,7 +2968,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )
 
   acquisitionCase(
-    [`starting:markError`],
+    [`starting:fail`],
     `keeps demand requested during initial error unacquired until a restart`,
     async (reach) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
@@ -2980,7 +2980,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         id: `sync-entry-error-ready-recovery`,
         startSync: false,
         sync: {
-          sync: ({ markError, markReady }) => {
+          sync: ({ fail, markReady }) => {
             if (syncRunCount++ !== 1) {
               markReady()
               return {
@@ -2992,8 +2992,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
               }
             }
             recover = markReady
-            markError(new Error(`initial sync failed`))
-            reach(`starting:markError`)
+            fail(new Error(`initial sync failed`))
+            reach(`starting:fail`)
             return {
               loadSubset: (options) => {
                 loads.push(options)
@@ -3236,14 +3236,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`keeps an installed loader unavailable after its initial error`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const loads: Array<LoadSubsetOptions> = []
-    let markError!: (error: unknown) => void
+    let fail!: (error: unknown) => void
     let markReady!: () => void
     const collection = createOnDemandCollection<{ id: string }>({
       id: `installed-loader-error-ready-recovery`,
       startSync: false,
       sync: {
         sync: (operations) => {
-          markError = operations.markError
+          fail = operations.fail
           markReady = operations.markReady
           return {
             loadSubset: (options) => {
@@ -3260,7 +3260,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
 
-    markError(new Error(`initial sync failed`))
+    fail(new Error(`initial sync failed`))
     expect(() => markReady()).toThrow(InvalidCollectionStatusTransitionError)
     subscription.requestSnapshot({ where })
     await flushPromises()
@@ -3276,14 +3276,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
-    let markError!: (error: unknown) => void
+    let fail!: (error: unknown) => void
     let markReady!: () => void
     const collection = createOnDemandCollection<{ id: string }>({
       id: `release-unavailable-demand`,
       startSync: false,
       sync: {
         sync: (operations) => {
-          markError = operations.markError
+          fail = operations.fail
           markReady = operations.markReady
           return {
             loadSubset: (options) => {
@@ -3300,7 +3300,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
 
-    markError(new Error(`initial sync failed`))
+    fail(new Error(`initial sync failed`))
     subscription.requestSnapshot({ where })
     subscription.releaseSnapshot(where)
     // A restart is the only recovery; the released demand stays released.
@@ -3317,20 +3317,20 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   acquisitionCase(
-    [`on-demand:markError`],
+    [`on-demand:fail`],
     `keeps demand from an installed loader's initial error unacquired until a restart`,
     async (reach) => {
       const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
       const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
       const loads: Array<LoadSubsetOptions> = []
-      let markError!: (error: unknown) => void
+      let fail!: (error: unknown) => void
       let markReady!: () => void
       const collection = createOnDemandCollection<{ id: string }>({
         id: `installed-loader-initial-error`,
         startSync: false,
         sync: {
           sync: (operations) => {
-            markError = operations.markError
+            fail = operations.fail
             markReady = operations.markReady
             return {
               loadSubset: (options) => {
@@ -3349,10 +3349,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot({ where: oldWhere })
       const removeErrorListener = collection.on(`status:error`, () => {
         subscription.requestSnapshot({ where: newWhere })
-        reach(`on-demand:markError`)
+        reach(`on-demand:fail`)
       })
 
-      markError(new Error(`initial sync failed`))
+      fail(new Error(`initial sync failed`))
 
       await flushPromises()
       expect.soft(collection.status).toBe(`error`)
@@ -3492,7 +3492,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
     await flushPromises()
 
-    expect(collection.status).toBe(`error`)
+    expect(collection.status).toBe(`crashed`)
     expect(subscription.status).toBe(`ready`)
 
     subscription.unsubscribe()

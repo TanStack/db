@@ -120,7 +120,7 @@ it.each(intents)(
       },
     })
     try {
-      sync.markError(new Error('initial sync failed'))
+      sync.fail(new Error('initial sync failed'))
       sync.begin()
       sync.truncate(markReady === undefined ? undefined : { markReady })
       sync.write({ type: 'insert', value: { id: 1, value: 'late' } })

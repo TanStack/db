@@ -2149,14 +2149,14 @@ describe(`Query Collections`, () => {
               write: (row: Person) => void
               commit: () => void
               markReady: () => void
-              markError: (error: unknown) => void
+              fail: (error: unknown) => void
             }
           | undefined
         const source = createCollection<Person>({
           id: `solid-persisted-${outcome}`,
           getKey: (row) => row.id,
           sync: {
-            sync: ({ begin, write, commit, markReady, markError }) => {
+            sync: ({ begin, write, commit, markReady, fail }) => {
               sync = {
                 begin,
                 write: (row) => write({ type: `insert`, value: row }),
@@ -2164,7 +2164,7 @@ describe(`Query Collections`, () => {
                   commit()
                 },
                 markReady,
-                markError,
+                fail,
               }
               return {}
             },
@@ -2220,7 +2220,7 @@ describe(`Query Collections`, () => {
           } else {
             expect(view.getByTestId(`local-waiting`)).toBeTruthy()
             if (outcome === `ready`) sync!.markReady()
-            else sync!.markError(new Error(`network failed`))
+            else sync!.fail(new Error(`network failed`))
           }
           const content = await view.findByTestId(`local-person`)
           expect(content.textContent).toBe(`John Doe`)

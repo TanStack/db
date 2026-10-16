@@ -1,5 +1,5 @@
 import { getCollectionBuilder } from '../query/live/collection-registry.js'
-import type { CollectionErrorInfo, ErrorTreeNode } from '../types'
+import type { ErrorTreeNode } from '../types'
 import type { CollectionImpl } from './index.js'
 
 /** A Collection that another Collection reads, under its query alias. */
@@ -38,9 +38,7 @@ export function buildErrorTree(
   // A live query's tree shape comes from its query definition.
   const builder = getCollectionBuilder(collection)
   const sources = builder?.errorTreeSources() ?? []
-  const lifecycle = collection._lifecycle
-  const error: CollectionErrorInfo | null =
-    lifecycle.gateProblem ?? lifecycle.health.error
+  const { failureReason, error } = collection._lifecycle.problems
   const children = sources.map((source) =>
     buildErrorTree(source.collection, source, collection),
   )
@@ -49,6 +47,7 @@ export function buildErrorTree(
     collectionId: collection.id,
     kind: kind ?? (builder ? `live-query` : `source`),
     status: collection.status,
+    failureReason,
     error,
     ...(instances ? { instances: countInstances(instances()) } : {}),
     sources: children,
@@ -56,33 +55,41 @@ export function buildErrorTree(
 }
 
 /**
- * A node from its own facts and its children. The node is in error when it
- * has a problem, and has errors when it or anything below it does.
+ * A node from its own facts and its children. It has errors when it or
+ * anything below it has a `failureReason` or an `error`.
  */
 export function errorTreeNode(
   owner: object,
   id: string | undefined,
-  fields: Omit<ErrorTreeNode, `isError` | `hasErrors`>,
+  fields: Omit<ErrorTreeNode, `hasErrors`>,
 ): ErrorTreeNode {
-  const { error, instances, sources } = fields
+  const { failureReason, error, instances, sources } = fields
   return cachedNode(owner, id ?? fields.alias, {
     ...fields,
-    isError: error !== null,
     hasErrors:
+      failureReason !== null ||
       error !== null ||
-      (instances?.inError ?? 0) > 0 ||
+      (instances?.withErrors ?? 0) > 0 ||
       sources.some((child) => child.hasErrors),
   })
 }
 
+/** Whether a Collection's own node shows a problem. */
+export function hasOwnProblem(
+  collection: Pick<CollectionImpl<any, any, any, any, any>, `_lifecycle`>,
+): boolean {
+  const { failureReason, error } = collection._lifecycle.problems
+  return failureReason !== null || error !== null
+}
+
 function countInstances(
   collections: ReadonlyArray<CollectionImpl<any, any, any, any, any>>,
-): { total: number; inError: number } {
-  let inError = 0
+): { total: number; withErrors: number } {
+  let withErrors = 0
   for (const instance of collections) {
-    if (instance.status === `error` || instance.health.isError) inError++
+    if (hasOwnProblem(instance)) withErrors++
   }
-  return { total: collections.length, inError }
+  return { total: collections.length, withErrors }
 }
 
 /** Return the cached node for this Collection and alias if nothing changed. */
@@ -104,11 +111,11 @@ function sameNode(a: ErrorTreeNode, b: ErrorTreeNode): boolean {
     a.collectionId === b.collectionId &&
     a.kind === b.kind &&
     a.status === b.status &&
-    a.isError === b.isError &&
     a.hasErrors === b.hasErrors &&
+    a.failureReason === b.failureReason &&
     a.error === b.error &&
     a.instances?.total === b.instances?.total &&
-    a.instances?.inError === b.instances?.inError &&
+    a.instances?.withErrors === b.instances?.withErrors &&
     a.sources.length === b.sources.length &&
     a.sources.every((source, index) => source === b.sources[index])
   )

@@ -321,7 +321,7 @@ export interface QueryCollectionUtils<
   /** Execute direct writes as one atomic batch. Resolves when the sync commit applies. */
   writeBatch: (callback: () => void) => Promise<void>
 
-  // Query Observer State (getters). Failures appear in `collection.health`
+  // Query Observer State (getters). Failures appear in `collection.errors`
   // and each live query's `errors` tree.
   /** Check if query is currently fetching (initial or background) */
   isFetching: boolean
@@ -1114,7 +1114,7 @@ export function queryCollectionOptions(
       write,
       commit,
       markReady,
-      markError,
+      fail,
       reportError,
       reportHealthy,
       collection,
@@ -1150,8 +1150,8 @@ export function queryCollectionOptions(
     let errorRevision = 0
     const failedResultApplications = new Map<string, unknown>()
     // A failed fetch or result application after Collection readiness is a
-    // health error that is not final, since TanStack Query fetches again.
-    // The Collection is healthy again once no observed Query is failing.
+    // failureReason, since TanStack Query fetches again. It clears once no
+    // observed Query is failing.
     const failingQueries = new Set<string>()
     const reportFailing = (hashedQueryKey: string, error: unknown) => {
       failingQueries.add(hashedQueryKey)
@@ -2759,7 +2759,7 @@ export function queryCollectionOptions(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
-          if (collection.status === `loading`) markError(error)
+          if (collection.status === `loading`) fail(error)
           else reportFailing(hashedQueryKey, error)
         },
       )
@@ -3127,10 +3127,10 @@ export function queryCollectionOptions(
 
           // A failure before the first successful snapshot leaves no usable
           // collection state. Later refetch failures keep the last ready
-          // snapshot available and report health.
+          // snapshot available and report a failureReason.
           // A re-notified error is the same failure, so it is not reported
           // again.
-          if (collection.status === `loading`) markError(result.error)
+          if (collection.status === `loading`) fail(result.error)
           else if (isNewError) reportFailing(hashedQueryKey, result.error)
         }
       }

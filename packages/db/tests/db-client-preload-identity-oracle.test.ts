@@ -223,10 +223,8 @@ describe(`DbClient preload source identity`, () => {
         getKey: (row: Row) => row.id,
         startSync: true,
         sync: {
-          sync: ({
-            markError,
-          }: Parameters<SyncConfig<Row, string>[`sync`]>[0]) => {
-            failFirst = () => markError(new Error(`first source failed`))
+          sync: ({ fail }: Parameters<SyncConfig<Row, string>[`sync`]>[0]) => {
+            failFirst = () => fail(new Error(`first source failed`))
           },
         },
       })
@@ -261,7 +259,8 @@ describe(`DbClient preload source identity`, () => {
         }).liveQueries?.[0]
         expect(stream?.queryHash).toBe(queryHash)
         failFirst()
-        await expect(pending).rejects.toThrow(/entered error state/)
+        // The live query reports its source's own failure.
+        await expect(pending).rejects.toThrow(/first source failed/)
         expect(client.dehydrate().liveQueries).toBeUndefined()
 
         client.hydrate({

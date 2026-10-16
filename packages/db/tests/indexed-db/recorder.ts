@@ -15,7 +15,7 @@ export type RecordedEvent = {
 export function recordCollection(
   collection: Pick<
     Collection<OracleRow>,
-    'subscribeChanges' | 'on' | 'values' | 'status' | 'health'
+    'subscribeChanges' | 'on' | 'values' | 'status' | 'errors'
   >,
   id: string,
   sink: (event: RecordedEvent) => void = () => {},
@@ -40,10 +40,11 @@ export function recordCollection(
     statuses.push(status)
     append({ type: 'status', status })
   })
-  // After the first ready, a source failure is health, not status. Record it
-  // in the status history so a status law still observes it.
-  const stopHealth = collection.on('health:change', () => {
-    if (collection.health.isError) statuses.push('health-error')
+  // After the first ready, a stopped sync is the Collection's `error`, not a
+  // status. Record it in the status history so a status law still observes it.
+  const stopErrors = collection.on('errors:change', () => {
+    if (collection.status === 'ready' && collection.errors.error)
+      statuses.push('sync-error')
   })
   const subscription = collection.subscribeChanges(
     (changes) => {
@@ -74,7 +75,7 @@ export function recordCollection(
     events,
     stop: () => {
       stopStatus()
-      stopHealth()
+      stopErrors()
       subscription.unsubscribe()
     },
   }

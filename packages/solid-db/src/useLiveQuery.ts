@@ -84,7 +84,7 @@ type InferConditionalResultType<TContext extends Context> =
  *     <Match when={todosQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={todosQuery.isError}>
+ *     <Match when={todosQuery.isLoadingError}>
  *       <div>Error: {todosQuery.status}</div>
  *     </Match>
  *     <Match when={todosQuery.isReady}>
@@ -109,7 +109,7 @@ type InferConditionalResultType<TContext extends Context> =
  *   </Suspense>
  * )
  */
-/** Status, persistence, and health fields every `useLiveQuery` result has. */
+/** Status, persistence, and error fields every `useLiveQuery` result has. */
 type UseLiveQueryFlags = {
   isLoading: boolean
   isReady: boolean
@@ -117,8 +117,13 @@ type UseLiveQueryFlags = {
   isPersistedReady: boolean
   persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: boolean
   errors: ErrorTreeNode | undefined
 }
 
@@ -183,7 +188,7 @@ export function useLiveQuery<TContext extends Context>(
  *     <Match when={itemsQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={itemsQuery.isError}>
+ *     <Match when={itemsQuery.isLoadingError}>
  *       <div>Something went wrong</div>
  *     </Match>
  *     <Match when={!itemsQuery.isReady}>
@@ -235,7 +240,7 @@ export function useLiveQuery<TContext extends Context>(
  *    <Match when={sharedQuery.isLoading}>
  *      <div>Loading...</div>
  *    </Match>
- *    <Match when={sharedQuery.isError}>
+ *    <Match when={sharedQuery.isLoadingError}>
  *      <div>Error loading data</div>
  *    </Match>
  *  </Switch>
@@ -575,14 +580,24 @@ export function useLiveQuery(
         return status() === `idle`
       },
     },
-    isError: {
+    isLoadingError: {
       get() {
         return status() === `error`
+      },
+    },
+    isCrashed: {
+      get() {
+        return status() === `crashed`
       },
     },
     isCleanedUp: {
       get() {
         return status() === `cleaned-up`
+      },
+    },
+    isSyncError: {
+      get() {
+        return status() === `ready` && errors()?.hasErrors === true
       },
     },
     errors: {

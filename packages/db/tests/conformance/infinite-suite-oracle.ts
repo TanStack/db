@@ -891,7 +891,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([3])
           expect(handle.current().status).toBe(`ready`)
-          expect(handle.current().isError).toBe(false)
+          expect(handle.current().isLoadingError).toBe(false)
 
           utils.setWindow = originalSetWindow
           await handle.fetchNextPage()

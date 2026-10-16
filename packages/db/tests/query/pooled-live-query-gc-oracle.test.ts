@@ -236,8 +236,8 @@ describe(`pooled live query gcTime`, () => {
     await vi.advanceTimersByTimeAsync(1)
     const cleanup = source.cleanup()
     await vi.advanceTimersByTimeAsync(1)
-    expect(compiledView.observer.getSnapshot().status).toBe(`error`)
-    expect(pooledView.observer.getSnapshot().status).toBe(`error`)
+    expect(compiledView.observer.getSnapshot().status).toBe(`crashed`)
+    expect(pooledView.observer.getSnapshot().status).toBe(`crashed`)
     release()
     await cleanup
     pooledView.stop()

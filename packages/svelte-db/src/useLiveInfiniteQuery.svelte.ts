@@ -262,11 +262,17 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     get isIdle() {
       return snapshot.isIdle
     },
-    get isError() {
-      return snapshot.isError
+    get isLoadingError() {
+      return snapshot.isLoadingError
+    },
+    get isCrashed() {
+      return snapshot.isCrashed
     },
     get isCleanedUp() {
       return snapshot.isCleanedUp
+    },
+    get isSyncError() {
+      return snapshot.isSyncError
     },
     get pages() {
       return snapshot.pages as Array<Array<InferResultType<TContext>[number]>>

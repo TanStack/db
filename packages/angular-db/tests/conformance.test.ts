@@ -38,7 +38,8 @@ import {
 import { injectLiveQuery } from '../src/index'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
-import { makeHealthSource } from '../../db/tests/conformance/health-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type {
@@ -113,27 +114,12 @@ function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-angular-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-angular-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 async function settle() {
@@ -152,7 +138,9 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
         persistedStatus: result.persistedStatus(),
         isPersistedReady: result.isPersistedReady(),
         persistedError: result.persistedError(),
-        isError: result.isError(),
+        isLoadingError: result.isLoadingError(),
+        isCrashed: result.isCrashed(),
+        isSyncError: result.isSyncError(),
         // angular-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status() !== `disabled`,
         errors: result.errors(),
@@ -235,8 +223,8 @@ const angularDriver: LiveQueryDriver = {
       createCollection,
       `conformance-angular-lagging-${sourceSeq++}`,
     ),
-  makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
-    makeHealthSource<T>(
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
       createCollection,
       `conformance-angular-health-${sourceSeq++}`,
       data,
@@ -387,7 +375,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     persistedStatus: `unavailable`,
     isPersistedReady: false,
     persistedError: undefined,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
     errors: undefined,
   }
@@ -400,9 +390,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

@@ -253,7 +253,7 @@ describe(`injectLiveQuery`, () => {
       expect(result.isReady()).toBe(true)
       expect(result.isLoading()).toBe(false)
       expect(result.isIdle()).toBe(false)
-      expect(result.isError()).toBe(false)
+      expect(result.isLoadingError()).toBe(false)
       expect(result.isCleanedUp()).toBe(false)
     })
   })
@@ -297,7 +297,7 @@ describe(`injectLiveQuery`, () => {
         [],
         `idle`,
       )
-      const { status, isReady, isLoading, isError, isCleanedUp } =
+      const { status, isReady, isLoading, isLoadingError, isCleanedUp } =
         injectLiveQuery(col)
 
       await waitForAngularUpdate()
@@ -315,7 +315,7 @@ describe(`injectLiveQuery`, () => {
       await waitForAngularUpdate()
 
       expect(status()).toBe(`error`)
-      expect(isError()).toBe(true)
+      expect(isLoadingError()).toBe(true)
 
       col.__setStatus(`cleaned-up`)
       await waitForAngularUpdate()
@@ -1129,7 +1129,7 @@ describe(`injectLiveQuery`, () => {
         expect(result.isReady()).toBe(true)
         expect(result.isLoading()).toBe(false)
         expect(result.isIdle()).toBe(false)
-        expect(result.isError()).toBe(false)
+        expect(result.isLoadingError()).toBe(false)
         expect(result.collection()).toBeNull()
         expect(result.data()).toEqual([])
         expect(result.state().size).toBe(0)
@@ -1181,7 +1181,7 @@ describe(`injectLiveQuery`, () => {
         expect(result.isReady()).toBe(true)
         expect(result.isLoading()).toBe(false)
         expect(result.isIdle()).toBe(false)
-        expect(result.isError()).toBe(false)
+        expect(result.isLoadingError()).toBe(false)
         expect(result.collection()).toBeNull()
         expect(result.data()).toEqual([])
         expect(result.state().size).toBe(0)

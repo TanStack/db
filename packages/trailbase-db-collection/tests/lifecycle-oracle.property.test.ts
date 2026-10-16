@@ -13,7 +13,7 @@ import type { Event, ListResponse } from 'trailbase'
  * on-demand sync run does not claim an initial list. Stream events update an independent
  * key/value relation. Startup failure rejects; any later end of the stream
  * that the adapter did not cancel keeps the last rows and the `ready` status
- * and reports a final health error, because the adapter does not resubscribe.
+ * and reports the Collection's `error`, because the adapter does not resubscribe.
  * A failure is that error's `cause`. Cleanup clears rows, cancels work, and fences
  * late results from prior sync runs after restart.
  *
@@ -354,16 +354,16 @@ async function checkLifecycle(
           const isFailure =
             plan.ending === `read-error` || plan.ending === `parse-error`
           if (!plan.immediate && plan.ending !== `cleanup`) {
-            expect(collection.health, `${epoch}:${plan.ending} health`).toEqual(
-              {
-                isError: true,
-                error: expect.objectContaining({
-                  phase: `sync`,
-                  final: true,
-                  ...(isFailure ? { cause: failure } : {}),
-                }),
-              },
-            )
+            expect(
+              collection.errors,
+              `${epoch}:${plan.ending} error`,
+            ).toMatchObject({
+              hasErrors: true,
+              failureReason: null,
+              error: expect.objectContaining(
+                isFailure ? { cause: failure } : {},
+              ),
+            })
           }
           assertReports()
           if (plan.ending === `cleanup` || plan.ending === `parse-error`)
@@ -1168,7 +1168,7 @@ it.each(heldPlans)(
  * Collection keeps its rows and stays ready, a later service change does not
  * reach it, and a later on-demand load does not wait for a new subscription.
  * The load lists the service's current rows. Because the sync adapter stops
- * receiving changes, it reports a final health error, so an application can
+ * receiving changes, it reports the Collection's `error`, so an application can
  * see that the rows can grow stale; only a restart subscribes again. This
  * lane makes that limit executable; reconnecting is left to the TrailBase
  * provider, and the lane does not claim the limit is the right product
@@ -1185,10 +1185,10 @@ it.each(heldPlans)(
  *
  * Checkpoints: after the stream ends, after the service change, and after the
  * later load. Each compares rows, status, and subscribe calls. After the end,
- * Collection health holds one final health error, and nothing clears it.
+ * The Collection's `error` stays, and nothing clears it in this sync run.
  */
 it.each([`close`, `read-error`] as const)(
-  `keeps rows, reports a final health error, and does not resubscribe after the stream ends: %s`,
+  `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
   async (ending) => {
     const service = new Map(raceServiceRows.map((row) => [row.id, row]))
     let controller!: ReadableStreamDefaultController<Event>
@@ -1227,12 +1227,13 @@ it.each([`close`, `read-error`] as const)(
       await turn()
       expect(collection.status, `${ending} status after the end`).toBe(`ready`)
       expect(rows(), `${ending} rows after the end`).toEqual(established)
-      const finalHealth = {
-        isError: true,
-        error: expect.objectContaining({ phase: `sync`, final: true }),
+      const stopped = {
+        hasErrors: true,
+        failureReason: null,
+        error: expect.anything(),
       }
-      expect(collection.health, `${ending} health after the end`).toEqual(
-        finalHealth,
+      expect(collection.errors, `${ending} error after the end`).toMatchObject(
+        stopped,
       )
 
       service.set(1, { id: 1, data: `v2` })
@@ -1249,8 +1250,8 @@ it.each([`close`, `read-error`] as const)(
       expect(rows(), `${ending} a later load lists current rows`).toEqual(
         sortedRows(service.values()),
       )
-      expect(collection.health, `${ending} health after the load`).toEqual(
-        finalHealth,
+      expect(collection.errors, `${ending} error after the load`).toMatchObject(
+        stopped,
       )
     } finally {
       await collection.cleanup()

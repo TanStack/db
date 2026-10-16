@@ -185,7 +185,7 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, fail, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
@@ -397,13 +397,19 @@ export function trailBaseCollectionOptions<
         }
       }
 
-      // The adapter does not resubscribe, so it gives up when its stream
-      // ends; a failed sync run already reported why it ended.
+      // The adapter does not resubscribe, so it stops when its stream ends;
+      // the first end reports why, and fail() may be called once.
+      let streamEnded = false
       function reportStreamEnd(error: unknown, closed = false) {
         if (cancelled) return
-        if (collection.status === `loading` || collection.status === `ready`)
-          markError(error)
-        else if (!closed) console.error(`TrailBase subscription failed`, error)
+        if (
+          !streamEnded &&
+          (collection.status === `loading` || collection.status === `ready`)
+        ) {
+          streamEnded = true
+          fail(error)
+        } else if (!closed)
+          console.error(`TrailBase subscription failed`, error)
       }
 
       async function start() {

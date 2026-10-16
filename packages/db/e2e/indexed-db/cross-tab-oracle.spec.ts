@@ -570,11 +570,11 @@ for (const obsolete of [false, true])
       const state = await observe(receiver)
       expect(state.reads).toContain('abort')
       // After Collection readiness, an active receiver that misses a peer
-      // change gives up as a final health error; it keeps its rows and status.
+      // change stops syncing: the Collection's `error`, with its rows and
+      // status kept.
       expect(state.status).toBe('ready')
-      expect(state.health).toEqual(
-        obsolete ? null : { phase: 'sync', final: true },
-      )
+      if (obsolete) expect(state.syncError).toBeNull()
+      else expect(state.syncError).toEqual(expect.any(String))
       if (obsolete)
         assertStatuses(
           state.statuses,

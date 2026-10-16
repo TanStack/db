@@ -779,8 +779,8 @@ source rows belong in a query result.
 
 Collection cleanup has two boundaries. Cleanup start is an internal synchronous
 boundary. It closes restart admission, invalidates the current sync run, detaches
-its demand, puts dependent live queries in terminal error, and marks dependent
-Effects disposed. Both dependent transitions happen before adapter cleanup
+its demand, crashes dependent live queries, and marks dependent Effects
+disposed. Both dependent transitions happen before adapter cleanup
 settles. This prevents either dependent from using work that belongs to the
 discarded sync run. The Effect becomes disposed and releases its source
 subscription synchronously. Its disposal promise may still wait for in-flight
@@ -818,8 +818,8 @@ fresh private publication barrier. Settlements from the old sync run cannot
 publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
-a dependent live query. Manually cleaning up a source puts its live queries in
-a terminal error state. Restarting that source alone does not revive their
+a dependent live query. Manually cleaning up a source crashes its live
+queries. Restarting that source alone does not revive their
 graphs or publish replacement results; callers must restart or recreate the
 live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
@@ -1340,7 +1340,7 @@ delivered, so with it the gate also ends initial suppression. An obsolete or
 aborted initial load releases its hold, and a truncate replacement takes the
 hold over. Neither can keep the gate open or close it for good. A real load
 failure before the gate disposes the Effect; after the gate, a source problem
-is health, delivered through `onHealthChange`.
+is error tree detail, delivered through `onErrorsChange`.
 
 Two limits remain. Before an on-demand source completes a full sync, a ready
 query can hold rows that the source does not yet update. The source contract,
@@ -1504,7 +1504,7 @@ the compiler's comparator and break ties by key
 Collection only when the application reads it.
 
 A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. When its source
-starts cleanup, it enters the same terminal error and keeps its last rows.
+starts cleanup, it crashes the same way and keeps its last rows.
 The pooled live query oracle compares the two over generated histories.
 
 ### Physical planning and work
@@ -1589,9 +1589,8 @@ every row before the top-K (a recorded limit).
     materialization cells, visible rows, the current private replay state, and
     required Collection facades—not with settled historical replay attempts or
     raw delta history.
-14. **Cleanup:** cleanup start synchronously closes restart admission, puts
-    dependent live queries in terminal error, and marks dependent Effects
-    disposed. The source Collection keeps its prior status until adapter cleanup
+14. **Cleanup:** cleanup start synchronously closes restart admission,
+    crashes dependent live queries, and marks dependent Effects disposed. The source Collection keeps its prior status until adapter cleanup
     settles; only then does it publish `cleaned-up` and settle its cleanup
     promise.
 15. **Deferred acquisition:** a live-query Collection or pooled live query
@@ -1603,41 +1602,50 @@ every row before the top-K (a recorded limit).
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
-16. **Final initial errors, crashes, and Collection health:** a sync run's
-    initial error is final for that sync run; a Collection moves from `error`
-    to `ready` only through a restart. A source Collection in `error` ends the
-    sync run of every live query above it, for every shape and at any time.
-    Before the query's initial-query readiness this is an initial error.
-    After it, a source reaches `error` only by an initial error during an
-    on-demand source's own initial sync, or by a crash: IndexedDB closure, a
-    terminal local persistence failure, or an internal invariant failure. A
-    query cannot keep serving rows from a Collection that cannot serve reads.
-    Every other problem after initial-query readiness is health metadata: the
-    query keeps its status and rows, and its error tree reports the problem.
-    A lazy load or a root Collection's load that fails after initial-query
-    readiness is a request error on the query's node. A lazy demand's error
-    clears when that demand settles or is released; a root Collection's error
-    clears when a later load of that Collection settles. Query failures and
-    contract violations, such as a graph failure or a Collection cleaned up
-    under the query, also end the query. An Effect follows the same rules,
-    with its initial-query readiness at its settled initial loads: a source in
-    `error` ends it through `onSourceError`, and a load that fails after its
-    initial-query readiness is a request error on the Effect's error tree,
-    delivered through `onHealthChange`, while the Effect keeps running.
-17. **Error tree:** a live query's `errors` has one node for itself and one per
-    source alias in query order, recursing through nested live queries. An
-    include's source has `kind: 'include'`; when the include materializes a
-    child Collection per parent row, its node rolls those up as
-    `instances: { total, inError }`, counting only that include's children
-    even when another include reads the same alias, and a child's health
-    change is relayed like a source's. A pooled live query's tree is the tree a
-    live-query Collection over its source would have, so it also reaches
-    deeper levels. The shape is fixed by the query. Each node mirrors its
-    Collection when read, and the query emits `health:change` whenever a node
-    below it changes. When a Collection's status changes, its `status:change`
-    fires first and its `health:change` follows at once; the tree is current
-    when either fires. A node keeps its object identity until something in its
-    subtree changes, and a change replaces only the nodes on its path.
+16. **Status and the error tree:** status says whether the data can be
+    shown; the error tree says whether it is still kept current. A sync run's
+    failed first load (`fail()` before Collection readiness) is status
+    `error` and is final for that sync run. A crash (IndexedDB closure, a
+    terminal local persistence failure, a throwing sync function, or an
+    internal invariant failure) is status `crashed` from any active status and
+    is permanent for the Collection instance. A live query takes its sources'
+    worst status until its initial-query readiness (`crashed` over `error`
+    over `loading`). After it, only `crashed` propagates: a query cannot keep
+    serving rows from a Collection that cannot serve reads. Every other
+    problem after initial-query readiness, including an on-demand source
+    whose own first load fails then, leaves the query's status and rows
+    alone and shows on the node that owns it. A source's `reportError()` is
+    its node's `failureReason`, which `reportHealthy()` clears; its `fail()`
+    after Collection readiness is its node's `error`, which stays for the
+    sync run, and every later report from that sync adapter throws. A lazy
+    load or a root Collection's load that fails after initial-query readiness
+    is an `error` on the query's own node. A lazy demand's error clears when
+    that demand settles or is released; a root Collection's error clears when
+    a later load of that Collection settles. Query failures and contract
+    violations, such as a graph failure or a Collection cleaned up under the
+    query, crash the query. An Effect follows the same rules, with its
+    initial-query readiness at its settled initial loads: a crashed source,
+    or a source whose first load fails before that readiness, ends it through
+    `onSourceError`; after it, every other problem is error tree detail
+    delivered through `onErrorsChange`, while the Effect keeps running.
+17. **Error tree:** a Collection's `errors` is one node; a live query's has
+    one node for itself and one per source alias in query order, recursing
+    through nested live queries. A node shows at most one problem:
+    `failureReason` (the sync adapter still tries) or `error` (the first load
+    failed, the sync adapter stopped, the Collection crashed, or, on a
+    query's own node, a request for more data failed). An include's source
+    has `kind: 'include'`; when the include materializes a child Collection
+    per parent row, its node rolls those up as `instances: { total,
+withErrors }`, counting only that include's children even when another
+    include reads the same alias, and a child's change is relayed like a
+    source's. A pooled live query's tree is the tree a live-query Collection
+    over its source would have, so it also reaches deeper levels. The shape
+    is fixed by the query. Each node mirrors its Collection when read, and
+    the query emits `errors:change` whenever a node below it changes. When a
+    Collection's status changes, its `status:change` fires first and its
+    `errors:change` follows at once; the tree is current when either fires.
+    A node keeps its object identity until something in its subtree changes,
+    and a change replaces only the nodes on its path.
 
 ## Glossary
 

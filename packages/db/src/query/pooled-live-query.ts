@@ -172,9 +172,9 @@ class Partition {
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)
       })
-      // Like a live query, a pooled view fails for good when its source
-      // starts cleanup, before the adapter's cleanup settles; queries
-      // mounted later get a new partition.
+      // Like a live query, a pooled view crashes when its source starts
+      // cleanup, before the adapter's cleanup settles; queries mounted later
+      // get a new partition.
       const stopCleanupStart = this.source._onCleanupStart(() => {
         const previousStatus = this.source.status
         this.terminate()
@@ -182,7 +182,7 @@ class Partition {
           type: `status:change`,
           collection: this.source as unknown as Collection,
           previousStatus,
-          status: `error`,
+          status: `crashed`,
         })
       })
       this.stopStatusEvents = () => {
@@ -194,7 +194,7 @@ class Partition {
 
   private deliverStatus(event: CollectionStatusChangeEvent): void {
     const delivered = this.terminated
-      ? { ...event, status: `error` as const }
+      ? { ...event, status: `crashed` as const }
       : event
     for (const listener of [...this.statusListeners]) listener(delivered)
     if (this.terminated) {
@@ -510,7 +510,7 @@ class PooledLiveQuery {
   }
 
   get status(): CollectionStatus {
-    return this.partition.terminated ? `error` : this.source.status
+    return this.partition.terminated ? `crashed` : this.source.status
   }
 
   private endedProblem: CollectionErrorInfo | undefined
@@ -518,10 +518,10 @@ class PooledLiveQuery {
   /** The same error tree a live-query Collection over this source exposes. */
   get errors(): ErrorTreeNode {
     const source = buildErrorTree(this.source, { alias: this.alias }, this)
-    // The view shows its source's gate. A terminated partition also ended
-    // this view, for example when its source was cleaned up under it.
+    // The view shows its source's status error. A terminated partition also
+    // ended this view, for example when its source was cleaned up under it.
     const error =
-      this.source._lifecycle.gateProblem ??
+      this.source._lifecycle.statusProblem ??
       (this.partition.terminated
         ? (this.endedProblem ??= describeProblem(
             new Error(
@@ -529,8 +529,6 @@ class PooledLiveQuery {
                 ? `The pooled live query's source ended`
                 : codedMessage(246),
             ),
-            `initial`,
-            true,
           ))
         : null)
     return errorTreeNode(this, undefined, {
@@ -538,6 +536,7 @@ class PooledLiveQuery {
       collectionId: this.source.id,
       kind: `live-query`,
       status: this.status,
+      failureReason: null,
       error,
       sources: [source],
     })
