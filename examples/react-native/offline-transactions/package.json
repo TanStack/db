@@ -17,7 +17,7 @@
     "@react-native-community/netinfo": "11.4.1",
     "@tanstack/db": "^0.15.1",
     "@tanstack/offline-transactions": "^1.1.3",
-    "@tanstack/query-db-collection": "^1.4.6",
+    "@tanstack/query-db-collection": "^1.4.7",
     "@tanstack/react-db": "^0.5.11",
     "@tanstack/react-native-db-sqlite-persistence": "^0.2.36",
     "@tanstack/react-query": "^5.90.20",
