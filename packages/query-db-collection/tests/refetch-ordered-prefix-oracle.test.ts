@@ -1928,6 +1928,43 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     })
   })
 
+  // Found by the random campaign. A Query invalidation lets another consumer
+  // observe row 1 before the backend deletes it, and the final refetch applies
+  // while an optimistic update holds source publication back. The public law
+  // is unchanged: after release, the ordered window equals the pure backend
+  // window, regardless of which consumer previously observed a deleted row.
+  it(`a held refetch removes a deleted row owned by an observed query`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        terms: 1,
+        orderKey: `rank`,
+        pageCap: undefined,
+        limit: 1,
+        offset: 1,
+      },
+      initial: [
+        { id: 1, rank: 0, marked: true },
+        { id: 0, rank: 0, marked: false },
+      ],
+      history: [
+        { type: `hold`, kind: `update`, id: 0 },
+        { type: `upsert`, id: 2, rank: 0 },
+        { type: `refetch` },
+        { type: `release` },
+        { type: `flip`, id: 0 },
+        { type: `upsert`, id: 0, rank: 1 },
+        { type: `observe`, id: 1 },
+        { type: `invalidate` },
+        { type: `delete`, id: 1 },
+        { type: `hold`, kind: `update`, id: 0 },
+        { type: `refetch` },
+        { type: `release` },
+      ],
+    })
+  })
+
   // The premise-directed campaign for the skip under a hold. Its reach
   // witness requires refetches that report while a hold is running.
   it.runIf(replay.replayPath === undefined)(

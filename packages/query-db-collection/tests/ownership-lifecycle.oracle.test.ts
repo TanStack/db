@@ -7,7 +7,9 @@ import {
   isCancelledError,
 } from '@tanstack/query-core'
 import {
+  DbClient,
   IR,
+  collectionOptions,
   createCollection,
   createLiveQueryCollection,
   createOptimisticAction,
@@ -5850,6 +5852,119 @@ describe(`query collection ownership lifecycle`, () => {
     expect(
       persistedOwners(collection._state.syncedMetadata, orphaned.id),
     ).toEqual([])
+  })
+
+  /**
+   * Releasing and then reacquiring one demand creates a new active claim. An
+   * older release may publish later, but it cannot erase that newer claim. The
+   * independent model removes the first claim, adds the second, and leaves the
+   * shared row until the second release. The unrelated blocker only delays
+   * publication.
+   */
+  it(`keeps a reacquired claim across an older release publication`, async () => {
+    const id = `reacquired-claim-old-release`
+    const detail = categorySubset(`detail`)
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[shared]],
+      staleTime: Number.POSITIVE_INFINITY,
+    })
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+
+    await collection._sync.loadSubset(detail)
+    mutation.mutate(() => collection.insert(blocker))
+    cleanups.push(async () => {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+    })
+
+    const pendingBefore = collection._state.pendingSyncedTransactions.length
+    collection._sync.unloadSubset(detail)
+    await vi.waitFor(() =>
+      expect(
+        collection._state.pendingSyncedTransactions.length,
+      ).toBeGreaterThan(pendingBefore),
+    )
+    const pendingAfterRelease =
+      collection._state.pendingSyncedTransactions.length
+    const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+    void reacquired.catch(() => undefined)
+    await vi.waitFor(() =>
+      expect(
+        collection._state.pendingSyncedTransactions.length,
+      ).toBeGreaterThan(pendingAfterRelease),
+    )
+
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    await reacquired
+    await vi.waitFor(() => expect(rows(collection)).toEqual([shared.id]))
+
+    collection._sync.unloadSubset(detail)
+    await vi.waitFor(() => expect(rows(collection)).toEqual([]))
+    expect(queryFn).toHaveBeenCalledOnce()
+  })
+
+  /**
+   * Accepted Query results update ownership in acceptance order even while
+   * publication is held. The independent model stores each active Query's
+   * latest complete result and exposes their union: after the detail and list
+   * results become empty, the peer still exposes the row; after the peer is
+   * released, the union is empty. Published metadata remains stale until the
+   * hold ends, so it cannot be the model's source of truth.
+   */
+  it(`composes accepted owner retirements ahead of stale metadata`, async () => {
+    const id = `accepted-owner-retirements`
+    const detail = categorySubset(`detail`)
+    const list = categorySubset(`list`)
+    const peer: LoadSubsetOptions = {
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`category`]),
+        new IR.Value([`shared`, `peer`]),
+      ]),
+    }
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[shared], [shared], [shared], [], [], [shared]],
+    })
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+
+    await collection._sync.loadSubset(detail)
+    await collection._sync.loadSubset(list)
+    await collection._sync.loadSubset(peer)
+
+    mutation.mutate(() => collection.insert(blocker))
+    cleanups.push(async () => {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+    })
+    expect(mutation.state).toBe(`persisting`)
+
+    const pendingBefore = collection._state.pendingSyncedTransactions.length
+    const refetch = collection.utils.refetch()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(6))
+    await vi.waitFor(() =>
+      expect(
+        collection._state.pendingSyncedTransactions.length,
+      ).toBeGreaterThanOrEqual(pendingBefore + 2),
+    )
+
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    await refetch
+    await vi.waitFor(() => expect(rows(collection)).toEqual([shared.id]))
+
+    collection._sync.unloadSubset(peer)
+    await vi.waitFor(() => expect(rows(collection)).toEqual([]))
+    expect(queryFn).toHaveBeenCalledTimes(6)
   })
 
   // Law: once a result's sync transaction is accepted, the rows it owns stay
@@ -11868,6 +11983,132 @@ describe(`query collection ownership lifecycle`, () => {
       expectedEmptyBaselineScans([`restart`, `empty-result`]),
     )
   })
+
+  /**
+   * A current complete Query result replaces its cold persisted result. The
+   * independent model starts with `{kept, omitted}` and replaces it with
+   * `{kept}`. Persisted row order cannot change that result, so both scan
+   * orders must expose the survivor and delete the omission.
+   */
+  it.each([
+    { scanOrder: [`kept`, `omitted`] },
+    { scanOrder: [`omitted`, `kept`] },
+  ] as const)(
+    `replaces a cold two-row result in scan order $scanOrder`,
+    async ({ scanOrder }) => {
+      const id = `cold-multi-row-owner-${scanOrder.join(`-`)}`
+      const queryHash = hashKey([id])
+      const kept: Item = { id: `kept`, category: `shared`, name: `Kept` }
+      const omitted: Item = {
+        id: `omitted`,
+        category: `shared`,
+        name: `Omitted`,
+      }
+      const byId = new Map([
+        [kept.id, kept],
+        [omitted.id, omitted],
+      ])
+      const ownerMetadata = {
+        queryCollection: { owners: { [queryHash]: true } },
+      }
+      const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
+      const scanPersistedRows = vi.fn(() =>
+        Promise.resolve(
+          scanOrder.map((rowId) => ({
+            key: rowId,
+            value: byId.get(rowId)!,
+            metadata: ownerMetadata,
+          })),
+        ),
+      )
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[kept]],
+        metadataRecorder: metadata,
+        scanPersistedRows,
+        setupMetadata: (syncMetadata) =>
+          syncMetadata.collection.set(`queryCollection:gc:${queryHash}`, {
+            queryHash,
+            mode: `until-revalidated`,
+          }),
+      })
+
+      await collection._sync.loadSubset({})
+
+      expect(rows(collection)).toEqual([kept.id])
+      expect(metadata.writes).toContainEqual({
+        type: `delete`,
+        key: omitted.id,
+      })
+    },
+  )
+
+  /**
+   * Hydrated rows obey the same complete-result replacement law. The public
+   * Collection begins with `{kept, omitted}` and the Query returns `{kept}`.
+   * Hydration order cannot change the public result or keep the survivor alive
+   * after its demand is released.
+   */
+  it.each([
+    { hydrationOrder: [`kept`, `omitted`] },
+    { hydrationOrder: [`omitted`, `kept`] },
+  ] as const)(
+    `replaces a hydrated two-row result in order $hydrationOrder`,
+    async ({ hydrationOrder }) => {
+      const id = `hydrated-multi-row-owner-${hydrationOrder.join(`-`)}`
+      const queryHash = hashKey([id])
+      const kept: Item = { id: `kept`, category: `shared`, name: `Kept` }
+      const omitted: Item = {
+        id: `omitted`,
+        category: `shared`,
+        name: `Omitted`,
+      }
+      const byId = new Map([
+        [kept.id, kept],
+        [omitted.id, omitted],
+      ])
+      const queryClient = createQueryClient()
+      const queryFn = vi.fn(() => Promise.resolve([kept]))
+      const descriptor = collectionOptions(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const client = new DbClient({ queryClient })
+      client.hydrate({
+        collections: [
+          {
+            collectionId: id,
+            rows: hydrationOrder.map((rowId) => ({
+              key: rowId,
+              value: byId.get(rowId)!,
+              metadata: {
+                queryCollection: { owners: { [queryHash]: true } },
+              },
+            })),
+          },
+        ],
+      })
+      const collection = client.collection(descriptor)
+      cleanups.push(async () => {
+        await client.cleanup()
+        queryClient.clear()
+      })
+
+      await collection._sync.loadSubset({})
+      expect(rows(collection)).toEqual([kept.id])
+
+      collection._sync.unloadSubset({})
+      await vi.waitFor(() => expect(rows(collection)).toEqual([]))
+      expect(queryFn).toHaveBeenCalledOnce()
+    },
+  )
 
   /**
    * A retained subset owner cannot be settled by acquiring a different Query
