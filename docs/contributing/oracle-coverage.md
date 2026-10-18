@@ -1055,6 +1055,29 @@ held-request checkpoint. These finite histories leave same-run external durable
 writers, larger overlapping-fetch schedules, and direct-patch provenance after
 Query cache dehydration outside their proven scope.
 
+A fixed accepted-ownership history acquires three exact subset claims for one
+row, then accepts two complete empty results while an unrelated optimistic
+mutation delays publication. Its independent model stores the latest complete
+result per active Query and exposes their union: the third result keeps the row
+public until its own release, after which the union is empty. The ordered
+refetch owner's held-delete replay is the killing witness for trusting stale
+published owners over accepted ownership. A release/reacquisition history also
+holds publication, reacquires the same cached Query, then proves the older
+release cannot erase the new claim by releasing it and observing an empty
+public row set. Larger overlap schedules, window ownership outside the ordered
+replay, and durable-adapter ordering remain open under the owners named above.
+
+A controlled cold persisted scan gives one Query two rows in both scan orders,
+then returns a current result that omits one row. Its independent replacement
+model requires the survivor to remain public with its owner and the controlled
+persistence boundary to receive a deletion for the omission. A row-by-row
+reconstruction that treats the first persisted edge as a resolved Query fails
+one order. A sibling DbClient hydration history supplies the same two rows in
+both orders, then compares the public Collection with the same complete current
+result and releases its demand. A row-by-row reconstruction fails both orders
+at the public-row checkpoint. These finite histories do not cover larger cold
+results or hydration interleaved with another active Query result.
+
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the
 builder creates it must fail before child rows are read. Without that check,
