@@ -1145,6 +1145,8 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   deferAcquisition?: boolean
+  /** Set to false to observe rows without acquiring source data. @internal */
+  autoLoad?: boolean
   /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.

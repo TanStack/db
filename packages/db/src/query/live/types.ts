@@ -105,6 +105,14 @@ export interface LiveQueryCollectionConfig<
   startSync?: boolean
 
   /**
+   * Set to false to query available rows without acquiring source data.
+   * Readiness describes the result over those rows.
+   * Other consumers may still load and update the shared source rows.
+   * @default true
+   */
+  autoLoad?: boolean
+
+  /**
    * GC time for the collection
    */
   gcTime?: number

@@ -292,8 +292,20 @@ export function validateOraclePropertyRegistry(
   return registry
 }
 
+const autoLoadProperties: Array<string> = []
+for (const mode of [`eager`, `on-demand`]) {
+  for (const indexed of [false, true]) {
+    for (const shape of [`window`, `join`, `include`]) {
+      autoLoadProperties.push(
+        `live-query-auto-load.${mode}.${indexed}.${shape}`,
+      )
+    }
+  }
+}
+
 export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
+  ...autoLoadProperties,
   ...publicationProperties,
   ...refinementProperties,
   ...paginationMatrixProperties,
