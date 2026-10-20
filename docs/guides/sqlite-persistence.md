@@ -236,13 +236,45 @@ An on-demand cache is not yet a certified offline snapshot. The first managed ge
 
 ## Render after SQLite restore
 
-`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot. Set it on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback.
+`initialRender` supports eager persisted Collections and explicitly opted-in progressive sources. Genuine `syncMode: 'on-demand'` sources remain unsupported. Set it on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback.
 
 Install the React binding to use the following components:
 
 ```sh
 npm install @tanstack/react-db
 ```
+
+Electric progressive sources are represented as on-demand Collections internally. To restore their entire local cache before initial rendering, opt in explicitly:
+
+```ts
+persistedCollectionOptions({
+  ...electricCollectionOptions({
+    id: 'todos',
+    syncMode: 'progressive',
+    getKey: (todo: Todo) => todo.id,
+    shapeOptions: {
+      url: 'http://localhost:3000/v1/shape',
+      params: { table: 'todos' },
+    },
+  }),
+  persistence: syncedPersistence,
+  initialRender: {
+    strategy: 'network-first',
+    networkTimeoutMs: 0,
+    progressive: true,
+  },
+})
+```
+
+Import `electricCollectionOptions` from `@tanstack/electric-db-collection`.
+Use `progressive: true` only with progressive sources. The wrapper trusts this
+assertion; it cannot distinguish them from genuine on-demand sources.
+Restoration loads every cached row into memory. Persisted readiness means that
+local restoration finished, not that the previous full network sync completed.
+An interrupted initial sync can therefore restore only previously cached subsets,
+and a new cache can render empty. Network sync continues and replaces that
+provisional cache with the full snapshot. Applications requiring a complete
+server snapshot should continue to wait for Collection readiness.
 
 A regular React live query exposes both readiness signals:
 
@@ -266,7 +298,7 @@ function TodosView() {
 }
 ```
 
-`isReady` reports Collection readiness. `isPersistedReady` reports that every opted-in source finished its current eager restore, even when SQLite had no rows. These flags do not identify where each visible row came from. A regular `useLiveQuery` does not wait for the network-first deadline before it renders rows.
+`isReady` reports Collection readiness. `isPersistedReady` reports that every opted-in source finished its current local restore, even when SQLite had no rows. These flags do not identify where each visible row came from. A regular `useLiveQuery` does not wait for the network-first deadline before it renders rows.
 
 The hooks also expose `persistedStatus` and `persistedError`. The status is `unavailable` if a source did not opt in, `loading` during restore, `ready` after every restore completes, or `error` if a restore fails. `persistedError` keeps the restore error. An SSR seed does not count as a SQLite restore.
 

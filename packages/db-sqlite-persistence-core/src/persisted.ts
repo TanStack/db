@@ -823,6 +823,12 @@ export type PersistedInitialRenderOptions = {
   strategy: `network-first`
   /** Time to prefer network before restored rows may render; defaults to 3s. */
   networkTimeoutMs?: number
+  /**
+   * Restore the full local cache for a progressive source represented as
+   * on-demand. Do not enable for genuinely on-demand sources. This certifies
+   * local restoration only, not completion of a previous network snapshot.
+   */
+  progressive?: boolean
 }
 
 const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
@@ -2604,7 +2610,7 @@ class PersistedCollectionRuntime<
       onStartupMetadataLoaded()
     }
     const appliedCursor =
-      this.syncMode !== `on-demand`
+      this.syncMode !== `on-demand` || this.persistedReadiness !== undefined
         ? await this.hydrateBaseline(lifecycleGeneration, adapter)
         : undefined
     return lifecycleGeneration === this.lifecycleGeneration
@@ -6830,7 +6836,11 @@ export function persistedCollectionOptions<
   }
 
   const networkTimeoutMs = getNetworkTimeoutMs(options.initialRender)
-  if (networkTimeoutMs !== undefined && options.syncMode === `on-demand`) {
+  if (
+    networkTimeoutMs !== undefined &&
+    options.syncMode === `on-demand` &&
+    !options.initialRender?.progressive
+  ) {
     throw new InvalidPersistedCollectionConfigError(
       `network-first initial rendering requires eager persistence syncMode`,
     )

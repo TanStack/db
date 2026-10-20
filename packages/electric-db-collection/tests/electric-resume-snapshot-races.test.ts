@@ -1,6 +1,11 @@
 import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  createLiveQueryObserver,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
   SQLiteCorePersistenceAdapter,
@@ -975,6 +980,134 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
  * persistence-driver and real-provider owners.
  */
 describe(`Electric resume snapshot races`, () => {
+  it.each([false, true])(
+    `renders the progressive SQLite cache before network delivery (resume marker: %s)`,
+    async (hasResumeMarker) => {
+      // This receiving witness uses real SQLite and the Electric adapter with a
+      // controlled ShapeStream. A missing marker deliberately represents cached
+      // subset rows from an interrupted initial sync, not a complete snapshot.
+      const database = new DatabaseSync(`:memory:`)
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver: createDriver(database),
+        schemaVersion: 1,
+      })
+      const collectionId = `progressive-initial-render`
+      const cached = { id: 1, name: `cached` }
+      const claim = await adapter.claimCacheGeneration(collectionId)
+      await adapter.applyCommittedTx(
+        { kind: `managed`, ...claim },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: claim.claimId,
+          mutations: [{ type: `insert`, key: 1, value: cached }],
+          collectionMetadataMutations: hasResumeMarker
+            ? [
+                {
+                  type: `set`,
+                  key: `electric:resume`,
+                  value: {
+                    kind: `resume`,
+                    requiresTagState: false,
+                    offset: `10_0`,
+                    handle: `shape-old`,
+                    shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+                    updatedAt: 1,
+                  },
+                },
+              ]
+            : [],
+        },
+      )
+      await adapter.releaseCacheGenerationClaim(claim.claimId)
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          ElectricCollectionUtils<Item>
+        >({
+          ...electricCollectionOptions<Item>({
+            id: collectionId,
+            getKey: (row) => row.id,
+            syncMode: `progressive`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+          }),
+          persistence: { adapter },
+          initialRender: {
+            strategy: `network-first`,
+            networkTimeoutMs: 0,
+            progressive: true,
+          },
+        }),
+      )
+      const query = createLiveQueryCollection({
+        query: (q) => q.from({ row: collection }),
+      })
+      const observer = createLiveQueryObserver(query)
+      const unsubscribe = observer.subscribe(() => {})
+      let primaryFailure: unknown
+      const cleanupFailures: Array<unknown> = []
+      try {
+        await reachCheckpoint(
+          observer.preloadForInitialRender(),
+          `local initial render`,
+        )
+        expect(observer.getSnapshot().isPersistedReady).toBe(true)
+        expect(observer.getSnapshot().data).toHaveLength(1)
+        expect(observer.getSnapshot().data).toMatchObject([cached])
+        expect(collection.status).toBe(`loading`)
+        await vi.waitFor(() => expect(subscribers).toHaveLength(1))
+        expect(vi.mocked(ShapeStream).mock.calls[0]![0]).toEqual(
+          expect.objectContaining({
+            offset: hasResumeMarker ? `10_0` : undefined,
+          }),
+        )
+        // The fresh full snapshot replaces provisional cached rows. A resumed
+        // stream keeps its established baseline and applies only new changes.
+        subscribers[0]!([
+          change(`insert`, { id: 2, name: `network` }),
+          { headers: { control: `up-to-date` } },
+        ])
+        await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+        const expected = hasResumeMarker
+          ? [cached, { id: 2, name: `network` }]
+          : [{ id: 2, name: `network` }]
+        expect(
+          [...collection.values()]
+            .map(({ id, name }) => ({ id, name }))
+            .sort((a, b) => a.id - b.id),
+        ).toEqual(expected)
+      } catch (error) {
+        primaryFailure = error
+      } finally {
+        for (const cleanup of [
+          unsubscribe,
+          () => observer.dispose(),
+          () => query.cleanup(),
+          () => collection.cleanup(),
+          () => database.close(),
+        ]) {
+          try {
+            await cleanup()
+          } catch (error) {
+            cleanupFailures.push(error)
+          }
+        }
+      }
+      reportReceivingOutcome(
+        primaryFailure,
+        cleanupFailures,
+        `progressive initial render`,
+      )
+    },
+  )
+
   beforeEach(() => {
     subscribers.length = 0
     synchronousMessages = undefined

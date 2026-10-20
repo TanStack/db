@@ -2472,6 +2472,18 @@ network provider; it does not prove browser scheduling or arbitrary histories.
 The framework identity scenario does not cover every possible rejection value
 or an error already present before a hook mounts.
 
+The progressive opt-in extends the empty/nonempty controlled restore histories to
+on-demand core sources with a held subset acquisition. The same local-restoration
+rule applies; this does not certify a previously completed network snapshot.
+The receiving cases in `electric-resume-snapshot-races.test.ts` exercise the
+Electric adapter with real Node SQLite managed caches and a controlled SDK
+stream, both with and without a saved resume marker. They check cached rows
+before network delivery and replacement versus resumed updates afterward.
+These cases do not establish OPFS scheduling, multi-tab coordination, cache
+rotation during initial fallback, or progressive-specific joined/restart histories.
+Those remain outside this draft's validation and need receiving coverage before
+a broader guarantee can be made.
+
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to

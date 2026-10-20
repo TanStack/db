@@ -45,13 +45,18 @@ function deferred<T>() {
 
 function recordingAdapter(rows: ReadonlyArray<Row>) {
   const load = deferred<void>()
+  const readStarted = vi.fn()
   const adapter: PersistenceAdapter = {
     loadSubset: async () => {
+      readStarted()
       await load.promise
       return rows.map((value) => ({ key: value.id, value }))
     },
     loadResumeSnapshot: async (_id, options) => {
-      if (options?.includeRows !== false) await load.promise
+      if (options?.includeRows !== false) {
+        readStarted()
+        await load.promise
+      }
       return {
         rows:
           options?.includeRows === false
@@ -68,7 +73,7 @@ function recordingAdapter(rows: ReadonlyArray<Row>) {
     applyCommittedTx: async () => {},
     ensureIndex: async () => {},
   }
-  return { adapter, load }
+  return { adapter, load, readStarted }
 }
 
 function source(
@@ -76,23 +81,29 @@ function source(
   adapter: PersistenceAdapter,
   optIn: boolean,
   networkTimeoutMs = 0,
+  progressive = false,
 ) {
   return createCollection(
     persistedCollectionOptions<Row, string>({
       id,
       getKey: (row) => row.id,
       persistence: { adapter },
+      ...(progressive ? { syncMode: `on-demand` as const } : {}),
       ...(optIn
         ? {
             initialRender: {
               strategy: `network-first` as const,
               networkTimeoutMs,
+              ...(progressive ? { progressive: true } : {}),
             },
           }
         : {}),
       // Upstream never declares Collection readiness. Local restore is a
       // separately observable boundary even while this stays loading.
-      sync: { sync: () => ({}) },
+      sync: {
+        sync: () =>
+          progressive ? { loadSubset: () => new Promise<void>(() => {}) } : {},
+      },
     }),
   )
 }
@@ -141,8 +152,11 @@ async function checkWithCleanup(
  * # When may a query render its restored data?
  *
  * The independent status rule is an all-source conjunction: a query is persisted-ready
- * only after every eager persisted source opted in and successfully completed
- * its restore in the current sync run. A source that opts out makes the
+ * only after every eligible persisted source opted in and successfully completed
+ * its restore in the current sync run. This draft extends eligibility to
+ * explicitly opted-in progressive sources, which core sees as on-demand.
+ * This means the cached rows were restored, not that a prior full network
+ * snapshot completed. The empty/nonempty histories cover both modes. A source that opts out makes the
  * query unavailable for this signal. A failed restore reports that exact
  * failure. Neither an empty persisted database nor a pending network source
  * changes the rule. Initial rendering prefers upstream-signaled Collection
@@ -183,6 +197,11 @@ async function checkWithCleanup(
  * another model formulation. ORC-012 records the bounded contract, driver,
  * wrong-answer checks, and uncovered histories here and in the coverage map.
  * It does not claim all network histories.
+ * Progressive calibration: upstream rejects both new source-mode cases at
+ * configuration. With only that rejection removed, omitting startup baseline
+ * hydration fails the pre-query read checkpoint for both empty and nonempty
+ * caches. Query-triggered subset reads previously masked this omission; the
+ * pre-query checkpoint distinguishes startup restoration from demand loading.
  * ORC-013: the joined half-ready snapshot rejects any-one-ready; the empty
  * restore rejects row-count readiness; the 99/100-ms deadline and 50/100-ms
  * joined deadlines reject early fallback; the restart witness rejects stale
@@ -294,40 +313,54 @@ describe(`persisted-readiness oracle`, () => {
     expect(caseId).toBe(36)
   })
 
-  for (const rows of [[], [{ id: `one`, value: `restored` }]]) {
-    it(`waits for ${rows.length ? `nonempty` : `empty`} local restore without waiting for upstream`, async () => {
-      const fixture = recordingAdapter(rows)
-      const persisted = source(`local-${rows.length}`, fixture.adapter, true)
-      const query = createLiveQueryCollection({
-        query: (q) => q.from({ row: persisted }),
-      })
-      const observer = createLiveQueryObserver(query)
-      const observedPersistedStatuses: Array<string> = []
-      const unsubscribe = observer.subscribe(() => {
-        observedPersistedStatuses.push(observer.getSnapshot().persistedStatus)
-      })
-      await checkWithCleanup(async () => {
-        expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-        expect(observer.getSnapshot().isPersistedReady).toBe(false)
-
-        fixture.load.resolve()
-        await vi.waitFor(() => {
-          const snapshot = observer.getSnapshot()
-          expect(snapshot.persistedStatus).toBe(`ready`)
-          expect(snapshot.isPersistedReady).toBe(true)
-          expect(snapshot.status).toBe(`loading`)
-          expect(snapshot.data).toMatchObject(rows)
+  // Both source modes owe the same restore-before-fallback rule. The row
+  // count dimension distinguishes a restored empty cache from a pending read.
+  for (const progressive of [false, true]) {
+    for (const rows of [[], [{ id: `one`, value: `restored` }]]) {
+      it(`waits for ${progressive ? `progressive` : `eager`} ${rows.length ? `nonempty` : `empty`} local restore without waiting for upstream`, async () => {
+        const fixture = recordingAdapter(rows)
+        const persisted = source(
+          `local-${progressive}-${rows.length}`,
+          fixture.adapter,
+          true,
+          0,
+          progressive,
+        )
+        // Startup itself must restore the baseline, even before query demand.
+        // Otherwise a subset read can mask a missing startup hydration step.
+        persisted.startSyncImmediate()
+        await vi.waitFor(() => expect(fixture.readStarted).toHaveBeenCalled())
+        const query = createLiveQueryCollection({
+          query: (q) => q.from({ row: persisted }),
         })
-        await observer.preloadForInitialRender()
-        expect(observer.getSnapshot().data).toMatchObject(rows)
-        expect(observedPersistedStatuses).toContain(`ready`)
-      }, [
-        unsubscribe,
-        () => observer.dispose(),
-        () => query.cleanup(),
-        () => persisted.cleanup(),
-      ])
-    })
+        const observer = createLiveQueryObserver(query)
+        const observedPersistedStatuses: Array<string> = []
+        const unsubscribe = observer.subscribe(() => {
+          observedPersistedStatuses.push(observer.getSnapshot().persistedStatus)
+        })
+        await checkWithCleanup(async () => {
+          expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
+          expect(observer.getSnapshot().isPersistedReady).toBe(false)
+
+          fixture.load.resolve()
+          await vi.waitFor(() => {
+            const snapshot = observer.getSnapshot()
+            expect(snapshot.persistedStatus).toBe(`ready`)
+            expect(snapshot.isPersistedReady).toBe(true)
+            expect(snapshot.status).toBe(`loading`)
+            expect(snapshot.data).toMatchObject(rows)
+          })
+          await observer.preloadForInitialRender()
+          expect(observer.getSnapshot().data).toMatchObject(rows)
+          expect(observedPersistedStatuses).toContain(`ready`)
+        }, [
+          unsubscribe,
+          () => observer.dispose(),
+          () => query.cleanup(),
+          () => persisted.cleanup(),
+        ])
+      })
+    }
   }
 
   it(`requires every joined source to opt in and finish its own restore`, async () => {
