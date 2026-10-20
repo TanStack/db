@@ -12,7 +12,7 @@ import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'
 
 type Row = { id: string; value: string }
-type ModelOutcome = `loading` | `ready` | `error`
+type ModelOutcome = `loading` | `ready` | `error` | `unavailable`
 type ModelSource = {
   optedIn: boolean
   outcome: ModelOutcome
@@ -20,7 +20,9 @@ type ModelSource = {
 }
 
 function expectedPersistedSnapshot(sources: ReadonlyArray<ModelSource>) {
-  if (sources.some((entry) => !entry.optedIn)) {
+  if (
+    sources.some((entry) => !entry.optedIn || entry.outcome === `unavailable`)
+  ) {
     return { status: `unavailable`, error: undefined }
   }
   const failed = sources.find((entry) => entry.outcome === `error`)
@@ -94,13 +96,13 @@ function source(
             initialRender: {
               strategy: `network-first` as const,
               networkTimeoutMs,
-              ...(progressive ? { progressive: true } : {}),
             },
           }
         : {}),
       // Upstream never declares Collection readiness. Local restore is a
       // separately observable boundary even while this stays loading.
       sync: {
+        ...(progressive ? { isPersistedSnapshotComplete: () => true } : {}),
         sync: () =>
           progressive ? { loadSubset: () => new Promise<void>(() => {}) } : {},
       },
@@ -154,9 +156,9 @@ async function checkWithCleanup(
  * The independent status rule is an all-source conjunction: a query is persisted-ready
  * only after every eligible persisted source opted in and successfully completed
  * its restore in the current sync run. This draft extends eligibility to
- * explicitly opted-in progressive sources, which core sees as on-demand.
- * This means the cached rows were restored, not that a prior full network
- * snapshot completed. The empty/nonempty histories cover both modes. A source that opts out makes the
+ * progressive sources with adapter-certified complete snapshots, which core
+ * sees as on-demand. A source with no complete snapshot reports unavailable.
+ * The empty/nonempty histories cover both modes. A source that opts out makes the
  * query unavailable for this signal. A failed restore reports that exact
  * failure. Neither an empty persisted database nor a pending network source
  * changes the rule. Initial rendering prefers upstream-signaled Collection
@@ -179,7 +181,7 @@ async function checkWithCleanup(
  * Audit: ORC-001/002 use the approved all-source rule and the independent
  * expectedPersistedSnapshot model. ORC-003/005 are the finite outcome grammar,
  * controlled persistence driver, and public snapshot checks. ORC-004/007/008
- * do not apply: the 36-case product is enumerated, not generated or stateful.
+ * do not apply: the 64-case product is enumerated, not generated or stateful.
  * ORC-006: the pre-implementation observer lacked persistedStatus and
  * preloadForInitialRender; the deadline test also failed against the immediate
  * persisted-ready race. Before the early-error repair, the held-read witness
@@ -227,10 +229,15 @@ describe(`persisted-readiness oracle`, () => {
   })
 
   it(`refines the finite two-source readiness model`, async () => {
-    const outcomes: ReadonlyArray<ModelOutcome> = [`loading`, `ready`, `error`]
+    const outcomes: ReadonlyArray<ModelOutcome> = [
+      `loading`,
+      `ready`,
+      `error`,
+      `unavailable`,
+    ]
     let caseId = 0
     // Grammar: each source independently opts in or out and has one of the
-    // three local outcomes. No network transition is needed to judge this
+    // four local outcomes. No network transition is needed to judge this
     // observer-level projection; real persistence histories are below.
     for (const leftOptedIn of [false, true]) {
       for (const rightOptedIn of [false, true]) {
@@ -310,7 +317,7 @@ describe(`persisted-readiness oracle`, () => {
         }
       }
     }
-    expect(caseId).toBe(36)
+    expect(caseId).toBe(64)
   })
 
   // Both source modes owe the same restore-before-fallback rule. The row
@@ -363,37 +370,52 @@ describe(`persisted-readiness oracle`, () => {
     }
   }
 
-  it(`requires every joined source to opt in and finish its own restore`, async () => {
-    const left = recordingAdapter([{ id: `one`, value: `left` }])
-    const right = recordingAdapter([{ id: `one`, value: `right` }])
-    const sourceA = source(`local-join-left`, left.adapter, true)
-    const sourceB = source(`local-join-right`, right.adapter, true)
-    const query = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
-    })
-    const observer = createLiveQueryObserver(query)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      const initialRenderWait = observer.preloadForInitialRender()
-      left.load.resolve()
-      await vi.waitFor(() => expect(sourceA.has(`one`)).toBe(true))
-      expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
+  it.each([false, true])(
+    `requires every joined source to opt in and finish its own restore (progressive: %s)`,
+    async (progressive) => {
+      const left = recordingAdapter([{ id: `one`, value: `left` }])
+      const right = recordingAdapter([{ id: `one`, value: `right` }])
+      const sourceA = source(
+        `local-join-left`,
+        left.adapter,
+        true,
+        0,
+        progressive,
+      )
+      const sourceB = source(
+        `local-join-right`,
+        right.adapter,
+        true,
+        0,
+        progressive,
+      )
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ a: sourceA })
+            .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
+      })
+      const observer = createLiveQueryObserver(query)
+      const unsubscribe = observer.subscribe(() => {})
+      await checkWithCleanup(async () => {
+        const initialRenderWait = observer.preloadForInitialRender()
+        left.load.resolve()
+        await vi.waitFor(() => expect(sourceA.has(`one`)).toBe(true))
+        expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
 
-      right.load.resolve()
-      await initialRenderWait
-      expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
-      expect(observer.getSnapshot().data).toHaveLength(1)
-    }, [
-      unsubscribe,
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => sourceA.cleanup(),
-      () => sourceB.cleanup(),
-    ])
-  })
+        right.load.resolve()
+        await initialRenderWait
+        expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
+        expect(observer.getSnapshot().data).toHaveLength(1)
+      }, [
+        unsubscribe,
+        () => observer.dispose(),
+        () => query.cleanup(),
+        () => sourceA.cleanup(),
+        () => sourceB.cleanup(),
+      ])
+    },
+  )
 
   it(`follows a live-query source to its underlying persisted Collection`, async () => {
     const fixture = recordingAdapter([{ id: `one`, value: `local` }])
@@ -478,6 +500,57 @@ describe(`persisted-readiness oracle`, () => {
       () => persisted.cleanup(),
     ])
   })
+
+  it.each([`before-restore`, `after-restore`] as const)(
+    `rejects a network failure when no completed snapshot exists (%s)`,
+    async (order) => {
+      const fixture = recordingAdapter([
+        { id: `partial`, value: `provisional` },
+      ])
+      let fail: ((error: unknown) => void) | undefined
+      const persisted = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: `unavailable-${order}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
+          persistence: { adapter: fixture.adapter },
+          sync: {
+            isPersistedSnapshotComplete: () => false,
+            sync: ({ markError }) => {
+              fail = markError
+              return { loadSubset: () => new Promise<void>(() => {}) }
+            },
+          },
+        }),
+      )
+      const query = createLiveQueryCollection({
+        query: (q) => q.from({ row: persisted }),
+      })
+      const observer = createLiveQueryObserver(query)
+      const unsubscribe = observer.subscribe(() => {})
+      await checkWithCleanup(async () => {
+        const failure = new Error(`network unavailable`)
+        const rejected = expect(
+          observer.preloadForInitialRender(),
+        ).rejects.toThrow(`entered error state`)
+        await vi.waitFor(() => expect(fail).toBeDefined())
+        if (order === `before-restore`) fail!(failure)
+        fixture.load.resolve()
+        await vi.waitFor(() =>
+          expect(observer.getSnapshot().persistedStatus).toBe(`unavailable`),
+        )
+        if (order === `after-restore`) fail!(failure)
+        await rejected
+        expect(observer.getSnapshot().isPersistedReady).toBe(false)
+      }, [
+        unsubscribe,
+        () => observer.dispose(),
+        () => query.cleanup(),
+        () => persisted.cleanup(),
+      ])
+    },
+  )
 
   it(`rejects network-first initial rendering for on-demand persistence`, () => {
     const fixture = recordingAdapter([])
@@ -596,65 +669,76 @@ describe(`persisted-readiness oracle`, () => {
     ])
   })
 
-  it(`does not publish a stale restore after cleanup and restart`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    fixture.load.resolve()
-    const firstRead = deferred<void>()
-    const secondRead = deferred<void>()
-    const loadResumeSnapshot = fixture.adapter.loadResumeSnapshot
-    let baselineReads = 0
-    let firstReadReturned = false
-    // The obsolete sync run returns a distinct row, so a leaked publication
-    // remains observable even after the replacement restore completes.
-    fixture.adapter.loadResumeSnapshot = async (id, options) => {
-      if (options?.includeRows !== false) {
-        const read = ++baselineReads
-        await (read === 1 ? firstRead.promise : secondRead.promise)
-        const snapshot = await loadResumeSnapshot(id, options)
-        if (read === 1) {
-          firstReadReturned = true
-          return {
-            ...snapshot,
-            rows: [{ key: `stale`, value: { id: `stale`, value: `obsolete` } }],
+  it.each([false, true])(
+    `does not publish a stale restore after cleanup and restart (progressive: %s)`,
+    async (progressive) => {
+      const fixture = recordingAdapter([{ id: `one`, value: `local` }])
+      fixture.load.resolve()
+      const firstRead = deferred<void>()
+      const secondRead = deferred<void>()
+      const loadResumeSnapshot = fixture.adapter.loadResumeSnapshot
+      let baselineReads = 0
+      let firstReadReturned = false
+      // The obsolete sync run returns a distinct row, so a leaked publication
+      // remains observable even after the replacement restore completes.
+      fixture.adapter.loadResumeSnapshot = async (id, options) => {
+        if (options?.includeRows !== false) {
+          const read = ++baselineReads
+          await (read === 1 ? firstRead.promise : secondRead.promise)
+          const snapshot = await loadResumeSnapshot(id, options)
+          if (read === 1) {
+            firstReadReturned = true
+            return {
+              ...snapshot,
+              rows: [
+                { key: `stale`, value: { id: `stale`, value: `obsolete` } },
+              ],
+            }
           }
+          return snapshot
         }
-        return snapshot
+        return loadResumeSnapshot(id, options)
       }
-      return loadResumeSnapshot(id, options)
-    }
-    const persisted = source(`local-restart`, fixture.adapter, true)
-    const observer = createLiveQueryObserver(persisted)
-    const observedData: Array<unknown> = []
-    const unsubscribe = observer.subscribe(() => {
-      observedData.push(observer.getSnapshot().data)
-    })
-    await checkWithCleanup(async () => {
-      await vi.waitFor(() => expect(baselineReads).toBe(1))
-      await persisted.cleanup()
-      persisted.startSyncImmediate()
-      firstRead.resolve()
-      await vi.waitFor(() => expect(baselineReads).toBe(2))
-      await vi.waitFor(() => expect(firstReadReturned).toBe(true))
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-      expect(observer.getSnapshot().data).toEqual([])
-
-      secondRead.resolve()
-      await vi.waitFor(() => {
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
-        expect(persisted.has(`one`)).toBe(true)
-      })
-      expect(observedData).not.toContainEqual(
-        expect.arrayContaining([expect.objectContaining({ id: `stale` })]),
+      const persisted = source(
+        `local-restart`,
+        fixture.adapter,
+        true,
+        0,
+        progressive,
       )
-    }, [
-      () => firstRead.resolve(),
-      () => secondRead.resolve(),
-      unsubscribe,
-      () => observer.dispose(),
-      () => persisted.cleanup(),
-    ])
-  })
+      const observer = createLiveQueryObserver(persisted)
+      const observedData: Array<unknown> = []
+      const unsubscribe = observer.subscribe(() => {
+        observedData.push(observer.getSnapshot().data)
+      })
+      await checkWithCleanup(async () => {
+        await vi.waitFor(() => expect(baselineReads).toBe(1))
+        await persisted.cleanup()
+        persisted.startSyncImmediate()
+        firstRead.resolve()
+        await vi.waitFor(() => expect(baselineReads).toBe(2))
+        await vi.waitFor(() => expect(firstReadReturned).toBe(true))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
+        expect(observer.getSnapshot().data).toEqual([])
+
+        secondRead.resolve()
+        await vi.waitFor(() => {
+          expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
+          expect(persisted.has(`one`)).toBe(true)
+        })
+        expect(observedData).not.toContainEqual(
+          expect.arrayContaining([expect.objectContaining({ id: `stale` })]),
+        )
+      }, [
+        () => firstRead.resolve(),
+        () => secondRead.resolve(),
+        unsubscribe,
+        () => observer.dispose(),
+        () => persisted.cleanup(),
+      ])
+    },
+  )
 
   // The finite conjunction above has no transitions. This legal history gives
   // source A two sync runs while source B completes once. A's old restore cannot

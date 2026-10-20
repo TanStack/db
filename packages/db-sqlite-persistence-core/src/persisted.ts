@@ -823,12 +823,6 @@ export type PersistedInitialRenderOptions = {
   strategy: `network-first`
   /** Time to prefer network before restored rows may render; defaults to 3s. */
   networkTimeoutMs?: number
-  /**
-   * Restore the full local cache for a progressive source represented as
-   * on-demand. Do not enable for genuinely on-demand sources. This certifies
-   * local restoration only, not completion of a previous network snapshot.
-   */
-  progressive?: boolean
 }
 
 const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
@@ -1619,6 +1613,10 @@ class PersistedCollectionRuntime<
     private readonly dbName: string,
     private readonly persistedReadiness?: PersistedReadinessTracker,
     private readonly optionsClaim?: () => void | (() => void),
+    private readonly isPersistedSnapshotComplete?: SyncConfig<
+      T,
+      TKey
+    >[`isPersistedSnapshotComplete`],
   ) {}
 
   private get storageCollectionId(): string {
@@ -2260,7 +2258,9 @@ class PersistedCollectionRuntime<
       }
       if (lifecycleGeneration === this.lifecycleGeneration) {
         this.startupSettled = true
-        this.persistedReadiness?.set({ status: `ready` })
+        if (this.persistedReadiness?.getSnapshot().status === `loading`) {
+          this.persistedReadiness.set({ status: `ready` })
+        }
       }
       resolveStartupMetadata()
     })().catch((error) => {
@@ -2549,6 +2549,7 @@ class PersistedCollectionRuntime<
   private async hydrateBaseline(
     lifecycleGeneration: number,
     adapter: HydrationPersistenceAdapter,
+    requireCompleteSnapshot = false,
   ): Promise<number | undefined | false> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return undefined
 
@@ -2562,6 +2563,7 @@ class PersistedCollectionRuntime<
       {
         lifecycleGeneration,
         bindKeySetEvidence: true,
+        requireCompleteSnapshot,
       },
       adapter,
     )
@@ -2611,7 +2613,11 @@ class PersistedCollectionRuntime<
     }
     const appliedCursor =
       this.syncMode !== `on-demand` || this.persistedReadiness !== undefined
-        ? await this.hydrateBaseline(lifecycleGeneration, adapter)
+        ? await this.hydrateBaseline(
+            lifecycleGeneration,
+            adapter,
+            this.isPersistedSnapshotComplete !== undefined,
+          )
         : undefined
     return lifecycleGeneration === this.lifecycleGeneration
       ? {
@@ -3290,6 +3296,7 @@ class PersistedCollectionRuntime<
     config: {
       lifecycleGeneration: number
       bindKeySetEvidence?: boolean
+      requireCompleteSnapshot?: boolean
       requestLocalLoadFailure?: boolean
       rejectBufferedReplayFailure?: boolean
     },
@@ -3308,6 +3315,7 @@ class PersistedCollectionRuntime<
       try {
         let rows: Array<{ key: TKey; value: T; metadata?: unknown }>
         let bindResumeSnapshot: (() => void) | undefined
+        let canHydrate = true
         if (config.bindKeySetEvidence && !this.scopedRecovery) {
           const snapshot = await adapter.loadResumeSnapshot(
             this.storageTargetFor(),
@@ -3325,6 +3333,20 @@ class PersistedCollectionRuntime<
           if (config.lifecycleGeneration !== this.lifecycleGeneration)
             return true
           if (resetSequence !== this.resetSequence) return true
+          if (config.requireCompleteSnapshot) {
+            canHydrate =
+              snapshot.keySet?.status === `consistent` &&
+              this.isPersistedSnapshotComplete?.(
+                new Map(
+                  snapshot.collectionMetadata.map(({ key, value }) => [
+                    key,
+                    value,
+                  ]),
+                ),
+              ) === true
+            if (!canHydrate)
+              this.persistedReadiness?.set({ status: `unavailable` })
+          }
           bindResumeSnapshot = () => this.bindResumeSnapshotEvidence(snapshot)
           boundRowVersion = snapshot.latestRowVersion
         } else {
@@ -3356,8 +3378,9 @@ class PersistedCollectionRuntime<
         bindResumeSnapshot?.()
 
         if (
-          !config.bindKeySetEvidence ||
-          this.persistedKeySetEvidence?.status !== `incompatible`
+          canHydrate &&
+          (!config.bindKeySetEvidence ||
+            this.persistedKeySetEvidence?.status !== `incompatible`)
         ) {
           for (const row of rows) {
             hydrationContext.suppliedRowKeys.add(row.key)
@@ -6839,10 +6862,10 @@ export function persistedCollectionOptions<
   if (
     networkTimeoutMs !== undefined &&
     options.syncMode === `on-demand` &&
-    !options.initialRender?.progressive
+    !(hasOwnSyncKey(options) && options.sync.isPersistedSnapshotComplete)
   ) {
     throw new InvalidPersistedCollectionConfigError(
-      `network-first initial rendering requires eager persistence syncMode`,
+      `network-first initial rendering requires eager persistence syncMode or an adapter that certifies completed persisted snapshots`,
     )
   }
   const persistedReadinessTracker =
@@ -6895,6 +6918,9 @@ export function persistedCollectionOptions<
       collectionId,
       persistedReadinessTracker,
       claimOptions,
+      persistedReadinessTracker
+        ? syncOptions.sync.isPersistedSnapshotComplete
+        : undefined,
     )
     claimedRuntime = runtime
 

@@ -174,6 +174,7 @@ function fixture(
       `electric:resume`,
       {
         kind: `resume`,
+        snapshotComplete: true,
         requiresTagState: false,
         offset: `10_0`,
         handle: `shape-old`,

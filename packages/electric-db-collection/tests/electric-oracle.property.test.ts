@@ -267,6 +267,9 @@ function resumeState(): ReadonlyMap<string, unknown> {
       `electric:resume`,
       {
         kind: `resume`,
+        // These histories start from a completed full snapshot. Legacy and
+        // interrupted snapshots are covered by the initial-render receiver.
+        snapshotComplete: true,
         requiresTagState: false,
         offset: `10_0`,
         handle: `shape-1`,

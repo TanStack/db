@@ -4251,6 +4251,7 @@ describe(`Electric Integration`, () => {
           `electric:resume`,
           {
             kind: `resume`,
+            snapshotComplete: true,
             requiresTagState: false,
             offset: `10_0`,
             handle: `handle-1`,
