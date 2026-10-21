@@ -877,10 +877,13 @@ comparison. The
 [Node driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts)
 and the
 [Chromium page driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order.opfs.ts)
-supply only an entry point and access-handle control. Both feed the same
+supply the entry point, access-handle control, database names, and result
+reporting. The Node driver also generates random histories from the same
+grammar. Neither driver states expected results, and both feed the same
 comparison. The
 [Chromium spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-oracle.opfs.spec.ts)
-checks only that every example ran and that no violation occurred. A witness
+checks for page errors, a completed run, one result per example, and no
+violations. It states no expected results either. A witness
 that restates expected results needs the record that ORC-014 describes.
 
 ## Observe what the contract promises
