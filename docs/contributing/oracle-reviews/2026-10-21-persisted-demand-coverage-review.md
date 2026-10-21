@@ -125,16 +125,19 @@ separate durable path, outside the source-transaction pipeline, was run.
   the lifecycle history has checkpoints ±1 ms around each load's own deadline.
   The half-deadline and sync-run-deadline designs are rejected there.
 - **ORC-014:** The controlled premise is a source whose load settles after its
-  applied receipt. The Electric progressive witness receives the law:
-  subset-only coverage settles offline, and a never-loaded subset waits. A Query
-  DB receiving witness is still needed.
+  applied receipt. Two receiving witnesses supply it with a real source. In
+  the Electric progressive witness, subset-only coverage settles offline and a
+  never-loaded subset waits. In the Query DB witness
+  (`persisted-on-demand-offline-witness.test.ts`, added after the reviewed
+  head), a covered query settles at the wait or at once on a rejected
+  `queryFn`, and a never-loaded query waits. The coverage-ignored mutant fails
+  both covered Query DB histories.
 
 ## Open in-scope cells
 
 The [coverage map](../oracle-coverage.md#persisted-readiness-and-network-first-initial-rendering)
 owns these. Each needs a witness:
 
-- Query DB receiving witness (owner and retention metadata);
 - ordered windows and cursor pages in session 2, including a key that ignores
   offset or cursor;
 - must-refetch, schema reset, and cache-claim rotation in the coverage oracle;

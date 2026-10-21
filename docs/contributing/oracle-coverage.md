@@ -2553,8 +2553,12 @@ eager deadline fails the persisted-readiness oracle instead. The Electric
 progressive witness in
 `packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
 receives the law: with the opt-in, a subset-only session 1 settles offline on
-its restored rows, and a never-loaded subset still waits. Query DB receiving
-witnesses, ordered windows, cursor
+its restored rows, and a never-loaded subset still waits. The Query DB witness
+in `packages/query-db-collection/tests/persisted-on-demand-offline-witness.test.ts`
+receives it with a fresh QueryClient per session: a covered on-demand query
+stays loading until the wait and then shows its restored rows, a rejected
+`queryFn` settles it at once, and a never-loaded query keeps loading; a mutant
+that ignores coverage fails both covered histories. Ordered windows, cursor
 pages, and later demand in session 2 (including a demand key that ignores
 offset or cursor but honors limit, which no history distinguishes),
 optimistic writes on a covered demand, a failure before the restore
