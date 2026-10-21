@@ -5633,11 +5633,6 @@ function createWrappedSyncConfig<
           if (!transaction.handedToCollection) yield* transaction.operationKeys
         }
       })
-      const settlePendingTransaction = (
-        transaction: OpenSyncTransaction<T, TKey>,
-      ) => {
-        removePendingPublicationTransaction(transaction)
-      }
       // A source receipt is accepted once its rows are durable, and resolves
       // when core makes them visible.
       const visibleAfterDurable = (
@@ -5655,12 +5650,8 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
         applied: Promise<void>,
       ) => {
-        void applied.then(
-          () => settlePendingTransaction(transaction),
-          () => {
-            settlePendingTransaction(transaction)
-          },
-        )
+        const settle = () => removePendingPublicationTransaction(transaction)
+        void applied.then(settle, settle)
       }
       const getPendingRowMetadataWrite = (key: TKey) => {
         for (
@@ -6206,7 +6197,7 @@ function createWrappedSyncConfig<
             openTransaction?.terminalFailure ?? getTerminalFailure()
           if (terminalFailure) {
             if (openTransaction) {
-              settlePendingTransaction(openTransaction)
+              removePendingPublicationTransaction(openTransaction)
               settlePublicationAdmissionWaiters(
                 openTransaction,
                 terminalFailure.error,
@@ -6223,13 +6214,13 @@ function createWrappedSyncConfig<
           }
 
           if (signal?.aborted) {
-            settlePendingTransaction(openTransaction)
+            removePendingPublicationTransaction(openTransaction)
             const error = new SyncTransactionAbortedError()
             settlePublicationAdmissionWaiters(openTransaction, error)
             return createHandledRejection(error)
           }
           if (runtime.isScopedRecoveryPending()) {
-            settlePendingTransaction(openTransaction)
+            removePendingPublicationTransaction(openTransaction)
             const error = new SyncTransactionAbortedError()
             settlePublicationAdmissionWaiters(openTransaction, error)
             return createHandledRejection(error)

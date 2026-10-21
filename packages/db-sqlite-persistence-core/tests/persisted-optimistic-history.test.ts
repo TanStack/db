@@ -39,8 +39,8 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * the wrapper discards it when its turn comes, and every settled row it alone
  * held drops in that publication. The model fixes that drop at the turn; an
  * implementation that dropped the hold at abort time would also be legal, and
- * this lane would reject it. The last test checks that each campaign reached
- * a hold across a drain and a hold released by an abort.
+ * this lane would reject it. The last test checks that the fixed campaign
+ * reached a hold across a drain and a hold released by an abort.
  *
  * Grammar limits: a handler cannot await acceptance while a hold is
  * outstanding, because acceptance follows the held durable step. The schema,
@@ -242,12 +242,13 @@ fcTest.prop(
   60_000,
 )
 
-// A replay runs one history, so only full campaigns owe this reach.
-it(`persisted campaigns reach deferred holds and holds released by an abort`, () => {
+// The fixed campaign owes this reach; its seed is stable. A random seed can
+// miss a rare state, so its reach is reported, not required. A replay runs
+// one history.
+it(`persisted fixed campaign reaches deferred holds and holds released by an abort`, () => {
   if (process.env.TANSTACK_DB_ORACLE_SEED !== undefined) return
-  for (const [name, campaign] of Object.entries(reach)) {
-    if (campaign.runs === 0) continue
-    expect(campaign.deferredHolds, `${name} deferred holds`).toBeGreaterThan(0)
-    expect(campaign.abortReleases, `${name} abort releases`).toBeGreaterThan(0)
-  }
+  if (reach.fixed.runs === 0) return
+  expect(reach.fixed.deferredHolds, `fixed deferred holds`).toBeGreaterThan(0)
+  expect(reach.fixed.abortReleases, `fixed abort releases`).toBeGreaterThan(0)
+  console.info(`random campaign reach`, reach.random)
 })

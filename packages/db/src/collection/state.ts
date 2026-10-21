@@ -624,9 +624,9 @@ export class CollectionStateManager<
     // Deferred keys matter only to what they can hold: a completed
     // transaction, a held row, or attribution waiting for its sync.
     if (
+      this.transactions.size > 0 ||
       this.heldOptimisticRows.size > 0 ||
-      this.pendingLocalOrigins.size > 0 ||
-      this.hasCompletedTransaction()
+      this.pendingLocalOrigins.size > 0
     ) {
       for (const key of this.deferredSyncKeys()) pendingSyncKeys.add(key)
     }
@@ -1108,13 +1108,6 @@ export class CollectionStateManager<
       this.isDrainingSyncTransactions = false
     }
     if (failed) throw firstError
-  }
-
-  private hasCompletedTransaction(): boolean {
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `completed`) return true
-    }
-    return false
   }
 
   hasPersistingTransaction(): boolean {
