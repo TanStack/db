@@ -871,6 +871,17 @@ of that contract. Buffering, snapshot tokens, shape offsets, Collection
 transactions, and local indexes are source-specific ways to satisfy it; they
 are not materializer state.
 
+A persisted wrapper is a source at this boundary. Over an opted-in on-demand
+source, it may establish a request's baseline from durable rows instead of the
+network. That exact demand must have persisted demand coverage in the current
+persisted cache generation. The request then settles once its persisted subset
+restore is visible and the configured wait has passed, or its upstream load
+has failed. The upstream load continues as work the wrapper owns. Its later
+rows are ordinary source writes. Releasing the demand, or cleanup, aborts it.
+Coverage proves completeness when the covered load settled. It proves neither
+freshness nor broader extent than the exact demand (law 7). A demand without
+coverage settles only when its upstream load does.
+
 Lazy-demand growth requests only uncovered keys. When contraction or churn
 would leave fragmented coverage, the controller requests one complete current
 key union while retaining every established acquisition that still intersects
@@ -1397,7 +1408,12 @@ query can hold rows that the source does not yet update. The source contract,
 not this law, decides when it delivers those changes; Electric applies them at
 its atomic swap. A source that resumes from complete local rows settles its
 loads at once, so its queries are ready on those rows before the network
-responds.
+responds. A persisted wrapper applies the same rule to a single demand that has
+persisted demand coverage: after its wait, that demand settles on its restored
+rows. Initial readiness, ordered-window publication, and later demand
+therefore proceed offline on covered demands without a separate rule. A
+demand built from other rows' values, such as a cursor page, is covered only
+when the restored rows produce the same demand key.
 
 **Deferred acquisition:** a live-query Collection reads local memory and
 starts no provider work on its own. Until it has a subscriber or a preload in
@@ -1624,7 +1640,9 @@ every row before the top-K (a recorded limit).
 7. **Applied settlement:** a successful subset load settles only after its
    establishing sync transactions are visible; a source must not add queue
    priority merely to force the load to settle. Settlement proves no broader
-   source extent than the exact request.
+   source extent than the exact request. A persisted subset restore of a
+   demand with persisted demand coverage is an establishing transaction for
+   that demand.
 8. **Nested propagation:** every materialized relation consumes the fully
    materialized output relation of its children.
 9. **Publication:** reads, events, and downstream queries observe the same
