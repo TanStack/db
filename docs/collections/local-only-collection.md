@@ -341,7 +341,7 @@ LocalOnly collections are perfect for:
 | Survives page reload | No | Yes |
 | Performance | Fastest | Fast |
 | Size limits | Memory limits | ~5-10MB |
-| Row values | Any JavaScript value | Values that survive JSON |
+| Row values | Any JavaScript value | Values the configured `parser` can store (JSON by default) |
 | Best for | Temporary UI state | User preferences |
 
 ## Learn More
