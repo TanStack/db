@@ -13,6 +13,7 @@ export default defineConfig({
     `open-timeout.opfs.spec.ts`,
     `hydration-commit-oracle.opfs.spec.ts`,
     `leader-close-oracle.opfs.spec.ts`,
+    `opfs-request-order-oracle.opfs.spec.ts`,
   ],
   timeout: 60_000,
   fullyParallel: false,
