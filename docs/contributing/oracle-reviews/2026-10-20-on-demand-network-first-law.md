@@ -192,10 +192,11 @@ the rows and writing the coverage must not leave coverage without rows.
 
 ## Oracle design
 
-**Owner.** The persisted-readiness oracle gains a second law beside the eager
-network-first law. Its opening prose, model, grammar, driver, and checks change
-together. The live-query consequences listed above stay with their existing
-owners. A receiving witness is needed for the window-publication case.
+**Owner.** `packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`
+owns this law. It sits beside the eager network-first owner,
+`persisted-readiness-oracle.test.ts`, under the same coverage-map section.
+The live-query consequences listed above stay with their existing owners. A
+receiving witness is needed for the window-publication case.
 
 **Independent model.** For each demand, the model records the local restore
 (`pending`, `done`, or `error`) and the coverage (`covered`, `uncovered`, or

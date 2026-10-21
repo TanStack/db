@@ -2472,6 +2472,27 @@ network provider; it does not prove browser scheduling or arbitrary histories.
 The framework identity scenario does not cover every possible rejection value
 or an error already present before a hook mounts.
 
+The persisted demand coverage oracle in
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`
+owns the proposed on-demand law: an opted-in wrapper may settle a demand's
+load from SQLite only when that exact demand has persisted demand coverage,
+after the configured wait or an upstream failure. Its bounded enumeration
+crosses five session-1 histories (not requested, failed, overlapping demand,
+settled empty, settled), two waits, and four session-2 upstream schedules,
+over the real wrapper and `SQLiteCorePersistenceAdapter` on `node:sqlite`.
+Session 1 creates coverage only through real loads. A pure trace model
+predicts status, `preload()` state, and exact rows at five checkpoints. A
+joined history checks that the network-first wait releases an eager and an
+on-demand source only when the on-demand demand is covered. Model-level
+calibration shows that eight wrong designs each differ from the law at a named
+cell. The law is not implemented: on main every production cell fails at
+setup because `initialRender` rejects `syncMode: 'on-demand'`. Without the
+opt-in, main matches every uncovered cell and diverges at the first checkpoint
+where the law applies for every covered cell except an early network answer.
+Production mutants, Electric and Query DB receiving witnesses, ordered
+windows and later demand, cache-claim rotation, truncate, must-refetch, and
+framework Suspense remain open.
+
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to
