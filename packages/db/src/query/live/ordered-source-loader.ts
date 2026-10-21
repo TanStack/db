@@ -3,7 +3,7 @@ import {
   canExpressCursorOrder,
 } from '../../utils/cursor.js'
 import { normalizeError } from '../../utils/error.js'
-import { runAllCallbacks } from '../../utils/callbacks.js'
+import { reportUncaught, runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import type {
   CollectionSubscription,
@@ -57,15 +57,6 @@ const workState = (work: AuthoritativeWork): WorkState =>
 
 /** The loader's work slot or debt reached a state its rules forbid. */
 export class OrderedLoaderInvariantError extends Error {}
-
-// A lease release that throws is an adapter bug, so it never changes a load,
-// a window, or the loader's state. Report it uncaught, as the subscription
-// reports an async subscriber error.
-function reportReleaseFailure(error: unknown): void {
-  queueMicrotask(() => {
-    throw error
-  })
-}
 
 class OrderedPostSettlementError {
   constructor(readonly cause: unknown) {}
@@ -635,10 +626,12 @@ export class OrderedSourceLoader {
             )
           }
           owner.delete(release)
+          // A release that throws never changes a load, a window, or the
+          // loader's state; it is reported uncaught.
           try {
             release()
           } catch (error) {
-            reportReleaseFailure(error)
+            reportUncaught(error)
           }
         }),
       )
@@ -953,7 +946,7 @@ export class OrderedSourceLoader {
               try {
                 releaseAcquisition()
               } catch (error) {
-                reportReleaseFailure(error)
+                reportUncaught(error)
               } finally {
                 this.retiringSupersededAcquisitions = false
               }
@@ -1352,7 +1345,7 @@ export class OrderedSourceLoader {
     try {
       observed?.release({ error })
     } catch (releaseError) {
-      reportReleaseFailure(releaseError)
+      reportUncaught(releaseError)
     }
     if (
       isAuthoritativeRequest &&

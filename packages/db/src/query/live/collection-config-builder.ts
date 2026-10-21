@@ -180,6 +180,7 @@ export class CollectionConfigBuilder<
   private windowFailed = false
   private syncRunGeneration = 0
   private windowOperationGeneration = 0
+  private windowRequestGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections = createSourceRecord<OrderByOptimizationInfo>()
 
@@ -329,9 +330,12 @@ export class CollectionConfigBuilder<
       offset: options.offset ?? baseWindow?.offset,
       limit: options.limit ?? baseWindow?.limit,
     }
+    const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
       return sourceRecovery.then(async () => {
+        // A newer call wins, even if this deferred one resumes after it.
+        if (request !== this.windowRequestGeneration) return
         const settlement = this.setWindow(requestedWindow)
         if (settlement !== true) await settlement
       })

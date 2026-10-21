@@ -750,14 +750,19 @@ rolls the tentative owner back without calling `unloadSubset`. Logical demand
 retires even when `unloadSubset` fails. Each physical acquisition gets one release
 attempt, marked before calling adapter or error-listener code. Reentrant and
 repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
-and a cleanup failure cannot replace an earlier request failure. Core reports
-the error but retains no retry debt: a broken adapter can leak external resources
-if it throws before freeing them. Adapters must make their own cleanup reliable.
+and a cleanup failure cannot replace an earlier request failure. An
+`unloadSubset` that throws is an adapter bug. Core reports its error uncaught,
+once, from a microtask, and continues as if the release had succeeded: the
+error is not a load error, so it sets no `lastError`, emits no
+`loadSubset:error`, fails no replay, window move, or Effect, and no
+`releaseSnapshot()`, `unsubscribe()`, or `dispose()` call throws or rejects
+with it. Core retains no retry debt: a broken adapter can leak external
+resources if it throws before freeing them. Adapters must make their own
+cleanup reliable.
 Replay replaces acquisition leases sequentially: detach and release the old lease,
 then acquire a fresh one only if the logical demand and replay are still current.
-A release failure fails that replay without starting a replacement. A load
-throw leaves the logical demand detached; a later authoritative replay can
-reacquire it. Neither path restores an already released lease. A sole adapter
+A load throw leaves the logical demand detached; a later authoritative replay
+can reacquire it. Neither path restores an already released lease. A sole adapter
 resource may stop and restart in this gap; adapters must not tear down resources
 held by another owner. The public replacement barrier remains closed throughout
 the gap and through failed startup, so visible results do not flicker. Once a
@@ -1247,10 +1252,10 @@ A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
 retire cursor suffixes, ties, unfinished work, or another subscription's leases.
 Adapter eviction must still preserve rows owned by the replacement or peers.
-A lease release throws only when an adapter's `unloadSubset` throws, which is
-an adapter bug. The ordered loader therefore reports a release error uncaught,
-from a microtask, as the subscription reports an async subscriber error, and
-continues as if the release had succeeded. The error changes no load result,
+A lease release reports an adapter's throwing `unloadSubset` uncaught, as
+described for subscription cleanup, and does not throw. The ordered loader
+also reports any error a release callback still throws uncaught, from a
+microtask, and continues as if the release had succeeded. The error changes no load result,
 window move, publication, or loader state: the successful replacement finishes
 its boundary and continuation bookkeeping and publishes.
 

@@ -1082,6 +1082,14 @@ describe(`loadSubset replay refinement`, () => {
  * - **Convergence:** after a final truncate with no faults, and an explicit
  *   window move that revalidates a window whose own move failed, the window
  *   equals the model.
+ * - **Terminal error:** a failed lazy join demand load is fatal, because the
+ *   join side can no longer be complete, so the query stays in `error` and
+ *   convergence does not apply. Either side can be the lazy one: the planner
+ *   loads an inner join's root by key when the marker source is eager. A
+ *   demand load asks for keys (a `where` with no `orderBy`). A failed load
+ *   that a truncate's replay issued is not fatal: it keeps the last
+ *   publication until the next replay. So a query may end in `error` only
+ *   after a demand load issued outside a replay failed.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
@@ -1217,6 +1225,7 @@ type OrderedReach = {
   markerLoads: number
   markerTruncates: number
   abortedMoves: number
+  terminalErrors: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1235,6 +1244,9 @@ async function checkOrderedReplay(
 ): Promise<OrderedReach> {
   const sign = scenario.direction === `asc` ? 1 : -1
   let window = { offset: scenario.offset, limit: scenario.limit }
+  // The newest window move wins: an older move that settles later does not
+  // restore its window.
+  let latestMove = 0
   const peerWindow = { offset: scenario.offset, limit: scenario.limit }
   const truth = new Map<number, OrderedRow>(
     [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id * 10 }]),
@@ -1287,6 +1299,12 @@ async function checkOrderedReplay(
   let truncating = false
   let anyLoadFailed = false
   let earlyThrowSinceTruncate = false
+  // A marker truncate's commit starts its replay loads synchronously.
+  let markerReplaying = false
+  let demandFailed = false
+  // Lazy join demand asks for keys; ordered and full-source loads do not.
+  const isDemand = (options: LoadSubsetOptions) =>
+    options.where !== undefined && options.orderBy === undefined
   let violation: string | undefined
   // The faults this history injects. They may surface as rejected loads, as
   // thrown releases, or as errors the subscription rethrows from a microtask,
@@ -1323,6 +1341,7 @@ async function checkOrderedReplay(
     markerLoads: 0,
     markerTruncates: 0,
     abortedMoves: 0,
+    terminalErrors: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -1356,6 +1375,7 @@ async function checkOrderedReplay(
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
             reach.markerLoads++
+            const demand = !markerReplaying && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
@@ -1363,6 +1383,7 @@ async function checkOrderedReplay(
               if (!ok) {
                 load.outcome = `failed`
                 anyLoadFailed = true
+                if (demand) demandFailed = true
                 reach.failedLoads++
                 throw inject(new Error(`marker load failed`))
               }
@@ -1415,6 +1436,7 @@ async function checkOrderedReplay(
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
+            const demand = !truncating && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
@@ -1422,6 +1444,7 @@ async function checkOrderedReplay(
               if (!ok) {
                 load.outcome = `failed`
                 anyLoadFailed = true
+                if (demand) demandFailed = true
                 reach.failedLoads++
                 throw inject(new Error(`load failed`))
               }
@@ -1589,7 +1612,13 @@ async function checkOrderedReplay(
         installedMarkers.add(id)
       }
     }
-    const receipt = markerSync.commit()
+    markerReplaying = true
+    let receipt: true | Promise<void>
+    try {
+      receipt = markerSync.commit()
+    } finally {
+      markerReplaying = false
+    }
     if (receipt !== true) await receipt
   }
   try {
@@ -1675,6 +1704,7 @@ async function checkOrderedReplay(
           case `window`: {
             const requested = { offset: command.offset, limit: command.limit }
             reach.windowMoves++
+            const move = ++latestMove
             const settled = live.utils.setWindow(requested)
             if (settled === true) {
               window = requested
@@ -1682,7 +1712,7 @@ async function checkOrderedReplay(
             }
             const applied = settled.then(
               () => {
-                window = requested
+                if (move === latestMove) window = requested
               },
               (error: unknown) => {
                 // A release failure does not fail the move, so it must not
@@ -1754,8 +1784,15 @@ async function checkOrderedReplay(
     const revalidated = live.utils.setWindow(window)
     if (revalidated !== true) await revalidated.catch(swallow)
     await settleAll()
-    checkWindow(`convergence`, live.toArray, window)
-    if (peer) checkWindow(`peer convergence`, peer.toArray, peerWindow)
+    for (const [query, label, expected] of [
+      [live, `convergence`, window],
+      ...(peer ? [[peer, `peer convergence`, peerWindow] as const] : []),
+    ] as const) {
+      if (query.status === `error`) {
+        expect(demandFailed, `${label}: terminal error`).toBe(true)
+        reach.terminalErrors++
+      } else checkWindow(label, query.toArray, expected)
+    }
   } finally {
     holding = false
     for (const resolve of held.splice(0)) resolve(true)
@@ -1795,7 +1832,19 @@ describe(`Ordered windows across truncate replays`, () => {
   //   old rows until an unrelated write);
   // - a window move whose joined load a truncate aborts (the model counted
   //   the move's AbortError as an escaped fault; it is a legal rejection, and
-  //   this replay keeps the branch reached).
+  //   this replay keeps the branch reached);
+  // - a window move that retires lazy joined demand whose release throws (the
+  //   subscription reported the release failure as a load error, so the move
+  //   rejected with it; core now reports it uncaught);
+  // - a held marker demand load that fails (the model expected convergence,
+  //   but a failed lazy join demand is fatal by design; this replay keeps the
+  //   terminal-error branch reached);
+  // - two window moves while a load is held (the model let the older move,
+  //   which settled later, restore its window; the newest move wins);
+  // - an inner join whose lazy root demand load fails (the model allowed a
+  //   terminal error only for marker loads; either side can be lazy);
+  // - two window moves that a pending source recovery defers (both resumed
+  //   after recovery, the older one last, so it replaced the newer window).
   it.each([
     {
       name: `a release that throws after a successful repair`,
@@ -1858,6 +1907,83 @@ describe(`Ordered windows across truncate replays`, () => {
       },
       reaches: `abortedMoves`,
     },
+    {
+      name: `a window move that retires lazy joined demand whose release throws`,
+      history: [
+        { type: `unloadThrows` },
+        { type: `truncate`, armAfterStart: true },
+        { type: `truncateMarkers` },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncate`, armAfterStart: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `inner`,
+        markerMode: `on-demand`,
+      },
+    },
+    {
+      name: `a held marker demand load that fails`,
+      history: [
+        { type: `hold` },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `move`, id: 5, rank: 1 },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        direction: `desc`,
+        limit: 1,
+        ties: true,
+        joined: `some`,
+        markerMode: `on-demand`,
+      },
+      reaches: `terminalErrors`,
+    },
+    {
+      name: `two window moves while a load is held`,
+      history: [
+        { type: `hold` },
+        { type: `window`, offset: 1, limit: 2 },
+        { type: `window`, offset: 0, limit: 1 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        offset: 1,
+        limit: 1,
+        joined: `none`,
+      },
+    },
+    {
+      name: `an inner join whose lazy root demand load fails`,
+      history: [
+        { type: `hold` },
+        { type: `mark`, id: 2, on: true },
+        { type: `settle`, ok: false },
+        { type: `move`, id: 1, rank: 1 },
+      ],
+      scenario: { ...ordinaryOrderedScenario, limit: 1, joined: `inner` },
+      reaches: `terminalErrors`,
+    },
+    {
+      name: `two window moves that a pending source recovery defers`,
+      history: [
+        { type: `hold` },
+        { type: `truncate`, armAfterStart: false },
+        { type: `window`, offset: 1, limit: 1 },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `truncateMarkers` },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncateMarkers` },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+      },
+    },
   ] satisfies Array<{
     name: string
     history: Array<OrderedCommand>
@@ -1894,6 +2020,7 @@ describe(`Ordered windows across truncate replays`, () => {
         markerLoads: 0,
         markerTruncates: 0,
         abortedMoves: 0,
+        terminalErrors: 0,
       }
       await fc.assert(
         fc.asyncProperty(
@@ -1916,11 +2043,13 @@ describe(`Ordered windows across truncate replays`, () => {
       // Reach witnesses: releases throw without a truncate, while a replay
       // starts, and while it settles; loads fail and stay held across a
       // truncate; and the settled-window law is checked.
-      // An aborted move needs a truncate to land inside a held move; the
-      // named replay above reaches it.
+      // An aborted move needs a truncate to land inside a held move, and a
+      // terminal error needs a held marker demand load to fail; the named
+      // replays above reach both.
       if (campaign !== `replay`) {
         for (const [dimension, count] of Object.entries(total)) {
-          if (dimension === `abortedMoves`) continue
+          if (dimension === `abortedMoves` || dimension === `terminalErrors`)
+            continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }

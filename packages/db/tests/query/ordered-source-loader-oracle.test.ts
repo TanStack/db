@@ -184,7 +184,8 @@ describe(`OrderedSourceLoader`, () => {
       await flushPromises()
       expect(uncaught.errors).toEqual([failure])
       expect(reads).toHaveBeenCalledWith(expect.objectContaining({ limit: 2 }))
-      expect(subscription.lastError).toBe(failure)
+      // A release failure is not a load error.
+      expect(subscription.lastError).toBeUndefined()
       info.limit = 3
       await loader.loadMore(2)
       expect(requests.map((request) => request.limit)).toEqual([

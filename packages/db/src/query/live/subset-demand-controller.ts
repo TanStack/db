@@ -282,9 +282,5 @@ function releaseSegment(
   segment: DemandSegment,
 ): void {
   segment.abortController.abort()
-  try {
-    subscription.releaseSnapshot(segment.where)
-  } catch {
-    // CollectionSubscription has already reported the one cleanup failure.
-  }
+  subscription.releaseSnapshot(segment.where)
 }
