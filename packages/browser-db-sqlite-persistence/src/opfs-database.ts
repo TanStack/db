@@ -324,6 +324,9 @@ export async function openBrowserWASQLiteOPFSDatabase(
       } catch (error) {
         closeError = error
       } finally {
+        rejectAllPendingRequests(
+          new DOMException(`The SQLite connection is closed`, `AbortError`),
+        )
         disposeWorker()
       }
 

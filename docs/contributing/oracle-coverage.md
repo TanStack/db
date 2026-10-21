@@ -3686,3 +3686,14 @@ do not depend on its resolution. Real server ordering, framework unmount
 scheduling, and published npm behavior require receiving integration witnesses;
 the present evidence is controlled DB source execution. The revision-bound
 review record is `docs/contributing/oracle-reviews/issue-2058-paced-serialization.md`.
+
+## Explicit OPFS connection close
+
+The browser OPFS lifecycle owner also enumerates explicit close with one or
+three pending execute responses, another execute submitted while close is in
+flight, successful close and all three worker error classifications, and FIFO
+or reverse late-response delivery. At close settlement every pending execute
+must reject with `AbortError`, while close preserves its own outcome. Later
+responses cannot resettle requests, later execute rejects, and repeated close
+and pagehide release resources only once. Controlled worker messages establish
+the connection promise contract, not native OPFS locking or bfcache admission.

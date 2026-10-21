@@ -17,6 +17,9 @@ import type {
  * value. A restored page must open a new connection. Completed init and execute
  * requests leave the connection active until pagehide or close. Listener and
  * worker resources release exactly once even when init or close fails.
+ * Explicit close likewise rejects remaining work before terminating the worker,
+ * whether close succeeds or reports a worker error. Its own outcome is retained.
+ * This extends the same accepted-request settlement law as pagehide.
  *
  * Controlled page and worker objects implement only the browser event and
  * message grammar. Generated products vary pending request kind, delivery
@@ -932,6 +935,99 @@ TANSTACK_DB_OPFS_*_ORACLE_{SEED,RUNS,PATH} controls with this file's
 package-local Vitest command.
 */
 describe(`OPFS page lifecycle oracle`, () => {
+  // Enumerate the close outcome, pending sibling count, and stale response order.
+  // The model predicts cancellation independently of worker response contents;
+  // the close-settlement checkpoint must not wait for those held responses.
+  it.each(
+    [
+      undefined,
+      `INVALID_CONFIG`,
+      `PERSISTENCE_UNAVAILABLE`,
+      `INTERNAL`,
+    ].flatMap((code) =>
+      [1, 3].flatMap((executeCount) =>
+        [`fifo`, `reverse`].map((releaseDirection) => ({
+          code: code as BrowserOPFSWorkerErrorCode | undefined,
+          executeCount,
+          releaseDirection: releaseDirection as ReleaseDirection,
+        })),
+      ),
+    ),
+  )(
+    `settles pending work on explicit close ($code, $executeCount, $releaseDirection)`,
+    async ({ code, executeCount, releaseDirection }) => {
+      const page = installEnvironment({
+        heldResponseType: `execute`,
+        closeErrorCode: code,
+      })
+      const ledger: Array<Settlement> = []
+      const database = await openBrowserWASQLiteOPFSDatabase({
+        databaseName: `oracle.sqlite`,
+      })
+      const worker = ControlledWorker.instances[0]!
+      const pending = []
+      for (let index = 0; index < executeCount; index++) {
+        pending.push(
+          track(
+            `before-${index}`,
+            database.execute(`SELECT ${index}`),
+            () => [],
+            ledger,
+          ),
+        )
+      }
+      await Promise.resolve()
+      const closing = track(
+        `close`,
+        Promise.resolve(database.close!()),
+        () => `closed`,
+        ledger,
+      )
+      pending.push(
+        track(`during`, database.execute(`SELECT 99`), () => [], ledger),
+      )
+      await closing
+      // Observe settlement before delivering stale worker responses. Awaiting
+      // the pending promises here would hide the violation behind a timeout.
+      await Promise.resolve()
+      expect(ledger.filter(({ label }) => label !== `close`)).toHaveLength(
+        executeCount + 1,
+      )
+      for (const entry of ledger.filter(({ label }) => label !== `close`)) {
+        expect(entry).toMatchObject({
+          status: `rejected`,
+          observation: {
+            name: `AbortError`,
+            message: `The SQLite connection is closed`,
+          },
+        })
+      }
+      expect(ledger.find(({ label }) => label === `close`)).toMatchObject(
+        code
+          ? {
+              status: `rejected`,
+              observation: {
+                name: workerFailureContracts[code].name,
+                message: `${workerFailureContracts[code].messagePrefix}controlled close failure`,
+              },
+            }
+          : { status: `fulfilled`, observation: `closed` },
+      )
+      expectDisposed(page, worker)
+      const checkpoint = [...ledger]
+      worker.releaseHeldResponses(undefined, releaseDirection)
+      page.dispatchPageHide(false)
+      await Promise.resolve()
+      expect(ledger).toEqual(checkpoint)
+      await Promise.all(pending)
+      await expect(database.execute(`SELECT 100`)).rejects.toMatchObject(
+        closedConnection,
+      )
+      await database.close!()
+      expectDisposed(page, worker)
+    },
+  )
+
   it.each([
     { label: `default`, timeoutMs: undefined, deadline: 30_000 },
     { label: `overridden`, timeoutMs: 40, deadline: 40 },
