@@ -293,6 +293,7 @@ export class CollectionLifecycleManager<
     this.adapterStopped = true
     const reload = this.reloadRun
     this.reloadRun = undefined
+    if (reload) this.sync.dropReloadReplacement()
     if (this.status === `ready`) {
       // The rows stay; a reload that failed shows its new error instead.
       this.failureReason = null
@@ -396,6 +397,7 @@ export class CollectionLifecycleManager<
     const run = this.reloadRun
     if (!run) return false
     this.reloadRun = undefined
+    this.sync.dropReloadReplacement()
     run.reject(error)
     return true
   }

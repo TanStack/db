@@ -82,7 +82,17 @@
  * replacement waits for the run's next transaction. The driver writes like
  * a diffing adapter: an insert for a key missing from the baseline and an
  * update for a key it has. `effect` disposes the Effect over A and creates a
- * new one. A query whose first load failed stays in `error` until its
+ * new one. `cleanup-hold` starts `cleanup({ dependents: true })` while the
+ * adapter's cleanup stays pending, and `cleanup-settle` lets it finish.
+ * Cleanup start ends the sync run at once: the rows go, the node drops the
+ * run's problems but keeps a failed first load's or a crash's cause while
+ * the status shows it, the retired run's calls do nothing, and a reload
+ * rejects. The cascade ends the query and an Effect over the Collection,
+ * without a source error. After cleanup settles, the status is `cleaned-up`,
+ * and a reload starts a fresh sync run. Outside the grammar: a crash of a
+ * Collection whose cleanup started, a query's reload after a cleanup ended
+ * it, a new Effect while A's cleanup is pending, and cleanup of the pooled
+ * shape. A history that does not settle within 10 seconds fails. A query whose first load failed stays in `error` until its
  * own reload: `reload-query` calls the observed query's `reload()`, which
  * reloads every Collection below it that shows an error, through a nested
  * live query, and then the query itself. `restart` cleans up the
@@ -176,12 +186,15 @@ type Step =
   | { kind: `reload-query` }
   // `effect` disposes the Effect over A and creates a new one.
   | { kind: `effect` }
+  // `cleanup-hold` starts `cleanup({ dependents: true })` while the adapter's
+  // cleanup stays pending; `cleanup-settle` lets it finish.
+  | { kind: `cleanup-hold` | `cleanup-settle`; source: SourceName }
 
 // ---------------------------------------------------------------------------
 // Independent model
 // ---------------------------------------------------------------------------
 
-type Gate = `loading` | `ready` | `error` | `crashed`
+type Gate = `loading` | `ready` | `error` | `crashed` | `cleaned-up`
 // `serial` names one reported problem. A new report is a new problem even
 // when it has the same field, so the node that shows it is a new node.
 type Problem = null | { message: string; serial: number }
@@ -198,7 +211,9 @@ type GateModel = { gate: Gate; cause: string | null; reloading: boolean }
 // `armed`: a reload started and its run has not begun a transaction yet, so
 // the next transaction it begins replaces every row, and until then a diffing
 // adapter sees no rows to diff against.
+// `cleaning`: cleanup started and the adapter's cleanup has not settled.
 type SourceModel = GateModel & {
+  cleaning: boolean
   failure: Problem
   stopped: Problem
   failureFromReload: boolean
@@ -226,22 +241,85 @@ type Model = {
   serial: number
   selfReloads: Array<PendingSelfReload>
   effect: EffectModel
+  // A cascade cleanup ended the observed query (and, below it, the inner
+  // query): it shows `cleaned-up` and announces nothing more.
+  queryEnded: boolean
+  innerEnded: boolean
 }
 
 // An Effect over A. It reaches its gate when A is ready. A crash of A ends
 // it at any time, and a failed first load of A ends it before its gate,
 // including one that A already showed when the Effect was created. After
-// its gate, every other problem of A is error tree detail. `live`: it has
-// not ended.
-type EffectModel = { live: boolean; gate: boolean }
+// its gate, every other problem of A is error tree detail. A cascade cleanup
+// of A ends it without a source error: the app asked for it. `live`: it has
+// not ended; `errors`: how often it reported a source error.
+type EffectModel = { live: boolean; gate: boolean; errors: number }
 
 function deriveEffect(model: Model): void {
   const { effect } = model
   const A = model.sources.A
   if (!effect.live) return
-  if (A.gate === `crashed` || (A.gate === `error` && !effect.gate))
+  if (A.gate === `crashed` || (A.gate === `error` && !effect.gate)) {
     effect.live = false
-  else if (A.gate === `ready`) effect.gate = true
+    effect.errors++
+  } else if (A.gate === `ready`) effect.gate = true
+}
+
+// A fresh sync run of a cleaned-up Collection: nothing of the old run stays.
+function restartSource(source: SourceModel): void {
+  Object.assign(source, {
+    gate: `loading`,
+    cause: null,
+    reloading: false,
+    failure: null,
+    stopped: null,
+    failureFromReload: false,
+    cleaning: false,
+    rows: new Map(),
+    open: null,
+    armed: false,
+  } satisfies SourceModel)
+}
+
+// Cleanup start invalidates the sync run at once: the rows go, the node drops
+// the run's problems but keeps a crash's or failed first load's cause while
+// the status shows it, and the status waits for the adapter's cleanup. A
+// cascade ends every live query and Effect that reads the Collection. A
+// second cleanup returns the pending one.
+function applyCleanup(
+  shape: Shape,
+  model: Model,
+  kind: `cleanup-hold` | `cleanup-settle`,
+  name: SourceName,
+): void {
+  const source = model.sources[name]
+  if (!shapeSources[shape].includes(name)) return
+  if (kind === `cleanup-settle`) {
+    if (!source.cleaning) return
+    source.cleaning = false
+    source.gate = `cleaned-up`
+    source.cause = null
+    deriveQueries(shape, model)
+    return
+  }
+  if (source.cleaning || source.gate === `cleaned-up`) return
+  Object.assign(source, {
+    cleaning: true,
+    reloading: false,
+    failure: null,
+    stopped: null,
+    failureFromReload: false,
+    rows: new Map(),
+    open: null,
+    armed: false,
+  })
+  model.queryEnded = true
+  model.selfReloads = []
+  if (name === `A`) {
+    model.innerEnded = true
+    if (model.effect.live) model.effect.live = false
+  }
+  deriveQueries(shape, model)
 }
 
 // The rows a diffing adapter reads to choose between insert and update: the
@@ -304,6 +382,7 @@ function freshModel(): Model {
     failure: null,
     stopped: null,
     failureFromReload: false,
+    cleaning: false,
     rows: new Map(),
     open: null,
     armed: false,
@@ -314,7 +393,9 @@ function freshModel(): Model {
     inner: { gate: `loading`, cause: null, reloading: false },
     serial: 0,
     selfReloads: [],
-    effect: { live: true, gate: false },
+    effect: { live: true, gate: false, errors: 0 },
+    queryEnded: false,
+    innerEnded: false,
   }
 }
 
@@ -345,6 +426,14 @@ function deriveGate(
 function deriveQueries(shape: Shape, model: Model): void {
   const gates = (names: ReadonlyArray<SourceName>) =>
     names.map((name) => model.sources[name])
+  const ended: GateModel = { gate: `cleaned-up`, cause: null, reloading: false }
+  if (model.innerEnded) model.inner = ended
+  if (model.queryEnded) {
+    model.query = shape === `pooled-nested` ? model.inner : ended
+    if (shape === `nested` && !model.innerEnded)
+      model.inner = deriveGate(model.inner, gates([`A`]))
+    return
+  }
   if (shape === `nested`) {
     model.inner = deriveGate(model.inner, gates([`A`]))
     model.query = deriveGate(model.query, [model.inner, model.sources.B])
@@ -371,13 +460,22 @@ function applyModel(
     return `ok`
   }
   if (step.kind === `effect`) {
-    model.effect = { live: true, gate: false }
+    // Excluded while A's cleanup is pending. Over a cleaned-up A, the new
+    // Effect's subscription starts A's next sync run.
+    if (model.sources.A.cleaning) return `ok`
+    if (model.sources.A.gate === `cleaned-up`) restartSource(model.sources.A)
+    model.effect = { live: true, gate: false, errors: 0 }
     deriveEffect(model)
     return `ok`
   }
+  if (step.kind === `cleanup-hold` || step.kind === `cleanup-settle`) {
+    applyCleanup(shape, model, step.kind, step.source)
+    return `ok`
+  }
   if (step.kind === `reload-query`) {
-    // A pooled view has no reload of its own.
-    if (shape === `pooled-nested`) return `ok`
+    // A pooled view has no reload of its own. A query a cleanup ended is
+    // outside the grammar for its reload.
+    if (shape === `pooled-nested` || model.queryEnded) return `ok`
     if (model.query.gate === `crashed`) return `throws`
     // The query reloads every Collection below it that shows an error,
     // through any nested live query; a reload in flight keeps its run.
@@ -430,6 +528,19 @@ function applyModel(
   // fail(), adapter calls throw until a reload starts a new sync run.
   const stopped =
     !source.reloading && (source.gate === `error` || source.stopped !== null)
+  // While cleanup is pending, and after it, the retired run's calls do
+  // nothing. A reload is a start: it rejects during cleanup, and after it a
+  // fresh sync run starts. Core crashes only a running Collection, so a
+  // crash there is outside the grammar.
+  if (source.cleaning || source.gate === `cleaned-up`) {
+    if (step.kind === `reload` || step.kind === `reload-cleanup-fails`) {
+      if (source.cleaning) return `throws`
+      restartSource(source)
+      deriveQueries(shape, model)
+      deriveEffect(model)
+    }
+    return `ok`
+  }
   if (step.kind !== `crash` && source.gate === `crashed`) {
     // A crash ends the status calls. Data the run commits still applies:
     // closure keeps accepted sync obligations, such as the confirmation of
@@ -539,7 +650,12 @@ function applyModel(
       }
       break
     case `crash`:
-      // From any active status, for good.
+      // From any active status, for good. A reload ends with it, before its
+      // first commit: the rows stay the baseline.
+      if (source.reloading) {
+        source.armed = false
+        if (source.open) source.open.truncate = false
+      }
       if (source.gate !== `crashed`) {
         source.gate = `crashed`
         source.cause = `${step.source} crashed`
@@ -729,6 +845,8 @@ function expectedTree(
 function createSource(name: SourceName) {
   let params: SyncParams | undefined
   let failNextCleanup = false
+  // A held adapter cleanup stays pending until the driver settles it.
+  let held: ReturnType<typeof createDeferred<void>> | undefined
   const collection = createCollection<Row, number>({
     id: `health-oracle-${name}-${Math.random().toString(36).slice(2)}`,
     getKey: (row) => row.id,
@@ -738,6 +856,7 @@ function createSource(name: SourceName) {
       sync: (next) => {
         params = next
         return () => {
+          if (held) return held.promise
           if (!failNextCleanup) return
           failNextCleanup = false
           return Promise.reject(new Error(`${name} cleanup failed`))
@@ -749,6 +868,13 @@ function createSource(name: SourceName) {
     collection,
     failNextCleanup: (armed = true) => {
       failNextCleanup = armed
+    },
+    holdCleanup: () => {
+      held ??= createDeferred<void>()
+    },
+    settleCleanup: () => {
+      held?.resolve()
+      held = undefined
     },
     get params(): SyncParams {
       if (!params) throw new Error(`source ${name} has not started`)
@@ -928,6 +1054,24 @@ function expectedQuerySize(shape: Shape, model: Model): number {
   }
 }
 
+// A history that hangs fails as a counterexample, not as a test timeout.
+async function withDeadline(work: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`history did not settle within 10 s`)),
+          10_000,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function runHistory(
   shape: Shape,
   steps: ReadonlyArray<Step>,
@@ -942,7 +1086,12 @@ async function runHistory(
   // A pooled view ends for good when its source is cleaned up, and a later
   // mount gets a new view, so its histories do not restart.
   if (shape === `pooled-nested`) {
-    steps = steps.filter((step) => step.kind !== `restart`)
+    steps = steps.filter(
+      (step) =>
+        step.kind !== `restart` &&
+        step.kind !== `cleanup-hold` &&
+        step.kind !== `cleanup-settle`,
+    )
   }
   // Each event, with the status announced so far and the tree read then.
   type Event = {
@@ -956,6 +1105,13 @@ async function runHistory(
   let stop = () => {}
   // The Effect over A, how often it reported a source error, and A's
   // listener count just before it was created.
+  const pendingCleanups: Partial<Record<SourceName, Promise<void>>> = {}
+  const settleCleanups = async () => {
+    for (const name of [`A`, `B`] as const) {
+      sources[name].settleCleanup()
+      await pendingCleanups[name]
+    }
+  }
   let effect: ReturnType<typeof createEffect> | undefined
   let effectErrors: Array<Error> = []
   let listenersBeforeEffect = 0
@@ -1024,8 +1180,14 @@ async function runHistory(
                 model.sources[step.source].gate === `loading` ||
                 model.sources[step.source].reloading,
               open: model.sources[step.source].open !== null,
+              retired:
+                model.sources[step.source].cleaning ||
+                model.sources[step.source].gate === `cleaned-up`,
+              cleaning: model.sources[step.source].cleaning,
             }
           : undefined
+      const queryEndedBefore = model.queryEnded
+      const aCleaningBefore = model.sources.A.cleaning
       const expected = applyModel(shape, model, step)
       // The write tag the model gave this step, if it wrote.
       const tag = model.serial
@@ -1033,7 +1195,23 @@ async function runHistory(
       let thrown: unknown
       try {
         if (step.kind === `effect`) {
-          await mountEffect()
+          if (!aCleaningBefore) await mountEffect()
+        } else if (step.kind === `cleanup-hold`) {
+          if (shapeSources[shape].includes(step.source)) {
+            sources[step.source].holdCleanup()
+            pendingCleanups[step.source] ??= sources[step.source].collection
+              .cleanup({ dependents: true })
+              .finally(() => {
+                pendingCleanups[step.source] = undefined
+              })
+          }
+        } else if (step.kind === `cleanup-settle`) {
+          sources[step.source].settleCleanup()
+          await pendingCleanups[step.source]
+        } else if (step.kind === `reload-query` && queryEndedBefore) {
+          // Outside the grammar: the reload of a query a cleanup ended.
+        } else if (step.kind === `crash` && pre!.retired) {
+          // Outside the grammar: core crashes only a running Collection.
         } else if (step.kind === `reload-query`) {
           const reload = (query as { reload?: () => Promise<void> }).reload?.()
           if (query.status === `crashed`)
@@ -1041,6 +1219,7 @@ async function runHistory(
           else void reload?.catch(() => undefined)
           await flushPromises()
         } else if (step.kind === `restart`) {
+          await settleCleanups()
           // The app ends its readers before it cleans up their Collections.
           await effect?.dispose()
           await query.cleanup()
@@ -1054,15 +1233,16 @@ async function runHistory(
           const params = sources[step.source].params
           if (step.kind === `reload`) {
             // A reload settles only when its new run commits or fails; a
-            // crashed Collection rejects at once.
+            // crashed Collection, or one whose cleanup is pending, rejects at
+            // once.
             const reload = params.collection.reload()
-            if (params.collection.status === `crashed`)
+            if (params.collection.status === `crashed` || pre!.cleaning)
               thrown = await reload.catch((e: unknown) => e)
             else void reload.catch(() => undefined)
           } else if (step.kind === `reload-cleanup-fails`) {
             sources[step.source].failNextCleanup()
             const reload = params.collection.reload()
-            if (params.collection.status === `crashed`)
+            if (params.collection.status === `crashed` || pre!.cleaning)
               thrown = await reload.catch((e: unknown) => e)
             else {
               void reload.catch(() => undefined)
@@ -1159,9 +1339,9 @@ async function runHistory(
         !model.effect.live,
       )
       expect(effectErrors.length, `${label}: effect source errors`).toBe(
-        model.effect.live ? 0 : 1,
+        model.effect.errors,
       )
-      if (step.kind === `effect` && !model.effect.live) {
+      if (step.kind === `effect` && !aCleaningBefore && !model.effect.live) {
         expect(
           listenersOn(sources.A.collection),
           `${label}: listeners left by the ended effect`,
@@ -1200,7 +1380,12 @@ async function runHistory(
             ).toBe(`health`)
           }
         }
-        if (JSON.stringify(before) !== JSON.stringify(after)) {
+        // A query a cleanup ended announces nothing more; a read still
+        // shows the current tree.
+        if (
+          !model.queryEnded &&
+          JSON.stringify(before) !== JSON.stringify(after)
+        ) {
           expect(
             events.at(-1)?.tree,
             `${label}: last event is current`,
@@ -1211,6 +1396,7 @@ async function runHistory(
   } finally {
     console.error = consoleError
     stop()
+    await settleCleanups()
     await effect?.dispose()
     await query.cleanup()
     await inner?.cleanup({ dependents: true })
@@ -1244,6 +1430,51 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
+  'a reload rejects while adapter cleanup is pending, and starts fresh after it':
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`report`, `A`),
+      { kind: `cleanup-hold`, source: `A` },
+      on(`reload`, `A`),
+      { kind: `write`, source: `A`, key: 2 },
+      { kind: `cleanup-settle`, source: `A` },
+      on(`reload`, `A`),
+      on(`ready`, `A`),
+    ],
+  "cleanup keeps a failed first load's cause while the status shows it": [
+    on(`fail`, `A`),
+    { kind: `cleanup-hold`, source: `A` },
+    on(`report`, `A`),
+    { kind: `cleanup-settle`, source: `A` },
+  ],
+  'a cascade cleanup ends the Effect without a source error': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `cleanup-hold`, source: `A` },
+    { kind: `effect` },
+    { kind: `cleanup-settle`, source: `A` },
+    { kind: `effect` },
+    on(`ready`, `A`),
+  ],
+  "a crash during a reload keeps the rows as the adapter's baseline": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`reload`, `A`),
+    on(`crash`, `A`),
+    { kind: `write`, source: `A`, key: 1 },
+    { kind: `commit`, source: `A` },
+  ],
+  "a crash during a reload stops the reload's transaction replacing rows": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 3 },
+    { kind: `commit`, source: `A` },
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 2 },
+    on(`crash`, `A`),
+    { kind: `commit`, source: `A` },
+  ],
   "a query's reload replaces the rows its failed run left": [
     on(`ready`, `A`),
     on(`fail`, `B`),
@@ -1434,6 +1665,15 @@ describe(`source failure and health oracle`, () => {
     { weight: 1, arbitrary: fc.constant({ kind: `reload-query` } as const) },
     { weight: 1, arbitrary: fc.constant({ kind: `effect` } as const) },
     {
+      weight: 1,
+      arbitrary: fc
+        .tuple(
+          fc.constantFrom(`cleanup-hold` as const, `cleanup-settle` as const),
+          fc.constantFrom(`A` as const, `B` as const),
+        )
+        .map(([kind, source]): Step => ({ kind, source })),
+    },
+    {
       weight: 6,
       arbitrary: fc
         .tuple(
@@ -1457,7 +1697,7 @@ describe(`source failure and health oracle`, () => {
     oraclePropertyOptions(60, `source-health.history`),
   )(
     `generated histories refine the model`,
-    (shape, steps) => runHistory(shape, steps),
+    (shape, steps) => withDeadline(runHistory(shape, steps)),
     120_000,
   )
 })
