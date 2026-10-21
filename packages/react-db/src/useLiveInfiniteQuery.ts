@@ -91,7 +91,7 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   isIdle: boolean
   /** The first load failed: there is nothing to show. */
   isLoadingError: boolean
-  /** Local storage or an invariant broke; recovery is a new Collection. */
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: boolean
   isCleanedUp: boolean
   /** The data is shown, and a sync problem or failed page load is in `errors`. */

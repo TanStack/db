@@ -61,7 +61,7 @@ export interface UseLiveQueryFlags {
   isIdle: ComputedRef<boolean>
   /** The first load failed: there is nothing to show. */
   isLoadingError: ComputedRef<boolean>
-  /** Local storage or an invariant broke; recovery is a new Collection. */
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
   /** The data is shown, and a sync problem or failed request is in `errors`. */

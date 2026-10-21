@@ -211,6 +211,15 @@ let effectCounter = 0
  * await effect.dispose()
  * ```
  */
+/** The error that ends an Effect whose source crashed or failed its first load. */
+function stoppedSourceError(collectionId: string, status: CollectionStatus) {
+  return new Error(
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Source collection '${collectionId}' entered ${status} state`
+      : codedMessage(135, { collectionId, status }),
+  )
+}
+
 export function createEffect<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -638,6 +647,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         else this.handleSourceChanges(sourceId, changes)
       }
 
+      // A source that stopped before this Effect sends no status change. End
+      // the Effect before any subscription or load reaches that source.
+      if (collection.status === `crashed` || collection.status === `error`) {
+        this.onSourceError(stoppedSourceError(collectionId, collection.status))
+        this.starting = false
+        return
+      }
+
       // Subscribe to source changes
       const subscription = collection.subscribeChanges(changeCallback, {
         ...this.buildSubscriptionOptions(
@@ -764,13 +781,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           status === `crashed` ||
           (status === `error` && !this.reachedReady)
         ) {
-          this.onSourceError(
-            new Error(
-              devBuild() && process.env.NODE_ENV !== `production`
-                ? `Source collection '${collectionId}' entered ${status} state`
-                : codedMessage(135, { collectionId, status }),
-            ),
-          )
+          this.onSourceError(stoppedSourceError(collectionId, status))
           return
         }
 
@@ -795,9 +806,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         handleSourceStatus(status),
       )
       this.unsubscribeCallbacks.add(statusUnsubscribe)
-      // A source that stopped before this subscription sends no status change.
-      if (collection.status === `crashed` || collection.status === `error`)
-        handleSourceStatus(collection.status)
       this.unsubscribeCallbacks.add(
         collection.on(`errors:change`, () => this.reportErrors()),
       )

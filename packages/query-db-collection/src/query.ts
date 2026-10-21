@@ -1275,7 +1275,14 @@ export function queryCollectionOptions(
     const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
     const retainedQueriesPendingRevalidation = new Set<string>()
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
-    let errorRevision = 0
+    // Per Query: a result application that started before that Query's
+    // latest failure does not establish its recovery.
+    const errorRevisions = new Map<string, number>()
+    const errorRevisionOf = (hashedQueryKey: string) =>
+      errorRevisions.get(hashedQueryKey) ?? 0
+    const bumpErrorRevision = (hashedQueryKey: string) => {
+      errorRevisions.set(hashedQueryKey, errorRevisionOf(hashedQueryKey) + 1)
+    }
     const failedResultApplications = new Map<string, unknown>()
     // A failed fetch or result application after Collection readiness is a
     // failureReason, since TanStack Query fetches again. It clears once no
@@ -2892,7 +2899,10 @@ export function queryCollectionOptions(
           if (finish()) {
             failedResultApplications.delete(hashedQueryKey)
             // Applying cached data during a fetch does not establish recovery.
-            if (!isFetching && applicationErrorRevision === errorRevision) {
+            if (
+              !isFetching &&
+              applicationErrorRevision === errorRevisionOf(hashedQueryKey)
+            ) {
               reportRecovered(hashedQueryKey)
             }
           }
@@ -2900,7 +2910,7 @@ export function queryCollectionOptions(
         (error) => {
           if (!finish()) return
           failedResultApplications.set(hashedQueryKey, error)
-          errorRevision++
+          bumpErrorRevision(hashedQueryKey)
           console.error(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
@@ -2919,7 +2929,7 @@ export function queryCollectionOptions(
       ) => true | Promise<void>,
     ): void => {
       invalidatePendingResultApplication(hashedQueryKey)
-      const currentErrorRevision = errorRevision
+      const currentErrorRevision = errorRevisionOf(hashedQueryKey)
       const controller: ResultApplicationController = new AbortController()
       let settleRefetchAtFetchBoundary = () => {}
       const fetchBoundary = new Promise<void>((resolve) => {
@@ -2944,7 +2954,10 @@ export function queryCollectionOptions(
           )
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
-          if (!result.isFetching && currentErrorRevision === errorRevision) {
+          if (
+            !result.isFetching &&
+            currentErrorRevision === errorRevisionOf(hashedQueryKey)
+          ) {
             reportRecovered(hashedQueryKey)
           }
         }
@@ -3262,7 +3275,7 @@ export function queryCollectionOptions(
             if (observedQuery) {
               observedErrorUpdates.set(observedQuery, result.errorUpdateCount)
             }
-            errorRevision++
+            bumpErrorRevision(hashedQueryKey)
           }
 
           console.error(
@@ -3492,6 +3505,7 @@ export function queryCollectionOptions(
       if (query?.state.fetchStatus !== `fetching`)
         fetchStartGenerations.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
+      errorRevisions.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
     }
@@ -3564,6 +3578,7 @@ export function queryCollectionOptions(
         if (observer?.getCurrentQuery().state.fetchStatus !== `fetching`)
           fetchStartGenerations.delete(hashedQueryKey)
         hashToQueryKey.delete(hashedQueryKey)
+        errorRevisions.delete(hashedQueryKey)
         queryRefCounts.set(hashedQueryKey, 0)
         return
       }

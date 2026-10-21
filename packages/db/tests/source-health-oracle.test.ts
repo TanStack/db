@@ -1308,8 +1308,9 @@ describe(`reload invariant`, () => {
   // Cleanup start drops the discarded run's problems while the status waits
   // for adapter cleanup. Every change to the tree is announced, so the drop
   // is too: the last errors:change before the status change shows no
-  // problem. A crash's cause stays until the status leaves `crashed`.
-  it.each([`report`, `fail`, `crash`] as const)(
+  // problem. The cause of a `crashed` or `error` status stays while that
+  // status shows.
+  it.each([`report`, `fail`, `crash`, `first-load-error`] as const)(
     `announces the problems that cleanup start drops: %s`,
     async (problem) => {
       const adapterCleanup = createDeferred<void>()
@@ -1321,21 +1322,34 @@ describe(`reload invariant`, () => {
         sync: {
           sync: (next) => {
             params = next
-            next.markReady()
+            if (problem === `first-load-error`)
+              next.fail(new Error(`first load failed`))
+            else next.markReady()
             return () => adapterCleanup.promise
           },
         },
       })
-      await collection.preload()
+      await collection.preload().catch(() => undefined)
       if (problem === `report`) params.reportError(new Error(`stalled`))
       else if (problem === `fail`) params.fail(new Error(`stopped`))
-      else collection._lifecycle.crash(new Error(`crashed`))
+      else if (problem === `crash`)
+        collection._lifecycle.crash(new Error(`crashed`))
       const announced: Array<ErrorTreeNode> = []
       collection.on(`errors:change`, () => announced.push(collection.errors))
       const cleaned = collection.cleanup()
-      expect(collection.status).toBe(problem === `crash` ? `crashed` : `ready`)
-      if (problem === `crash`) {
-        expect(collection.errors.error?.message).toBe(`crashed`)
+      // A status's own cause stays while that status shows.
+      const keepsCause = problem === `crash` || problem === `first-load-error`
+      expect(collection.status).toBe(
+        problem === `crash`
+          ? `crashed`
+          : problem === `first-load-error`
+            ? `error`
+            : `ready`,
+      )
+      if (keepsCause) {
+        expect(collection.errors.error?.message).toBe(
+          problem === `crash` ? `crashed` : `first load failed`,
+        )
         expect(announced).toEqual([])
       } else {
         expect(collection.errors.hasErrors).toBe(false)
@@ -1344,8 +1358,10 @@ describe(`reload invariant`, () => {
       adapterCleanup.resolve()
       await cleaned
       expect(collection.status).toBe(`cleaned-up`)
+      expect(collection.errors.hasErrors).toBe(false)
     },
   )
+
 
   // A ready callback that throws reaches the adapter's markReady(), on a
   // start and on a reload alike. The reload itself succeeded once the status
@@ -1392,24 +1408,40 @@ describe(`reload invariant`, () => {
 
   // A reload whose new run fails keeps the rows, so they stay the baseline
   // that a diffing adapter, such as query-db, reads for its next write.
-  it(`keeps the rows as the baseline after the reload's new run fails`, async () => {
-    const source = createSource(`A`)
-    source.collection.startSyncImmediate()
-    source.params.begin()
-    source.params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
-    source.params.commit()
-    source.params.markReady()
-    const reload = source.collection.reload().catch(() => undefined)
-    source.params.fail(new Error(`reload failed`))
-    await reload
-    const baseline = [
-      ...source.params.collection._state.acceptedSyncedEntries(),
-    ]
-    expect(baseline.map(([key]) => key)).toEqual([1])
-    expect([...source.collection.keys()]).toEqual([1])
-    expect(source.collection.errors.error?.message).toBe(`reload failed`)
-    await source.collection.cleanup()
-  })
+  // A transaction the new run opened before it failed is no longer the
+  // reload's replacement: when it commits, its writes apply on the kept rows.
+  it.each([`no open transaction`, `an open transaction`] as const)(
+    `keeps the rows as the baseline after the reload's new run fails with %s`,
+    async (open) => {
+      const source = createSource(`A`)
+      source.collection.startSyncImmediate()
+      source.params.begin()
+      source.params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+      source.params.commit()
+      source.params.markReady()
+      const reload = source.collection.reload().catch(() => undefined)
+      if (open === `an open transaction`) {
+        source.params.begin()
+        source.params.write({ type: `insert`, value: { id: 2, parentId: 2 } })
+      }
+      source.params.fail(new Error(`reload failed`))
+      await reload
+      const baseline = [
+        ...source.params.collection._state.acceptedSyncedEntries(),
+      ]
+      expect(baseline.map(([key]) => key)).toEqual(
+        open === `an open transaction` ? [1, 2] : [1],
+      )
+      expect([...source.collection.keys()]).toEqual([1])
+      if (open === `an open transaction`) {
+        await source.params.commit()
+        expect([...source.collection.keys()].sort()).toEqual([1, 2])
+      }
+      expect(source.collection.status).toBe(`ready`)
+      expect(source.collection.errors.error?.message).toBe(`reload failed`)
+      await source.collection.cleanup()
+    },
+  )
 
   // The oracle's driver writes one row key, so it cannot see rows that a
   // reload failed to replace. This witness writes a new key in the new run.
@@ -1473,7 +1505,8 @@ describe(`reload invariant`, () => {
 describe(`request errors`, () => {
   function createRequestHistory() {
     let parentParams!: SyncParams
-    const outcomes: Array<`ok` | `fail`> = []
+    const outcomes: Array<`ok` | `fail` | `hold`> = []
+    const held: Array<ReturnType<typeof createDeferred<void>>> = []
     const parents = createCollection<Row, number>({
       id: `health-request-parents-${Math.random().toString(36).slice(2)}`,
       getKey: (row) => row.id,
@@ -1495,6 +1528,11 @@ describe(`request errors`, () => {
           return {
             loadSubset: (_options: LoadSubsetOptions) => {
               const outcome = outcomes.shift() ?? `ok`
+              if (outcome === `hold`) {
+                const load = createDeferred<void>()
+                held.push(load)
+                return load.promise
+              }
               return outcome === `ok`
                 ? Promise.resolve()
                 : Promise.reject(new Error(`child load failed`))
@@ -1516,7 +1554,15 @@ describe(`request errors`, () => {
       parentParams.commit()
     }
     const markParentsReady = () => parentParams.markReady()
-    return { parents, children, query, outcomes, writeParent, markParentsReady }
+    return {
+      parents,
+      children,
+      query,
+      outcomes,
+      held,
+      writeParent,
+      markParentsReady,
+    }
   }
 
   async function withHistory(
@@ -1621,6 +1667,36 @@ describe(`request errors`, () => {
         },
       ),
   )
+
+  // A replay clears only what failed before it started (as LoadOrder does
+  // for root loads): a demand that fails while the replay is in flight keeps
+  // its error when the replay succeeds. The replay holds that failure with
+  // its publication, so it shows once the replay settles.
+  it(`a source reload's replay keeps a request error that failed after it started`, () =>
+    withHistory(
+      async ({ query, children, outcomes, held, writeParent, markParentsReady }) => {
+        const preload = query.preload()
+        writeParent(`insert`, 1)
+        markParentsReady()
+        await preload
+
+        outcomes.push(`hold`)
+        const reload = children.reload()
+        await flushPromises()
+        expect(held, `the replay is in flight`).toHaveLength(1)
+
+        outcomes.push(`fail`)
+        writeParent(`insert`, 2)
+        await flushPromises()
+
+        held[0]!.resolve()
+        await reload
+        await flushPromises()
+        expect(query.errors.error, `the later failure stays`).toMatchObject({
+          message: `child load failed`,
+        })
+      },
+    ))
 
   it(`a failed load before initial-query readiness fails the query's sync run`, () =>
     withHistory(async ({ query, outcomes, writeParent, markParentsReady }) => {
@@ -2620,21 +2696,38 @@ describe(`effect over a source that already stopped`, () => {
   )
 
   it.each(histories)(`%j`, async ({ status, skipInitial }) => {
+    let loads = 0
     const source = createCollection<Row, number>({
       id: `health-effect-stopped-${Math.random().toString(36).slice(2)}`,
       getKey: (row) => row.id,
       gcTime: 0,
       startSync: true,
+      syncMode: `on-demand`,
       sync: {
         sync: (params) => {
           if (status === `error`) params.fail(new Error(`first load failed`))
           else params.markReady()
+          return {
+            loadSubset: () => {
+              loads++
+              return true
+            },
+          }
         },
       },
     })
     await source.preload().catch(() => undefined)
     if (status === `crashed`) source._lifecycle.crash(new Error(`crashed`))
     expect(source.status).toBe(status)
+    const listeners = () =>
+      [
+        ...(
+          source as unknown as {
+            _events: { listeners: Map<string, Map<unknown, unknown>> }
+          }
+        )._events.listeners.values(),
+      ].reduce((sum, set) => sum + set.size, 0)
+    const listenersBefore = listeners()
     const sourceErrors: Array<Error> = []
     const trees: Array<ErrorTreeNode> = []
     const consoleError = console.error
@@ -2651,6 +2744,11 @@ describe(`effect over a source that already stopped`, () => {
       expect(effect.disposed).toBe(true)
       expect(sourceErrors).toHaveLength(1)
       expect(trees).toEqual([])
+      // It ends before any subscription or load reaches the source, and it
+      // leaves no listener on it.
+      expect(loads, `loads issued to the stopped source`).toBe(0)
+      expect(source.subscriberCount).toBe(0)
+      expect(listeners(), `listeners left on the source`).toBe(listenersBefore)
     } finally {
       console.error = consoleError
       await effect.dispose()

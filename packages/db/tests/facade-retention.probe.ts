@@ -27,7 +27,6 @@ function capture(
     [
       {
         edgeId: `children`,
-        sourceIds: [],
         rows,
         activeBuckets,
         hasOrderBy: false,

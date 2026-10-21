@@ -70,7 +70,6 @@ describe(`BucketFacadeAdapter`, () => {
         [
           {
             edgeId: `children`,
-            sourceIds: [],
             rows,
             activeBuckets,
             hasOrderBy: false,
@@ -134,7 +133,6 @@ describe(`BucketFacadeAdapter`, () => {
         [
           {
             edgeId: `children`,
-            sourceIds: [],
             rows,
             activeBuckets,
             hasOrderBy: ordered,
@@ -221,7 +219,6 @@ describe(`BucketFacadeAdapter`, () => {
       [
         {
           edgeId: `children`,
-          sourceIds: [],
           rows,
           activeBuckets,
           hasOrderBy: true,
@@ -275,7 +272,6 @@ describe(`BucketFacadeAdapter`, () => {
       [
         {
           edgeId: `children`,
-          sourceIds: [],
           rows,
           activeBuckets,
           hasOrderBy: true,
@@ -443,14 +439,12 @@ describe(`BucketFacadeAdapter`, () => {
       [
         {
           edgeId: `first`,
-          sourceIds: [],
           rows: firstRows,
           activeBuckets: firstActiveBuckets,
           hasOrderBy: false,
         },
         {
           edgeId: `second`,
-          sourceIds: [],
           rows: secondRows,
           activeBuckets: secondActiveBuckets,
           hasOrderBy: false,
@@ -546,7 +540,6 @@ describe(`BucketFacadeAdapter`, () => {
       [
         {
           edgeId: `children`,
-          sourceIds: [],
           rows,
           activeBuckets,
           hasOrderBy: false,

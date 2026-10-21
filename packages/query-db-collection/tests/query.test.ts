@@ -11894,4 +11894,76 @@ describe(`failureReason follows the still-failing Queries`, () => {
       }
     },
   )
+
+  // A recovered Query's result can apply late, behind a persisting write.
+  // Another Query failing meanwhile does not keep the recovered one listed:
+  // only a newer failure of the same Query does.
+  it(`a late recovery still counts when another Query fails meanwhile`, async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    const failing = new Set<number>()
+    const persisting = createDeferred<void>()
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `failing-queries-late-recovery`,
+        queryKey: [`failing-queries-late-recovery`],
+        queryClient: client,
+        getKey: (row: { id: number }) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        queryFn: (ctx): Promise<Array<{ id: number }>> => {
+          const limit = (
+            ctx.meta?.loadSubsetOptions as { limit?: number } | undefined
+          )?.limit
+          return failing.has(limit!)
+            ? Promise.reject(new Error(`subset ${limit} failed`))
+            : Promise.resolve([{ id: limit! }])
+        },
+        onInsert: () => persisting.promise,
+      }),
+    )
+    const consoleError = vi
+      .spyOn(console, `error`)
+      .mockImplementation(() => {})
+    const refetch = async (limit: number) => {
+      const query = client
+        .getQueryCache()
+        .findAll()
+        .find(
+          (q) =>
+            (q.meta?.loadSubsetOptions as { limit?: number } | undefined)
+              ?.limit === limit,
+        )!
+      await query.fetch().catch(() => undefined)
+      await flushPromises()
+    }
+    const shown = () => collection.errors.failureReason?.message ?? null
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      await collection._sync.loadSubset({ limit: 2 })
+      await flushPromises()
+      failing.add(1)
+      await refetch(1)
+      expect(shown()).toBe(`subset 1 failed`)
+      // Query 1 recovers while a write persists, so its result waits.
+      const write = collection.insert({ id: 100 })
+      failing.delete(1)
+      await refetch(1)
+      failing.add(2)
+      await refetch(2)
+      persisting.resolve()
+      await write.isPersisted.promise
+      await flushPromises()
+      expect(shown(), `query 2 still fails`).toBe(`subset 2 failed`)
+      failing.delete(2)
+      await refetch(2)
+      expect(shown(), `after both recover`).toBeNull()
+    } finally {
+      persisting.resolve()
+      consoleError.mockRestore()
+      await collection.cleanup()
+      client.clear()
+    }
+  })
 })

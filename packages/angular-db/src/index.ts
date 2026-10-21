@@ -50,7 +50,7 @@ export interface InjectLiveQueryFlags {
   isIdle: Signal<boolean>
   /** The first load failed: there is nothing to show. */
   isLoadingError: Signal<boolean>
-  /** Local storage or an invariant broke; recovery is a new Collection. */
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: Signal<boolean>
   /** A signal indicating whether the collection has been cleaned up */
   isCleanedUp: Signal<boolean>

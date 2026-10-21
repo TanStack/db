@@ -235,7 +235,7 @@ function TaskList() {
 | `loading` | `isLoading` | The first data is on its way. | Show a placeholder. |
 | `ready` | `isReady` | The data can be shown. | Show it. Check `isSyncError` for a banner. |
 | `error` | `isLoadingError` | The first load failed. There is nothing to show. | Show a failure screen and offer `reload()`. |
-| `crashed` | `isCrashed` | Local storage broke. This Collection cannot be used again. | Recreate the Collection (see [When a Collection crashes](#when-a-collection-crashes)). |
+| `crashed` | `isCrashed` | Local storage broke. Nothing recovers it in place. | Clean it up with its dependents and start it again (see [When a Collection crashes](#when-a-collection-crashes)). |
 | `cleaned-up` | `isCleanedUp` | The Collection was cleaned up. | Nothing. |
 
 Two rules make `status` predictable:
@@ -897,7 +897,7 @@ await collection.cleanup() // Resolves successfully
 To retry a failed first load or a stopped sync, call `reload()` on the
 Collection or on the live query that reads it. See [Reloading](#reloading). A
 crashed Collection cannot reload; clean it up with `{ dependents: true }` and
-create a new one. See [When a Collection crashes](#when-a-collection-crashes).
+start it again. See [When a Collection crashes](#when-a-collection-crashes).
 
 ### Graceful Degradation
 

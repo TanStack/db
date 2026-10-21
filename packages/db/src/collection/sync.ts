@@ -384,9 +384,21 @@ export class CollectionSyncManager<
           },
           fail: (error: unknown) => {
             if (!isCurrentSync()) return
+            const reloading = this.lifecycle.reloading
             this.lifecycle.fail(error)
             // The reload ended without a commit, so its rows stay the baseline.
             this.state.reloadTruncatePending = false
+            // A transaction it opened no longer replaces them: its writes
+            // apply on the kept rows.
+            const open = this.state.pendingSyncedTransactions.find(
+              (transaction) =>
+                transaction === this.reloadTruncateTransaction &&
+                !transaction.committed,
+            )
+            if (reloading && open) {
+              open.truncate = false
+              this.state.refreshPendingSyncedProjection()
+            }
           },
           reportError: (error: unknown) => {
             if (isCurrentSync()) this.lifecycle.reportError(error)
