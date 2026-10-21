@@ -498,7 +498,6 @@ export class CollectionConfigBuilder<
     }))
   }
 
-
   settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
@@ -1032,13 +1031,9 @@ export class CollectionConfigBuilder<
     // and pays for no facade state.
     const facadeCompilations = this.bucketFacadesCache
     const bucketFacades = facadeCompilations
-      ? new BucketFacadeAdapter(
-          this.id,
-          facadeCompilations,
-          (count) => {
-            syncState.messagesCount += count
-          },
-        )
+      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
+          syncState.messagesCount += count
+        })
       : undefined
     if (bucketFacades) {
       syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
