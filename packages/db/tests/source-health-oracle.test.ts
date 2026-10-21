@@ -17,7 +17,9 @@
  *   status and the rows do not change. A node shows at most one problem, and
  *   nothing clears an `error` within a sync run. Once the adapter called
  *   `fail()`, every later report from it is a contract violation that throws.
- *   After a crash, adapter calls do nothing: core ended the run.
+ *   After a crash, the adapter's status calls do nothing: core ended the
+ *   run. Sync data the run commits still applies, as closure keeps accepted
+ *   sync obligations.
  *
  * A live query exposes both axes for everything it depends on through
  * `collection.errors`: one node for itself and one per source alias in query
@@ -49,15 +51,24 @@
  *
  * The model keeps, for each Collection, its status and its problem after
  * readiness (none, a failure reason, or an error), with a serial for each
- * reported problem. It derives
- * each live query's gate from its Collections, using only the rules above,
- * and builds the expected tree from those facts. It does not read production
- * state.
+ * reported problem. It also keeps the Collection's rows (key and the tag of
+ * the write that produced each), the sync run's open transaction, and
+ * whether a reload's replacement is armed. A reload's first transaction
+ * replaces every row; until the run begins it, a diffing adapter reads no
+ * rows to diff against. A reload that fails before its first commit keeps
+ * the rows, and a transaction it began no longer replaces them. A crash ends
+ * the status calls, but data the run commits still applies. It derives each
+ * live query's gate from its Collections, using only the rules above, and
+ * the Effect's state from A: its gate is A's readiness, and a crash, or a
+ * failed first load before the gate, ends it. It builds the expected tree
+ * and rows from those facts. It does not read production state.
  *
  * ## The history grammar
  *
- * Steps act on Collection `A` or `B`: `ready` writes the Collection's row and calls
- * `markReady()`; `fail` calls `fail()`; `report` calls `reportError()`;
+ * Steps act on Collection `A` or `B`: `ready` writes row 1 during a first
+ * load or a reload, commits, and calls `markReady()`; `write` adds row 1, 2,
+ * or 3 to the run's open transaction, beginning one if none is open;
+ * `commit` commits it; `fail` calls `fail()`; `report` calls `reportError()`;
  * `healthy` calls `reportHealthy()`; `crash` crashes the Collection through
  * its lifecycle, as a crash cause would; `reload` calls `collection.reload()`.
  * A reload keeps the rows, status, and shown problem, and marks the node
@@ -66,9 +77,12 @@
  * reload of a crashed Collection rejects. `reload-cleanup-fails` reloads while
  * the retired run's cleanup rejects: that breaks the adapter contract, so the
  * Collection crashes and the reload ends with it, unless a reload is already in
- * flight and nothing is retired. `cancel` begins, writes, and commits with an
- * aborted signal: nothing changes, and a reload's truncate waits for the run's
- * next commit. A query whose first load failed stays in `error` until its
+ * flight and nothing is retired. `cancel` commits the open transaction (or a
+ * new one) with an aborted signal: its writes are gone, and a reload's
+ * replacement waits for the run's next transaction. The driver writes like
+ * a diffing adapter: an insert for a key missing from the baseline and an
+ * update for a key it has. `effect` disposes the Effect over A and creates a
+ * new one. A query whose first load failed stays in `error` until its
  * own reload: `reload-query` calls the observed query's `reload()`, which
  * reloads every Collection below it that shows an error, through a nested
  * live query, and then the query itself. `restart` cleans up the
@@ -83,8 +97,11 @@
  * ## The comparison
  *
  * After every step the driver compares, with the model: the query's status,
- * its row count while ready, the full projected error tree, and the thrown
- * error class. It also checks identity: reading twice gives the same tree,
+ * each Collection's rows and tags, the baseline a diffing adapter reads, the
+ * query's row count while ready, whether the Effect ended and how often it
+ * reported a source error, the full projected error tree, and the thrown
+ * error class. An Effect that ends as it is created leaves A's listener count
+ * where it was. It also checks identity: reading twice gives the same tree,
  * and between steps a node is the same object exactly when its expected
  * facts, including problem serials, did not change. At every event it checks
  * that no `errors:change` shows a status that `status:change` has not
@@ -130,7 +147,9 @@ import type {
   SyncConfig,
 } from '../src/types.js'
 
-type Row = { id: number; parentId: number }
+// `tag` names the write that produced a row, so a read shows which write
+// (and so which sync run) the row came from.
+type Row = { id: number; parentId: number; tag?: number }
 type SyncParams = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 type SourceName = `A` | `B`
 type Shape =
@@ -148,8 +167,15 @@ type Step =
         | `cancel`
       source: SourceName
     }
+  // `write` adds a row to the sync run's open transaction, beginning one if
+  // none is open; `commit` commits it (an empty transaction when none is
+  // open). The transaction stays open across other steps.
+  | { kind: `write`; source: SourceName; key: RowKey }
+  | { kind: `commit`; source: SourceName }
   | { kind: `restart` }
   | { kind: `reload-query` }
+  // `effect` disposes the Effect over A and creates a new one.
+  | { kind: `effect` }
 
 // ---------------------------------------------------------------------------
 // Independent model
@@ -168,10 +194,17 @@ type GateModel = { gate: Gate; cause: string | null; reloading: boolean }
 // run's error still shows.
 // `failureFromReload`: the new run reported `failure` itself, so its first
 // commit keeps it.
+// `rows` are the applied synced rows; `open` is the run's open transaction.
+// `armed`: a reload started and its run has not begun a transaction yet, so
+// the next transaction it begins replaces every row, and until then a diffing
+// adapter sees no rows to diff against.
 type SourceModel = GateModel & {
   failure: Problem
   stopped: Problem
   failureFromReload: boolean
+  rows: Rows
+  open: OpenTransaction | null
+  armed: boolean
 }
 // A query's reload() reloads the Collections below it that show an error,
 // then reloads the query itself once they all settle, unless one failed.
@@ -180,12 +213,78 @@ type PendingSelfReload = {
   waits: Set<SourceName | `inner`>
   failed: boolean
 }
+type RowKey = 1 | 2 | 3
+// Synced rows by key, each with the tag of the write that produced it.
+type Rows = Map<number, number>
+// A sync transaction the run has begun and not committed. `truncate`: the
+// transaction is a reload's first, so its commit replaces every row.
+type OpenTransaction = { writes: Rows; truncate: boolean }
 type Model = {
   sources: Record<SourceName, SourceModel>
   query: GateModel
   inner: GateModel
   serial: number
   selfReloads: Array<PendingSelfReload>
+  effect: EffectModel
+}
+
+// An Effect over A. It reaches its gate when A is ready. A crash of A ends
+// it at any time, and a failed first load of A ends it before its gate,
+// including one that A already showed when the Effect was created. After
+// its gate, every other problem of A is error tree detail. `live`: it has
+// not ended.
+type EffectModel = { live: boolean; gate: boolean }
+
+function deriveEffect(model: Model): void {
+  const { effect } = model
+  const A = model.sources.A
+  if (!effect.live) return
+  if (A.gate === `crashed` || (A.gate === `error` && !effect.gate))
+    effect.live = false
+  else if (A.gate === `ready`) effect.gate = true
+}
+
+// The rows a diffing adapter reads to choose between insert and update: the
+// applied rows with the open transaction's writes on top, or only the open
+// transaction's writes when it replaces every row, or none while a reload's
+// replacement has not begun.
+function expectedBaseline(source: SourceModel): Rows {
+  if (source.armed) return new Map()
+  if (source.open?.truncate) return new Map(source.open.writes)
+  return new Map([...source.rows, ...(source.open?.writes ?? [])])
+}
+
+// The run begins a transaction. A reload's run replaces every row with its
+// first transaction.
+function openTransaction(source: SourceModel): OpenTransaction {
+  if (!source.open) {
+    source.open = { writes: new Map(), truncate: source.armed }
+    source.armed = false
+  }
+  return source.open
+}
+
+// A reload completes at its first commit when the Collection is ready, and
+// at markReady() when its first load failed: the node drops the retired
+// run's problems.
+function completeReload(source: SourceModel): void {
+  source.reloading = false
+  source.gate = `ready`
+  source.cause = null
+  if (!source.failureFromReload) source.failure = null
+  source.failureFromReload = false
+  source.stopped = null
+}
+
+// Commit the open transaction: a reload's first one replaces every row.
+function commitOpen(source: SourceModel): void {
+  const { writes, truncate } = openTransaction(source)
+  source.rows = truncate
+    ? new Map(writes)
+    : new Map([...source.rows, ...writes])
+  source.open = null
+  if (truncate && source.reloading && source.gate === `ready`)
+    completeReload(source)
 }
 
 const shapeSources: Record<Shape, ReadonlyArray<SourceName>> = {
@@ -205,6 +304,9 @@ function freshModel(): Model {
     failure: null,
     stopped: null,
     failureFromReload: false,
+    rows: new Map(),
+    open: null,
+    armed: false,
   })
   return {
     sources: { A: source(), B: source() },
@@ -212,6 +314,7 @@ function freshModel(): Model {
     inner: { gate: `loading`, cause: null, reloading: false },
     serial: 0,
     selfReloads: [],
+    effect: { live: true, gate: false },
   }
 }
 
@@ -267,6 +370,11 @@ function applyModel(
     Object.assign(model, freshModel())
     return `ok`
   }
+  if (step.kind === `effect`) {
+    model.effect = { live: true, gate: false }
+    deriveEffect(model)
+    return `ok`
+  }
   if (step.kind === `reload-query`) {
     // A pooled view has no reload of its own.
     if (shape === `pooled-nested`) return `ok`
@@ -277,7 +385,13 @@ function applyModel(
       const source = model.sources[name]
       return source.gate === `error` || source.stopped !== null
     })
-    for (const name of reloaded) model.sources[name].reloading = true
+    for (const name of reloaded) {
+      const source = model.sources[name]
+      if (source.reloading) continue
+      source.reloading = true
+      source.armed = true
+      source.open = null
+    }
     if (shape === `nested`) {
       // The outer query reloads the inner query when A shows an error; the
       // inner query reloads A, then itself.
@@ -305,50 +419,75 @@ function applyModel(
     }
     deriveQueries(shape, model)
     settleSelfReloads(shape, model)
+    deriveEffect(model)
     return `ok`
   }
   // A step on a source this shape does not read has no effect.
   if (!shapeSources[shape].includes(step.source)) return `ok`
   const source = model.sources[step.source]
   let outcome: `ok` | `throws` | `bad-transition` = `ok`
-  // After a crash, adapter calls do nothing and a reload rejects. After
+  // After a crash, status calls do nothing and a reload rejects. After
   // fail(), adapter calls throw until a reload starts a new sync run.
   const stopped =
     !source.reloading && (source.gate === `error` || source.stopped !== null)
   if (step.kind !== `crash` && source.gate === `crashed`) {
+    // A crash ends the status calls. Data the run commits still applies:
+    // closure keeps accepted sync obligations, such as the confirmation of
+    // a write admitted before it (the IndexedDB retirement oracle owns that
+    // law).
+    if (step.kind === `write`)
+      openTransaction(source).writes.set(step.key, ++model.serial)
+    if (step.kind === `commit`) commitOpen(source)
+    if (step.kind === `cancel`) source.open = null
     deriveQueries(shape, model)
+    deriveEffect(model)
     return step.kind === `reload` || step.kind === `reload-cleanup-fails`
       ? `throws`
       : outcome
   }
   switch (step.kind) {
     case `ready`:
-      if (source.reloading) {
-        // The new run's first commit replaces the rows and clears the
-        // retired run's problems from the node.
-        source.reloading = false
-        source.gate = `ready`
-        source.cause = null
-        if (!source.failureFromReload) source.failure = null
-        source.failureFromReload = false
-        source.stopped = null
-      } else if (source.gate === `error`) outcome = `bad-transition`
+      // During a first load or a reload, the run writes row 1 and commits
+      // before markReady(), as a first load does.
+      if (source.gate === `loading` || source.reloading) {
+        openTransaction(source).writes.set(1, ++model.serial)
+        commitOpen(source)
+      }
+      if (source.reloading) completeReload(source)
+      else if (source.gate === `error`) outcome = `bad-transition`
       else if (stopped) outcome = `throws`
       else source.gate = `ready`
       break
+    case `write`:
+      openTransaction(source).writes.set(step.key, ++model.serial)
+      break
+    case `commit`:
+      commitOpen(source)
+      break
     case `reload`:
-      // Everything visible stays until the new run commits or fails.
-      source.reloading = true
+      // Everything visible stays until the new run commits or fails. The
+      // retired run's open transaction is dropped.
+      if (!source.reloading) {
+        source.reloading = true
+        source.armed = true
+        source.open = null
+      }
       break
-    case `cancel`:
-      // A commit canceled by its signal never happened: nothing changes,
-      // and a reload's truncate waits for the run's next commit.
+    case `cancel`: {
+      // A commit canceled by its signal never happened: its writes are gone,
+      // and a reload's replacement waits for the run's next transaction.
+      const canceled = openTransaction(source)
+      if (canceled.truncate && source.reloading) source.armed = true
+      source.open = null
       break
+    }
     case `reload-cleanup-fails`:
       // A reload in flight returns its promise and retires nothing.
       if (source.reloading) break
       // The retired run's cleanup rejecting breaks the adapter contract:
-      // the Collection crashes and the reload ends with it.
+      // the Collection crashes and the reload ends with it. The reload
+      // already dropped the retired run's open transaction.
+      source.open = null
       source.gate = `crashed`
       source.cause = `${step.source} cleanup failed`
       source.failure = null
@@ -359,7 +498,17 @@ function applyModel(
       // Before Collection readiness the first load fails; after it, the
       // rows stay and the node shows the error.
       if (stopped) outcome = `throws`
-      else if (source.gate !== `ready`) {
+      else {
+        // A reload that fails before its first commit keeps the rows: they
+        // stay the baseline, and a transaction it began no longer replaces
+        // them.
+        if (source.reloading) {
+          source.armed = false
+          if (source.open) source.open.truncate = false
+        }
+      }
+      if (outcome === `throws`) break
+      if (source.gate !== `ready`) {
         source.gate = `error`
         source.cause = `${step.source} gave up`
         source.reloading = false
@@ -402,6 +551,7 @@ function applyModel(
   }
   deriveQueries(shape, model)
   settleSelfReloads(shape, model)
+  deriveEffect(model)
   return outcome
 }
 
@@ -742,6 +892,42 @@ function expectIdentity(
   )
 }
 
+// A diffing adapter writes an insert for a key missing from its baseline and
+// an update for a key it has, so a wrong baseline throws or loses rows.
+function writeDiffing(params: SyncParams, key: number, tag: number): void {
+  const known = new Map(params.collection._state.acceptedSyncedEntries())
+  params.write({
+    type: known.has(key) ? `update` : `insert`,
+    value: { id: key, parentId: key, tag },
+  })
+}
+
+function sortedTags(rows: Rows): Array<[number, number]> {
+  return [...rows].sort(([a], [b]) => a - b)
+}
+
+function tagsOf(rows: ReadonlyArray<Row>): Array<[number, number]> {
+  return sortedTags(new Map(rows.map((row) => [row.id, row.tag!])))
+}
+
+// The rows a ready query shows. `join()` is a left join, so a join keeps
+// every row of its left side; an include shows its parent rows, and the
+// pooled view keeps rows whose parentId is 1.
+function expectedQuerySize(shape: Shape, model: Model): number {
+  const { A, B } = model.sources
+  switch (shape) {
+    case `direct`:
+    case `self-join`:
+    case `join`:
+    case `nested`:
+      return A.rows.size
+    case `include`:
+      return B.rows.size
+    case `pooled-nested`:
+      return A.rows.has(1) ? 1 : 0
+  }
+}
+
 async function runHistory(
   shape: Shape,
   steps: ReadonlyArray<Step>,
@@ -768,6 +954,30 @@ async function runHistory(
   let events: Array<Event> = []
   let announced: string = query.status
   let stop = () => {}
+  // The Effect over A, how often it reported a source error, and A's
+  // listener count just before it was created.
+  let effect: ReturnType<typeof createEffect> | undefined
+  let effectErrors: Array<Error> = []
+  let listenersBeforeEffect = 0
+  const listenersOn = (collection: Collection<any, any>) =>
+    [
+      ...(
+        collection as unknown as {
+          _events: { listeners: Map<string, Map<unknown, unknown>> }
+        }
+      )._events.listeners.values(),
+    ].reduce((sum, set) => sum + set.size, 0)
+  const mountEffect = async () => {
+    await effect?.dispose()
+    listenersBeforeEffect = listenersOn(sources.A.collection)
+    const errors: Array<Error> = []
+    effectErrors = errors
+    effect = createEffect({
+      query: (q) => q.from({ row: sources.A.collection }),
+      onBatch: () => {},
+      onSourceError: (error) => errors.push(error),
+    })
+  }
   // Cleanup without subscribers drops event listeners, so each sync run
   // registers its own.
   const begin = () => {
@@ -790,6 +1000,7 @@ async function runHistory(
       stopHealth()
     }
     start()
+    void mountEffect()
   }
   const consoleError = console.error
   console.error = () => {}
@@ -804,17 +1015,34 @@ async function runHistory(
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${JSON.stringify(step)} on ${shape}`
       const before = expectedTree(shape, model, true)
+      // The run's state before the step decides what the adapter does, as a
+      // real adapter decides from its own state.
+      const pre =
+        `source` in step
+          ? {
+              loading:
+                model.sources[step.source].gate === `loading` ||
+                model.sources[step.source].reloading,
+              open: model.sources[step.source].open !== null,
+            }
+          : undefined
       const expected = applyModel(shape, model, step)
+      // The write tag the model gave this step, if it wrote.
+      const tag = model.serial
       events = []
       let thrown: unknown
       try {
-        if (step.kind === `reload-query`) {
+        if (step.kind === `effect`) {
+          await mountEffect()
+        } else if (step.kind === `reload-query`) {
           const reload = (query as { reload?: () => Promise<void> }).reload?.()
           if (query.status === `crashed`)
             thrown = await reload?.catch((e: unknown) => e)
           else void reload?.catch(() => undefined)
           await flushPromises()
         } else if (step.kind === `restart`) {
+          // The app ends its readers before it cleans up their Collections.
+          await effect?.dispose()
           await query.cleanup()
           await inner?.cleanup({ dependents: true })
           await Promise.all([
@@ -842,24 +1070,27 @@ async function runHistory(
             }
             sources[step.source].failNextCleanup(false)
           } else if (step.kind === `ready`) {
-            // A reload's new run commits its row, as a first load does.
-            if (
-              params.collection.status === `loading` ||
-              params.collection._lifecycle.reloading
-            ) {
-              params.begin()
-              params.write({
-                type: `insert`,
-                value: { id: 1, parentId: 1 },
-              })
+            // A first load's or a reload's run commits row 1 before
+            // markReady(), in its open transaction if it has one.
+            if (pre!.loading) {
+              if (!pre!.open) params.begin()
+              writeDiffing(params, 1, tag)
               params.commit()
             }
             params.markReady()
+          } else if (step.kind === `write`) {
+            if (!pre!.open) params.begin()
+            writeDiffing(params, step.key, tag)
+          } else if (step.kind === `commit`) {
+            if (!pre!.open) params.begin()
+            params.commit()
           } else if (step.kind === `cancel`) {
             const canceled = new AbortController()
             canceled.abort()
-            params.begin()
-            params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+            if (!pre!.open) {
+              params.begin()
+              writeDiffing(params, 1, tag)
+            }
             try {
               params.commit(canceled.signal)
             } catch {
@@ -896,8 +1127,45 @@ async function runHistory(
       expect(query.status, `${label}: gate`).toBe(
         model.query.gate as CollectionStatus,
       )
+      // Rows: each Collection shows its applied rows, and a diffing adapter
+      // reads the baseline. A ready query shows the rows its shape derives
+      // from them. Nothing reads a crashed Collection's baseline.
+      for (const name of shapeSources[shape]) {
+        const source = model.sources[name]
+        const collection = sources[name].collection
+        expect(tagsOf(collection.toArray), `${label}: ${name} rows`).toEqual(
+          sortedTags(source.rows),
+        )
+        if (source.gate === `crashed`) continue
+        expect(
+          sortedTags(
+            new Map(
+              [...collection._state.acceptedSyncedEntries()].map(
+                ([key, row]) => [key, row.tag!],
+              ),
+            ),
+          ),
+          `${label}: ${name} baseline`,
+        ).toEqual(sortedTags(expectedBaseline(source)))
+      }
       if (model.query.gate === `ready`) {
-        expect(size(), `${label}: rows stay while ready`).toBe(1)
+        expect(size(), `${label}: query rows`).toBe(
+          expectedQuerySize(shape, model),
+        )
+      }
+      // The Effect ends once, through onSourceError. One that ends as it is
+      // created, over a stopped source, leaves nothing on that source.
+      expect(effect!.disposed, `${label}: effect ended`).toBe(
+        !model.effect.live,
+      )
+      expect(effectErrors.length, `${label}: effect source errors`).toBe(
+        model.effect.live ? 0 : 1,
+      )
+      if (step.kind === `effect` && !model.effect.live) {
+        expect(
+          listenersOn(sources.A.collection),
+          `${label}: listeners left by the ended effect`,
+        ).toBe(listenersBeforeEffect)
       }
       const tree = expectedTree(shape, model)
       const next = query.errors
@@ -943,6 +1211,7 @@ async function runHistory(
   } finally {
     console.error = consoleError
     stop()
+    await effect?.dispose()
     await query.cleanup()
     await inner?.cleanup({ dependents: true })
     await Promise.all([
@@ -975,6 +1244,58 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
+  "a query's reload replaces the rows its failed run left": [
+    on(`ready`, `A`),
+    on(`fail`, `B`),
+    { kind: `reload-query` },
+    on(`ready`, `B`),
+  ],
+  "a reload's first transaction replaces every row": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `commit`, source: `A` },
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 3 },
+    { kind: `commit`, source: `A` },
+  ],
+  "a failed reload's open transaction applies on the kept rows": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `commit`, source: `A` },
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 3 },
+    on(`fail`, `A`),
+    { kind: `commit`, source: `A` },
+  ],
+  "a failed reload keeps the rows as the adapter's baseline": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`reload`, `A`),
+    on(`fail`, `A`),
+    { kind: `write`, source: `A`, key: 1 },
+    { kind: `commit`, source: `A` },
+  ],
+  'a canceled reload transaction leaves the replacement for the next one': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `commit`, source: `A` },
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 3 },
+    on(`cancel`, `A`),
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `commit`, source: `A` },
+  ],
+  'a crashed Collection still applies the sync data its run commits': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 2 },
+    on(`crash`, `A`),
+    { kind: `write`, source: `A`, key: 3 },
+    { kind: `commit`, source: `A` },
+  ],
   'a failure reason clears when the sync adapter reports healthy': [
     on(`ready`, `A`),
     on(`ready`, `B`),
@@ -1094,8 +1415,24 @@ describe(`source failure and health oracle`, () => {
   }
 
   const stepArb: fc.Arbitrary<Step> = fc.oneof(
+    {
+      weight: 2,
+      arbitrary: fc
+        .tuple(
+          fc.constantFrom(`A` as const, `B` as const),
+          fc.constantFrom(1 as const, 2 as const, 3 as const),
+        )
+        .map(([source, key]): Step => ({ kind: `write`, source, key })),
+    },
+    {
+      weight: 1,
+      arbitrary: fc
+        .constantFrom(`A` as const, `B` as const)
+        .map((source): Step => ({ kind: `commit`, source })),
+    },
     { weight: 1, arbitrary: fc.constant(restart) },
     { weight: 1, arbitrary: fc.constant({ kind: `reload-query` } as const) },
+    { weight: 1, arbitrary: fc.constant({ kind: `effect` } as const) },
     {
       weight: 6,
       arbitrary: fc
@@ -1116,10 +1453,12 @@ describe(`source failure and health oracle`, () => {
     },
   )
   fcTest.prop(
-    [fc.constantFrom(...shapes), fc.array(stepArb, { maxLength: 8 })],
+    [fc.constantFrom(...shapes), fc.array(stepArb, { maxLength: 12 })],
     oraclePropertyOptions(60, `source-health.history`),
-  )(`generated histories refine the model`, (shape, steps) =>
-    runHistory(shape, steps),
+  )(
+    `generated histories refine the model`,
+    (shape, steps) => runHistory(shape, steps),
+    120_000,
   )
 })
 
@@ -1361,7 +1700,6 @@ describe(`reload invariant`, () => {
       expect(collection.errors.hasErrors).toBe(false)
     },
   )
-
 
   // A ready callback that throws reaches the adapter's markReady(), on a
   // start and on a reload alike. The reload itself succeeded once the status
@@ -1674,7 +2012,14 @@ describe(`request errors`, () => {
   // its publication, so it shows once the replay settles.
   it(`a source reload's replay keeps a request error that failed after it started`, () =>
     withHistory(
-      async ({ query, children, outcomes, held, writeParent, markParentsReady }) => {
+      async ({
+        query,
+        children,
+        outcomes,
+        held,
+        writeParent,
+        markParentsReady,
+      }) => {
         const preload = query.preload()
         writeParent(`insert`, 1)
         markParentsReady()

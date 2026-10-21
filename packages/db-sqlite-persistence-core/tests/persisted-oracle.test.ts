@@ -23570,7 +23570,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             params.markReady()
             // The controlled source has no pending asynchronous callback.
             // Its old commit is already queued inside the persisted wrapper.
-            return { restartAfterScopedRecovery: () => {} }
+            return {
+              // An on-demand source serves the subsets that recovery
+              // reacquires in the new generation.
+              loadSubset: () => true,
+              restartAfterScopedRecovery: () => {},
+            }
           },
         },
         persistence: { adapter },
@@ -23612,6 +23617,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         value: { id: `new-source`, title: `New source result` },
       })
       await whenSyncAccepted(source.commit())
+      // Recovery succeeded: the Collection still accepts sync data.
+      expect(collection.status).toBe(`ready`)
       expect(collection.get(`new-source`)).toMatchObject({
         id: `new-source`,
         title: `New source result`,
@@ -28027,6 +28034,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             params.markReady()
             // Both old commits have entered the wrapper before rotation.
             return {
+              // An on-demand source serves the subsets that recovery
+              // reacquires in the new generation.
+              loadSubset: () => true,
               restartAfterScopedRecovery: (cacheRotated) =>
                 cacheRotated.then(() => sourceRestarted.resolve()),
             }
@@ -28082,6 +28092,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           ),
         ),
       ).toEqual([])
+      // Recovery succeeded: the Collection still accepts sync data.
+      expect(collection.status).toBe(`ready`)
       source.begin()
       source.write({
         type: `insert`,

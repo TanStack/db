@@ -1114,8 +1114,14 @@ export class CollectionConfigBuilder<
         facadePublication?.prepare()
         if (hasParentChanges) {
           begin()
+          // A reload's first transaction replaces every row, so no earlier
+          // row exists for the batch it holds.
+          const replaces =
+            config.collection._state.pendingSyncedTransactions.at(-1)
+              ?.truncate === true
           let lookup: ((key: string | number) => boolean) | undefined
           const hasSyncedKey = (key: string | number) => {
+            if (replaces) return false
             lookup ??= config.collection._state.createSyncedKeyLookup()
             return lookup(key)
           }
