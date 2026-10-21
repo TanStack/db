@@ -24,10 +24,12 @@ import type { PersistedTx, SQLiteDriver } from '../src'
  * version, the first read costs at most one driver call more than the same
  * read after setup is cached in memory. A partial state may cost more.
  *
- * Model: a starting state is the set of setup facts present. The expected
- * schema is a snapshot from a separate fresh-install database, not from the
- * adapter under test; the expected rows are the seeded rows. A state is
- * complete exactly when every fact is present.
+ * Model: a starting state is the set of setup facts present. The model names
+ * the seven schema objects (type, name, table) from the fact list itself.
+ * Their SQL text is taken from a production fresh install on a separate
+ * database, so that part checks reopen against fresh install rather than
+ * the absolute trigger and table definitions. The expected rows are the
+ * seeded rows. A state is complete exactly when every fact is present.
  *
  * History grammar, on one node:sqlite database:
  * - Interrupted setup: the registry row exists and setup stopped after the
@@ -95,6 +97,57 @@ const removeFact: Record<Fact, string> = {
   insertTrigger: `DROP TRIGGER IF EXISTS "${rowTable}_key_evidence_insert"`,
   deleteTrigger: `DROP TRIGGER IF EXISTS "${rowTable}_key_evidence_delete"`,
   updateTrigger: `DROP TRIGGER IF EXISTS "${rowTable}_key_evidence_update"`,
+}
+
+const schemaObjectOf: Partial<
+  Record<Fact, { type: string; name: string; tbl_name: string }>
+> = {
+  rowTable: { type: `table`, name: rowTable, tbl_name: rowTable },
+  rowIndex: {
+    type: `index`,
+    name: `${rowTable}_row_version_idx`,
+    tbl_name: rowTable,
+  },
+  tombstoneTable: {
+    type: `table`,
+    name: tombstoneTable,
+    tbl_name: tombstoneTable,
+  },
+  tombstoneIndex: {
+    type: `index`,
+    name: `${tombstoneTable}_row_version_idx`,
+    tbl_name: tombstoneTable,
+  },
+  insertTrigger: {
+    type: `trigger`,
+    name: `${rowTable}_key_evidence_insert`,
+    tbl_name: rowTable,
+  },
+  deleteTrigger: {
+    type: `trigger`,
+    name: `${rowTable}_key_evidence_delete`,
+    tbl_name: rowTable,
+  },
+  updateTrigger: {
+    type: `trigger`,
+    name: `${rowTable}_key_evidence_update`,
+    tbl_name: rowTable,
+  },
+}
+
+// Ordered like collectionSchema: by type, then name.
+function modelSchemaObjects(): Array<{
+  type: string
+  name: string
+  tbl_name: string
+}> {
+  return setupOrder
+    .flatMap((fact) => schemaObjectOf[fact] ?? [])
+    .sort(
+      (left, right) =>
+        left.type.localeCompare(right.type) ||
+        left.name.localeCompare(right.name),
+    )
 }
 
 const seededRows: Array<Row> = [
@@ -329,16 +382,14 @@ function workLawApplies(start: Start): boolean {
 describe(`collection setup reopen oracle`, () => {
   it(`repairs every legal starting state to a fresh install and skips complete setup`, async () => {
     const expectedSchema = await freshInstallSchema()
-    // The fresh install has the two tables, two indexes, and three triggers.
-    expect(expectedSchema.map(({ type }) => type).sort()).toEqual([
-      `index`,
-      `index`,
-      `table`,
-      `table`,
-      `trigger`,
-      `trigger`,
-      `trigger`,
-    ])
+    // The model's seven objects, independent of production setup.
+    expect(
+      expectedSchema.map(({ type, name, tbl_name }) => ({
+        type,
+        name,
+        tbl_name,
+      })),
+    ).toEqual(modelSchemaObjects())
 
     for (const start of starts) {
       const observed = await reopen(start)
