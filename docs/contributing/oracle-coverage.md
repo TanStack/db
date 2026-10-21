@@ -2537,14 +2537,14 @@ and exact rows at five checkpoints. A fixed lifecycle history checks that each
 load measures its own wait and settles on its own restored rows, that
 release aborts the upstream load, and that coverage survives release. A joined history checks that the network-first
 wait releases an eager and an on-demand source only when the on-demand demand
-is covered. Model-level calibration shows that fourteen wrong designs each
-differ from the law at a named case, and a fifteenth keeps coverage across a
-truncate. Before the implementation, every
+is covered. Model-level calibration shows that sixteen wrong designs (thirteen
+single-demand, two lifecycle, one joined) each differ from the law at a named
+case. Before the implementation, every
 production case failed at setup because `initialRender` rejected
 `syncMode: 'on-demand'`; without the opt-in, that code matched every
 uncovered cell and diverged at the first checkpoint where the law applies for
 every covered cell except an early network answer. With the implementation,
-every case passes. Production mutants that ignore coverage, ignore or halve
+every case passes; the [implementation review](oracle-reviews/2026-10-21-persisted-demand-coverage-review.md) records RED, GREEN, and each mutant's outcome. Production mutants that ignore coverage, ignore or halve
 the wait, error a covered demand on upstream failure, write coverage before
 the load settles, measure the wait from the sync run, keep coverage across a
 truncate, or let an on-demand opt-in permit fallback alone each fail named
