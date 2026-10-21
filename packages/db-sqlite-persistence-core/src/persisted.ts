@@ -5653,19 +5653,26 @@ function createWrappedSyncConfig<
         const settle = () => removePendingPublicationTransaction(transaction)
         void applied.then(settle, settle)
       }
-      const getPendingRowMetadataWrite = (key: TKey) => {
+      type MetadataWrite = { type: `delete` } | { type: `set`; value: unknown }
+      const getPendingMetadataWrite = <K>(
+        key: K,
+        getMap: (
+          transaction: OpenSyncTransaction<T, TKey>,
+        ) => Map<K, MetadataWrite>,
+        checkTruncate?: (transaction: OpenSyncTransaction<T, TKey>) => boolean,
+      ) => {
         for (
           let index = pendingPublicationTransactions.length - 1;
           index >= 0;
           index--
         ) {
           const transaction = pendingPublicationTransactions[index]!
-          const write = transaction.rowMetadataWrites.get(key)
+          const write = getMap(transaction).get(key)
           if (write) {
             markPendingMetadataDependency(transaction)
             return { found: true, write }
           }
-          if (transaction.truncate) {
+          if (checkTruncate?.(transaction)) {
             markPendingMetadataDependency(transaction)
             return {
               found: true,
@@ -5675,20 +5682,39 @@ function createWrappedSyncConfig<
         }
         return { found: false as const }
       }
-      const getPendingCollectionMetadataWrite = (key: string) => {
-        for (
-          let index = pendingPublicationTransactions.length - 1;
-          index >= 0;
-          index--
-        ) {
-          const transaction = pendingPublicationTransactions[index]!
-          const write = transaction.collectionMetadataWrites.get(key)
-          if (write) {
-            markPendingMetadataDependency(transaction)
-            return { found: true, write }
-          }
+      const getPendingRowMetadataWrite = (key: TKey) =>
+        getPendingMetadataWrite(
+          key,
+          (t) => t.rowMetadataWrites,
+          (t) => t.truncate,
+        )
+      const getPendingCollectionMetadataWrite = (key: string) =>
+        getPendingMetadataWrite(key, (t) => t.collectionMetadataWrites)
+      const abortPublicationTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        error: unknown,
+      ) => {
+        removePendingPublicationTransaction(transaction)
+        settlePublicationAdmissionWaiters(transaction, error)
+        return createHandledRejection(error)
+      }
+      const updateMetadataWrite = <K>(
+        key: K,
+        write: MetadataWrite,
+        getMap: (
+          transaction: OpenSyncTransaction<T, TKey>,
+        ) => Map<K, MetadataWrite>,
+        contextName: string,
+      ) => {
+        if (startupState.cleanedUp) return
+        const openTransaction = getOpenTransaction()
+        if (openTransaction?.terminalFailure ?? getTerminalFailure()) return
+        if (!openTransaction) {
+          throw new InvalidPersistedCollectionConfigError(
+            `${contextName} must be called within an open sync transaction`,
+          )
         }
-        return { found: false as const }
+        getMap(openTransaction).set(key, write)
       }
       let fullStartPromise: Promise<void> | null = null
       let sourceResultPromise: Promise<SyncConfigRes> | null = null
@@ -6040,33 +6066,20 @@ function createWrappedSyncConfig<
                   return params.metadata!.row.get(key)
                 },
                 set: (key: TKey, value: unknown) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.row.set must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.rowMetadataWrites.set(key, {
-                    type: `set`,
-                    value,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `set`, value },
+                    (t) => t.rowMetadataWrites,
+                    `metadata.row.set`,
+                  )
                 },
                 delete: (key: TKey) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.row.delete must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.rowMetadataWrites.set(key, {
-                    type: `delete`,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `delete` },
+                    (t) => t.rowMetadataWrites,
+                    `metadata.row.delete`,
+                  )
                 },
               },
               collection: {
@@ -6089,33 +6102,20 @@ function createWrappedSyncConfig<
                   return params.metadata!.collection.get(key)
                 },
                 set: (key: string, value: unknown) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.collection.set must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.collectionMetadataWrites.set(key, {
-                    type: `set`,
-                    value,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `set`, value },
+                    (t) => t.collectionMetadataWrites,
+                    `metadata.collection.set`,
+                  )
                 },
                 delete: (key: string) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.collection.delete must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.collectionMetadataWrites.set(key, {
-                    type: `delete`,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `delete` },
+                    (t) => t.collectionMetadataWrites,
+                    `metadata.collection.delete`,
+                  )
                 },
                 list: (prefix?: string) => {
                   if (startupState.cleanedUp) return []
@@ -6197,8 +6197,7 @@ function createWrappedSyncConfig<
             openTransaction?.terminalFailure ?? getTerminalFailure()
           if (terminalFailure) {
             if (openTransaction) {
-              removePendingPublicationTransaction(openTransaction)
-              settlePublicationAdmissionWaiters(
+              return abortPublicationTransaction(
                 openTransaction,
                 terminalFailure.error,
               )
@@ -6214,16 +6213,12 @@ function createWrappedSyncConfig<
           }
 
           if (signal?.aborted) {
-            removePendingPublicationTransaction(openTransaction)
             const error = new SyncTransactionAbortedError()
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            return createHandledRejection(error)
+            return abortPublicationTransaction(openTransaction, error)
           }
           if (runtime.isScopedRecoveryPending()) {
-            removePendingPublicationTransaction(openTransaction)
             const error = new SyncTransactionAbortedError()
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            return createHandledRejection(error)
+            return abortPublicationTransaction(openTransaction, error)
           }
           try {
             bindToCurrentHydration(openTransaction)

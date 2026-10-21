@@ -656,20 +656,7 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
-    for (const [key, { row }] of this.heldOptimisticRows) {
-      if (!pendingSyncKeys.has(key)) {
-        this.heldOptimisticRows.delete(key)
-        this.pendingLocalOrigins.delete(key)
-      } else if (row === undefined) this.optimisticDeletes.add(key)
-      else this.optimisticUpserts.set(key, row)
-    }
-    // Attribution also waits only for a committed sync transaction on its
-    // key. A deferred one can be dropped without applying.
-    for (const key of this.pendingLocalOrigins) {
-      if (!pendingSyncKeys.has(key)) this.pendingLocalOrigins.delete(key)
-    }
-
-    this.overlayActiveTransactions()
+    this.overlayHeldAndActive(pendingSyncKeys)
 
     // Update cached size
     this.size = this.calculateSize()
@@ -705,6 +692,28 @@ export class CollectionStateManager<
     this.transactions.set(transaction.id, transaction)
     transaction.collections.add(this.collection)
     return true
+  }
+
+  /**
+   * Overlay held settled rows, then still-active transactions. Given the keys
+   * of committed sync transactions that have not applied, first end every
+   * hold and attribution whose key none of them touches; a deferred one can
+   * be dropped without applying.
+   */
+  private overlayHeldAndActive(pendingSyncKeys?: ReadonlySet<TKey>): void {
+    if (pendingSyncKeys) {
+      for (const key of this.heldOptimisticRows.keys()) {
+        if (!pendingSyncKeys.has(key)) this.heldOptimisticRows.delete(key)
+      }
+      for (const key of this.pendingLocalOrigins) {
+        if (!pendingSyncKeys.has(key)) this.pendingLocalOrigins.delete(key)
+      }
+    }
+    for (const [key, { row }] of this.heldOptimisticRows) {
+      if (row === undefined) this.optimisticDeletes.add(key)
+      else this.optimisticUpserts.set(key, row)
+    }
+    this.overlayActiveTransactions()
   }
 
   /**
@@ -1354,16 +1363,9 @@ export class CollectionStateManager<
       this.isCommittingSyncTransactions = false
 
       // A settled row that a deferred transaction still holds stays over the
-      // new base. Still-active transactions overlay it.
-      for (const [key, { row }] of this.heldOptimisticRows) {
-        if (row === undefined) this.optimisticDeletes.add(key)
-        else this.optimisticUpserts.set(key, row)
-      }
-
-      // Always overlay any still-active optimistic transactions so mutations that started
-      // after the truncate snapshot are preserved. Truncate clears attribution
-      // with the old base, not the still-live local requests.
-      this.overlayActiveTransactions()
+      // new base. Truncate clears attribution with the old base, not the
+      // still-live local requests, so active transactions overlay it too.
+      this.overlayHeldAndActive()
 
       // After applying synced operations, if this commit included a truncate,
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
