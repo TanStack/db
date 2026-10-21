@@ -204,6 +204,72 @@ function validateJsonSerializable(
 }
 
 /**
+ * Names the first part of an acyclic value that JSON.stringify would omit or
+ * replace, so a restore could not return it. A `toJSON` result is checked in
+ * place of its owner. An `undefined` property reads back as absent, so it is
+ * kept. Other class instances keep only their own enumerable data.
+ */
+function findJsonLoss(
+  value: unknown,
+  path: string,
+  key = ``,
+): string | undefined {
+  const toJSON = (value as { toJSON?: unknown } | null)?.toJSON
+  if (typeof value === `object` && typeof toJSON === `function`) {
+    value = toJSON.call(value, key)
+  }
+  if (typeof value === `function` || typeof value === `symbol`) {
+    return `${path} is a ${typeof value}`
+  }
+  if (typeof value === `number` && !Number.isFinite(value)) {
+    return `${path} is ${value}`
+  }
+  if (typeof value !== `object` || value === null) return undefined
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const itemPath = `${path}[${index}]`
+      if (item === undefined) return `${itemPath} is undefined`
+      const loss = findJsonLoss(item, itemPath, String(index))
+      if (loss) return loss
+    }
+    return undefined
+  }
+  if (
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof RegExp ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  ) {
+    return `${path} is a ${value.constructor.name}`
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return `${path} has a symbol key`
+  }
+  for (const [name, item] of Object.entries(value)) {
+    if (item === undefined) continue
+    const loss = findJsonLoss(item, `${path}.${name}`, name)
+    if (loss) return loss
+  }
+  return undefined
+}
+
+/**
+ * Validates that a fresh restore can return an authored row. A custom parser
+ * owns its value domain, so only serialization failures apply to it.
+ */
+function validateStorableRow(
+  parser: Parser,
+  value: unknown,
+  operation: string,
+): void {
+  validateJsonSerializable(parser, value, operation)
+  if (parser !== JSON) return
+  const loss = findJsonLoss(value, `row`)
+  if (loss) throw new SerializationError(operation, loss)
+}
+
+/**
  * Generate a UUID for version tracking
  * @returns A unique identifier string for tracking data versions
  */
@@ -692,7 +758,7 @@ export function localStorageCollectionOptions(
 
   const wrappedOnInsert = (params: InsertMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
-      validateJsonSerializable(parser, mutation.modified, `insert`)
+      validateStorableRow(parser, mutation.modified, `insert`)
     })
     return persistAutomatic(
       params.transaction.mutations,
@@ -702,7 +768,7 @@ export function localStorageCollectionOptions(
 
   const wrappedOnUpdate = (params: UpdateMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
-      validateJsonSerializable(parser, mutation.modified, `update`)
+      validateStorableRow(parser, mutation.modified, `update`)
     })
     return persistAutomatic(
       params.transaction.mutations,
@@ -757,7 +823,7 @@ export function localStorageCollectionOptions(
       switch (mutation.type) {
         case `insert`:
         case `update`:
-          validateJsonSerializable(parser, mutation.modified, mutation.type)
+          validateStorableRow(parser, mutation.modified, mutation.type)
           break
         case `delete`:
           validateJsonSerializable(parser, mutation.original, mutation.type)

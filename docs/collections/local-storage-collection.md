@@ -67,6 +67,7 @@ The `localStorageCollectionOptions` function accepts the following options:
 - `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
 - `storage`: Custom storage implementation (defaults to `localStorage`). Can be `sessionStorage` or any object with the localStorage API
 - `storageEventApi`: Event API for subscribing to storage events (defaults to `window`). Enables custom cross-tab, cross-window, or cross-process synchronization
+- `parser`: Object with `parse` and `stringify` methods for storage (defaults to `JSON`). Use a library such as superjson to store values that JSON cannot represent
 - `onInsert`: Optional handler function called when items are inserted
 - `onUpdate`: Optional handler function called when items are updated
 - `onDelete`: Optional handler function called when items are deleted
@@ -102,6 +103,27 @@ row. A disjoint peer write does not change the authored value. For example, a
 writer can still hold a `Date`, while a peer and a freshly restored Collection
 see its JSON string. With a custom parser, an authored row is read back after a
 successful write so the writer also sees any value that parser normalized.
+
+With the default JSON parser, an insert or update must contain only values that
+a restore can return. The Collection rejects a row that contains any of these:
+
+- a function or symbol, or a property with a symbol key
+- `NaN`, `Infinity`, or `-Infinity`
+- `undefined` as an array entry
+- a `Map`, `Set`, `RegExp`, `ArrayBuffer`, or typed array
+
+The rejected mutation's `isPersisted` promise rejects with
+`SerializationError`. Nothing is written to storage and the optimistic row
+rolls back. An automatic write's `onInsert` or `onUpdate` handler does not run;
+a manual `acceptMutations` call rejects with the same error.
+
+Some values are accepted and normalized. A value with a `toJSON` method, such
+as `Date`, is stored as that method's result. A property whose value is
+`undefined` is stored as an absent property, and `-0` is stored as `0`. A class
+instance is stored as its own enumerable properties, so a restored row is a
+plain object without the class's methods. A custom `parser`, such as one that
+supports `Map`, defines its own value rules; only its `stringify` errors reject
+a write.
 
 Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write
