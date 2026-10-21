@@ -367,9 +367,11 @@ sync-side truncate: nothing visible changes until the new run's first commit.
   `error`, and the `reload()` promise rejects.
 
 On a live query, `reload()` reloads each of its sources that has an `error`,
-then the query itself if it failed its first load. To reload one source
-instead, call `reload()` on that source's Collection; a query in `error`
-stays there until its own `reload()`.
+then the query itself if its own node has an `error`: its first load failed,
+or a request for more data failed. To reload one source instead, call
+`reload()` on that source's Collection; a query in `error` stays there until
+its own `reload()`. A source's reload also loads the query's data again, so it
+clears the query's failed requests when those loads succeed.
 
 ```ts
 // Retry a failed first load every 30 seconds until the backend is back.

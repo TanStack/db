@@ -435,6 +435,11 @@ export class CollectionSubscriber<
           return
         }
         this.orderedLoader?.settleFullSourceReplay()
+        // The replay loaded every demand of this subscription again.
+        this.collectionConfigBuilder.settleReplayedRequests(
+          this.sourceId,
+          this.demand.planIds(),
+        )
         this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
           syncRunGeneration,
         )

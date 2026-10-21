@@ -132,7 +132,7 @@ export class CollectionConfigBuilder<
 
   /**
    * Reload each source with an error anywhere in its tree, then this query if
-   * its own first load failed. A nested live query passes the reload down the
+   * its own node shows an error. A nested live query passes the reload down the
    * same way. A source's reload keeps this query's status until it commits.
    */
   async reload(): Promise<void> {
@@ -147,9 +147,10 @@ export class CollectionConfigBuilder<
           findProblems(collection.errors).some((node) => node.error !== null),
       )
     await Promise.all(failed.map((collection) => collection.reload()))
-    // The query reloads itself after its sources; a reload of it already in
-    // flight settles with that run.
-    if (query?.status === `error` || query?._lifecycle.reloading)
+    // The query reloads itself after its sources when its own node shows an
+    // error (a failed first load or a request error); a reload of it already
+    // in flight settles with that run.
+    if (query?._lifecycle.problems.error || query?._lifecycle.reloading)
       await query._sync.reload()
   }
 
@@ -642,6 +643,12 @@ export class CollectionConfigBuilder<
   /** A later root load of the source succeeded. */
   settleRootLoad(sourceId: string): void {
     this.clearFailedRequest(`root:${sourceId}`)
+  }
+
+  /** A source's truncate replay loaded these demands again. */
+  settleReplayedRequests(sourceId: string, planIds: Iterable<string>): void {
+    this.settleRootLoad(sourceId)
+    for (const planId of planIds) this.clearFailedRequest(planId)
   }
 
   // After the first ready, a failed load is a request error on this query's

@@ -41,6 +41,11 @@ export class SubsetDemandController {
   private readonly warnedPlans = new Set<string>()
   private valueIdentity = createValueIdentity()
 
+  /** The plans this controller holds demand for. */
+  planIds(): IterableIterator<string> {
+    return this.states.keys()
+  }
+
   setDemand(
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,

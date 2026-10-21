@@ -41,6 +41,7 @@ import type {
 import type {
   ChangeMessage,
   CollectionDependent,
+  CollectionStatus,
   ErrorTreeNode,
   KeyedStream,
   StringCollationConfig,
@@ -754,10 +755,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       }
 
       // Listen for status changes on source collections
-      const statusUnsubscribe = collection.on(`status:change`, (event) => {
+      const handleSourceStatus = (status: CollectionStatus) => {
         if (this.disposed) return
-
-        const { status } = event
 
         // A crash ends the effect at any time. A failed first load ends it
         // before its gate; after the gate it is a sync problem in the tree.
@@ -791,8 +790,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         }
         // errors:change follows every status change and reports the tree.
         this.latchReady()
-      })
+      }
+      const statusUnsubscribe = collection.on(`status:change`, ({ status }) =>
+        handleSourceStatus(status),
+      )
       this.unsubscribeCallbacks.add(statusUnsubscribe)
+      // A source that stopped before this subscription sends no status change.
+      if (collection.status === `crashed` || collection.status === `error`)
+        handleSourceStatus(collection.status)
       this.unsubscribeCallbacks.add(
         collection.on(`errors:change`, () => this.reportErrors()),
       )

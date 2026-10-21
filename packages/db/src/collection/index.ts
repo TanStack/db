@@ -1303,7 +1303,8 @@ export class CollectionImpl<
    * clears the node's problem; a `status` of `error` becomes `ready`. If the
    * new run fails first, the rows and status stay and the node shows the new
    * error. On a live query, it reloads each of its sources that has an
-   * `error`, and then the query itself if its own first load failed.
+   * `error`, and then the query itself if its own node has an `error`: a
+   * failed first load or a failed request for more data.
    *
    * Returns the promise of a reload in flight when called again. Rejects on a
    * `crashed` Collection: a crash is permanent for the instance.

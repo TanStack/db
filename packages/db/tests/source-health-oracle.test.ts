@@ -1500,6 +1500,43 @@ describe(`request errors`, () => {
       expect(query.status).toBe(`ready`)
     }))
 
+  // A later load of the failed demand that fulfills clears its error, also
+  // when a reload issues it: a source's reload replays the query's demand,
+  // and the query's own reload loads it in a new run. The guide offers
+  // `reload()` for a node with an `error`, so the query's reload must reach
+  // a request error on its own node.
+  it.each([`source`, `query`] as const)(
+    `a request error clears when the %s reload loads the demand again`,
+    (reloaded) =>
+      withHistory(
+        async ({
+          query,
+          children,
+          outcomes,
+          writeParent,
+          markParentsReady,
+        }) => {
+          const preload = query.preload()
+          writeParent(`insert`, 1)
+          markParentsReady()
+          await preload
+
+          outcomes.push(`fail`)
+          writeParent(`insert`, 2)
+          await flushPromises()
+          expect(query.errors.error).toMatchObject({
+            message: `child load failed`,
+          })
+
+          await (reloaded === `source` ? children : query).reload()
+          await flushPromises()
+          expect(query.errors.hasErrors).toBe(false)
+          expect(query.status).toBe(`ready`)
+          expect(query.size).toBe(2)
+        },
+      ),
+  )
+
   it(`a failed load before initial-query readiness fails the query's sync run`, () =>
     withHistory(async ({ query, outcomes, writeParent, markParentsReady }) => {
       outcomes.push(`fail`)
@@ -2423,6 +2460,56 @@ describe(`effect errors`, () => {
           ],
         })
       }
+    } finally {
+      console.error = consoleError
+      await effect.dispose()
+      await source.cleanup()
+    }
+  })
+})
+
+// The Effect lane above creates the Effect first. A source can already be in
+// `error` (its first load failed) or `crashed` when the Effect subscribes.
+// No status change follows, so the Effect must read the status when it
+// subscribes. Model: the Effect never reaches its gate, so either status ends
+// it through `onSourceError` once, and no tree is reported.
+describe(`effect over a source that already stopped`, () => {
+  const histories = ([`error`, `crashed`] as const).flatMap((status) =>
+    [true, false].map((skipInitial) => ({ status, skipInitial })),
+  )
+
+  it.each(histories)(`%j`, async ({ status, skipInitial }) => {
+    const source = createCollection<Row, number>({
+      id: `health-effect-stopped-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          if (status === `error`) params.fail(new Error(`first load failed`))
+          else params.markReady()
+        },
+      },
+    })
+    await source.preload().catch(() => undefined)
+    if (status === `crashed`) source._lifecycle.crash(new Error(`crashed`))
+    expect(source.status).toBe(status)
+    const sourceErrors: Array<Error> = []
+    const trees: Array<ErrorTreeNode> = []
+    const consoleError = console.error
+    console.error = () => {}
+    const effect = createEffect({
+      query: (q) => q.from({ row: source }),
+      skipInitial,
+      onBatch: () => {},
+      onSourceError: (error) => sourceErrors.push(error),
+      onErrorsChange: (errors) => trees.push(errors),
+    })
+    try {
+      await flushPromises()
+      expect(effect.disposed).toBe(true)
+      expect(sourceErrors).toHaveLength(1)
+      expect(trees).toEqual([])
     } finally {
       console.error = consoleError
       await effect.dispose()
