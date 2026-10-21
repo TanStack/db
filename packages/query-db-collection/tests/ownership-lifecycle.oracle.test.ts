@@ -5980,8 +5980,8 @@ describe(`query collection ownership lifecycle`, () => {
         ? []
         : // Both a same-rows result and a failed refetch leave the row owned.
           cached
-    const union = (lease: Array<string>) =>
-      history.peer ? [...new Set([...lease, shared.id])].sort() : lease
+    const union = (leaseRows: Array<string>) =>
+      history.peer ? [...new Set([...leaseRows, shared.id])].sort() : leaseRows
     return {
       held: [`blocker`, shared.id],
       published: union(history.settles === `while-held` ? refetched : cached),
