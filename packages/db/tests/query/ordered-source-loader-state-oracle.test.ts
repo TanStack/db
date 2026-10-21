@@ -1735,6 +1735,9 @@ describe(`Successful finite demand retirement`, () => {
  *   its participant, or a release's cleanup error. A read the loader starts
  *   while handling it cannot replace that error. A dead request's failure
  *   belongs to its replay, and one a replay reacquired is absorbed.
+ * - **Cost:** once loading is quiet and a bounded repair is available, an
+ *   invalidation reads no full source, and it issues at most one chain (in
+ *   this fake, a prefix, a tie, and a refill) per ordering epoch move.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -2097,6 +2100,7 @@ type AuthorityObservation = {
   disposals: number
   startThrows: number
   startThrowsDuringFailure: number
+  costChecks: number
   hungRequests: number
   offsetWindows: number
 }
@@ -2140,6 +2144,7 @@ async function checkAuthorityCase(
   let startThrewDuringRetry = false
   let settlingFailure = false
   let startThrowsDuringFailure = 0
+  let costChecks = 0
   // The start-throw branch sets the flag, so read it through a call.
   const retryStartThrew = () => startThrewDuringRetry
   let startThrows = 0
@@ -2959,6 +2964,7 @@ async function checkAuthorityCase(
       )
       if (!coveredByFullSource && !hungAuthority && !isDisposed()) {
         const before = ledger.length
+        const movesBefore = epochMoves
         loader.invalidateSourceOrdering()
         run(() => loader.loadMore())
         await flush()
@@ -2966,6 +2972,44 @@ async function checkAuthorityCase(
           throw new Error(
             `progress: an invalidation after the drain issued no request`,
           )
+        }
+        // Cost: a full-source read is very expensive, so a repair avoids one
+        // whenever a bounded read is available (ARCHITECTURE.md). That holds
+        // after a settled request in this incarnation, for a plan that does
+        // not need the full source, with an expressible boundary, unless an
+        // unindexed window still needs rows past a repeated prefix (the
+        // documented fallback). One repair is then one chain per ordering
+        // epoch move: in this fake, a prefix, a tie, and a refill.
+        await drain()
+        const repair = ledger.slice(before)
+        const boundedRepair =
+          !testCase.requiresFullSource &&
+          !boundaryUnexpressible &&
+          (testCase.indexed || !testCase.needsMore) &&
+          repair.every(({ outcome }) => outcome === `ok`) &&
+          ledger.some(
+            (request) =>
+              request.outcome === `ok` &&
+              !request.fullSource &&
+              request.issuedTruncates === truncates,
+          )
+        if (boundedRepair) {
+          costChecks++
+          const fullRead = repair.find(({ fullSource }) => fullSource)
+          if (fullRead) {
+            throw new Error(
+              `cost: request ${fullRead.index} read the full source although a bounded repair was available`,
+            )
+          }
+          const authoritative = repair.filter(
+            (request) => request.authoritative,
+          ).length
+          const chains = epochMoves - movesBefore
+          if (authoritative > 3 * chains) {
+            throw new Error(
+              `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
+            )
+          }
         }
       }
     }
@@ -3001,6 +3045,7 @@ async function checkAuthorityCase(
     disposals,
     startThrows,
     startThrowsDuringFailure,
+    costChecks,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
   }
@@ -3436,6 +3481,7 @@ describe(`Ordered source request authority`, () => {
         disposals: 0,
         startThrows: 0,
         startThrowsDuringFailure: 0,
+        costChecks: 0,
         hungRequests: 0,
         offsetWindows: 0,
       }

@@ -1080,6 +1080,8 @@ describe(`loadSubset replay refinement`, () => {
  * - **Convergence:** after a final truncate with no faults, and an explicit
  *   window move that revalidates a window whose own move failed, the window
  *   equals the model.
+ * - **Status:** with no failed load, a quiet live query and its peer are
+ *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
  *   thrown release, a rejected window move, or an error the subscription
  *   rethrows from a microtask. No other error may escape.
@@ -1248,6 +1250,7 @@ async function checkOrderedReplay(
   const escapedError = () => escaped
   // Adapter callbacks set these flags, so read them through a call.
   const faultExcusesWindow = () => anyLoadFailed || earlyThrowSinceTruncate
+  const anyLoadFailedNow = () => anyLoadFailed
   const reach: OrderedReach = {
     settlementThrows: 0,
     throwsAfterReplay: 0,
@@ -1502,6 +1505,12 @@ async function checkOrderedReplay(
       throw new Error(`escaped error: only injected faults may surface`, {
         cause: escapedError(),
       })
+    }
+    // Status: a release that throws is reported, but it fails no load, so a
+    // quiet query with no failed load stays ready.
+    if (!anyLoadFailedNow()) {
+      expect(live.status, `status`).toBe(`ready`)
+      if (peer) expect(peer.status, `peer status`).toBe(`ready`)
     }
     if (!faultExcusesWindow()) {
       reach.settledWindowChecks++
