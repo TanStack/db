@@ -145,8 +145,9 @@ owns these. Each needs a witness:
   exercises it;
 - a failure that arrives before the persisted subset restore publishes;
 - optimistic writes on a covered demand;
-- nested live queries over an on-demand source (the gate reads the live query
-  that directly owns the demand);
+- nested live queries beyond one outer query over the joined query. After
+  the reviewed head, Part 3 adds that nested shape and reads rows at release;
+  a gate that reads the root query's demands fails only the nested cells.
 - Suspense over a real persisted on-demand Collection. After the reviewed
   head, React and Solid tests receive the joined gate with capability fixtures,
   and the gate mutant that lets the on-demand opt-in permit fallback alone

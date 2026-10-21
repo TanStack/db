@@ -982,9 +982,16 @@ async function runLifecycle(): Promise<{
 // cases; the released rows are the joined row from session 1. The wrong
 // design "an on-demand opt-in permits fallback on its own" releases without
 // coverage.
+//
+// The rows are read when the wait releases, because that is the snapshot a
+// Suspense render shows. Session 2 also reads the joined query through an
+// outer live query (`nested`). The gate then reads demand settlement from the
+// inner query, which owns the demand on C, while the outer query must already
+// show the joined row at release.
 // ===========================================================================
 
 type ChildHistory = `covered by the same joined query` | `never requested`
+type JoinedShape = `flat` | `nested`
 
 // `initialRenderReleased` is the network-first wait; `collectionReady` is the
 // live query's own readiness, which needs P's Collection to be ready.
@@ -1084,7 +1091,10 @@ function joined(
   )
 }
 
-async function runJoined(history: ChildHistory): Promise<JoinedObservation> {
+async function runJoined(
+  history: ChildHistory,
+  shape: JoinedShape,
+): Promise<JoinedObservation> {
   const covered = history === `covered by the same joined query`
   const driver = createDriver(new DatabaseSync(`:memory:`))
 
@@ -1111,12 +1121,34 @@ async function runJoined(history: ChildHistory): Promise<JoinedObservation> {
   const adapter = new SQLiteCorePersistenceAdapter({ driver })
   const parents = eagerParents(adapter, false)
   const children = onDemandChildren(adapter, false)
-  const query = joined(parents, children.collection)
+  const inner = joined(parents, children.collection)
+  const query =
+    shape === `flat`
+      ? inner
+      : createLiveQueryCollection((q) =>
+          q.from({ row: inner }).select(({ row }) => ({
+            id: row.id,
+            parentValue: row.parentValue,
+            childValue: row.childValue,
+          })),
+        )
   const observer = createLiveQueryObserver(query)
   const unsubscribe = observer.subscribe(() => {})
-  const initialRender = { released: false }
+  // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
+  const visibleRows = () =>
+    (observer.getSnapshot().data as Array<object>).map((row) =>
+      Object.fromEntries(
+        Object.entries(row).filter(([key]) => !key.startsWith(`$`)),
+      ),
+    )
+  const initialRender: { released: boolean; rows?: unknown } = {
+    released: false,
+  }
   void observer.preloadForInitialRender().then(
-    () => (initialRender.released = true),
+    () => {
+      initialRender.released = true
+      initialRender.rows = visibleRows()
+    },
     () => undefined,
   )
   return withCleanup(async () => {
@@ -1131,20 +1163,14 @@ async function runJoined(history: ChildHistory): Promise<JoinedObservation> {
     return {
       initialRenderReleased: initialRender.released,
       collectionReady: observer.getSnapshot().isReady,
-      // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
-      rows: initialRender.released
-        ? (observer.getSnapshot().data as Array<object>).map((row) =>
-            Object.fromEntries(
-              Object.entries(row).filter(([key]) => !key.startsWith(`$`)),
-            ),
-          )
-        : undefined,
+      rows: initialRender.rows,
     }
   }, [
     () => vi.useRealTimers(),
     unsubscribe,
     () => observer.dispose(),
     () => query.cleanup(),
+    () => inner.cleanup(),
     () => children.collection.cleanup(),
     () => parents.cleanup(),
   ])
@@ -1386,14 +1412,18 @@ describe(`persisted demand coverage oracle`, () => {
     expect(actual.observations).toEqual(expectedLifecycle())
   })
 
-  it.each([
-    `covered by the same joined query`,
-    `never requested`,
-  ] as const satisfies ReadonlyArray<ChildHistory>)(
-    `releases the joined network-first wait only when the on-demand side is covered: %s`,
-    async (history) => {
+  it.each(
+    ([`covered by the same joined query`, `never requested`] as const).flatMap(
+      (history: ChildHistory) =>
+        ([`flat`, `nested`] as const).map(
+          (shape: JoinedShape) => [history, shape] as const,
+        ),
+    ),
+  )(
+    `releases the joined network-first wait only when the on-demand side is covered: %s, %s`,
+    async (history, shape) => {
       quietConsole()
-      expect(await runJoined(history)).toEqual(expectedJoined(history))
+      expect(await runJoined(history, shape)).toEqual(expectedJoined(history))
     },
   )
 })
