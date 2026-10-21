@@ -928,5 +928,10 @@
     "file": "query/compiler/index.ts",
     "template": "A windowed or findOne result row has no include route",
     "literals": ["A windowed or findOne result row has no include route"]
+  },
+  "245": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Ordered load lease release failed:",
+    "literals": ["Ordered load lease release failed:"]
   }
 }

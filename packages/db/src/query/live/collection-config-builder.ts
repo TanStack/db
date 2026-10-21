@@ -402,14 +402,24 @@ export class CollectionConfigBuilder<
         }
       },
       (error: unknown) => {
-        if (windowOperationGeneration === this.windowOperationGeneration) {
-          // A release failure is reported, but the window still moved.
-          if (isOrderedCleanupFailure(error)) {
+        // A lease release that throws does not fail the move: the window
+        // moved. Report it like a failing cleanup task, not as the move's
+        // result.
+        if (isOrderedCleanupFailure(error)) {
+          if (windowOperationGeneration === this.windowOperationGeneration) {
             this.settledWindow = requestedWindow
-          } else {
-            this.windowFailed = true
-            this.currentWindow = this.settledWindow
           }
+          console.error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Ordered load lease release failed:`
+              : codedMessage(245),
+            error,
+          )
+          return
+        }
+        if (windowOperationGeneration === this.windowOperationGeneration) {
+          this.windowFailed = true
+          this.currentWindow = this.settledWindow
         }
         throw error
       },

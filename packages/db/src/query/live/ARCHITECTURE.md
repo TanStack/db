@@ -1254,7 +1254,9 @@ loader marks an error that a lease release threw. Its participant still
 rejects with that error, so the error is reported, but the live query's
 publication barrier counts the load as successful and publishes its rows. An
 explicit window move whose load succeeded still settles at its new window when
-a release throws; its promise rejects with that cleanup error.
+a release throws, and its promise resolves. The builder reports that cleanup
+error with `console.error`, like a failing cleanup task, so it does not count
+as the move's failure.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting

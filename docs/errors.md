@@ -2469,3 +2469,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 A windowed or findOne result row has no include route
 ```
+
+<a id="error-245"></a>
+
+## Error 245: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Ordered load lease release failed:
+```

@@ -1083,8 +1083,9 @@ describe(`loadSubset replay refinement`, () => {
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
- *   thrown release, a rejected window move, or an error the subscription
- *   rethrows from a microtask. No other error may escape.
+ *   thrown release, a window move rejected by a load failure, or an error the
+ *   subscription rethrows from a microtask. A release failure never rejects a
+ *   window move. No other error may escape.
  *
  * History grammar: rank moves, holding the next loads, settling the oldest
  * held load with success or failure, truncates (optionally arming the next
@@ -1463,7 +1464,8 @@ async function checkOrderedReplay(
           // An explicit window move on the first query, which also retries
           // its failed requests.
           // A move that rejects, as one does after a failed source recovery,
-          // leaves the window where it was, unless only a release failed.
+          // leaves the window where it was. A release failure never rejects
+          // a move.
           case `window`: {
             const requested = { offset: command.offset, limit: command.limit }
             reach.windowMoves++
@@ -1477,8 +1479,10 @@ async function checkOrderedReplay(
                 window = requested
               },
               (error: unknown) => {
+                // A release failure does not fail the move, so it must not
+                // reject it either.
                 if (error instanceof Error && cleanupFaults.has(error)) {
-                  window = requested
+                  escaped ??= error
                 }
                 swallow(error)
               },
