@@ -1558,7 +1558,12 @@ concurrently, so close ran while an execute waited for the handle: SQLite
 refused to close an unfinalized statement, and close was answered first. That
 worker and a worker that queues executes but not close both fail. This does not
 prove Chromium's Web Lock or access-handle timing, multi-tab handoff, or OPFS
-durability; no Chromium OPFS witness closes with a pending execute yet.
+durability. The
+[Chromium close witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/close-pending-write-oracle.opfs.spec.ts)
+takes the access handle through OPFSCoopSyncVFS's own handoff, then closes
+while an insert waits for it: the insert and close succeed in order, later work
+is refused, and the row survives a reopen. The concurrent worker fails it. The
+review record is `docs/contributing/oracle-reviews/pr-2213-opfs-close.md`.
 
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
