@@ -185,3 +185,53 @@ request-authority lane and the existing loader oracles check the real loader.
 ```sh
 ~/.claude/skills/field-lab/scripts/tlc . -config run2-safe.cfg LoaderAuthority
 ```
+
+## Run 3: the transition table
+
+`LoaderTable.tla` extends run 2 with the loader's transition table
+(#2194 after a66163f94). It adds a cursor reset by truncate, the replay that
+settles it, the incarnation each request is issued in, a window move that
+starts owed work while a replay is pending, and four checks:
+
+- `Coherence`: complete coverage owes no debt, a repair owes some, and a
+  failed full-source read owes a full-source read.
+- `Table`: an action property. Each step keeps the work state or makes one
+  of the moves the loader's `moveWork()` allows.
+- `OwnIsGrounded`, strengthened: an own failure cannot come from a request
+  whose demand a replay reacquired.
+- `NoStall`, `NoLeak`, and `ChainHeld` allow a pending replay, which owns
+  the requests from before the truncate and finishes a running chain.
+
+A repair chain is still identified by its epoch. A new chain needs new debt,
+and new bounded debt needs an epoch move, so the epoch names the chain in
+this model. The loader uses the authority generation for the same purpose.
+
+| Configuration | Weakened rule (one defect fixed in this round) | Result |
+| --- | --- | --- |
+| `run3-safe.cfg` | none | No error, 9,368,122 distinct states, depth 17 |
+| `run3-weak-noAbsorb.cfg` | A full-source failure after a covering replay becomes own | `OwnIsGrounded` violated in 6 steps |
+| `run3-weak-noAbsorb-table.cfg` | The same, checking only the table | `Table` violated in 6 steps |
+| `run3-weak-replayKeepsDebt.cfg` | A replay keeps the failed read's full debt | `Coherence` violated in 5 steps |
+| `run3-weak-chainOwnsAfterFinish.cfg` | A chain request owns authority after a replay finished its chain | `OwnIsGrounded` violated in 8 steps |
+| `run3-weak-debtUnderCoverage.cfg` | A failure raises debt under complete coverage | `Coherence` violated in 5 steps |
+
+All seven run-2 weakened rules still fail under run 3 with five request
+slots. With four slots, `lateStamp` and `epochRetire` pass, so run 3 uses
+five.
+
+Three encoding corrections were made; none weakened a property. `NoStall`
+first flagged a running chain whose staged step a truncate had cleared, which
+the pending replay finishes. `chainOwnsAfterFinish` first passed because no
+action could start a chain while a replay was pending; the explicit window
+move does that in the loader. The safe rules then flagged a replaced chain's
+request that settled after full coverage, which the loader now retires; the
+model's settle rule now retires it too.
+
+Run 1 (`LoaderLedger.tla`) is kept as history. Its two gaps that a review
+noted, a superseded failed lease held after a full-source read and a strand
+invariant that holds vacuously under `unifiedMin`, are closed in run 2 by
+`NoLeak` and `OwnIsGrounded` and carried into run 3.
+
+```sh
+~/.claude/skills/field-lab/scripts/tlc . -config run3-safe.cfg LoaderTable
+```
