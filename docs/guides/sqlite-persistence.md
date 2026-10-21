@@ -236,7 +236,7 @@ An on-demand cache is not yet a certified offline snapshot. The first managed ge
 
 ## Render after SQLite restore
 
-`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot. Set it on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback.
+Set `initialRender` on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback. Eager and on-demand Collections both support it; [on-demand Collections](#on-demand-collections-offline) apply it to each query demand.
 
 Install the React binding to use the following components:
 
@@ -266,7 +266,7 @@ function TodosView() {
 }
 ```
 
-`isReady` reports Collection readiness. `isPersistedReady` reports that every opted-in source finished its current eager restore, even when SQLite had no rows. These flags do not identify where each visible row came from. A regular `useLiveQuery` does not wait for the network-first deadline before it renders rows.
+`isReady` reports Collection readiness. `isPersistedReady` reports that every opted-in eager source finished its current restore, even when SQLite had no rows. For an on-demand source, it reports only that the persisted Collection started; it does not say whether a query's demand has rows in SQLite. These flags do not identify where each visible row came from. A regular `useLiveQuery` does not wait for the network-first deadline before it renders rows.
 
 The hooks also expose `persistedStatus` and `persistedError`. The status is `unavailable` if a source did not opt in, `loading` during restore, `ready` after every restore completes, or `error` if a restore fails. `persistedError` keeps the restore error. An SSR seed does not count as a SQLite restore.
 
@@ -299,6 +299,37 @@ Suspense prefers Collection readiness. If it remains pending after `networkTimeo
 A source failure can allow fallback before the deadline. React also waits for restore if its client query stream fails before the first render, including before the component mounts. Once every restore succeeds, React renders the derived query result, even if it is empty.
 
 A derived-query failure still reaches the surrounding React Error Boundary. If the network-first wait rejects, its error reaches that boundary. A successful network load can render even if restore failed or a source did not opt in.
+
+### On-demand Collections offline
+
+An on-demand Collection loads rows for each query demand: the filter, order, and limit that a query asks the source for. With `initialRender`, a demand can settle on its rows from SQLite when the network does not answer. This includes Electric's `syncMode: 'progressive'`, which loads query subsets on demand until its full sync completes.
+
+```ts
+const issues = createCollection(
+  persistedCollectionOptions<Issue, string>({
+    ...electricCollectionOptions({
+      id: 'issues',
+      shapeOptions: { url: 'http://localhost:3000/v1/shape', params: { table: 'issues' } },
+      syncMode: 'progressive',
+      getKey: (issue) => issue.id,
+    }),
+    persistence: syncedPersistence,
+    initialRender: { strategy: 'network-first', networkTimeoutMs: 3_000 },
+  }),
+)
+```
+
+The rule applies to each demand separately:
+
+- A demand is covered after a load of that exact demand settles online and its rows are saved in SQLite. Another filter, order, or limit is a different demand, even when its rows overlap.
+- A later load of a covered demand first shows its rows from SQLite. If the network does not answer within `networkTimeoutMs`, or it fails, the load settles on those rows. `isReady`, `preload()`, and Suspense then proceed as they do after a network load.
+- The network load keeps running. Its rows replace the restored rows when they arrive. If it fails after the load settled, the query stays ready on the rows it shows.
+- A demand that never settled online is not covered. Offline, it waits for the network. A query that has never run therefore stays loading offline unless a completed progressive full sync already holds every row.
+- A source truncate, such as an Electric must-refetch, ends coverage for every demand. A new cache generation starts without coverage.
+
+Coverage proves that the rows were complete when the earlier load settled. It does not prove that they are current. The wait changes when readiness arrives, not which rows the source has. A cursor page or a demand built from other rows' values is covered only if the restored rows produce the same demand again.
+
+For a query that joins eager and on-demand sources, the network-first wait ends when every eager source has restored and passed its deadline, and every on-demand demand of the query has settled.
 
 Persisted readiness does not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately. The fallback does not classify source errors.
 
