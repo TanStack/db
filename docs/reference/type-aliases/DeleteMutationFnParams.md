@@ -7,7 +7,7 @@ title: DeleteMutationFnParams
 type DeleteMutationFnParams<T, TKey, TUtils> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:667](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L667)
+Defined in: [packages/db/src/types.ts:689](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L689)
 
 ## Type Parameters
 
@@ -31,7 +31,7 @@ Defined in: [packages/db/src/types.ts:667](https://github.com/TanStack/db/blob/m
 collection: Collection<T, TKey, TUtils>;
 ```
 
-Defined in: [packages/db/src/types.ts:677](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L677)
+Defined in: [packages/db/src/types.ts:699](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L699)
 
 ***
 
@@ -41,4 +41,4 @@ Defined in: [packages/db/src/types.ts:677](https://github.com/TanStack/db/blob/m
 transaction: TransactionWithMutations<T, "delete", Collection<T, TKey, TUtils>>;
 ```
 
-Defined in: [packages/db/src/types.ts:672](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L672)
+Defined in: [packages/db/src/types.ts:694](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L694)

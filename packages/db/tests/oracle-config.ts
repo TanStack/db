@@ -27,6 +27,7 @@ const staticOracleProperties = [
   `sqlite-persistence.owner-isolation`,
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
+  `sqlite-persistence.optimistic-history`,
   `trailbase.lifecycle`,
   `trailbase.page-event`,
   `electric.bound-descriptor-history`,
