@@ -4197,7 +4197,46 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     if (this.initialized) {
       return
     }
+    if (!(await this.databaseSetupComplete())) {
+      await this.setUpDatabase()
+    }
+    this.initialized = true
+  }
 
+  // 1 when every statement in setUpDatabase would be a no-op. Columns added
+  // by ALTER TABLE appear in sqlite_master's stored table definition.
+  private async databaseSetupComplete(): Promise<boolean> {
+    const rows = await this.driver.query<{ complete: number }>(
+      `SELECT
+         (SELECT COUNT(*) FROM sqlite_master
+          WHERE (type = 'table' AND name IN (
+                  'cache_generation', 'cache_generation_sequence',
+                  'cache_generation_claim', 'collection_registry',
+                  'persisted_index_registry', 'applied_tx',
+                  'collection_version', 'collection_expected_keys',
+                  'collection_metadata', 'leader_term',
+                  'collection_reset_epoch'))
+             OR (type = 'index' AND name IN (
+                  'cache_generation_head',
+                  'idx_applied_tx_collection_tx_id'))) = 13
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'cache_generation_claim'
+                       AND sql LIKE '%logical_id%'
+                       AND sql LIKE '%expires_at_ms%')
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'applied_tx'
+                       AND sql LIKE '%replay_json%'
+                       AND sql LIKE '%replay_requires_full_reload%')
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'collection_version'
+                       AND sql LIKE '%key_set_evidence_available%'
+                       AND sql LIKE '%key_set_evidence_incompatible%')
+         AS complete`,
+    )
+    return rows[0]?.complete === 1
+  }
+
+  private async setUpDatabase(): Promise<void> {
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS cache_generation (
          logical_id TEXT NOT NULL,
@@ -4351,29 +4390,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        )`,
     )
     await this.driver.exec(
-      `CREATE TABLE IF NOT EXISTS schema_version (
-         scope TEXT PRIMARY KEY,
-         version INTEGER NOT NULL,
-         updated_at INTEGER NOT NULL
-       )`,
-    )
-    await this.driver.run(
-      `INSERT INTO schema_version (scope, version, updated_at)
-       VALUES ('global', ?, CAST(strftime('%s', 'now') AS INTEGER))
-       ON CONFLICT(scope) DO UPDATE SET
-         version = excluded.version,
-         updated_at = excluded.updated_at`,
-      [this.schemaVersion],
-    )
-    await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_reset_epoch (
          collection_id TEXT PRIMARY KEY,
          reset_epoch INTEGER NOT NULL,
          updated_at INTEGER NOT NULL
        )`,
     )
-
-    this.initialized = true
   }
 }
 

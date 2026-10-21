@@ -4295,12 +4295,8 @@ class PersistedCollectionRuntime<
         )
       }
 
-      this.observeStreamPosition(
-        response.term,
-        response.seq,
-        response.latestRowVersion,
-      )
-
+      // The commit's own tx:committed notice advances the observed position.
+      // Observing it here first would make that notice look like a gap.
       const uniqueAcceptedMutationIds = Array.from(
         new Set(response.acceptedMutationIds),
       )

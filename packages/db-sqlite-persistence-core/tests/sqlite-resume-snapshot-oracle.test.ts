@@ -3988,6 +3988,8 @@ describe(`SQLite resume snapshots`, () => {
       let keyEvidenceReads = 0
       let keyMembershipScans = 0
       const driver = createDriver(database, undefined, (sql) => {
+        // A schema probe names these tables but reads neither.
+        if (sql.includes(`sqlite_master`)) return
         if (sql.includes(`key_set_evidence_available`)) keyEvidenceReads += 1
         if (sql.includes(`collection_expected_keys`)) {
           keyMembershipScans += 1
