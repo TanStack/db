@@ -1077,8 +1077,7 @@ failure or an invalidation under complete coverage owes nothing, and a
 full-source transport that fails after a replay reacquired its demand leaves
 the coverage and its lease in place. A replay that settles is the full-source
 read's success: it pays the debt and retires the settled finite leases and the
-superseded failed leases, as a full-source success does. Its subscriber still
-schedules the graph run when one of those releases throws. A chain request owns authority only while its
+superseded failed leases, as a full-source success does. A chain request owns authority only while its
 chain runs: when a replay finished the chain first, the request's later failure
 is superseded by that replay.
 
@@ -1247,16 +1246,12 @@ A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
 retire cursor suffixes, ties, unfinished work, or another subscription's leases.
 Adapter eviction must still preserve rows owned by the replacement or peers.
-If an older prefix's release throws, the successful replacement still finishes
-its boundary and continuation bookkeeping before surfacing the cleanup error.
-Cleanup failure does not turn the successful acquisition into a failed load. The
-loader marks an error that a lease release threw. Its participant still
-rejects with that error, so the error is reported, but the live query's
-publication barrier counts the load as successful and publishes its rows. An
-explicit window move whose load succeeded still settles at its new window when
-a release throws, and its promise resolves. The builder reports that cleanup
-error with `console.error`, like a failing cleanup task, so it does not count
-as the move's failure.
+A lease release throws only when an adapter's `unloadSubset` throws, which is
+an adapter bug. The ordered loader therefore reports a release error uncaught,
+from a microtask, as the subscription reports an async subscriber error, and
+continues as if the release had succeeded. The error changes no load result,
+window move, publication, or loader state: the successful replacement finishes
+its boundary and continuation bookkeeping and publishes.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting

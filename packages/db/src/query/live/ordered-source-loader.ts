@@ -58,15 +58,13 @@ const workState = (work: AuthoritativeWork): WorkState =>
 /** The loader's work slot or debt reached a state its rules forbid. */
 export class OrderedLoaderInvariantError extends Error {}
 
-// Errors a lease release threw. The request that retired the lease still
-// succeeded: its participant reports the error, but the load did not fail.
-const cleanupFailures = new WeakSet<object>()
-
-/** Whether an ordered participant rejected only because a release threw. */
-export function isOrderedCleanupFailure(error: unknown): boolean {
-  return (
-    typeof error === `object` && error !== null && cleanupFailures.has(error)
-  )
+// A lease release that throws is an adapter bug, so it never changes a load,
+// a window, or the loader's state. Report it uncaught, as the subscription
+// reports an async subscriber error.
+function reportReleaseFailure(error: unknown): void {
+  queueMicrotask(() => {
+    throw error
+  })
 }
 
 class OrderedPostSettlementError {
@@ -640,10 +638,7 @@ export class OrderedSourceLoader {
           try {
             release()
           } catch (error) {
-            if (typeof error === `object` && error !== null) {
-              cleanupFailures.add(error)
-            }
-            throw error
+            reportReleaseFailure(error)
           }
         }),
       )
@@ -917,8 +912,8 @@ export class OrderedSourceLoader {
         this.pending = undefined
       }
       if (!this.active) return
-      // Retirement failure does not undo a successful acquisition. Finish its
-      // boundary and continuation, then report the first cleanup error.
+      // A callback that fails after a successful acquisition does not undo
+      // it. Finish its boundary and continuation, then report the first error.
       runAllCallbacks([
         () => {
           if (!isFullSource) {
@@ -957,6 +952,8 @@ export class OrderedSourceLoader {
               this.retiringSupersededAcquisitions = true
               try {
                 releaseAcquisition()
+              } catch (error) {
+                reportReleaseFailure(error)
               } finally {
                 this.retiringSupersededAcquisitions = false
               }
@@ -1354,8 +1351,8 @@ export class OrderedSourceLoader {
     }
     try {
       observed?.release({ error })
-    } catch {
-      // Cleanup is attempted once and must not replace the request failure.
+    } catch (releaseError) {
+      reportReleaseFailure(releaseError)
     }
     if (
       isAuthoritativeRequest &&

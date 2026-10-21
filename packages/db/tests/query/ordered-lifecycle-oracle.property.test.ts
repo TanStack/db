@@ -12,7 +12,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { flushPromises } from '../utils.js'
+import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -2511,13 +2511,24 @@ describe(`post-publication null fallback oracle`, () => {
   it.each([`delete-marker`, `retarget-marker`] as const)(
     `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
     async (mutation) => {
-      await observeLaterFallback(
-        mutation,
-        `literal-true`,
-        `pending`,
-        (observed) => assertLaterFallbackObservation(mutation, observed),
-        true,
-      )
+      // The loader also reports the throwing release uncaught, once: it is
+      // an adapter bug, not a load result.
+      const uncaught = captureMicrotaskErrors()
+      try {
+        await observeLaterFallback(
+          mutation,
+          `literal-true`,
+          `pending`,
+          (observed) => assertLaterFallbackObservation(mutation, observed),
+          true,
+        )
+        await flushPromises()
+      } finally {
+        uncaught.restore()
+      }
+      expect(uncaught.errors.map(String)).toEqual([
+        `Error: first ordered acquisition release failed`,
+      ])
     },
   )
 })

@@ -417,15 +417,10 @@ export class CollectionSubscriber<
         ) {
           return
         }
-        // A throwing lease release reports its error but cannot hold back
-        // the graph run that publishes and continues the replay.
-        try {
-          this.orderedLoader?.settleFullSourceReplay()
-        } finally {
-          this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
-            syncRunGeneration,
-          )
-        }
+        this.orderedLoader?.settleFullSourceReplay()
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+          syncRunGeneration,
+        )
       },
     }
   }

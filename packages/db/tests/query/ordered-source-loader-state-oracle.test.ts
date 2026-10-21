@@ -9,7 +9,7 @@ import {
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { flushPromises } from '../utils.js'
+import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -148,7 +148,7 @@ describe(`Ordered source request ownership`, () => {
     }
   })
 
-  it(`keeps nested refinement pending when successful cleanup reports an error`, async () => {
+  it(`keeps nested refinement pending when an older lease release throws`, async () => {
     const requests: Array<Observed> = []
     const releases: Array<number> = []
     const participants: Array<Promise<unknown>> = []
@@ -199,6 +199,7 @@ describe(`Ordered source request ownership`, () => {
       },
     )
 
+    const uncaught = captureMicrotaskErrors()
     try {
       loader.start()
       requests[0]!.deferred.resolve()
@@ -212,22 +213,25 @@ describe(`Ordered source request ownership`, () => {
       expect(requests).toHaveLength(4)
       expect(participants).toHaveLength(4)
       await flushPromises()
+      // The older prefix's release throws: an adapter bug, reported
+      // uncaught. No participant reports it, and the nested refinement stays
+      // pending.
       const recent = participants.slice(2)
-      const cleanup = recent.find(
-        (participant) => participantErrors.get(participant) === cleanupError,
-      )!
-      const nested = recent.find((participant) => participant !== cleanup)!
       const pending = (
         loader as unknown as { pending: Promise<unknown> | undefined }
       ).pending
       expect(result).toBe(pending)
-      expect(pending).toBe(nested)
-      await expect(cleanup).rejects.toBe(cleanupError)
+      expect(recent).toContain(pending)
+      expect(
+        recent.some((participant) => participantErrors.has(participant)),
+      ).toBe(false)
+      expect(uncaught.errors).toEqual([cleanupError])
 
-      expect(loader.loadMore()).toBe(nested)
+      expect(loader.loadMore()).toBe(pending)
       expect(requests).toHaveLength(4)
       expect(releases).toEqual([0])
     } finally {
+      uncaught.restore()
       loader.dispose()
       for (const observed of requests) observed.deferred.resolve()
       await Promise.allSettled(participants)
@@ -1258,6 +1262,7 @@ describe(`Ordered source request ownership`, () => {
           if (result instanceof Promise) participants.push(result)
         },
       )
+      const uncaught = captureMicrotaskErrors()
       try {
         loader.start()
         loader.invalidateSourceOrdering()
@@ -1270,22 +1275,24 @@ describe(`Ordered source request ownership`, () => {
           await expect(participants[index]).rejects.toBe(failure)
         }
         // A replay covers the source like a full-source success, so it
-        // releases the superseded page itself; a throwing release surfaces
-        // there. Without a replay, the explicit retry releases both.
-        if (replayed && releaseThrows) {
-          expect(() => loader.settleFullSourceReplay()).toThrow(cleanupError)
-        } else if (replayed) loader.settleFullSourceReplay()
-        if (releaseThrows && !replayed)
-          expect(() => loader.loadMore(1)).toThrow(cleanupError)
-        else loader.loadMore(1)
+        // releases the superseded page itself. Without a replay, the explicit
+        // retry releases both. A throwing release is reported uncaught.
+        if (replayed) loader.settleFullSourceReplay()
+        loader.loadMore(1)
+        await flushPromises()
         const expected = order
           .filter((index) => !replayed || index === 0)
           .map((index) => requests[index]!.acquisition)
         expect(releases).toEqual(expected)
+        // Each throwing release is reported uncaught, exactly once.
+        expect(uncaught.errors).toEqual(
+          releaseThrows ? releases.map(() => cleanupError) : [],
+        )
         loader.loadMore(2)
         expect(releases).toEqual(expected)
         expect(requests).toHaveLength(replayed ? 2 : 3)
       } finally {
+        uncaught.restore()
         loader.dispose()
         for (const request of requests) request.deferred.resolve()
         await Promise.allSettled(participants)
@@ -1615,6 +1622,7 @@ describe(`Successful finite demand retirement`, () => {
           if (result instanceof Promise) participants.push(result)
         },
       )
+      const uncaught = captureMicrotaskErrors()
       try {
         loader.start()
         requests[0]!.deferred.resolve()
@@ -1626,9 +1634,10 @@ describe(`Successful finite demand retirement`, () => {
         requests[2]!.deferred.resolve()
         await participants[2]
         requests[3]!.deferred.resolve()
-        if (action === `throw`)
-          await expect(participants[3]).rejects.toBe(failure)
-        else await participants[3]
+        // A throwing release is reported uncaught; the load still settles.
+        await participants[3]
+        await flushPromises()
+        expect(uncaught.errors).toEqual(action === `throw` ? [failure] : [])
         expect(releases).toEqual(
           requests
             .slice(0, action === `truncate` || action === `dispose` ? 1 : 2)
@@ -1644,6 +1653,7 @@ describe(`Successful finite demand retirement`, () => {
         expect(new Set(releases).size).toBe(releases.length)
         expect(requests).toHaveLength(4)
       } finally {
+        uncaught.restore()
         loader.dispose()
         for (const request of requests) request.deferred.resolve()
         await Promise.allSettled(participants)
@@ -1843,6 +1853,9 @@ describe(`Successful finite demand retirement`, () => {
  * ## Checkpoints
  *
  * Held, one request at a time, and release are checked after every step.
+ * A release that throws is an adapter bug: the loader reports it uncaught
+ * from a microtask and changes nothing else, so each one must be reported
+ * that way exactly once, and no other error may escape a microtask.
  * The release law says each acquisition is released at most once, and that
  * nothing is released while a truncate replay owns it, unless an explicit
  * retry replaces it or a held successful full-source lease covers it. After
@@ -2331,7 +2344,9 @@ async function checkAuthorityCase(
       }
       if (testCase.releaseFault && releaseFaults === 0) {
         releaseFaults++
-        throw new Error(`release ${request.index} failed`)
+        const failure = new Error(`release ${request.index} failed`)
+        thrownReleases.push(failure)
+        throw failure
       }
     }
     if (
@@ -2655,6 +2670,11 @@ async function checkAuthorityCase(
   let supersededFailuresAfterRepair = 0
   let checkedStrandPremises = 0
   let deferredStrandShapes = 0
+  // A release that throws is an adapter bug, which the loader reports
+  // uncaught from a microtask without changing any result. Each one is
+  // reported once, and no other error escapes that way.
+  const thrownReleases: Array<Error> = []
+  const uncaught = captureMicrotaskErrors()
   if (testCase.retryTimer) {
     vi.useFakeTimers({ toFake: [`setTimeout`, `clearTimeout`] })
   }
@@ -3013,11 +3033,21 @@ async function checkAuthorityCase(
         }
       }
     }
+    await flush()
+    if (
+      uncaught.errors.length !== thrownReleases.length ||
+      uncaught.errors.some((error, index) => error !== thrownReleases[index])
+    ) {
+      throw new Error(
+        `uncaught release reports: expected each throwing release once, got ${uncaught.errors.map(String).join(`, `)}`,
+      )
+    }
   } finally {
     loader.dispose()
     for (const request of ledger) request.deferred.resolve()
     await Promise.allSettled(participants)
     if (testCase.retryTimer) vi.useRealTimers()
+    uncaught.restore()
   }
   return {
     supersededFailures: ledger.filter(

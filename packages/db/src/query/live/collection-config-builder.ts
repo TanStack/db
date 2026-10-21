@@ -28,7 +28,6 @@ import {
   extractCollectionsFromQuery,
   sourcePermitsInitialReadiness,
 } from './utils.js'
-import { isOrderedCleanupFailure } from './ordered-source-loader.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
@@ -401,22 +400,7 @@ export class CollectionConfigBuilder<
           this.settledWindow = requestedWindow
         }
       },
-      (error: unknown) => {
-        // A lease release that throws does not fail the move: the window
-        // moved. Report it like a failing cleanup task, not as the move's
-        // result.
-        if (isOrderedCleanupFailure(error)) {
-          if (windowOperationGeneration === this.windowOperationGeneration) {
-            this.settledWindow = requestedWindow
-          }
-          console.error(
-            devBuild() && process.env.NODE_ENV !== `production`
-              ? `Ordered load lease release failed:`
-              : codedMessage(245),
-            error,
-          )
-          return
-        }
+      (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
           this.windowFailed = true
           this.currentWindow = this.settledWindow
@@ -576,11 +560,9 @@ export class CollectionConfigBuilder<
         this.scheduleGraphRun()
       }
     }
-    // A release that throws after a successful load is reported, but the
-    // load still succeeded and its rows may publish.
     void promise.then(
       () => finish(true),
-      (error: unknown) => finish(isOrderedCleanupFailure(error)),
+      () => finish(false),
     )
   }
 
