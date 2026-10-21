@@ -2,21 +2,25 @@
 /**
  * Compare the shipped size of packages with their merge-base on a base branch.
  *
- * Code weight is what users download and parse, so this measures minified
- * bundle bytes after gzip and brotli, not source lines: comments, names, and
+ * Code weight is what users download and parse, so this measures shipped
+ * bytes after gzip and brotli, not source lines: comments, names, and
  * formatting do not count. It builds each package with the same
- * `vite build --minify` that the Compressed size CI check uses, then compares
- * every `dist/esm` file.
+ * `vite build --minify` that the Compressed size CI check uses. Then, as an
+ * app's production build would, it bundles each package's exported entries
+ * with `process.env.NODE_ENV` set to `production` and its dependencies
+ * external, minifies, and compresses the bundle. Development-only code, such
+ * as full error messages, drops out. `--dev` instead compares every minified
+ * `dist/esm` file as the CI check does, development code included.
  *
  * Usage:
- *   pnpm size:compare [--base origin/main] [--exact-base]
+ *   pnpm size:compare [--base origin/main] [--exact-base] [--dev]
  *                     [--packages db,react-db,...] [--files] [--rebuild]
  *
  * The baseline is the merge-base with `--base` (as CI compares), built once in
  * a cached worktree under the OS temp directory. The working tree is rebuilt
  * in parallel, and a package whose sources did not change since its last
- * build is not rebuilt. The bytes include development-only error messages,
- * which production builds remove, so they overstate the shipped cost.
+ * build is not rebuilt. With `--files`, production mode lists each source
+ * module's minified bytes in the bundle, before compression.
  */
 import { execFile, execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -31,6 +35,7 @@ import { availableParallelism, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
+import { build as esbuild } from 'esbuild'
 
 const run = promisify(execFile)
 const args = process.argv.slice(2)
@@ -162,7 +167,7 @@ const sizes = (buffer) => ({
     params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
   }).length,
 })
-function measure(dir, pkg) {
+function measureDev(dir, pkg) {
   const esm = join(dir, `packages`, pkg, `dist`, `esm`)
   return new Map(
     walk(esm, (name) => /\.m?js$/.test(name)).map((file) => [
@@ -171,22 +176,95 @@ function measure(dir, pkg) {
     ]),
   )
 }
+
+// The ESM files a package exports, as an app imports them.
+function exportedEntries(pkgDir) {
+  const manifest = JSON.parse(
+    readFileSync(join(pkgDir, `package.json`), `utf8`),
+  )
+  const entries = new Set()
+  const visit = (value) => {
+    if (typeof value === `string`) {
+      if (/\.m?js$/.test(value) && !value.includes(`/cjs/`)) entries.add(value)
+    } else if (value && typeof value === `object`) {
+      for (const [condition, target] of Object.entries(value))
+        if (condition !== `require` && condition !== `types`) visit(target)
+    }
+  }
+  visit(manifest.exports ?? manifest.module ?? manifest.main)
+  return [...entries].map((entry) => join(pkgDir, entry))
+}
+
+// One bundle per package, as an app's production build sees it. The total
+// is the compressed bundle; each file's entry is its minified bytes in it.
+async function measureProduction(dir, pkg) {
+  const pkgDir = join(dir, `packages`, pkg)
+  const entries = exportedEntries(pkgDir).filter(existsSync)
+  if (entries.length === 0) return new Map()
+  const result = await esbuild({
+    stdin: {
+      contents: entries
+        .map((entry) => `export * from ${JSON.stringify(entry)}`)
+        .join(`\n`),
+      resolveDir: pkgDir,
+    },
+    absWorkingDir: pkgDir,
+    bundle: true,
+    minify: true,
+    format: `esm`,
+    platform: `neutral`,
+    packages: `external`,
+    // Resolve imports as an app would: the repo's tsconfig paths would
+    // otherwise inline other workspace packages from their sources.
+    tsconfigRaw: `{}`,
+    write: false,
+    metafile: true,
+    logLevel: `error`,
+    define: { 'process.env.NODE_ENV': `"production"` },
+  })
+  const bundle = Buffer.from(result.outputFiles[0].contents)
+  const files = new Map([[`(bundle)`, sizes(bundle)]])
+  const output = Object.values(result.metafile.outputs)[0]
+  for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
+    const name = relative(join(`dist`, `esm`), input)
+    files.set(name, { gzip: bytesInOutput, brotli: bytesInOutput, raw: true })
+  }
+  return files
+}
+
+const production = !flag(`dev`)
+const measure = (dir, pkg) =>
+  production
+    ? measureProduction(dir, pkg)
+    : Promise.resolve(measureDev(dir, pkg))
+
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`)
 const percent = (delta, base) =>
   base ? ` (${signed(Math.round((delta / base) * 1000) / 10)}%)` : ``
+// In production mode the bundle is the total; per-file entries are detail.
 const total = (map, key) =>
-  [...map.values()].reduce((sum, size) => sum + size[key], 0)
+  production
+    ? (map.get(`(bundle)`)?.[key] ?? 0)
+    : [...map.values()].reduce((sum, size) => sum + size[key], 0)
 
 console.log(
-  `merge-base ${baseSha.slice(0, 9)} (${baseRef}) vs working tree: minified dist/esm, gzip -9 and brotli -11 bytes\n`,
+  `merge-base ${baseSha.slice(0, 9)} (${baseRef}) vs working tree: ${
+    production
+      ? `production bundle per package (NODE_ENV=production, dependencies external)`
+      : `minified dist/esm files, development code included`
+  }, gzip -9 and brotli -11 bytes${
+    production && flag(`files`)
+      ? `; per-file rows are minified bytes before compression`
+      : ``
+  }\n`,
 )
 console.log(
   [`package`, `base gzip`, `head gzip`, `Δ gzip`, `Δ brotli`].join(`\t`),
 )
 const sum = { base: 0, head: 0, baseBrotli: 0, headBrotli: 0 }
 for (const pkg of packages) {
-  const base = measure(baseDir, pkg)
-  const head = measure(root, pkg)
+  const base = await measure(baseDir, pkg)
+  const head = await measure(root, pkg)
   const baseGzip = total(base, `gzip`)
   const headGzip = total(head, `gzip`)
   sum.base += baseGzip
@@ -204,6 +282,7 @@ for (const pkg of packages) {
   )
   if (!flag(`files`)) continue
   const changed = [...new Set([...base.keys(), ...head.keys()])]
+    .filter((file) => file !== `(bundle)`)
     .map((file) => [
       file,
       (head.get(file)?.gzip ?? 0) - (base.get(file)?.gzip ?? 0),

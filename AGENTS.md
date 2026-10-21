@@ -897,8 +897,9 @@ feature. Do not graft new code onto a design and leave the old code in place.
 Measure production code weight in shipped bytes, not lines. Run
 `pnpm size:compare` (add `--files` for a per-file breakdown). It builds the
 changed packages with the same minified build that the Compressed size CI
-check uses and compares gzip and brotli bytes with the merge-base on
-`origin/main`. Comments, names, and formatting cost nothing in that measure, so
+check uses, bundles each one as an app's production build would, and
+compares gzip and brotli bytes with the merge-base on `origin/main`.
+Development-only code, such as full error messages, does not count. Comments, names, and formatting cost nothing in that measure, so
 keep useful comments and clear names. Never delete a comment, shorten a name,
 or reformat code to improve a code-weight number. Reduce states, branches,
 helpers, and recovery paths.
