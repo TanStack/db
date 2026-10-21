@@ -430,5 +430,7 @@
   "cancelSyncTransaction": "g7",
   "startedBeforeFailure": "hb",
   "publishedErrors": "hc",
-  "views": "he"
+  "views": "he",
+  "isDeferredSyncKey": "b6",
+  "overlayHeldAndActive": "e8"
 }

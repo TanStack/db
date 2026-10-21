@@ -1305,6 +1305,91 @@ describe(`reload invariant`, () => {
     expect(runs).toBe(1)
   })
 
+  // Cleanup start drops the discarded run's problems while the status waits
+  // for adapter cleanup. Every change to the tree is announced, so the drop
+  // is too: the last errors:change before the status change shows no
+  // problem. A crash's cause stays until the status leaves `crashed`.
+  it.each([`report`, `fail`, `crash`] as const)(
+    `announces the problems that cleanup start drops: %s`,
+    async (problem) => {
+      const adapterCleanup = createDeferred<void>()
+      let params!: SyncParams
+      const collection = createCollection<Row, number>({
+        id: `health-cleanup-drop-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: (next) => {
+            params = next
+            next.markReady()
+            return () => adapterCleanup.promise
+          },
+        },
+      })
+      await collection.preload()
+      if (problem === `report`) params.reportError(new Error(`stalled`))
+      else if (problem === `fail`) params.fail(new Error(`stopped`))
+      else collection._lifecycle.crash(new Error(`crashed`))
+      const announced: Array<ErrorTreeNode> = []
+      collection.on(`errors:change`, () => announced.push(collection.errors))
+      const cleaned = collection.cleanup()
+      expect(collection.status).toBe(problem === `crash` ? `crashed` : `ready`)
+      if (problem === `crash`) {
+        expect(collection.errors.error?.message).toBe(`crashed`)
+        expect(announced).toEqual([])
+      } else {
+        expect(collection.errors.hasErrors).toBe(false)
+        expect(announced.at(-1)?.hasErrors).toBe(false)
+      }
+      adapterCleanup.resolve()
+      await cleaned
+      expect(collection.status).toBe(`cleaned-up`)
+    },
+  )
+
+  // A ready callback that throws reaches the adapter's markReady(), on a
+  // start and on a reload alike. The reload itself succeeded once the status
+  // is ready, so it resolves, as a start's preload does.
+  it.each([`sync`, `async`] as const)(
+    `settles a reload whose ready callback throws: %s markReady`,
+    async (timing) => {
+      let runs = 0
+      const collection = createCollection<Row, number>({
+        id: `health-reload-ready-throw-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            if (runs++ === 0) {
+              params.fail(new Error(`first load failed`))
+              return
+            }
+            if (timing === `sync`) params.markReady()
+            else
+              setTimeout(() => {
+                expect(() => params.markReady()).toThrow(`callback threw`)
+              }, 0)
+          },
+        },
+      })
+      await collection.preload().catch(() => undefined)
+      collection.onFirstReady(() => {
+        throw new Error(`callback threw`)
+      })
+      const settled = await Promise.race([
+        collection.reload().then(
+          () => `resolved`,
+          () => `rejected`,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(`pending`), 200)),
+      ])
+      expect(settled).toBe(`resolved`)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.errors.reloading).toBe(false)
+      await collection.cleanup()
+    },
+  )
+
   // A reload whose new run fails keeps the rows, so they stay the baseline
   // that a diffing adapter, such as query-db, reads for its next write.
   it(`keeps the rows as the baseline after the reload's new run fails`, async () => {
@@ -2625,6 +2710,54 @@ describe(`effect load failures`, () => {
  * per-row child Collection that starts changes nothing in the tree, so it
  * emits no `errors:change`; otherwise every new parent row would rebuild it.
  */
+// A pooled view's tree keeps node identity, as every tree does, whatever
+// alias its query gives the source, including the alias `root` that the
+// view's own node shows. The generated pooled shape uses one alias.
+describe(`pooled view node identity`, () => {
+  it.each([`row`, `root`])(`with source alias %s`, async (alias) => {
+    let params!: SyncParams
+    const source = createCollection<Row, number>({
+      id: `health-pooled-alias-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (next) => {
+          params = next
+          next.begin()
+          next.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+          next.commit()
+          next.markReady()
+        },
+      },
+    })
+    const view = createPooledLiveQuery(
+      new Query()
+        .from({ [alias]: source })
+        .where((refs) =>
+          eq(
+            (refs as Record<string, { parentId: number }>)[alias]!.parentId,
+            1,
+          ),
+        ) as unknown as Parameters<typeof createPooledLiveQuery>[0],
+    ) as unknown as PooledView
+    const subscription = view.subscribeChanges(() => {})
+    try {
+      await source.preload()
+      const first = view.errors
+      expect(first.sources.map((node) => node.alias)).toEqual([alias])
+      expect(view.errors, `a second read gives the same tree`).toBe(first)
+      params.reportError(new Error(`stalled`))
+      const reported = view.errors
+      expect(reported).not.toBe(first)
+      expect(view.errors, `the changed tree is stable too`).toBe(reported)
+      expect(reported.sources[0]!.failureReason?.message).toBe(`stalled`)
+    } finally {
+      subscription.unsubscribe()
+      await source.cleanup({ dependents: true })
+    }
+  })
+})
+
 describe(`include nodes`, () => {
   it(`keep their shape, and healthy children change nothing`, async () => {
     const make = (name: string) => {

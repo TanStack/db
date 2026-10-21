@@ -366,6 +366,12 @@ export class CollectionLifecycleManager<
       this.recovering = true
       try {
         this.markReady()
+      } catch (error) {
+        // A ready callback that throws reaches the adapter's markReady(); the
+        // reload succeeded once the status is ready.
+        if ((this.status as CollectionStatus) === `ready`) run.resolve()
+        else run.reject(error)
+        throw error
       } finally {
         this.recovering = false
       }
@@ -658,6 +664,7 @@ export class CollectionLifecycleManager<
       if (finished) return
       finished = true
       this.cleaningUp = false
+      this.statusError = null
       attempt(() => this.setStatus(`cleaned-up`))
 
       // Active collection subscriptions still depend on lifecycle events.
@@ -718,13 +725,21 @@ export class CollectionLifecycleManager<
     CleanupQueue.getInstance().cancel(this)
 
     this.hasBeenReady = false
-    // Problems belong to the discarded sync run.
+    // Problems belong to the discarded sync run. A crash's cause stays until
+    // the status leaves `crashed`.
+    const crashed = this.status === `crashed`
+    const { failureReason, error } = this.problems
+    const reloading = this.reloading
     this.adapterStopped = false
-    this.abandonReload(new CollectionPreloadAbortedError())
     this.failureReason = null
     this.stoppedError = null
     this.requestErrors = new RequestErrors()
-    this.statusError = null
+    if (!crashed) this.statusError = null
+    // An abandoned reload announces the tree; otherwise announce dropped
+    // problems here, since the status changes only when cleanup settles.
+    this.abandonReload(new CollectionPreloadAbortedError())
+    if (!crashed && !reloading && (failureReason || error))
+      this.events.emitErrorsChange()
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
     // first-ready listeners belong to the discarded run.
     this.onFirstReadyCallbacks = []
