@@ -472,8 +472,9 @@ export interface SyncConfig<
     reportError: (error: unknown) => void
     /**
      * The sync adapter stopped. Before the first ready the status becomes
-     * `error` and `preload()` rejects with `error`. After it, the rows stay and
-     * the node shows `error` until a reload. Throws after an earlier `fail()`.
+     * `error` and `preload()` rejects with `error`. After it, the rows stay, the
+     * status stays `ready`, and the node's `error` holds the cause until a
+     * reload. Throws after an earlier `fail()`.
      * While the sync adapter retries, call nothing or `reportError()`.
      */
     fail: (error: unknown) => void

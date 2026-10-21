@@ -225,19 +225,23 @@ export function rxdbCollectionOptions(
 
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
-        sub = rxCollection.$.subscribe((ev) => {
-          const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
-          switch (ev.operation) {
-            case `INSERT`:
-              queue({ type: `insert`, value: cur })
-              break
-            case `UPDATE`:
-              queue({ type: `update`, value: cur })
-              break
-            case `DELETE`:
-              queue({ type: `delete`, value: cur })
-              break
-          }
+        sub = rxCollection.$.subscribe({
+          next: (ev) => {
+            const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
+            switch (ev.operation) {
+              case `INSERT`:
+                queue({ type: `insert`, value: cur })
+                break
+              case `UPDATE`:
+                queue({ type: `update`, value: cur })
+                break
+              case `DELETE`:
+                queue({ type: `delete`, value: cur })
+                break
+            }
+          },
+          // An errored stream ends, so later writes would never arrive.
+          error: stop,
         })
 
         const subs = getFromMapOrCreate(
@@ -272,19 +276,21 @@ export function rxdbCollectionOptions(
           }
         }
 
-        if (!isCleanedUp()) {
-          ready = true
+        if (!isCleanedUp() && !stopped) {
           markReady()
         }
       }
 
-      // Readiness of this sync run: a reload runs `sync` again while the
+      // Whether this sync run stopped: a reload runs `sync` again while the
       // Collection still shows the previous run's status.
-      let ready = false
-      void start().catch((error: unknown) => {
+      let stopped = false
+      function stop(error: unknown) {
         stopOngoingFetch()
-        if (!ready) fail(error)
-      })
+        if (stopped) return
+        stopped = true
+        fail(error)
+      }
+      void start().catch(stop)
 
       return stopOngoingFetch
     },
