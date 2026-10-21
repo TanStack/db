@@ -2,14 +2,16 @@
 
 - Base: `origin/main` at the PR's merge base. Original PR commit: `832dff8a4`.
 - Repairs: `b836bfc95` (connection close), `0cd9128c8` (worker request
-  order), and the commit that adds this record (Chromium witness).
-- Owners:
-  `packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`
-  (connection close lane),
-  `packages/browser-db-sqlite-persistence/tests/opfs-worker-request-order-oracle.test.ts`
-  (worker order), and
-  `packages/browser-db-sqlite-persistence/e2e/close-pending-write-oracle.opfs.spec.ts`
-  (Chromium receiving witness).
+  order), `d56a7ee98` (closed-connection error), and the change that gives
+  the request-order oracle its Node and Chromium drivers.
+- Oracles:
+  - The connection close lane of
+    `packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
+    which uses a controlled worker.
+  - The request-order oracle,
+    `packages/browser-db-sqlite-persistence/tests/opfs-request-order-oracle.ts`.
+    Its Node driver is `tests/opfs-request-order-oracle.test.ts` and its
+    Chromium driver is `e2e/opfs-request-order-oracle.opfs.spec.ts`.
 
 ## Contract and evidence
 
@@ -46,9 +48,10 @@ record only which lane failed.
 | Defer rejection past close settlement | Close lane | Killed at close settlement |
 | Ignore pagehide while closing | Close lane, pagehide lane | Killed |
 | Ignore Worker `error` while closing | Close lane, terminal lane | Killed |
-| Concurrent worker (pre-repair) | Request-order oracle | Killed: close answered first with "unable to close due to unfinalized statements" |
-| Worker queues executes but not close | Request-order oracle | Killed on the same trace |
-| Concurrent worker (pre-repair) | Chromium witness | Killed: the waiting insert rejected with `AbortError` and close rejected with "unable to close due to unfinalized statements" |
+| Concurrent worker (pre-repair) | Request-order, Node driver | Killed on an insert that waits for the handle while close reaches the worker |
+| Worker queues executes but not close | Request-order, Node driver | Killed on the same history |
+| Concurrent worker (pre-repair) | Request-order, Chromium driver | Killed in 20 of 32 examples: settlements differ from the model |
+| Worker queues executes but not close | Request-order, Chromium driver | Killed in 20 of 32 examples |
 
 The pre-PR and original-PR connection controls are the exact earlier
 production files. The other connection and worker controls were temporary
@@ -57,16 +60,21 @@ the original pinned close table let the "reject at close start" and "dispose
 before reject" mutants pass.
 
 With the repairs, the package's unit and type suite passed: 20 files and 467
-runtime tests. All configured Chromium OPFS specs passed, including the new
-witness, which passed three repeated runs.
+runtime tests. All configured Chromium OPFS specs passed.
+
+A first version of the shared driver returned the handle in the same turn
+that it submitted close. Close then never reached the worker during the wait,
+and both worker mutants passed both drivers. The driver now waits for close to
+reach the worker before it returns the handle. Both mutants then failed.
 
 ## Limits
 
 The close lane uses a controlled worker that can answer in any order, so it
 also covers a close response that overtakes pending work. The request-order
 oracle runs the real worker module and wa-sqlite WASM in Node over an
-in-memory VFS with OPFSCoopSyncVFS's lock protocol. The Chromium witness
-checks one handoff history in local Chromium. Together they do not establish
+in-memory VFS with OPFSCoopSyncVFS's lock protocol, and its Chromium driver
+runs the same fixed examples against real OPFS in local Chromium. Together
+they do not establish
 other browsers, frozen tabs, a crash between a write and close, or multi-tab
 contention beyond one held handle.
 
@@ -82,6 +90,6 @@ It now reports `SQLiteConnectionClosedError`, exported from the core and
 browser packages. Work accepted before close and then cancelled still rejects
 with `AbortError`, the same as pagehide.
 
-While writing the Chromium witness, a 63-character database name failed to
+While writing the Chromium driver, a 63-character database name failed to
 open with a bare `sqlite3_open_v2` error, while a 56-character name opened.
 The limit and its error message are untested and unrecorded elsewhere.
