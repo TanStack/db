@@ -27,8 +27,10 @@ changes distinct from defects under the accepted contract. Preserve useful
 implementation freedom and state what the evidence does and does not establish.
 
 Before creating or editing an oracle, load
-[oracle-authoring](.agents/skills/oracle-authoring/SKILL.md). Before reviewing an
-oracle, load [oracle-review](.agents/skills/oracle-review/SKILL.md). Both use the
+[oracle-authoring](.agents/skills/oracle-authoring/SKILL.md). This applies to
+every oracle edit, including one made while fixing a bug or a review finding.
+Before reviewing an oracle, load
+[oracle-review](.agents/skills/oracle-review/SKILL.md). Both use the
 oracle guide below and a small [instrument library](docs/contributing/instruments/index.md)
 that is also available for other design work. Select instruments as needed;
 routine work does not require a full instrument sequence.

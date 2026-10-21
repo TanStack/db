@@ -274,6 +274,11 @@ presence of a preferred heading, class, comment template, or helper.
 - **Obligation:** The evidence MUST identify that premise and either point to a
   receiving witness in which the real provider or host supplies the same
   premise, or mark the cross-boundary claim unresolved with an owner.
+- **Shared law:** When the controlled and real environments check the same
+  law, the receiving witness SHOULD be another driver of the same oracle. It
+  reuses the oracle's law, model, history grammar or examples, and comparison.
+  It supplies only its production entry point, premise control, and
+  observation recorder.
 - **Acceptance evidence:** A reviewer can trace the specific event shape,
   ordering, error, or lifecycle condition from the controlled fixture to the
   receiving witness. A real-provider test of an unrelated ordinary case does
@@ -281,6 +286,9 @@ presence of a preferred heading, class, comment template, or helper.
 - **Not required:** An end-to-end run inside every component oracle. An oracle
   whose claim is explicitly limited to the controlled boundary does not need a
   real-provider witness to satisfy this requirement.
+- **Does not satisfy:** A receiving witness that writes its own expected
+  results is a second model. It can drift from the oracle it claims to
+  receive. Justify it under ORC-011, or record that drift risk.
 
 ## A quick start
 
@@ -786,6 +794,29 @@ test records the visible state at the promised applied checkpoint
 
 The fixture must really hold write delivery. If it delivers the writes and only delays returning from its load function, it controls a different event. Whether the returned Promise settles before or after application is a separate contract question. Record publications during the held interval if the promise concerns what users can see then. A scheduler is helpful only within the boundaries it controls; a seed cannot schedule arbitrary external I/O. The [fast-check scheduler documentation](https://fast-check.dev/docs/advanced/race-conditions/) explains the distinction between an operation's lifecycle and delivery of its result.
 
+### Treat driver timing helpers as premises
+
+A shared driver often needs helpers such as "wait until the request is blocked"
+or "let the message reach the worker". Each helper establishes a premise. If a
+helper does less than its name says, every driver that uses it can go green
+without reaching the history.
+
+In one recorded case, a driver gave back a lock in the same turn in which it
+submitted close. The close message was still crossing a task boundary, so the
+earlier request finished first. Close never ran during the wait, and both
+worker mutants passed both drivers. The driver had a premise check for "a
+request waits for the lock", but it had none for "close arrives during that
+wait".
+
+For each timing helper, do one of these:
+
+- Assert the premise at its checkpoint, for example from a lock inventory or a
+  delivery counter.
+- Show a mutant that the history can reject only when the premise holds.
+
+A helper that waits a fixed time is a bound, not a proof of delivery. State
+that limit beside the helper.
+
 ### One matrix can need two schedules
 
 The historical four-receipt settlement fixture shows why enumerating more positions is not enough. A receipt here is a completion obligation for a portion of applied work. The tested contract required success to await the relevant receipts and failure not to wait for unrelated later work.
@@ -825,9 +856,18 @@ ORC-014 applies only when evidence crosses from a controlled premise to a
 real-provider or host claim. Name the exact premise being transferred. For
 example, a controlled callback can judge a component's response to an event;
 claiming that a real provider emits that same event under the relevant
-conditions needs a receiving witness. The two witnesses may live in different
-tests. A declared controlled-boundary limit is an honest scope, not a failed
-component oracle.
+conditions needs a receiving witness. A declared controlled-boundary limit is
+an honest scope, not a failed component oracle.
+
+An oracle covers a design space, and each environment is one driver of it. When
+Node and a browser must satisfy the same law, put the law, model, histories,
+and comparison in one module. Then give each environment a driver for its entry
+point, premise control, and observations. The drivers may run in different test
+runners, but they do not each restate the expected results. The shared-driver
+fairness oracle shows the layout. `tests/shared-driver-fairness-oracle.ts` owns
+the law and checker. Its Vitest driver and its Chromium OPFS page driver
+(`e2e/shared-driver-fairness.opfs.ts`) feed the same checker. A second model is
+appropriate only when it is a deliberate ORC-011 formulation.
 
 ## Observe what the contract promises
 
@@ -993,7 +1033,8 @@ or a claimed repair, ask:
 8. Which larger promises remain outside this test, and where are they tracked?
 9. If a reusable boundary law is claimed, which case rejects a nearby wrong
    boundary? If a controlled premise supports a real-provider claim, where is
-   that exact premise received?
+   that exact premise received, and does that driver share the oracle's model
+   and comparison?
 10. If the result exposes a problem, which [repair location](instruments/adversarial-review.md#locate-the-repair)
     does the evidence support?
 
