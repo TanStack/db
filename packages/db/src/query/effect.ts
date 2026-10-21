@@ -882,6 +882,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     keys: Set<unknown>,
   ): void {
     let update
+    // A release can fail during this update; only an earlier failure clears.
+    const problemBefore = this.requests.problem
     try {
       update = this.demand.setDemand(subscription, plan, keys)
     } catch (error) {
@@ -892,6 +894,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (this.starting) throw error
       return
     }
+    // A released demand needs none of its rows, so its earlier failure no
+    // longer stands, as for a live query's retired demand.
+    if (
+      update.changed &&
+      update.empty &&
+      this.requests.problem === problemBefore
+    )
+      this.settleLoad(sourceId)
     if (update.ready instanceof Promise) {
       this.trackInitialLoad(
         update.ready,

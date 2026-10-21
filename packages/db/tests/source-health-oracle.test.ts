@@ -1913,6 +1913,67 @@ describe(`overlapping Effect loads`, () => {
   )
 })
 
+// As for a live query, an Effect's request error clears when the demand
+// that failed is released: its rows are no longer needed.
+it(`clears an Effect's request error when the failed demand is released`, async () => {
+  let failChildren = false
+  const parents = createSource(`B`)
+  const children = createCollection<Row, number>({
+    id: `health-effect-release-${Math.random().toString(36).slice(2)}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    gcTime: 0,
+    sync: {
+      sync: (params) => {
+        params.markReady()
+        return {
+          loadSubset: () =>
+            failChildren
+              ? Promise.reject(new Error(`child load failed`))
+              : Promise.resolve(),
+        }
+      },
+    },
+  })
+  const trees: Array<ErrorTreeNode> = []
+  parents.collection.startSyncImmediate()
+  const writeParent = (id: number, type: `insert` | `delete` = `insert`) => {
+    parents.params.begin()
+    parents.params.write({ type, value: { id, parentId: id } })
+    parents.params.commit()
+  }
+  const consoleError = console.error
+  console.error = () => {}
+  const effect = createEffect({
+    query: (q) =>
+      q
+        .from({ parent: parents.collection })
+        .leftJoin({ child: children }, ({ parent, child }) =>
+          eq(parent.id, child.parentId),
+        ),
+    onBatch: () => {},
+    onErrorsChange: (errors) => trees.push(errors),
+  })
+  try {
+    parents.params.markReady()
+    await flushPromises()
+    failChildren = true
+    writeParent(1)
+    await flushPromises()
+    expect(trees.at(-1)?.error?.message).toBe(`child load failed`)
+    writeParent(1, `delete`)
+    await flushPromises()
+    expect(trees.at(-1)?.error ?? null, `after the demand is released`).toBe(
+      null,
+    )
+  } finally {
+    console.error = consoleError
+    await effect.dispose()
+    await parents.collection.cleanup()
+    await children.cleanup()
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Effect lane
 // ---------------------------------------------------------------------------

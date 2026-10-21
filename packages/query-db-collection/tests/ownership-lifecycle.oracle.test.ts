@@ -6483,7 +6483,8 @@ describe(`query collection ownership lifecycle`, () => {
    * resources).
    *
    * Reference: the model owns one row through one demand. A failed release
-   * leaves `{ rows: [shared], stored: [shared], status: error }`; a restarted
+   * is a local persistence failure, so it crashes the Collection and leaves
+   * `{ rows: [shared], stored: [shared], status: crashed }`; a restarted
    * load and release give `[shared]` and then `{ rows: [], stored: [] }`. The
    * `durable` history is the control: the release succeeds and the restarted
    * run never refetches, because no demand remains.
@@ -6575,7 +6576,7 @@ describe(`query collection ownership lifecycle`, () => {
         queryCalls: queryFn.mock.calls.length,
       }).toEqual({
         afterRelease: failed
-          ? { rows: [shared.id], stored: [shared.id], status: `error` }
+          ? { rows: [shared.id], stored: [shared.id], status: `crashed` }
           : { rows: [], stored: [], status: `ready` },
         reacquisition:
           history === `failed-then-reacquired`
@@ -6593,7 +6594,8 @@ describe(`query collection ownership lifecycle`, () => {
    * fails. The release's commit is held at the persistence boundary while the
    * Query is reacquired; the reacquired application's commit then fails. The
    * release is durable, so the row leaves; the reacquired result never became
-   * durable, so it cannot keep the row. The Collection enters `error`, the
+   * durable, so it cannot keep the row. The persistence failure crashes the
+   * Collection, the
    * acquisition rejects with the persistence failure, and a restart serves and
    * releases the row normally. A history that keeps the row public after the
    * failure would report a result that storage never accepted.
@@ -6678,7 +6680,7 @@ describe(`query collection ownership lifecycle`, () => {
     }).toEqual({
       held: { rows: [shared.id], status: `ready` },
       reacquired: `Failed to durably persist collection "${id}": storage failed`,
-      failed: { rows: [], status: `error` },
+      failed: { rows: [], status: `crashed` },
       restartedLoad: [shared.id],
       restartedRelease: { rows: [], stored: [] },
     })
