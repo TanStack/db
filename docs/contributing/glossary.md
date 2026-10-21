@@ -30,7 +30,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | optimistic state | The rows an optimistic transaction overlays on the applied synced rows while its mutation function runs. It drops when the mutation function settles, whether it fulfills or rejects. | Retained snapshot or accepted local snapshot. |
 | accepted sync transaction | A committed sync transaction that core, or a wrapping sync after its durable step, has taken. It always applies, in commit order. While an optimistic transaction is persisting it is held, and it applies in the publication that drops that transaction's optimistic state. Handler-facing writes and Collection readiness wait for acceptance; commit receipts and subset loads wait for visibility. | Visible or applied sync transaction. |
 | held optimistic row | A successful transaction's optimistic row kept only while a queued sync transaction touches its key, so the drop and that transaction publish together. Its source attribution follows the key-and-timing rules in [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md), not source-client identity. | Retained or accepted snapshot. |
-| Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, or `cleaned-up`. | Subscription status. |
+| Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, `crashed`, or `cleaned-up`. | Subscription status. |
 | subscription status | One subscription value: `ready` or `loadingSubset`. | Collection status. |
 | subscription | A consumer of Collection changes with its own subset demands and lifecycle. | Collection, query, or transport. |
 | sync adapter | The code supplied through Collection sync configuration that starts a sync run and translates between TanStack DB and a provider. | Provider or source Collection. |
@@ -62,7 +62,8 @@ and a provider-qualified `provider session` for a remote lifecycle.
 
 Collection status and the error tree are separate axes. Status says whether the
 data can be shown; the error tree says whether the data on screen is still kept
-current. After Collection readiness, only a crash changes status.
+current. After Collection readiness in a sync run, only a crash changes status
+until cleanup ends the run.
 
 | Term | Meaning | Do not use as a synonym |
 | --- | --- | --- |

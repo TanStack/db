@@ -682,6 +682,7 @@ The collection provides these utility methods via `collection.utils`:
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
   - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
+
 Failures appear in the error tree. Before the first successful result, a
 failed fetch fails the first load (`status: 'error'`). After the Collection is
 ready, a failed fetch or result application for any Query it observes sets the

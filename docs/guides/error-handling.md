@@ -329,7 +329,7 @@ does not need a live query:
 ```ts
 todos.status // 'loading' | 'ready' | 'error' | 'crashed' | ...
 todos.errors // one node: { status, failureReason, error, reloading, ... }
-todos.on("errors:change", ({ errors }) => report(errors))
+todos.on("errors:change", ({ collection }) => report(collection.errors))
 await todos.reload()
 ```
 
