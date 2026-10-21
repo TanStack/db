@@ -5654,13 +5654,32 @@ function createWrappedSyncConfig<
         void applied.then(settle, settle)
       }
       type MetadataWrite = { type: `delete` } | { type: `set`; value: unknown }
-      const getPendingMetadataWrite = <K>(
+      const metadataValue = (write: MetadataWrite) =>
+        write.type === `delete` ? undefined : write.value
+      const applyMetadataWrite = (
+        merged: Map<string, unknown>,
+        key: string,
+        write: MetadataWrite,
+      ) => {
+        if (write.type === `delete`) merged.delete(key)
+        else merged.set(key, write.value)
+      }
+      // A metadata read sees the open transaction's write, then the newest
+      // staged one, then the Collection's. A truncate hides older row
+      // metadata. Reading a staged write makes its transaction a dependency.
+      const readStagedMetadata = <K>(
         key: K,
         getMap: (
           transaction: OpenSyncTransaction<T, TKey>,
         ) => Map<K, MetadataWrite>,
-        checkTruncate?: (transaction: OpenSyncTransaction<T, TKey>) => boolean,
-      ) => {
+        truncates: boolean,
+        stored: () => unknown,
+      ): unknown => {
+        if (startupState.cleanedUp) return undefined
+        const openTransaction = getOpenTransaction()
+        const openWrite = openTransaction && getMap(openTransaction).get(key)
+        if (openWrite) return metadataValue(openWrite)
+        if (truncates && openTransaction?.truncate) return undefined
         for (
           let index = pendingPublicationTransactions.length - 1;
           index >= 0;
@@ -5668,28 +5687,13 @@ function createWrappedSyncConfig<
         ) {
           const transaction = pendingPublicationTransactions[index]!
           const write = getMap(transaction).get(key)
-          if (write) {
+          if (write || (truncates && transaction.truncate)) {
             markPendingMetadataDependency(transaction)
-            return { found: true, write }
-          }
-          if (checkTruncate?.(transaction)) {
-            markPendingMetadataDependency(transaction)
-            return {
-              found: true,
-              write: { type: `delete` as const },
-            }
+            return write && metadataValue(write)
           }
         }
-        return { found: false as const }
+        return stored()
       }
-      const getPendingRowMetadataWrite = (key: TKey) =>
-        getPendingMetadataWrite(
-          key,
-          (t) => t.rowMetadataWrites,
-          (t) => t.truncate,
-        )
-      const getPendingCollectionMetadataWrite = (key: string) =>
-        getPendingMetadataWrite(key, (t) => t.collectionMetadataWrites)
       const abortPublicationTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
         error: unknown,
@@ -6044,27 +6048,13 @@ function createWrappedSyncConfig<
           ? {
               persistence: persistenceCapability,
               row: {
-                get: (key: TKey) => {
-                  if (startupState.cleanedUp) return undefined
-                  const openTransaction = getOpenTransaction()
-                  const pendingWrite =
-                    openTransaction?.rowMetadataWrites.get(key)
-                  if (pendingWrite) {
-                    return pendingWrite.type === `delete`
-                      ? undefined
-                      : pendingWrite.value
-                  }
-                  if (openTransaction?.truncate) {
-                    return undefined
-                  }
-                  const pending = getPendingRowMetadataWrite(key)
-                  if (pending.found) {
-                    return pending.write.type === `delete`
-                      ? undefined
-                      : pending.write.value
-                  }
-                  return params.metadata!.row.get(key)
-                },
+                get: (key: TKey) =>
+                  readStagedMetadata(
+                    key,
+                    (transaction) => transaction.rowMetadataWrites,
+                    true,
+                    () => params.metadata!.row.get(key),
+                  ),
                 set: (key: TKey, value: unknown) => {
                   updateMetadataWrite(
                     key,
@@ -6083,24 +6073,13 @@ function createWrappedSyncConfig<
                 },
               },
               collection: {
-                get: (key: string) => {
-                  if (startupState.cleanedUp) return undefined
-                  const openTransaction = getOpenTransaction()
-                  const pendingWrite =
-                    openTransaction?.collectionMetadataWrites.get(key)
-                  if (pendingWrite) {
-                    return pendingWrite.type === `delete`
-                      ? undefined
-                      : pendingWrite.value
-                  }
-                  const pending = getPendingCollectionMetadataWrite(key)
-                  if (pending.found) {
-                    return pending.write.type === `delete`
-                      ? undefined
-                      : pending.write.value
-                  }
-                  return params.metadata!.collection.get(key)
-                },
+                get: (key: string) =>
+                  readStagedMetadata(
+                    key,
+                    (transaction) => transaction.collectionMetadataWrites,
+                    false,
+                    () => params.metadata!.collection.get(key),
+                  ),
                 set: (key: string, value: unknown) => {
                   updateMetadataWrite(
                     key,
@@ -6136,11 +6115,7 @@ function createWrappedSyncConfig<
                       if (!prefix || key.startsWith(prefix)) {
                         pendingOwners.set(key, transaction)
                       }
-                      if (metadataWrite.type === `delete`) {
-                        merged.delete(key)
-                      } else {
-                        merged.set(key, metadataWrite.value)
-                      }
+                      applyMetadataWrite(merged, key, metadataWrite)
                     }
                   }
                   for (const owner of new Set(pendingOwners.values())) {
@@ -6152,11 +6127,7 @@ function createWrappedSyncConfig<
                       key,
                       metadataWrite,
                     ] of openTransaction.collectionMetadataWrites) {
-                      if (metadataWrite.type === `delete`) {
-                        merged.delete(key)
-                      } else {
-                        merged.set(key, metadataWrite.value)
-                      }
+                      applyMetadataWrite(merged, key, metadataWrite)
                     }
                   }
 
