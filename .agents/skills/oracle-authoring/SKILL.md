@@ -9,6 +9,10 @@ Start by making the law clear enough that someone could predict an observation
 without reading production. The hard part is deciding what is owed, to whom,
 under which conditions, and when. An executable model enacts that account.
 
+Use this skill whenever an oracle changes, or the production driver, history
+grammar, or comparison that it uses. This includes a change made while you fix
+a bug, fix a review finding, or evaluate review findings.
+
 Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
 [the glossary](../../../docs/contributing/glossary.md), and the relevant owner
 and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).

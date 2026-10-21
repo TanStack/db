@@ -27,8 +27,12 @@ changes distinct from defects under the accepted contract. Preserve useful
 implementation freedom and state what the evidence does and does not establish.
 
 Before creating or editing an oracle, load
-[oracle-authoring](.agents/skills/oracle-authoring/SKILL.md). Before reviewing an
-oracle, load [oracle-review](.agents/skills/oracle-review/SKILL.md). Both use the
+[oracle-authoring](.agents/skills/oracle-authoring/SKILL.md). This applies to
+an edit of an oracle or of the production driver, history grammar, or
+comparison that it uses. It also applies when the edit fixes a bug or a review
+finding.
+Before reviewing an oracle, load
+[oracle-review](.agents/skills/oracle-review/SKILL.md). Both use the
 oracle guide below and a small [instrument library](docs/contributing/instruments/index.md)
 that is also available for other design work. Select instruments as needed;
 routine work does not require a full instrument sequence.
@@ -887,19 +891,28 @@ return allDone
 
 ## Code Weight and Fail-Fast Design
 
-Treat each line of production code as a continuing cost. Bug fixes and
-features should aim for a net-negative production diff. Pay for new behavior by
+Treat production code as a continuing cost. Bug fixes and features should aim
+for a net-negative production diff. Pay for new behavior by
 refactoring the existing code it touches: merge duplicated logic and parallel
 structures, delete indirection, and remove branches that the change makes
 redundant. Refactoring existing code is the expected way to fix a bug or add a
 feature. Do not graft new code onto a design and leave the old code in place.
 
-When a change still grows production code after that work, state why. Name
+Measure production code weight in shipped bytes, not lines. Run
+`pnpm size:compare` (add `--files` for a per-file breakdown). It builds the
+changed packages with the same minified build that the Compressed size CI
+check uses, bundles each one as an app's production build would, and
+compares gzip and brotli bytes with the merge-base on `origin/main`.
+Development-only code, such as full error messages, does not count. Comments, names, and formatting cost nothing in that measure, so
+keep useful comments and clear names. Never delete a comment, shorten a name,
+or reformat code to improve a code-weight number. Reduce states, branches,
+helpers, and recovery paths.
+
+When a change still grows production bytes after that work, state why. Name
 the refactors you tried and the evidence that ruled them out.
 
 Tests and contract documentation can grow to prove the behavior. Report their
-weight separately from production code. Do not compress code or weaken names
-to reduce a line count. Reduce states, branches, helpers, and recovery paths.
+weight separately from production code.
 
 Use the test-first and bug-class guidance above to reproduce the failure and
 identify the violated contract. Strengthen or simplify existing control flow

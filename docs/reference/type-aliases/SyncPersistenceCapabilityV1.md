@@ -7,7 +7,7 @@ title: SyncPersistenceCapabilityV1
 type SyncPersistenceCapabilityV1<TKey> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L548)
+Defined in: [packages/db/src/types.ts:570](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L570)
 
 **`Internal`**
 
@@ -27,7 +27,7 @@ Unstable cross-package protocol for persistence-aware adapters.
 readonly hydrateBaseline: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:557](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L557)
+Defined in: [packages/db/src/types.ts:579](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L579)
 
 #### Returns
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/types.ts:557](https://github.com/TanStack/db/blob/m
 readonly optional managedCacheGeneration: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:554](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L554)
+Defined in: [packages/db/src/types.ts:576](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L576)
 
 This run owns a claimed on-demand cache generation.
 
@@ -53,7 +53,7 @@ This run owns a claimed on-demand cache generation.
 readonly protocol: "@tanstack/db/sync-persistence";
 ```
 
-Defined in: [packages/db/src/types.ts:551](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L551)
+Defined in: [packages/db/src/types.ts:573](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L573)
 
 ***
 
@@ -63,7 +63,7 @@ Defined in: [packages/db/src/types.ts:551](https://github.com/TanStack/db/blob/m
 readonly reserveCommitTurn: () => void;
 ```
 
-Defined in: [packages/db/src/types.ts:567](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L567)
+Defined in: [packages/db/src/types.ts:589](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L589)
 
 Reserve the open sync transaction's FIFO turn, so a subset hydration
 that starts before it commits waits for that commit.
@@ -80,7 +80,7 @@ that starts before it commits waits for that commit.
 readonly resumeSnapshot: object;
 ```
 
-Defined in: [packages/db/src/types.ts:571](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L571)
+Defined in: [packages/db/src/types.ts:593](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L593)
 
 #### certify()
 
@@ -123,7 +123,7 @@ readonly getKeySetEvidence: () =>
 readonly scanPersistedRows: (options?) => Promise<SyncPersistenceScannedRow<TKey>[]>;
 ```
 
-Defined in: [packages/db/src/types.ts:568](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L568)
+Defined in: [packages/db/src/types.ts:590](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L590)
 
 #### Parameters
 
@@ -143,7 +143,7 @@ Defined in: [packages/db/src/types.ts:568](https://github.com/TanStack/db/blob/m
 readonly optional startScopedRecovery: (resetMetadata?) => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:559](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L559)
+Defined in: [packages/db/src/types.ts:581](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L581)
 
 Retire untrusted on-demand rows and retain the provider's reset metadata.
 
@@ -171,7 +171,7 @@ Retire untrusted on-demand rows and retain the provider's reset metadata.
 readonly optional startupCacheGenerationRotated: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:556](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L556)
+Defined in: [packages/db/src/types.ts:578](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L578)
 
 The on-demand cache generation rotated before the source sync run entered.
 
@@ -183,4 +183,4 @@ The on-demand cache generation rotated before the source sync run entered.
 readonly version: 1;
 ```
 
-Defined in: [packages/db/src/types.ts:552](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L552)
+Defined in: [packages/db/src/types.ts:574](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L574)

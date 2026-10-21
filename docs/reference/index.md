@@ -419,6 +419,7 @@ title: "@tanstack/db"
 - [lower](functions/lower.md)
 - [lt](functions/lt.md)
 - [lte](functions/lte.md)
+- [makeComparator](functions/makeComparator.md)
 - [materialize](functions/materialize.md)
 - [max](functions/max.md)
 - [min](functions/min.md)

@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:112](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L112)
+Defined in: [useLiveQuery.ts:113](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L113)
 
 Create a live query using a query function
 
@@ -109,7 +109,7 @@ return (
 function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:134](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L134)
+Defined in: [useLiveQuery.ts:135](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L135)
 
 Create a live query using a query function
 
@@ -209,7 +209,7 @@ return (
 function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:198](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L198)
+Defined in: [useLiveQuery.ts:199](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L199)
 
 Create a live query using configuration object
 
@@ -278,7 +278,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:255](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L255)
+Defined in: [useLiveQuery.ts:256](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L256)
 
 Subscribe to an existing live query collection
 
@@ -350,7 +350,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
 ```
 
-Defined in: [useLiveQuery.ts:283](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L283)
+Defined in: [useLiveQuery.ts:284](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L284)
 
 Create a live query using a query function
 

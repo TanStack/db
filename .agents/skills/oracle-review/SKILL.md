@@ -55,3 +55,7 @@ correctness; a preference does not establish a contract violation.
 
 Report supported findings and remaining uncertainty. Do not invent findings,
 retire laws, or rewrite expectations to make a review come out decisive.
+
+If the review leads to oracle edits, load
+[oracle-authoring](../oracle-authoring/SKILL.md) before you edit. This also
+applies when you fix a finding during the same task.
