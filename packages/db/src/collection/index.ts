@@ -1307,7 +1307,8 @@ export class CollectionImpl<
    * failed first load or a failed request for more data.
    *
    * Returns the promise of a reload in flight when called again. Rejects on a
-   * `crashed` Collection: a crash is permanent for the instance.
+   * `crashed` Collection: a crash is not recovered in place. Clean the
+   * Collection up with its dependents to start it fresh.
    */
   public reload(): Promise<void> {
     const builder = getBuilderFromConfig(this.config)

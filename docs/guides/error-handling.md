@@ -400,14 +400,17 @@ accept writes:
 - its sync function threw, or an internal invariant failed.
 
 The Collection moves to `crashed`, and so does every live query and Effect over
-it, even after they were ready. A crash is permanent for that Collection
-instance: `reload()` rejects. To recover, clean up the Collection together with
-everything that reads from it, then create a new one.
+it, even after they were ready. A crash cannot be recovered in place: nothing
+restarts it, and `reload()` rejects. To recover, clean up the Collection
+together with everything that reads from it. Cleanup discards all of its state,
+so the next `preload()` or subscriber starts it fresh, as a new Collection
+would. If the cause remains, for example a bug in the sync function, the fresh
+start crashes again.
 
 ```ts
 console.log(todos.subscribers) // live queries, Effects, and raw subscriptions
 await todos.cleanup({ dependents: true })
-const freshTodos = createCollection(todosOptions())
+await todos.preload() // a fresh start; mount the queries again
 ```
 
 ### Cleaning up a Collection

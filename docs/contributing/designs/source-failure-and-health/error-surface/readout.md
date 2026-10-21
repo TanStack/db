@@ -22,7 +22,7 @@ subscribers, a failed reload becoming a loading error, and a query 'error' that 
   `error` = reload. One error field cannot carry that (control OneErrorField).
 - A query's 'error' clears without its own reload once its sources are ready again through
   reloads; `query.reload()` is a convenience that reloads its failed sources.
-- A crash is permanent for the instance; recovery is cascade cleanup and a new Collection.
+- A crash is not recovered in place; recovery is cascade cleanup and a fresh start.
 
 ## What it does not tell us
 - **F1 (decided: b):** a query in 'error' leaves it for 'loading' once no source has a

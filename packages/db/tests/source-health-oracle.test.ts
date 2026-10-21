@@ -1636,6 +1636,62 @@ describe(`request errors`, () => {
     }))
 })
 
+// A crash is not recovered in place: `reload()` rejects and nothing starts a
+// new sync run. Only cleanup leaves `crashed`, and cleanup discards all of
+// the Collection's state, so a later start is a fresh start, as a new
+// Collection over the same source would be. Model: after the cascade
+// cleanup and a new preload, the Collection and a query mounted again show
+// only the new run's rows and no problem.
+describe(`crash recovery`, () => {
+  it(`recovers a crashed Collection only through a full cleanup`, async () => {
+    let runs = 0
+    const collection = createCollection<Row, number>({
+      id: `health-crash-recovery-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          const run = ++runs
+          params.begin()
+          params.write({ type: `insert`, value: { id: run, parentId: run } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    let query = createLiveQueryCollection((q) => q.from({ row: collection }))
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await query.preload()
+      collection._lifecycle.crash(new Error(`index broke`))
+      expect(query.status).toBe(`crashed`)
+
+      await expect(collection.reload()).rejects.toThrow(/crashed/)
+      await flushPromises()
+      expect(collection.status, `nothing recovers it in place`).toBe(`crashed`)
+      expect(runs).toBe(1)
+
+      await collection.cleanup({ dependents: true })
+      await collection.preload()
+      expect(runs).toBe(2)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.toArray.map((row) => row.id)).toEqual([2])
+      expect(collection.errors.hasErrors).toBe(false)
+
+      query = createLiveQueryCollection((q) => q.from({ row: collection }))
+      await query.preload()
+      expect(query.status).toBe(`ready`)
+      expect(query.toArray.map((row) => row.id)).toEqual([2])
+      expect(query.errors.hasErrors).toBe(false)
+    } finally {
+      console.error = consoleError
+      await query.cleanup()
+      await collection.cleanup({ dependents: true })
+    }
+  })
+})
+
 // A query whose first load failed waits for `reload()`: another source
 // becoming ready does not restart it, and its failed load is not retried. The
 // main grammar fails only sources, so this lane supplies the query's own

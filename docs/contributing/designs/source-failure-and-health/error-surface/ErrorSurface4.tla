@@ -390,6 +390,8 @@ QueryErrorHasAWayOut ==
 QueryErrorNamesAFailure ==
   (mounted /\ qStatus = "error") =>
     \E s \in Sources : reloading[s] \/ gate[s] = "error" \/ problem[s] = "error"
+\* Nothing recovers a crash in place: only cleanup leaves 'crashed', and a later
+\* PreloadSource starts from 'cleaned' as a fresh Collection would.
 CrashPermanentForInstance ==
   [][\A s \in Sources : gate[s] = "crashed" => gate'[s] \in {"crashed", "cleaned"}]_vars
 ReloadNeverShowsLoading ==

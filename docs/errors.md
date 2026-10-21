@@ -124,7 +124,7 @@ Cannot clean up collection "collection-1" while 2 live query or Effect dependent
 Development builds show the full message. For example:
 
 ```text
-Cannot reload collection "collection-1" because it crashed. A crash is permanent for the Collection instance; clean it up and create a new one.
+Cannot reload collection "collection-1" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again.
 ```
 
 <a id="error-251"></a>

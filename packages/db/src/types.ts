@@ -772,7 +772,8 @@ export type CollectionStatus =
   | `error`
   /**
    * Local storage or an internal invariant broke. The Collection cannot serve
-   * reads or accept writes again; recovery is a new Collection.
+   * reads or accept writes, and `reload()` rejects. Only cleanup leaves it; a
+   * later start is a fresh start.
    */
   | `crashed`
   /** Collection has been cleaned up and resources freed */

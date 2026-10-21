@@ -29,8 +29,8 @@ Decisions, in short:
    `crashed`, and works during `loading` and after `error`. A live query's `reload()`
    reloads its failed sources.
 5. `cleanup()` throws while the Collection has subscribers; `subscribers` lists them and
-   `cleanup({ dependents: true })` cleans them up first. A crash is permanent for the
-   instance; recovery is a new Collection.
+   `cleanup({ dependents: true })` cleans them up first. A crash is not recovered in
+   place; recovery is a cascade cleanup and a fresh start.
 6. Persisted Collections join the same model: a synced disk restore opens the gate, a
    failed remote waits for the restore, remote problems after that are reported, and a
    failed restore is a crash. `persistedStatus`, `isPersistedReady`, and `persistedError`

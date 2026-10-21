@@ -1683,8 +1683,9 @@ every row before the top-K (a recorded limit).
     failed first load (`fail()` before Collection readiness) is status
     `error` and is final for that sync run. A crash (IndexedDB closure, a
     terminal local persistence failure, a throwing sync function, or an
-    internal invariant failure) is status `crashed` from any active status and
-    is permanent for the Collection instance. A live query takes its sources'
+    internal invariant failure) is status `crashed` from any active status.
+    Nothing recovers it in place; only cleanup, which discards all state,
+    leaves it. A live query takes its sources'
     worst status until its initial-query readiness (`crashed` over `error`
     over `loading`). After it, only `crashed` propagates: a query cannot keep
     serving rows from a Collection that cannot serve reads. Every other

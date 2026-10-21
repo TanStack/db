@@ -54,8 +54,8 @@ R7 Reload. reload() starts a new sync run like a sync-side truncate. Nothing vis
    atomically and clears the node's problem (an 'error' status becomes 'ready'). If the new
    run fails first, the old rows and status stay and the node shows the new `error`.
    reload() while a reload is in flight returns that reload's promise. reload() on a
-   'crashed' Collection throws: a crash is permanent for the instance; recovery is a new
-   Collection. reload() during 'loading' starts a new run; commits from the old run are
+   'crashed' Collection throws: a crash is not recovered in place; recovery is a cascade
+   cleanup, which discards all state, and a fresh start (of the same object or a new one). reload() during 'loading' starts a new run; commits from the old run are
    ignored. A failed request is re-issued by the new run.
 R9 Live-query reload. reload() on a live query in 'error' reloads each of its sources in
    'error' or with a node `error`. Its status stays 'error' while any source still has a
@@ -76,7 +76,7 @@ I3 Status 'ready' implies rows are shown; no after-ready failure or reload blank
 I4 From what the app can observe, it can pick one remedy: wait, retry the action, reload,
    report broken storage.
 I5 No silent recovery or silent degradation: 'error' becomes 'ready' only through a reload's
-   commit; 'crashed' never becomes 'ready' on the same instance; a failing remote is never
+   commit; 'crashed' never becomes 'ready' without a cleanup in between; a failing remote is never
    shown as healthy; a reload never shows 'loading' in place of 'error'.
 I6 'crashed' always means broken local storage or an invariant failure.
 I7 Rows shown never come from a superseded run.

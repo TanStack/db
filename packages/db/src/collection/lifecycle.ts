@@ -132,7 +132,7 @@ export class CollectionLifecycleManager<
       // A failed first load is final for its sync run. Only a reload leaves
       // it for `ready` (see `recovering`).
       error: [`cleaned-up`, `idle`, `crashed`],
-      // A crash is permanent for the Collection instance.
+      // Nothing recovers a crash in place; only cleanup leaves it.
       crashed: [`cleaned-up`],
       'cleaned-up': [`loading`, `error`, `crashed`],
     }
@@ -402,8 +402,9 @@ export class CollectionLifecycleManager<
 
   /**
    * Local storage or an internal invariant broke. The Collection can no
-   * longer serve reads or accept writes, from any active status. A crash is
-   * permanent for this Collection instance.
+   * longer serve reads or accept writes, from any active status. Nothing
+   * recovers a crash in place: only cleanup, which discards all state, leaves
+   * it.
    */
   public crash(error?: unknown): void {
     if (this.status === `crashed`) return

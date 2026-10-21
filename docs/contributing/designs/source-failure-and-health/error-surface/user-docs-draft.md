@@ -212,8 +212,8 @@ A Collection crashes when its local storage can no longer serve reads or accept 
 - an internal invariant failed.
 
 The Collection moves to `crashed`, and so does every live query over it. A crash is
-permanent for that Collection instance: `reload()` throws. To recover, clean up the
-Collection together with everything that reads from it, then create a new one.
+not recovered in place: `reload()` throws. To recover, clean up the Collection together
+with everything that reads from it, then start it again.
 
 ```ts
 console.log(todos.subscribers) // live queries, Effects, and raw subscriptions

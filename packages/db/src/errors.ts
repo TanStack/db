@@ -163,7 +163,7 @@ export class CollectionReloadCrashedError extends CollectionStateError {
   constructor(collectionId: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Cannot reload collection "${collectionId}" because it crashed. A crash is permanent for the Collection instance; clean it up and create a new one.`
+        ? `Cannot reload collection "${collectionId}" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again.`
         : codedMessage(250, { collectionId }),
     )
   }

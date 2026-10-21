@@ -23,7 +23,7 @@
     "Cannot clean up collection \"collection-1\" while 2 live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them."
   ],
   "CollectionReloadCrashedError": [
-    "Cannot reload collection \"collection-1\" because it crashed. A crash is permanent for the Collection instance; clean it up and create a new one."
+    "Cannot reload collection \"collection-1\" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again."
   ],
   "CollectionReloadDuringSyncEntryError": [
     "Cannot reload collection \"collection-1\" from inside its sync function. Reload after the sync function returns."
