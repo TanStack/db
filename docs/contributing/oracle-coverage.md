@@ -1540,9 +1540,17 @@ core: when an earlier source transaction's store was held, a settled row
 dropped to an older synced row before its deferred server row applied
 (insert-then-update and insert-then-delete histories). It is green now, and
 mutants that drop deferred keys from the hold, drop the held row at a drain,
-or skip the held overlay after a drain each fail it. A deferred transaction
-dropped without reaching the Collection (abort or claim loss while deferred)
-is not in the grammar. The lane uses an in-memory adapter.
+or skip the held overlay after a drain each fail it. The grammar also
+aborts a deferred transaction before its turn, and ends every history with a
+source transaction on every key, so a stale hold or leaked local attribution
+shows. That step was RED on the first fix: the wrapper marked an aborted
+transaction as handed to the Collection, so its hold never ended, and a
+non-optimistic write kept local attribution for a dropped transaction. A
+campaign check requires each run to reach a hold across a drain and a hold
+released by an abort. Open: wrapper cleanup or source restart while a
+transaction is deferred has no grammar step, and a held-row release filtered
+as a recent sync echo was not reproduced. The lane uses an in-memory
+adapter.
 Several tabs on one durable store each run their own source and store
 every source transaction they receive. DB promises only eventual
 consistency between them: while their streams interleave, a lagging tab's

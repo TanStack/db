@@ -621,7 +621,15 @@ export class CollectionStateManager<
         pendingSyncKeys.add(operation.key as TKey)
       }
     }
-    for (const key of this.deferredSyncKeys()) pendingSyncKeys.add(key)
+    // Deferred keys matter only to what they can hold: a completed
+    // transaction, a held row, or attribution waiting for its sync.
+    if (
+      this.heldOptimisticRows.size > 0 ||
+      this.pendingLocalOrigins.size > 0 ||
+      this.hasCompletedTransaction()
+    ) {
+      for (const key of this.deferredSyncKeys()) pendingSyncKeys.add(key)
+    }
     for (const transaction of this.transactions.values()) {
       if (transaction.state !== `completed`) continue
       for (const mutation of transaction.mutations) {
@@ -654,6 +662,11 @@ export class CollectionStateManager<
         this.pendingLocalOrigins.delete(key)
       } else if (row === undefined) this.optimisticDeletes.add(key)
       else this.optimisticUpserts.set(key, row)
+    }
+    // Attribution also waits only for a committed sync transaction on its
+    // key. A deferred one can be dropped without applying.
+    for (const key of this.pendingLocalOrigins) {
+      if (!pendingSyncKeys.has(key)) this.pendingLocalOrigins.delete(key)
     }
 
     this.overlayActiveTransactions()
@@ -1097,6 +1110,13 @@ export class CollectionStateManager<
     if (failed) throw firstError
   }
 
+  private hasCompletedTransaction(): boolean {
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `completed`) return true
+    }
+    return false
+  }
+
   hasPersistingTransaction(): boolean {
     for (const transaction of this.transactions.values()) {
       if (transaction.state === `persisting`) return true
@@ -1110,7 +1130,10 @@ export class CollectionStateManager<
   } {
     const syncRunGeneration = this.syncRunGeneration
     const hasPersistingTransaction = this.hasPersistingTransaction()
-    const deferredKeys = new Set(this.deferredSyncKeys())
+    const deferredKeys =
+      this.heldOptimisticRows.size > 0
+        ? new Set(this.deferredSyncKeys())
+        : undefined
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
@@ -1293,7 +1316,7 @@ export class CollectionStateManager<
           // deferred transaction on the key still holds its settled row.
           this.pendingLocalChanges.delete(key)
           this.pendingLocalOrigins.delete(key)
-          if (!deferredKeys.has(key)) this.heldOptimisticRows.delete(key)
+          if (!deferredKeys?.has(key)) this.heldOptimisticRows.delete(key)
           if (!transaction.preserveHydrationSeedKeys) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)

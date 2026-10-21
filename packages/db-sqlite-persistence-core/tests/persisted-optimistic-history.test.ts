@@ -35,6 +35,13 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * that makes it, and a settled optimistic row stays over the synced rows while
  * a committed sync transaction for its key has not applied, deferred or not.
  *
+ * `abort-deferred` aborts one deferred transaction's signal. It never applies:
+ * the wrapper discards it when its turn comes, and every settled row it alone
+ * held drops in that publication. The model fixes that drop at the turn; an
+ * implementation that dropped the hold at abort time would also be legal, and
+ * this lane would reject it. The last test checks that each campaign reached
+ * a hold across a drain and a hold released by an abort.
+ *
  * Grammar limits: a handler cannot await acceptance while a hold is
  * outstanding, because acceptance follows the held durable step. The schema,
  * partial-update, and reentrant lanes stay core-only. The adapter is a Map,
@@ -127,15 +134,35 @@ function persistedLane(): WrappingSyncLane & {
   }
 }
 
-async function runPersistedHistory({
-  initial,
-  steps,
-}: {
-  initial: Array<HistoryRow>
-  steps: Array<OptimisticStep>
-}) {
+// Each campaign must reach the states its laws are about, not only pass.
+type CampaignReach = {
+  runs: number
+  deferredHolds: number
+  abortReleases: number
+}
+const reach: Record<`fixed` | `random`, CampaignReach> = {
+  fixed: { runs: 0, deferredHolds: 0, abortReleases: 0 },
+  random: { runs: 0, deferredHolds: 0, abortReleases: 0 },
+}
+
+async function runPersistedHistory(
+  {
+    initial,
+    steps,
+  }: {
+    initial: Array<HistoryRow>
+    steps: Array<OptimisticStep>
+  },
+  campaign?: CampaignReach,
+) {
   const lane = persistedLane()
-  await runOptimisticHistory(initial, steps, undefined, { wrapping: lane })
+  const counts = await runOptimisticHistory(initial, steps, undefined, {
+    wrapping: lane,
+  })
+  if (!campaign) return
+  campaign.runs++
+  campaign.deferredHolds += counts.deferredHolds
+  campaign.abortReleases += counts.abortReleases
 }
 
 // A handler commits its server row and returns without awaiting acceptance;
@@ -203,7 +230,7 @@ fcTest.prop([wrappingSyncHistory], {
   seed: 22_012,
 })(
   `persisted Collections match optimistic histories with a fixed seed`,
-  runPersistedHistory,
+  (history) => runPersistedHistory(history, reach.fixed),
   60_000,
 )
 fcTest.prop(
@@ -211,6 +238,16 @@ fcTest.prop(
   oraclePropertyOptions(40, `sqlite-persistence.optimistic-history`),
 )(
   `persisted Collections match optimistic histories with a random or replayed seed`,
-  runPersistedHistory,
+  (history) => runPersistedHistory(history, reach.random),
   60_000,
 )
+
+// A replay runs one history, so only full campaigns owe this reach.
+it(`persisted campaigns reach deferred holds and holds released by an abort`, () => {
+  if (process.env.TANSTACK_DB_ORACLE_SEED !== undefined) return
+  for (const [name, campaign] of Object.entries(reach)) {
+    if (campaign.runs === 0) continue
+    expect(campaign.deferredHolds, `${name} deferred holds`).toBeGreaterThan(0)
+    expect(campaign.abortReleases, `${name} abort releases`).toBeGreaterThan(0)
+  }
+})

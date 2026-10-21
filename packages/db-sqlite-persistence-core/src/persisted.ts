@@ -5780,7 +5780,6 @@ function createWrappedSyncConfig<
         }
         try {
           assertHydrationSequenceCurrent(transaction)
-          transaction.handedToCollection = true
           for (const key of transaction.deferredHydrationMetadataDeleteKeys) {
             if (
               !transaction.hydrationContext?.suppliedRowKeys.has(key) &&
@@ -5816,6 +5815,9 @@ function createWrappedSyncConfig<
             }
           }
 
+          // Core takes the transaction in `commit()` unless its signal has
+          // aborted; only then do core's own holds cover its keys.
+          transaction.handedToCollection = signal?.aborted !== true
           const applied = params.commit(signal)
           transaction.applicationReceipt = applied
           // Core accepted the transaction, so it is no longer staged here;
@@ -5824,6 +5826,7 @@ function createWrappedSyncConfig<
           if (applied !== true) void applied.catch(() => undefined)
           return applied
         } catch (error) {
+          transaction.handedToCollection = false
           removePendingPublicationTransaction(transaction)
           throw error
         }

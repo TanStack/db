@@ -36,7 +36,9 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * queued in the Collection, or deferred: a wrapping sync, such as
  * persistence, has not handed it to the Collection because an earlier durable
  * step is still running. A deferred transaction keeps the row held through
- * drains of the queue ahead of it. With one local mutation and no truncate, the
+ * drains of the queue ahead of it. It is not accepted yet, so it can still
+ * abort: the wrapping sync discards it at its turn, and every hold and
+ * unconsumed attribution it alone kept ends in that publication. With one local mutation and no truncate, the
  * first queued same-key source transaction consumes local attribution at
  * settlement, even if a peer supplied it. Every same-key write in that atomic
  * transaction keeps that attribution. A later transaction is `'remote'`
@@ -199,6 +201,9 @@ export type OptimisticStep =
   // `release-store`; every later durable write waits behind it.
   | { type: `hold-store` }
   | { type: `release-store` }
+  // The source aborts one deferred transaction's signal. It never applies;
+  // the wrapping sync discards it when its turn comes.
+  | { type: `abort-deferred`; slot: number }
 
 type ModelTransaction = {
   key: number
@@ -234,6 +239,12 @@ class HistoryModel {
   // Drains that kept a settled row held for a deferred transaction. Only a
   // wrapping sync reaches this state.
   deferredHoldsAcrossDrain = 0
+  // Deferred transactions whose signal was aborted before their turn.
+  aborted = new Set<SourceBatch>()
+  // Discarded aborted transactions that released a settled row's hold.
+  abortReleases = 0
+  // Of those, releases of attribution no source transaction had consumed.
+  abortAttributionReleases = 0
 
   constructor(
     rows: Array<HistoryRow>,
@@ -378,14 +389,41 @@ class HistoryModel {
     if (!this.storeHeld) this.holdNext = true
   }
 
+  // Only a deferred transaction can abort: a queued one was accepted and
+  // always applies. Returns the aborted transaction, if any.
+  abortDeferred(slot: number): SourceBatch | undefined {
+    const live = this.deferred.filter((step) => !this.aborted.has(step))
+    if (!live.length) return undefined
+    const step = live[slot % live.length]!
+    this.aborted.add(step)
+    return step
+  }
+
   // Deferred transactions reach the Collection one at a time, in commit
-  // order. `applied` observes the visible rows after each one.
+  // order. An aborted one is discarded at its turn instead, and every hold it
+  // alone kept ends in that publication. `applied` observes the visible rows
+  // after each one.
   releaseStore(applied: () => void) {
     this.holdNext = false
     this.storeHeld = false
     while (this.deferred.length) {
-      this.arrive(this.deferred.shift()!)
+      const step = this.deferred.shift()!
+      if (this.aborted.has(step)) this.discard()
+      else this.arrive(step)
       applied()
+    }
+  }
+
+  // A settled row, and its unconsumed attribution, is held only while a
+  // committed sync transaction that has not applied touches its key.
+  private discard() {
+    const keys = this.committedKeys()
+    for (const transaction of this.transactions) {
+      if (!transaction.held || keys.has(transaction.key)) continue
+      if (transaction.originPending) this.abortAttributionReleases++
+      transaction.held = false
+      transaction.originPending = false
+      this.abortReleases++
     }
   }
 
@@ -706,6 +744,10 @@ export const optimisticHistory = fc.record({
 })
 // The core grammar plus store steps. While a hold is outstanding, an
 // in-handler batch does not await acceptance.
+// A deferred transaction's signal aborts before its turn.
+const abortStep: fc.Arbitrary<OptimisticStep> = fc
+  .nat(3)
+  .map((slot) => ({ type: `abort-deferred` as const, slot }))
 // Holds outnumber releases, so a hold often spans several settlements.
 const storeStep: fc.Arbitrary<OptimisticStep> = fc.constantFrom(
   { type: `hold-store` as const },
@@ -732,13 +774,13 @@ function excludeHeldAcceptance(
 // way a source acknowledges a write when it commits it. The shared grammar's
 // handler batches rarely write their own key.
 const acknowledgedEdit: fc.Arbitrary<OptimisticStep> = fc
-  .tuple(historyRow, fc.boolean())
-  .map(([row, isDelete]) =>
+  .tuple(historyRow, fc.boolean(), fc.boolean())
+  .map(([row, isDelete, optimistic]) =>
     isDelete
       ? {
           type: `delete` as const,
           key: row.id,
-          optimistic: true,
+          optimistic,
           inHandler: {
             type: `sync` as const,
             rows: [],
@@ -751,7 +793,7 @@ const acknowledgedEdit: fc.Arbitrary<OptimisticStep> = fc
           type: `edit` as const,
           key: row.id,
           fields: { a: row.a, b: row.b, c: row.c },
-          optimistic: true,
+          optimistic,
           inHandler: {
             type: `sync` as const,
             rows: [row],
@@ -766,6 +808,17 @@ const settleAll: Array<OptimisticStep> = Array.from({ length: 24 }, () => ({
   success: true,
   cascade: false,
 }))
+// After every hold has ended, one later source transaction writes every key.
+// A key that kept attribution or a hold it no longer owns shows it here.
+const observeEveryKey: Array<OptimisticStep> = [
+  { type: `release-store` },
+  {
+    type: `sync`,
+    rows: [1, 2, 3].map((id) => ({ id, a: 9, b: 9, c: 9 })),
+    truncate: false,
+    copies: 1,
+  },
+]
 /**
  * The grammar for a wrapping-sync lane: the core grammar plus held durable
  * writes and acknowledged edits.
@@ -781,13 +834,18 @@ export const wrappingSyncHistory = fc.record({
         { weight: 6, arbitrary: optimisticStep },
         { weight: 4, arbitrary: acknowledgedEdit },
         { weight: 2, arbitrary: storeStep },
+        { weight: 4, arbitrary: abortStep },
       ),
       { minLength: 2, maxLength: 24 },
     )
-    // Settle every outstanding transaction before the driver's final release,
-    // so an outstanding hold meets a drain. A settle with nothing active is
-    // skipped.
-    .map((steps) => [...excludeHeldAcceptance(steps), ...settleAll]),
+    // Settle every outstanding transaction before the release, so an
+    // outstanding hold meets a drain. A settle with nothing active is skipped.
+    // Then observe every key through one later source transaction.
+    .map((steps) => [
+      ...excludeHeldAcceptance(steps),
+      ...settleAll,
+      ...observeEveryKey,
+    ]),
 })
 
 /**
@@ -942,6 +1000,10 @@ export async function runOptimisticHistory(
     distinguishingPartialUpdates: 0,
     // Drains that kept a settled row held for a deferred transaction.
     deferredHolds: 0,
+    abortedDeferred: 0,
+    // Discarded aborted transactions that released a settled row's hold.
+    abortReleases: 0,
+    abortAttributionReleases: 0,
   }
   // The source admits each message against its own rows, including queued
   // batches. An insert names an absent key; an update or delete a present
@@ -1018,8 +1080,17 @@ export async function runOptimisticHistory(
     beginSourceBatch(step)
     return commitSourceBatch(step)
   }
+  // In a wrapping-sync lane each source transaction carries its own signal,
+  // so a history can abort it while it is deferred.
+  const controllers = new Map<SourceBatch, AbortController>()
   function commitSourceBatch(step: SourceBatch) {
-    const receipt = sync.commit()
+    let signal: AbortSignal | undefined
+    if (wrapping) {
+      const controller = new AbortController()
+      controllers.set(step, controller)
+      signal = controller.signal
+    }
+    const receipt = sync.commit(signal)
     if (receipt !== true)
       receipts.push({ batch: step, outcome: observeHistoryPromise(receipt) })
     if (model.transactions.some((entry) => entry.state === `persisting`)) {
@@ -1467,6 +1538,13 @@ export async function runOptimisticHistory(
         } else if (step.type === `release-store`) {
           if (!wrapping) throw new Error(`Store steps need a wrapping sync`)
           releaseStore()
+        } else if (step.type === `abort-deferred`) {
+          if (!wrapping) throw new Error(`Store steps need a wrapping sync`)
+          const aborted = model.abortDeferred(step.slot)
+          if (!aborted) continue
+          // The transaction still waits for its turn, so nothing changes yet.
+          controllers.get(aborted)!.abort()
+          counts.abortedDeferred++
         } else if (step.type === `reentrant`) {
           if (wrapping)
             throw new Error(`The wrapping-sync lane has no reentrant drain`)
@@ -1551,6 +1629,8 @@ export async function runOptimisticHistory(
         check(`final release-store`)
       }
       counts.deferredHolds = model.deferredHoldsAcrossDrain
+      counts.abortReleases = model.abortReleases
+      counts.abortAttributionReleases = model.abortAttributionReleases
       // A configuration mutant changes production setup, not an observation.
       if (mutant && mutant !== `partial-as-full`)
         expect(injected, `observation mutant reached its checkpoint`).toBe(true)
@@ -1584,11 +1664,13 @@ export async function runOptimisticHistory(
       () => rawSub?.unsubscribe(),
       () => downstream.cleanup(),
       () => collection.cleanup(),
-      ...receipts.map(({ outcome }, index) => async () => {
+      ...receipts.map(({ batch, outcome }, index) => async () => {
         await outcome.settled
         expectHistoryOutcome(
           outcome.read(),
-          { status: `fulfilled`, value: undefined },
+          model.aborted.has(batch)
+            ? { status: `rejected` }
+            : { status: `fulfilled`, value: undefined },
           `applied sync receipt ${index}`,
         )
       }),
