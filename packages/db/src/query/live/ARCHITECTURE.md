@@ -1148,7 +1148,8 @@ LEFT join to a Collection is an exception for a cross-alias filter when every or
 term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root
 page, core waits for the current lazy join demand and any joined subset load to
-settle, then reruns the graph. Joined-side changes also recheck ordered demand
+settle, then reruns the graph. A joined load can settle without delivering a
+row, so the joined source becoming ready schedules that run itself. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. An empty joined replay still
 releases held Effect callbacks.
 

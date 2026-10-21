@@ -1086,7 +1086,8 @@ describe(`loadSubset replay refinement`, () => {
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
  *   thrown release, a window move rejected by a load failure, or an error the
- *   subscription rethrows from a microtask. A release failure never rejects a
+ *   subscription rethrows from a microtask. A window move whose load a
+ *   truncate aborts may also reject with an `AbortError`. A release failure never rejects a
  *   window move. No other error may escape.
  *
  * History grammar: rank moves, holding the next loads, settling the oldest
@@ -1094,9 +1095,14 @@ describe(`loadSubset replay refinement`, () => {
  * unload once the replay has started), and arming the next unload to throw. The driver uses a real on-demand Collection with an index and an
  * ordered live query. At the end, every held load succeeds in order.
  *
- * Limits: one ordered source; the joined source is eager and its markers
- * change only through sync; no includes; and a provider that reads its rows
- * at the time it answers.
+ * The joined scenarios cross a LEFT join that keeps marked or unmarked rows
+ * and an inner join, over an eager marker source or one that loads markers on
+ * demand through the same held and failing loads; markers change and truncate
+ * through sync.
+ *
+ * Limits: one ordered source; no full joins (the ordered-work oracle owns
+ * them) and no includes; and a provider that reads its rows at the time it
+ * answers.
  */
 type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
@@ -1107,6 +1113,7 @@ type OrderedCommand =
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
   | { type: `mark`; id: number; on: boolean }
+  | { type: `truncateMarkers` }
 
 // The query's order and window, whether ranks may tie, and whether a second
 // live query reads the same source.
@@ -1116,9 +1123,13 @@ type OrderedScenario = {
   limit: 1 | 2 | 3
   ties: boolean
   peer: boolean
-  // The query LEFT-joins a marker source and keeps only marked rows, so the
-  // order source is filtered by a joined source.
-  joined: boolean
+  // How the query joins a marker source: none, a LEFT join that keeps marked
+  // rows (`some`) or unmarked rows (`none`), or an inner join. A LEFT join
+  // filter makes the order source filtered by a joined source.
+  joined: false | `some` | `none` | `inner`
+  // Whether the marker source holds every marker or loads them on demand,
+  // sharing the history's held and failing loads.
+  markerMode: `eager` | `on-demand`
 }
 
 const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
@@ -1127,7 +1138,13 @@ const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
   limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
   ties: fc.boolean(),
   peer: fc.boolean(),
-  joined: fc.boolean(),
+  joined: fc.constantFrom(
+    false as const,
+    `some` as const,
+    `none` as const,
+    `inner` as const,
+  ),
+  markerMode: fc.constantFrom(`eager` as const, `on-demand` as const),
 })
 
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
@@ -1161,6 +1178,10 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
   },
   { weight: 2, arbitrary: fc.constant({ type: `unloadThrows` as const }) },
   {
+    weight: 1,
+    arbitrary: fc.constant({ type: `truncateMarkers` as const }),
+  },
+  {
     weight: 2,
     arbitrary: fc.record({
       type: fc.constant(`mark` as const),
@@ -1191,6 +1212,11 @@ type OrderedReach = {
   descendingRuns: number
   joinedRuns: number
   markChanges: number
+  antiJoinedRuns: number
+  innerJoinedRuns: number
+  markerLoads: number
+  markerTruncates: number
+  abortedMoves: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1200,6 +1226,7 @@ const ordinaryOrderedScenario: OrderedScenario = {
   ties: false,
   peer: false,
   joined: false,
+  markerMode: `eager`,
 }
 
 async function checkOrderedReplay(
@@ -1218,7 +1245,11 @@ async function checkOrderedReplay(
   // window's rank sequence. Each shown row must also carry its current rank.
   const expectedRanks = (shown: { offset: number; limit: number }) =>
     [...truth.values()]
-      .filter(({ id }) => !scenario.joined || marked.has(id))
+      .filter(
+        ({ id }) =>
+          !scenario.joined ||
+          (scenario.joined === `none` ? !marked.has(id) : marked.has(id)),
+      )
       .map(({ rank }) => rank)
       .sort((left, right) => sign * (left - right))
       .slice(shown.offset, shown.offset + shown.limit)
@@ -1287,21 +1318,85 @@ async function checkOrderedReplay(
     descendingRuns: scenario.direction === `desc` ? 1 : 0,
     joinedRuns: scenario.joined ? 1 : 0,
     markChanges: 0,
+    antiJoinedRuns: scenario.joined === `none` ? 1 : 0,
+    innerJoinedRuns: scenario.joined === `inner` ? 1 : 0,
+    markerLoads: 0,
+    markerTruncates: 0,
+    abortedMoves: 0,
   }
-  let markerSync!: Parameters<
-    SyncConfig<{ id: number; rowId: number }, number>[`sync`]
-  >[0]
-  const markers = createCollection<{ id: number; rowId: number }, number>({
+  type Marker = { id: number; rowId: number }
+  let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
+  const installedMarkers = new Set<number>()
+  const onDemandMarkers = scenario.joined && scenario.markerMode === `on-demand`
+  const markers = createCollection<Marker, number>({
     getKey: (marker) => marker.id,
+    ...(onDemandMarkers
+      ? { syncMode: `on-demand` as const, autoIndex: `eager` as const }
+      : {}),
+    defaultIndexType: BTreeIndex,
     sync: {
       sync: (operations) => {
         markerSync = operations
-        operations.begin()
-        for (const id of marked) {
-          operations.write({ type: `insert`, value: { id, rowId: id } })
+        if (!onDemandMarkers) {
+          operations.begin()
+          for (const id of marked) {
+            operations.write({ type: `insert`, value: { id, rowId: id } })
+            installedMarkers.add(id)
+          }
+          operations.commit()
+          operations.markReady()
+          return
         }
-        operations.commit()
         operations.markReady()
+        return {
+          // Marker loads share the history's held and failing loads, so
+          // joined work can stay pending or fail.
+          loadSubset: async (options) => {
+            acquired.set(options, (acquired.get(options) ?? 0) + 1)
+            const load: Load = { epoch: truncates, outcome: `pending` }
+            loads.push(load)
+            reach.markerLoads++
+            if (holding) {
+              const ok = await new Promise<boolean>((resolve) =>
+                held.push(resolve),
+              )
+              if (!ok) {
+                load.outcome = `failed`
+                anyLoadFailed = true
+                reach.failedLoads++
+                throw inject(new Error(`marker load failed`))
+              }
+            } else await Promise.resolve()
+            if (options.signal?.aborted) {
+              load.outcome = `ok`
+              return
+            }
+            operations.begin()
+            for (const id of marked) {
+              const value = { id, rowId: id }
+              if (
+                options.where &&
+                evaluateReferenceExpression(options.where, value) !== true
+              ) {
+                continue
+              }
+              operations.write({
+                type: markers.has(id) ? `update` : `insert`,
+                value,
+              })
+              installedMarkers.add(id)
+            }
+            await operations.commit()
+            load.outcome = `ok`
+          },
+          unloadSubset: (options) => {
+            const count = acquired.get(options) ?? 0
+            if (count === 0) {
+              violation ??= `marker unloadSubset released a demand it did not hold`
+            }
+            acquired.set(options, count - 1)
+          },
+        }
       },
     },
   })
@@ -1361,10 +1456,11 @@ async function checkOrderedReplay(
               options.limit === undefined ? undefined : offset + options.limit,
             )
             sync.begin()
+            // A provider answers a load with every row it selects; a replay
+            // after a truncate must redeliver them.
             for (const value of selected) {
-              if (installed.get(value.id) === value) continue
               sync.write({
-                type: installed.has(value.id) ? `update` : `insert`,
+                type: source.has(value.id) ? `update` : `insert`,
                 value,
               })
               installed.set(value.id, value)
@@ -1406,13 +1502,22 @@ async function checkOrderedReplay(
   const query = () =>
     createLiveQueryCollection((q) => {
       const from = q.from({ row: source })
-      const filtered = scenario.joined
-        ? from
-            .leftJoin({ marker: markers }, ({ row, marker }) =>
+      const filtered =
+        scenario.joined === `inner`
+          ? from.innerJoin({ marker: markers }, ({ row, marker }) =>
               eq(row.id, marker.rowId),
             )
-            .where(({ marker }) => not(isUndefined(marker.rowId)))
-        : from
+          : scenario.joined
+            ? from
+                .leftJoin({ marker: markers }, ({ row, marker }) =>
+                  eq(row.id, marker.rowId),
+                )
+                .where(({ marker }) =>
+                  scenario.joined === `none`
+                    ? isUndefined(marker.rowId)
+                    : not(isUndefined(marker.rowId)),
+                )
+            : from
       return filtered
         .orderBy(({ row }) => row.rank, scenario.direction)
         .offset(scenario.offset)
@@ -1445,7 +1550,10 @@ async function checkOrderedReplay(
       }),
     )
   const settleAll = async () => {
-    for (let round = 0; round < 50; round++) {
+    // Each truncate replays every retained demand of each query, so a long
+    // held history can hold hundreds of loads. A load that starts another
+    // without end still fails.
+    for (let round = 0; round < 1000; round++) {
       await flushPromises()
       const next = held.shift()
       if (!next) return
@@ -1468,6 +1576,21 @@ async function checkOrderedReplay(
     } finally {
       truncating = false
     }
+  }
+  // An eager marker source rewrites its rows; an on-demand one replays the
+  // demand it retains.
+  const truncateMarkers = async () => {
+    installedMarkers.clear()
+    markerSync.begin()
+    markerSync.truncate()
+    if (!onDemandMarkers) {
+      for (const id of marked) {
+        markerSync.write({ type: `insert`, value: { id, rowId: id } })
+        installedMarkers.add(id)
+      }
+    }
+    const receipt = markerSync.commit()
+    if (receipt !== true) await receipt
   }
   try {
     await live.preload()
@@ -1522,16 +1645,26 @@ async function checkOrderedReplay(
             reach.markChanges++
             if (command.on) marked.add(command.id)
             else marked.delete(command.id)
+            // The marker provider delivers every change, as a live sync does.
             markerSync.begin()
-            markerSync.write(
-              command.on
-                ? {
-                    type: `insert`,
-                    value: { id: command.id, rowId: command.id },
-                  }
-                : { type: `delete`, key: command.id },
-            )
+            if (command.on) {
+              markerSync.write({
+                type: `insert`,
+                value: { id: command.id, rowId: command.id },
+              })
+              installedMarkers.add(command.id)
+            } else if (installedMarkers.delete(command.id)) {
+              markerSync.write({ type: `delete`, key: command.id })
+            }
             markerSync.commit()
+            break
+          }
+          // The joined source truncates. An eager source redelivers every
+          // marker; an on-demand one replays its loaded demands.
+          case `truncateMarkers`: {
+            if (!scenario.joined) break
+            reach.markerTruncates++
+            await truncateMarkers()
             break
           }
           // An explicit window move on the first query, which also retries
@@ -1556,6 +1689,12 @@ async function checkOrderedReplay(
                 // reject it either.
                 if (error instanceof Error && cleanupFaults.has(error)) {
                   escaped ??= error
+                }
+                // A truncate aborts the load a move waits on (ARCHITECTURE.md);
+                // the move then rejects and the window stays where it was.
+                if (error instanceof Error && error.name === `AbortError`) {
+                  reach.abortedMoves++
+                  return
                 }
                 swallow(error)
               },
@@ -1597,7 +1736,11 @@ async function checkOrderedReplay(
         checkWindow(`settled peer window`, peer.toArray, peerWindow)
       }
     }
+    // A failed replay keeps the last complete publication until a later
+    // authoritative replay of that source (ARCHITECTURE.md), so recovery
+    // replays every source.
     await truncate()
+    if (scenario.joined) await truncateMarkers()
     await settleAll()
     await flushPromises()
     if (violation) throw new Error(`adapter release: ${violation}`)
@@ -1645,7 +1788,14 @@ describe(`Ordered windows across truncate replays`, () => {
   //   graph run was never scheduled, so the window kept the old rows);
   // - an unload that throws during a window move whose load succeeded (the
   //   builder recorded the cleanup error as the move's failure, so the
-  //   window stayed private until another move).
+  //   window stayed private until another move);
+  // - an on-demand joined source that truncates while a marker load is held
+  //   (its loads finished without delivering a new row, and nothing ran the
+  //   graph that the pending joined work had held, so the window stayed on
+  //   old rows until an unrelated write);
+  // - a window move whose joined load a truncate aborts (the model counted
+  //   the move's AbortError as an escaped fault; it is a legal rejection, and
+  //   this replay keeps the branch reached).
   it.each([
     {
       name: `a release that throws after a successful repair`,
@@ -1677,14 +1827,49 @@ describe(`Ordered windows across truncate replays`, () => {
       ],
       scenario: { ...ordinaryOrderedScenario, limit: 1 },
     },
+    {
+      name: `an on-demand joined source that truncates while a marker load is held`,
+      history: [
+        { type: `hold` },
+        { type: `move`, id: 3, rank: 1 },
+        { type: `truncateMarkers` },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `some`,
+        markerMode: `on-demand`,
+      },
+    },
+    {
+      name: `a window move whose joined load a truncate aborts`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncate`, armAfterStart: false },
+        { type: `move`, id: 1, rank: 1 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+      },
+      reaches: `abortedMoves`,
+    },
   ] satisfies Array<{
     name: string
     history: Array<OrderedCommand>
     scenario?: OrderedScenario
+    reaches?: keyof OrderedReach
   }>)(
     `keeps the ordered window for $name (generated replay)`,
-    async ({ history, scenario }) => {
-      await checkOrderedReplay(history, scenario)
+    async ({ history, scenario, ...replay }) => {
+      const reach = await checkOrderedReplay(history, scenario)
+      const reaches: keyof OrderedReach | undefined =
+        `reaches` in replay ? replay.reaches : undefined
+      if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
     },
   )
 
@@ -1704,6 +1889,11 @@ describe(`Ordered windows across truncate replays`, () => {
         descendingRuns: 0,
         joinedRuns: 0,
         markChanges: 0,
+        antiJoinedRuns: 0,
+        innerJoinedRuns: 0,
+        markerLoads: 0,
+        markerTruncates: 0,
+        abortedMoves: 0,
       }
       await fc.assert(
         fc.asyncProperty(
@@ -1726,8 +1916,11 @@ describe(`Ordered windows across truncate replays`, () => {
       // Reach witnesses: releases throw without a truncate, while a replay
       // starts, and while it settles; loads fail and stay held across a
       // truncate; and the settled-window law is checked.
+      // An aborted move needs a truncate to land inside a held move; the
+      // named replay above reaches it.
       if (campaign !== `replay`) {
         for (const [dimension, count] of Object.entries(total)) {
+          if (dimension === `abortedMoves`) continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
