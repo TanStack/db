@@ -1818,8 +1818,9 @@ describe(`Successful finite demand retirement`, () => {
  * starts a truncate of its own (a reentrant reset), whether the first
  * release callback disposes the loader, whether each release
  * callback runs an ordinary pass synchronously (as a graph run does when a
- * release delivers deletes outside a transaction), and a window offset of 0
- * or 1.
+ * release delivers deletes outside a transaction; inside one the run is
+ * deferred, which is the ordinary form), and a window offset of 0 or 1.
+ * Truncates can stack on a pending replay, including one that failed.
  *
  * ## Checkpoints
  *
@@ -2060,6 +2061,8 @@ type AuthorityObservation = {
   timerRetries: number
   shrinkingMoves: number
   reentrantTruncates: number
+  stackedTruncates: number
+  truncatesAfterFailedReplay: number
   reentrantPasses: number
   disposals: number
   hungRequests: number
@@ -2114,6 +2117,9 @@ async function checkAuthorityCase(
   let disposals = 0
   let explicitRetrying = false
   let reentrantTruncates = 0
+  let stackedTruncates = 0
+  let truncatesAfterFailedReplay = 0
+  let replayFailedSinceTruncate = false
   let reentering = false
   let reentrantPasses = 0
   let hungRequests = 0
@@ -2377,6 +2383,12 @@ async function checkAuthorityCase(
   const replayPending = () => truncatePending
   function truncate() {
     truncates++
+    // A second truncate while a replay is pending, possibly one that failed.
+    if (truncatePending) {
+      stackedTruncates++
+      if (replayFailedSinceTruncate) truncatesAfterFailedReplay++
+    }
+    replayFailedSinceTruncate = false
     loader.resetCursor()
     truncatePending = true
     replayOwnedBefore = ledger.length
@@ -2627,7 +2639,10 @@ async function checkAuthorityCase(
           await flush()
           break
         case `replayFails`:
-          if (replayPending()) replayFailures++
+          if (replayPending()) {
+            replayFailures++
+            replayFailedSinceTruncate = true
+          }
           break
         // An optimistic overlay hides the window's row, so the loader must
         // refill it from the source.
@@ -2834,6 +2849,8 @@ async function checkAuthorityCase(
     timerRetries,
     shrinkingMoves,
     reentrantTruncates,
+    stackedTruncates,
+    truncatesAfterFailedReplay,
     reentrantPasses,
     disposals,
     hungRequests,
@@ -3223,6 +3240,8 @@ describe(`Ordered source request authority`, () => {
         timerRetries: 0,
         shrinkingMoves: 0,
         reentrantTruncates: 0,
+        stackedTruncates: 0,
+        truncatesAfterFailedReplay: 0,
         reentrantPasses: 0,
         disposals: 0,
         hungRequests: 0,

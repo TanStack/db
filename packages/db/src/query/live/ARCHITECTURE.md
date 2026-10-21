@@ -1050,8 +1050,9 @@ release pass, including the explicit and backoff retries' release of failed
 acquisitions, stops when a release resets the cursor or disposes the loader.
 The replay that follows owns the leases the pass did not reach. A release
 can deliver deletes that run the graph synchronously, so ordered refinement
-stays blocked until the pass unwinds, and a lease that a nested pass already
-released is not released again.
+stays blocked until the pass unwinds. No second pass can then reach the same
+leases within one generation, so a lease missing from its map during a pass is
+an invariant violation, not a case to skip.
 
 The loader's authoritative work is a small state machine. Its work slot is
 idle, a repair chain, or a full-source read that is held, complete, or failed;

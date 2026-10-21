@@ -597,8 +597,7 @@ export class OrderedSourceLoader {
   // Release each selected lease once. A release that resets the cursor, which
   // dispose also does, stops the pass; the replay that follows owns the
   // remaining leases. A release can run the graph synchronously, so
-  // refinement stays blocked until the pass unwinds, and a lease that a
-  // nested pass already released is skipped.
+  // refinement stays blocked until the pass unwinds.
   private releaseOwned<TEntry>(
     owner: Map<ReleaseLoadSubset, TEntry>,
     selected: (release: ReleaseLoadSubset, entry: TEntry) => boolean,
@@ -611,10 +610,16 @@ export class OrderedSourceLoader {
         Array.from(owner, ([release, entry]) => () => {
           if (
             orderedLoadGeneration !== this.orderedLoadGeneration ||
-            owner.get(release) !== entry ||
             !selected(release, entry)
           )
             return
+          // Within one generation no other pass can reach this map while
+          // refinement is blocked; a missing lease would be a double release.
+          if (owner.get(release) !== entry) {
+            throw new OrderedLoaderInvariantError(
+              `Ordered loader lease was released by another pass`,
+            )
+          }
           owner.delete(release)
           release()
         }),
