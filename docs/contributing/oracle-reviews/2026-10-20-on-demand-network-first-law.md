@@ -79,9 +79,11 @@ Until then, the load waits for the upstream load as it does today. A demand
 without coverage never settles from SQLite.
 
 After the load settles from SQLite, its upstream load continues as work that
-the wrapper owns. Rows from that load publish as ordinary source writes.
-Releasing the demand, or cleanup, aborts it. Settling from SQLite does not
-change Collection readiness.
+the wrapper owns. Rows from that load publish as ordinary source writes. A
+later upstream failure does not undo the settlement. Releasing the demand, or
+cleanup, aborts the upstream load. Coverage survives release: a later load of
+the same demand starts its own wait and may settle from SQLite again.
+Settling from SQLite does not change Collection readiness.
 
 An upstream load that settles successfully records coverage for its exact
 demand. Coverage is written durably with the load's rows or after them. A
@@ -150,11 +152,14 @@ is unchanged for a query over only eager sources.
 
 Today the observer's network-first gate runs only when every source registers a
 `PersistedReadinessSource` (`collectPersistedReadinessSources` in
-`packages/db/src/live-query-observer.ts`). An opted-in on-demand source must
-therefore register a contribution as well. Its contribution reports ready for a
-query only when that query's demands on the source have settled. A
-contribution that always reports ready would let the gate release a join before
-the on-demand side's rows arrive.
+`packages/db/src/live-query-observer.ts`). That interface reports one state per
+Collection, but demand settlement differs by query: two queries over the same
+on-demand source can be in different states. An opted-in on-demand source
+therefore registers only that it opted in, with no settlement state. The gate
+reads settlement from the live query itself: the query's own initial
+readiness, with each eager source's persisted restore standing in for that
+source's Collection readiness. An opt-in alone never permits fallback; that
+would release a join before the on-demand side's covered rows are visible.
 
 ### The wait
 
@@ -244,8 +249,12 @@ follow this combining rule (edited in this worktree).
 7. Aborting the upstream load when the wrapper settles from SQLite. Fresh rows
    then never arrive.
 8. Leaving a covered next page unpublished after the wait.
-9. An on-demand contribution that always reports ready. The gate then releases
+9. An on-demand opt-in that permits fallback on its own. The gate then releases
    a join before the on-demand side's covered rows are visible.
+10. Coverage keyed by filter only, ignoring order and limit.
+11. A wait measured from the sync run instead of the load, or coverage cleared
+    on release.
+12. A late upstream failure that undoes a settlement from SQLite.
 
 ## Documents that change with the law
 
@@ -256,7 +265,10 @@ follow this combining rule (edited in this worktree).
   demand coverage entries; revised persisted readiness and network-first
   initial render entries (edited in this worktree).
 - `docs/guides/sqlite-persistence.md` ("Render after SQLite restore") and
-  `docs/guides/live-queries.md`.
+  `docs/guides/live-queries.md`. They must say that a covered result, including
+  an empty one, is complete as of the load that covered it, not fresh, and that
+  the wait changes when a query is ready, not how fresh its rows are. Rows from
+  the network can still arrive after a query is ready.
 - `docs/contributing/oracle-coverage.md`, "Persisted readiness and network-first
   initial rendering."
 - `docs/contributing/oracle-reviews/issue-2056-cache-eviction-design.md`, per
