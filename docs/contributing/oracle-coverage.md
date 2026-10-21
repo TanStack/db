@@ -1575,6 +1575,40 @@ pre-publication tick. This bounded history does not prove Windows/Edge behavior,
 offline recovery, arbitrary later re-inserts, or a durable-acknowledgment
 contract for `awaitTxId`.
 
+The [optimistic-history oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
+now owns the held-row law for sync transactions deferred behind a wrapping
+sync's durable step, and checks that every optimistic mutation is visible in
+the tick that makes it. Its
+[persisted lane](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts)
+runs the shared grammar through `persistedCollectionOptions` with
+`hold-store` and `release-store` steps and a handler that commits its own
+server row. It was RED before the wrapper reported deferred sync keys to
+core: when an earlier source transaction's store was held, a settled row
+dropped to an older synced row before its deferred server row applied
+(insert-then-update and insert-then-delete histories). It is green now, and
+mutants that drop deferred keys from the hold, drop the held row at a drain,
+or skip the held overlay after a drain each fail it. The grammar also
+aborts a deferred transaction before its turn, and ends every history with a
+source transaction on every key, so a stale hold or leaked local attribution
+shows. That step was RED on the first fix: the wrapper marked an aborted
+transaction as handed to the Collection, so its hold never ended, and a
+non-optimistic write kept local attribution for a dropped transaction. A
+campaign check requires each run to reach a hold across a drain and a hold
+released by an abort. Open: wrapper cleanup or source restart while a
+transaction is deferred has no grammar step, and a held-row release filtered
+as a recent sync echo was not reproduced. The lane uses an in-memory
+adapter.
+Several tabs on one durable store each run their own source and store
+every source transaction they receive. DB promises only eventual
+consistency between them: while their streams interleave, a lagging tab's
+copy of an older transaction can be stored and announced after a newer one,
+so a tab can briefly show an older server state. Every tab delivers the
+same log in order, so durable state and every tab converge once the streams
+catch up. No lane checks this yet. Ordering the copies would need a generic
+source position on sync commits; Electric already stores `{ handle, offset }`
+with each commit, PowerSync does not use this wrapper, and persisted Query
+collections have no log position.
+
 The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
 preserves the held-checkpoint and extra-POST mutant results at the exact
 reviewed executable commit.
