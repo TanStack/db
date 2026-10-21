@@ -133,11 +133,16 @@ published virtual fields against an independently written public shape. Their
 passing type assertions do not prove runtime parsing, I/O, or publication.
 
 The shared-driver fairness owner now distinguishes K=1 from K=2 at the second
-hydrate and checks full logical persist FIFO order in its Node seam. The
+hydrate and checks full logical persist FIFO order. Its Node and Chromium
+production drivers apply one comparison,
+`findSharedDriverFairnessLawViolations`. It checks hydrate admission and
+completion, public rows rebuilt from the scenario seeds, persist FIFO order,
+and the K=1 cut at each hydrate. The
 [Chromium OPFS receiving spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness-oracle.opfs.spec.ts)
-checks a cold SQL read, the K=1 hydrate bound, public rows, the pending persist
-backlog at the second hydrate, and all five logical persist completion IDs in
-FIFO order during one held-BEGIN storm through the real worker. This closes the
+states no expected results of its own. It adds a cold SQL read and the
+already-running persist premise during one held-BEGIN storm through the real
+worker. The persist-first scheduling fault fails that spec at the shared
+comparison. This closes the
 bounded real-OPFS handoff at logical adapter completion for that history. It
 does not establish durable write order after reopen, naturally occurring
 contention, a browser matrix, multi-context coordination, elapsed-time

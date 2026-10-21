@@ -9,13 +9,13 @@
  */
 import { openBrowserWASQLiteOPFSDatabase } from '../src/index'
 import {
-  findSharedDriverFairnessViolation,
+  findSharedDriverFairnessLawViolations,
   observeSharedDriverFairness,
 } from '../tests/shared-driver-fairness-oracle'
 import type {
+  SharedDriverFairnessLawViolation,
   SharedDriverFairnessObservation,
   SharedDriverFairnessScenario,
-  SharedDriverFairnessViolation,
 } from '../tests/shared-driver-fairness-oracle'
 
 export type OPFSOracleResult =
@@ -23,7 +23,7 @@ export type OPFSOracleResult =
       status: `complete`
       provider: `Chromium OPFSCoopSyncVFS worker`
       observation: SharedDriverFairnessObservation
-      violation: SharedDriverFairnessViolation | undefined
+      lawViolations: ReadonlyArray<SharedDriverFairnessLawViolation>
       opfsCleanupFailures: ReadonlyArray<string>
     }
   | {
@@ -113,7 +113,7 @@ async function run(): Promise<void> {
   const status = document.querySelector<HTMLOutputElement>(`#oracle-status`)
   const databaseName = `ws5b-${crypto.randomUUID()}.sqlite`
   let observation: SharedDriverFairnessObservation | undefined
-  let violation: SharedDriverFairnessViolation | undefined
+  let lawViolations: ReadonlyArray<SharedDriverFairnessLawViolation> = []
   let primaryFailure: string | undefined
   let opfsCleanupFailures: ReadonlyArray<string> = []
   try {
@@ -122,7 +122,7 @@ async function run(): Promise<void> {
       scenarioFromLocation(),
     )
     // Freeze the reached semantic checkpoint before attempting OPFS cleanup.
-    violation = findSharedDriverFairnessViolation(observation)
+    lawViolations = findSharedDriverFairnessLawViolations(observation)
   } catch (error) {
     primaryFailure = error instanceof Error ? error.message : String(error)
   }
@@ -142,7 +142,7 @@ async function run(): Promise<void> {
       status: `complete`,
       provider: `Chromium OPFSCoopSyncVFS worker`,
       observation,
-      violation,
+      lawViolations,
       opfsCleanupFailures,
     }
     if (status) status.value = `complete`

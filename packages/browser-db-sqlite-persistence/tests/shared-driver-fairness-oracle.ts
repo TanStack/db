@@ -504,6 +504,117 @@ export function findSharedDriverFairnessViolation(
   return undefined
 }
 
+export type SharedDriverFairnessLawViolation = {
+  law: string
+  checkpoint: string
+  expected: unknown
+  actual: unknown
+}
+
+/** Public rows each cold hydrate must expose, rebuilt from the scenario seeds. */
+export function expectedHydratedCollections(
+  scenario: SharedDriverFairnessScenario,
+): Array<HydratedCollectionRows> {
+  return scenario.work.flatMap((work) =>
+    work.kind === `hydrate`
+      ? [
+          {
+            collectionId: collectionIdFor(scenario, work),
+            rows: work.seededRows.map((row) => ({ ...row })),
+          },
+        ]
+      : [],
+  )
+}
+
+/**
+ * The complete refinement check that every driver applies. Expected values
+ * come from the scenario and the K=1 reference, never from production. Reach
+ * laws come first so that a missing hydrate is not reported as a K=1 cut.
+ */
+export function findSharedDriverFairnessLawViolations(
+  observation: SharedDriverFairnessObservation,
+  fairnessBound = SHARED_DRIVER_FAIRNESS_BOUND,
+): Array<SharedDriverFairnessLawViolation> {
+  const { scenario } = observation
+  const expectedHydrates = expectedHydratedCollections(scenario)
+  const expectedPersistIds = scenario.work
+    .filter((work) => work.kind === `persist`)
+    .map((work) => collectionIdFor(scenario, work))
+  const violations: Array<SharedDriverFairnessLawViolation> = []
+  const compare = (
+    law: string,
+    checkpoint: string,
+    expected: unknown,
+    actual: unknown,
+  ) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      violations.push({ law, checkpoint, expected, actual })
+    }
+  }
+
+  compare(
+    `hydrate admission IDs`,
+    `after all preload requests`,
+    expectedHydrates.map(({ collectionId }) => collectionId),
+    observation.admittedHydrateIds,
+  )
+  compare(
+    `hydrate completion count`,
+    `after all preloads`,
+    expectedHydrates.length,
+    observation.hydrationCompletions.length,
+  )
+  compare(
+    `hydrated public rows`,
+    `after all preloads`,
+    expectedHydrates,
+    observation.hydratedCollections,
+  )
+  compare(
+    `persist FIFO completion order`,
+    `after all work settled`,
+    expectedPersistIds,
+    observation.logicalCompletionOrder
+      .filter((entry) => entry.startsWith(`persist:`))
+      .map((entry) => entry.slice(`persist:`.length)),
+  )
+
+  const cut = findSharedDriverFairnessViolation(observation, fairnessBound)
+  if (cut) {
+    const laws: Array<string> = []
+    if (cut.checkpoint.collectionId !== cut.expectedCollectionId) {
+      laws.push(`hydrate FIFO identity`)
+    }
+    if (
+      cut.checkpoint.completedPersistIds.length >
+      cut.expectedMaximumCompletedPersists
+    ) {
+      laws.push(`K=1 completed-persist bound`)
+    }
+    if (
+      cut.checkpoint.pendingPersistCount < cut.expectedMinimumPendingPersists
+    ) {
+      laws.push(`K=1 pending-persist backlog`)
+    }
+    if (cut.unexpectedCompletedPersistIds.length > 0) {
+      laws.push(`completed persist outside permitted prefix`)
+    }
+    violations.push({
+      law: laws.join(`; `),
+      checkpoint: `hydrate completion ${observation.hydrationCompletions.indexOf(cut.checkpoint)}`,
+      expected: {
+        collectionId: cut.expectedCollectionId,
+        maximumCompletedPersists: cut.expectedMaximumCompletedPersists,
+        minimumPendingPersists: cut.expectedMinimumPendingPersists,
+        permittedCompletedPersistIds: cut.permittedCompletedPersistIds,
+      },
+      actual: cut.checkpoint,
+    })
+  }
+  return violations
+}
+
 /** Checker calibration only; the executable hostile control uses the fixture. */
 export function createPersistFirstFaultObservation(
   scenario: SharedDriverFairnessScenario,
