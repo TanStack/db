@@ -126,6 +126,8 @@ type CollectionState = {
   latestRowVersion: number
   subscribers: Set<(message: ProtocolEnvelope<unknown>) => void>
   routeWaiters?: Set<() => void>
+  leadershipNeeded: Promise<void>
+  markLeadershipNeeded: () => void
 }
 
 // Adapter capabilities used by coordinator-side operations. Resume snapshots
@@ -416,9 +418,16 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   }
 
   async ensureLeadership(collectionId: string): Promise<void> {
+    // Join without replacing a queued Web Lock request, then wait until this
+    // node holds the route. Waiting marks leadership as needed.
     const state = this.ensureCollectionState(collectionId)
-    if (state.isLeader) return
-    await this.acquireLeadership(collectionId, state)
+    await this.waitForLeadershipRoute(
+      collectionId,
+      state,
+      undefined,
+      undefined,
+      true,
+    )
   }
 
   async requestEnsureRemoteSubset(
@@ -893,7 +902,13 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private getOrCreateCollectionState(collectionId: string): CollectionState {
     let state = this.collections.get(collectionId)
     if (!state) {
+      let markLeadershipNeeded!: () => void
+      const leadershipNeeded = new Promise<void>((resolve) => {
+        markLeadershipNeeded = resolve
+      })
       state = {
+        leadershipNeeded,
+        markLeadershipNeeded,
         participatesInLeadership: false,
         isLeader: false,
         leaderId: null,
@@ -954,6 +969,27 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             const reserveTerm = adapter.reserveLeadershipTerm
             if (!reserveTerm)
               throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
+            // Let hydrates already queued on the shared scheduler run before
+            // the durable term write. A leadership need skips the wait,
+            // because a scheduled hydrate may be waiting for this route.
+            await Promise.race([
+              adapter.runInRegularScope?.afterQueuedHydrates(),
+              state.leadershipNeeded,
+              new Promise((resolve) => {
+                abortController.signal.addEventListener(`abort`, resolve, {
+                  once: true,
+                })
+              }),
+            ])
+            // Every abort also replaces or clears the controller.
+            if (
+              this.isDisposed() ||
+              !this.participatesInLeadership(state) ||
+              this.collections.get(collectionId) !== state ||
+              state.lockAbortController !== abortController
+            ) {
+              return
+            }
             const pos = await this.withWriterLock(() => {
               const claimId = this.collectionClaimIds.get(collectionId)
               return reserveTerm.call(
@@ -1048,14 +1084,6 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       !state.isLeader &&
       state.leaderId === null
     ) {
-      this.channel.postMessage({
-        v: 1,
-        dbName: this.dbName,
-        collectionId,
-        senderId: this.nodeId,
-        ts: Date.now(),
-        payload: { type: `leader:routeRequest` },
-      } satisfies ProtocolEnvelope<{ type: `leader:routeRequest` }>)
       return this.waitForLeadershipRoute(
         collectionId,
         state,
@@ -1071,8 +1099,22 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     state: CollectionState,
     signal?: AbortSignal,
     timeoutMs?: number,
+    requireLocalLeadership = false,
   ): Promise<void> {
-    if (state.isLeader || state.leaderId !== null) return Promise.resolve()
+    const routed = () =>
+      state.isLeader || (!requireLocalLeadership && state.leaderId !== null)
+    if (routed()) return Promise.resolve()
+    // A local or remote lock holder may be waiting for this need before it
+    // reserves its term.
+    state.markLeadershipNeeded()
+    this.channel.postMessage({
+      v: 1,
+      dbName: this.dbName,
+      collectionId,
+      senderId: this.nodeId,
+      ts: Date.now(),
+      payload: { type: `leader:routeRequest` },
+    } satisfies ProtocolEnvelope<{ type: `leader:routeRequest` }>)
 
     return new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -1097,7 +1139,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           )
           return
         }
-        if (state.isLeader || state.leaderId !== null) {
+        if (routed()) {
           finish()
           resolve()
         }
@@ -1309,6 +1351,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
 
     const type = (payload as Record<string, unknown>).type as string | undefined
 
+    if (type === `leader:routeRequest` || type?.endsWith(`:req`)) {
+      const state = this.collections.get(envelope.collectionId)
+      if (state?.participatesInLeadership) state.markLeadershipNeeded()
+    }
+
     if (type === `leader:routeRequest`) {
       const state = this.collections.get(envelope.collectionId)
       if (state?.isLeader) this.emitHeartbeat(envelope.collectionId, state)
@@ -1388,6 +1435,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     request: RPCRequest,
   ): Promise<T> {
     if (this.isDisposed()) throw new Error(`coordinator disposed`)
+    // A lock holder may still be waiting to reserve its term. Ask for the
+    // route first instead of spending a full RPC timeout on no receiver.
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
     let lastError: Error | undefined
     let firstTransportCause: unknown
     const mutationRequestType = isMutatingRPCRequest(request)

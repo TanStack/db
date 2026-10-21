@@ -622,11 +622,24 @@ export interface PersistenceAdapter {
     task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
   ) => Promise<T>
   /** Schedule one regular operation before it acquires external writer locks. */
-  runInRegularScope?: <T>(
-    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
-  ) => Promise<T>
+  runInRegularScope?: RegularScope
   /** Whether hydration scopes currently enter a shared driver scheduler. */
   isHydrationScopeScheduled?: () => boolean
+}
+
+/**
+ * Regular work on a shared driver scheduler. A scheduler that admits regular
+ * work also orders it against hydrates, so the barrier is part of the same
+ * capability rather than a separate optional member.
+ */
+export type RegularScope = (<T>(
+  task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+) => Promise<T>) & {
+  /**
+   * Resolves after every hydrate queued or running at the call completes. It
+   * takes no scheduler turn and does not count as a lane completion.
+   */
+  afterQueuedHydrates: () => Promise<void>
 }
 
 export type HydrationPersistenceAdapter = PersistenceAdapter & {

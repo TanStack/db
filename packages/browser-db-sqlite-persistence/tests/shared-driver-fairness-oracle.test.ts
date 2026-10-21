@@ -688,6 +688,77 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
     30_000,
   )
 
+  // An election barrier waits between two queued hydrates while persists are
+  // queued. It is not logical work, so the K=1 checkpoints and the full
+  // interleaving must equal the same history without it. The scheduler trace
+  // shows that it settled after the hydrate queued before it and before the
+  // hydrate queued after it. An empty hydrate scope used as the barrier is a
+  // hydrate completion for K=1 and lets a second persist through.
+  describe(`election barrier between queued hydrates`, () => {
+    const id = `barrier-between-hydrates`
+    const hydrate = (index: number): SharedDriverFairnessWork => ({
+      kind: `hydrate`,
+      id: `hydrate-${index}`,
+      seededRows: [{ id: `row-${index}`, value: index }],
+    })
+    const persist = (index: number): SharedDriverFairnessWork => ({
+      kind: `persist`,
+      id: `persist-${index}`,
+      mutationsPerPersist: 1,
+    })
+    const withBarrier: SharedDriverFairnessScenario = {
+      id,
+      work: [
+        persist(0),
+        hydrate(0),
+        { kind: `barrier`, id: `barrier-0` },
+        hydrate(1),
+        persist(1),
+        persist(2),
+      ],
+    }
+    const withoutBarrier: SharedDriverFairnessScenario = {
+      id,
+      work: withBarrier.work.filter((work) => work.kind !== `barrier`),
+    }
+
+    it(`keeps the K=1 interleaving and waits only for the hydrate queued before it`, async () => {
+      let baseline: ReadonlyArray<string> | undefined
+      await withNodeScenario(withoutBarrier, (observation) => {
+        expectFairObservation(observation)
+        baseline = observation.logicalCompletionOrder
+      })
+      await withNodeScenario(withBarrier, (observation) => {
+        expectFairObservation(observation)
+        expect(observation.logicalCompletionOrder).toEqual(baseline)
+        const trace = observation.schedulerTrace
+        expect(trace[0]).toBe(`barrier-call:barrier-0@1`)
+        const settled = trace.indexOf(`barrier-settled:barrier-0`)
+        expect(settled).toBeGreaterThan(trace.indexOf(`hydrate-scope-end:1`))
+        expect(settled).toBeLessThan(trace.indexOf(`hydrate-scope-end:2`))
+      })
+    })
+
+    it(`rejects an empty hydrate scope used as the barrier`, async () => {
+      let failure: unknown
+      await withNodeScenario(
+        withBarrier,
+        (observation) => {
+          try {
+            expectFairObservation(observation)
+          } catch (error) {
+            failure = error
+          }
+        },
+        { barrierFault: `empty-hydrate` },
+      )
+      expect(failure).toMatchObject({
+        law: `K=1 completed-persist bound; K=1 pending-persist backlog; completed persist outside permitted prefix`,
+        checkpoint: `hydrate completion 1`,
+      })
+    })
+  })
+
   it(`proves tail-order ablation removes a hydrate-before-later-persist history`, () => {
     const sampleOptions = { seed: FIXED_SEED, numRuns: GENERATED_RUNS }
     const completeGrammar = fc.sample(generatedHistoryArbitrary, sampleOptions)

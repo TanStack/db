@@ -14,6 +14,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import type { ElectricCollectionUtils } from '../../electric-db-collection/src/electric'
+import type { HydrationPersistenceAdapter } from '../../db-sqlite-persistence-core/src/index'
 
 type Item = { id: string; label: string }
 export type ElectricLeaderCloseObservation = {
@@ -227,25 +228,31 @@ try {
       schemaVersion: 1,
     })
     collectionAdapter = options.persistence.adapter
-    const originalRegular =
-      collectionAdapter.runInRegularScope?.bind(collectionAdapter)
-    if (!originalRegular) throw new Error('regular scope unavailable')
-    collectionAdapter.runInRegularScope = (task) =>
-      originalRegular((scopedAdapter) =>
-        task({
-          ...scopedAdapter,
-          applyCommittedTx: async (requestedId, tx) => {
-            appliedKeys.push(
-              ...tx.mutations.map((mutation) => String(mutation.key)),
-            )
-            await scopedAdapter.applyCommittedTx(requestedId, tx)
-            if (tx.mutations.some((mutation) => mutation.key === 'crossing')) {
-              heldAfterDurability = true
-              await new Promise<void>(() => {})
-            }
-          },
-        }),
-      )
+    const originalScope = collectionAdapter.runInRegularScope
+    const originalRegular = originalScope?.bind(collectionAdapter)
+    if (!originalScope || !originalRegular)
+      throw new Error('regular scope unavailable')
+    collectionAdapter.runInRegularScope = Object.assign(
+      <T>(task: (adapter: HydrationPersistenceAdapter) => Promise<T>) =>
+        originalRegular((scopedAdapter) =>
+          task({
+            ...scopedAdapter,
+            applyCommittedTx: async (requestedId, tx) => {
+              appliedKeys.push(
+                ...tx.mutations.map((mutation) => String(mutation.key)),
+              )
+              await scopedAdapter.applyCommittedTx(requestedId, tx)
+              if (
+                tx.mutations.some((mutation) => mutation.key === 'crossing')
+              ) {
+                heldAfterDurability = true
+                await new Promise<void>(() => {})
+              }
+            },
+          }),
+        ),
+      { afterQueuedHydrates: originalScope.afterQueuedHydrates },
+    )
     const collection = createCollection(options)
     cleanupTasks.unshift(() => collection.cleanup())
     observeRows = () => ({

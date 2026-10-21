@@ -13,6 +13,7 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import {
   createBrowserWASQLitePersistence,
@@ -3277,6 +3278,247 @@ async function readRawCollectionSnapshot(
     rowCount: count[0]?.count ?? -1,
   }
 }
+
+/*
+Reload election-order oracle
+============================
+
+Law and source: reloads must stay fast (accepted persistence goal, issue
+#2205). On a reload of prefilled eager collections with a fresh coordinator,
+a collection's durable election term write does not run ahead of the
+database reads that were already queued when its leader Web Lock was
+granted. Liveness when a caller needs a leader belongs to the focused
+Browser coordinator owner (`leadership need under a queued read`).
+
+Model: from the history alone. When every collection is created and preloaded
+in one task and lock grants arrive on a later task, every startup read is
+queued at every grant. When grants arrive in the same turn as the request,
+no read is queued yet and the law asks nothing. The reference does not read
+the scheduler or coordinator state.
+
+History grammar: 1, 2, or 3 collections × grants in the same turn or on the
+next task. Each SQL statement resolves on a later task, like a round trip to
+the OPFS worker. Real wa-sqlite-compatible SQLite and the real composed
+Browser persistence, coordinator, and persisted wrapper are used.
+
+Observations: the driver SQL log (each collection's first row scan and its
+`INSERT INTO leader_term`), the number of startup hydrations queued at each
+leader grant (premise reach), and each durable term after reload. The strong
+judgment is the law above. The own-read judgment (a collection's term follows
+its own row scan) is reported beside it to separate the two failure shapes.
+
+Limits: the next-task grant models Chromium's lock manager, not a measured
+browser. With a same-turn grant the law is vacuous, so on such a host the
+ordering is best effort. Elapsed time is not observed.
+*/
+
+type ReloadOrderEvent = { kind: `scan` | `term`; collectionId: string }
+
+function reloadOrderViolations(
+  events: ReadonlyArray<ReloadOrderEvent>,
+  queuedAtGrant: ReadonlyMap<string, ReadonlyArray<string>>,
+): { strong: Array<string>; ownRead: Array<string> } {
+  const at = (kind: ReloadOrderEvent[`kind`], collectionId: string) =>
+    events.findIndex(
+      (event) => event.kind === kind && event.collectionId === collectionId,
+    )
+  const strong: Array<string> = []
+  const ownRead: Array<string> = []
+  for (const [collectionId, queued] of queuedAtGrant) {
+    const term = at(`term`, collectionId)
+    for (const read of queued) {
+      if (at(`scan`, read) > term) {
+        strong.push(`${collectionId} term before queued ${read} scan`)
+        if (read === collectionId) ownRead.push(`${collectionId} term first`)
+      }
+    }
+  }
+  return { strong, ownRead }
+}
+
+describe(`reload election-order oracle`, () => {
+  it.each(
+    [1, 2, 3].flatMap((count) =>
+      ([`same turn`, `next task`] as const).map((grant) => ({ count, grant })),
+    ),
+  )(
+    `orders $count reloaded term writes behind queued reads when grants arrive on the $grant`,
+    async ({ count, grant }) => {
+      type Row = { id: string; title: string }
+      const ids = Array.from({ length: count }, (_, index) => `reload-${index}`)
+      const directory = mkdtempSync(join(tmpdir(), `db-reload-order-`))
+      const filename = join(directory, `reload.sqlite`)
+      const openCollections = (
+        persistence: ReturnType<typeof createBrowserWASQLitePersistence>,
+      ) =>
+        ids.map((id) =>
+          createCollection(
+            persistedCollectionOptions<Row, string>({
+              id,
+              getKey: (row) => row.id,
+              persistence,
+              schemaVersion: 1,
+            }),
+          ),
+        )
+      const requestLock = controlledLocks.request
+      const prototype = SQLiteCorePersistenceAdapter.prototype
+      const runInHydrationScope = prototype.runInHydrationScope
+      let collections: Array<Collection<Row, string>> = []
+      let coordinator: BrowserCollectionCoordinator | undefined
+      let database: BrowserWASQLiteDatabase | undefined
+
+      await withFailurePreservingCleanup(async () => {
+        const fillDatabase = createWASQLiteTestDatabase({ filename })
+        const filler = createCoordinator(
+          `reload-order`,
+          createRecordingAdapter({ id: `reload-fill` }),
+        )
+        const filled = openCollections(
+          createBrowserWASQLitePersistence({
+            database: fillDatabase,
+            coordinator: filler,
+          }),
+        )
+        await Promise.all(filled.map((collection) => collection.preload()))
+        for (const collection of filled) {
+          await collection.insert({ id: `row`, title: collection.id })
+            .isPersisted.promise
+        }
+        for (const collection of filled) await collection.cleanup()
+        await disposeCoordinator(filler)
+        await fillDatabase.close?.()
+        await waitForWithoutDelivery(
+          () => heldLocks.size === 0 && queuedLocks.size === 0,
+          `fill session release`,
+        )
+
+        const events: Array<ReloadOrderEvent> = []
+        const tables = new Map<string, string>()
+        const reloadDatabase = createWASQLiteTestDatabase({ filename })
+        database = reloadDatabase
+        const execute = reloadDatabase.execute.bind(reloadDatabase)
+        reloadDatabase.execute = async <TRow>(
+          sql: string,
+          params: ReadonlyArray<unknown> = [],
+        ) => {
+          await nextTurn()
+          const rows = await execute<TRow>(sql, params)
+          const text = sql.replace(/\s+/g, ` `).trim()
+          if (text.startsWith(`SELECT table_name, tombstone_table_name`)) {
+            for (const row of rows as ReadonlyArray<{ table_name: string }>) {
+              tables.set(row.table_name, String(params[0]))
+            }
+          }
+          const scan =
+            /^SELECT key, value, metadata, row_version FROM "([^"]+)"/.exec(
+              text,
+            )
+          if (scan?.[1] && tables.has(scan[1])) {
+            events.push({ kind: `scan`, collectionId: tables.get(scan[1])! })
+          }
+          if (text.startsWith(`INSERT INTO leader_term`)) {
+            events.push({ kind: `term`, collectionId: String(params[0]) })
+          }
+          return rows
+        }
+        let queuedHydrations = 0
+        prototype.runInHydrationScope = function (
+          this: SQLiteCorePersistenceAdapter,
+          task,
+        ) {
+          queuedHydrations++
+          return runInHydrationScope.call(this, task)
+        } as typeof runInHydrationScope
+        const queuedAtGrant = new Map<string, Array<string>>()
+        const premise = new Map<string, number>()
+        controlledLocks.request = (name, optionsOrCallback, maybeCallback) => {
+          const leader = /^tsdb:leader:reload-order:(.+)$/.exec(name)?.[1]
+          if (!leader) {
+            return requestLock(name, optionsOrCallback, maybeCallback)
+          }
+          const callback =
+            typeof optionsOrCallback === `function`
+              ? optionsOrCallback
+              : maybeCallback!
+          const granted: LockCallback = (lock) => {
+            premise.set(leader, queuedHydrations)
+            // Independent model: a later-task grant follows the one task that
+            // created and preloaded every collection.
+            queuedAtGrant.set(leader, grant === `next task` ? ids : [])
+            return callback(lock)
+          }
+          const request = () =>
+            typeof optionsOrCallback === `function`
+              ? requestLock(name, granted)
+              : requestLock(name, optionsOrCallback, granted)
+          if (grant === `same turn`) return request()
+          return nextTurn().then(request)
+        }
+
+        coordinator = createCoordinator(
+          `reload-order`,
+          createRecordingAdapter({ id: `reload-bootstrap` }),
+        )
+        collections = openCollections(
+          createBrowserWASQLitePersistence({
+            database: reloadDatabase,
+            coordinator,
+          }),
+        )
+        await Promise.all(collections.map((collection) => collection.preload()))
+        await waitFor(
+          () => ids.every((id) => coordinator!.isLeader(id)),
+          `reloaded leaders`,
+        )
+
+        // Premise reach: the grant timing put the history in its cell.
+        expect(Object.fromEntries(premise)).toEqual(
+          Object.fromEntries(
+            ids.map((id) => [id, grant === `next task` ? count : 0]),
+          ),
+        )
+        expect(
+          ids.every(
+            (id) =>
+              events.some((e) => e.kind === `scan` && e.collectionId === id) &&
+              events.some((e) => e.kind === `term` && e.collectionId === id),
+          ),
+        ).toBe(true)
+        expect(reloadOrderViolations(events, queuedAtGrant)).toEqual({
+          strong: [],
+          ownRead: [],
+        })
+        // Neighbor guarantee: each reload still reserves a greater term.
+        expect(
+          await reloadDatabase.execute<{ latest_term: number }>(
+            `SELECT latest_term FROM leader_term ORDER BY collection_id`,
+          ),
+        ).toEqual(ids.map(() => ({ latest_term: 2 })))
+      }, [
+        [
+          `reload seams`,
+          () => {
+            controlledLocks.request = requestLock
+            prototype.runInHydrationScope = runInHydrationScope
+          },
+        ],
+        [
+          `reload Collections`,
+          async () => {
+            for (const collection of collections) await collection.cleanup()
+          },
+        ],
+        [`reload coordinator`, () => disposeCoordinator(coordinator)],
+        [`reload database`, () => Promise.resolve(database?.close?.())],
+        [
+          `reload directory`,
+          () => rmSync(directory, { recursive: true, force: true }),
+        ],
+      ])
+    },
+  )
+})
 
 describe(`per-collection adapter and SQLite-state oracle`, () => {
   // The coordinator constructs a transaction for local mutations. A managed
