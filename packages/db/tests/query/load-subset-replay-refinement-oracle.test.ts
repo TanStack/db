@@ -5,6 +5,8 @@ import { createDeferred } from '../../src/deferred.js'
 import {
   createLiveQueryCollection,
   eq,
+  isUndefined,
+  not,
   toArray,
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -1092,8 +1094,9 @@ describe(`loadSubset replay refinement`, () => {
  * unload once the replay has started), and arming the next unload to throw. The driver uses a real on-demand Collection with an index and an
  * ordered live query. At the end, every held load succeeds in order.
  *
- * Limits: one source, one live query with limit 2, no joins or includes, and
- * a provider that reads its rows at the time it answers.
+ * Limits: one ordered source; the joined source is eager and its markers
+ * change only through sync; no includes; and a provider that reads its rows
+ * at the time it answers.
  */
 type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
@@ -1103,6 +1106,7 @@ type OrderedCommand =
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
+  | { type: `mark`; id: number; on: boolean }
 
 // The query's order and window, whether ranks may tie, and whether a second
 // live query reads the same source.
@@ -1112,6 +1116,9 @@ type OrderedScenario = {
   limit: 1 | 2 | 3
   ties: boolean
   peer: boolean
+  // The query LEFT-joins a marker source and keeps only marked rows, so the
+  // order source is filtered by a joined source.
+  joined: boolean
 }
 
 const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
@@ -1120,6 +1127,7 @@ const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
   limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
   ties: fc.boolean(),
   peer: fc.boolean(),
+  joined: fc.boolean(),
 })
 
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
@@ -1153,6 +1161,14 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
   },
   { weight: 2, arbitrary: fc.constant({ type: `unloadThrows` as const }) },
   {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`mark` as const),
+      id: fc.integer({ min: 1, max: 5 }),
+      on: fc.boolean(),
+    }),
+  },
+  {
     weight: 1,
     arbitrary: fc.record({
       type: fc.constant(`window` as const),
@@ -1173,6 +1189,8 @@ type OrderedReach = {
   peerChecks: number
   windowMoves: number
   descendingRuns: number
+  joinedRuns: number
+  markChanges: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1181,6 +1199,7 @@ const ordinaryOrderedScenario: OrderedScenario = {
   limit: 2,
   ties: false,
   peer: false,
+  joined: false,
 }
 
 async function checkOrderedReplay(
@@ -1193,10 +1212,13 @@ async function checkOrderedReplay(
   const truth = new Map<number, OrderedRow>(
     [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id * 10 }]),
   )
+  // With a joined source, only marked rows qualify; row 2 starts unmarked.
+  const marked = new Set([1, 3, 4, 5])
   // Ties leave the order among equal ranks open, so the model predicts the
   // window's rank sequence. Each shown row must also carry its current rank.
   const expectedRanks = (shown: { offset: number; limit: number }) =>
     [...truth.values()]
+      .filter(({ id }) => !scenario.joined || marked.has(id))
       .map(({ rank }) => rank)
       .sort((left, right) => sign * (left - right))
       .slice(shown.offset, shown.offset + shown.limit)
@@ -1263,7 +1285,26 @@ async function checkOrderedReplay(
     peerChecks: 0,
     windowMoves: 0,
     descendingRuns: scenario.direction === `desc` ? 1 : 0,
+    joinedRuns: scenario.joined ? 1 : 0,
+    markChanges: 0,
   }
+  let markerSync!: Parameters<
+    SyncConfig<{ id: number; rowId: number }, number>[`sync`]
+  >[0]
+  const markers = createCollection<{ id: number; rowId: number }, number>({
+    getKey: (marker) => marker.id,
+    sync: {
+      sync: (operations) => {
+        markerSync = operations
+        operations.begin()
+        for (const id of marked) {
+          operations.write({ type: `insert`, value: { id, rowId: id } })
+        }
+        operations.commit()
+        operations.markReady()
+      },
+    },
+  })
   let sync!: Parameters<SyncConfig<OrderedRow, number>[`sync`]>[0]
   const source = createCollection<OrderedRow, number>({
     getKey: (row) => row.id,
@@ -1363,14 +1404,21 @@ async function checkOrderedReplay(
     },
   })
   const query = () =>
-    createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
+    createLiveQueryCollection((q) => {
+      const from = q.from({ row: source })
+      const filtered = scenario.joined
+        ? from
+            .leftJoin({ marker: markers }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
+            )
+            .where(({ marker }) => not(isUndefined(marker.rowId)))
+        : from
+      return filtered
         .orderBy(({ row }) => row.rank, scenario.direction)
         .offset(scenario.offset)
         .limit(scenario.limit)
-        .select(({ row }) => ({ id: row.id, rank: row.rank })),
-    )
+        .select(({ row }) => ({ id: row.id, rank: row.rank }))
+    })
   const live = query()
   // A peer reads the same source; its leases must survive the first
   // query's retirements, so its window obeys the same law.
@@ -1434,7 +1482,12 @@ async function checkOrderedReplay(
                 .map(({ rank }) => rank),
             )
             if (!scenario.ties && ranks.has(command.rank)) break
-            const value = { id: command.id, rank: command.rank }
+            // With ties, ranks come from the five starting ranks, so moved
+            // rows often tie with others.
+            const rank = scenario.ties
+              ? 10 * (1 + (command.rank % 5))
+              : command.rank
+            const value = { id: command.id, rank }
             // The provider delivers every source change, as a live sync does.
             truth.set(command.id, value)
             sync.begin()
@@ -1461,6 +1514,26 @@ async function checkOrderedReplay(
           case `unloadThrows`:
             throwNextUnload = true
             break
+          // A row gains or loses its marker in the joined source.
+          case `mark`: {
+            if (!scenario.joined || marked.has(command.id) === command.on) {
+              break
+            }
+            reach.markChanges++
+            if (command.on) marked.add(command.id)
+            else marked.delete(command.id)
+            markerSync.begin()
+            markerSync.write(
+              command.on
+                ? {
+                    type: `insert`,
+                    value: { id: command.id, rowId: command.id },
+                  }
+                : { type: `delete`, key: command.id },
+            )
+            markerSync.commit()
+            break
+          }
           // An explicit window move on the first query, which also retries
           // its failed requests.
           // A move that rejects, as one does after a failed source recovery,
@@ -1546,6 +1619,7 @@ async function checkOrderedReplay(
     for (const subscription of subscriptions) subscription.unsubscribe()
     await live.cleanup().catch(swallow)
     await peer?.cleanup().catch(swallow)
+    await markers.cleanup().catch(swallow)
     await flushPromises()
     process.off(`unhandledRejection`, swallow)
     microtasks.mockRestore()
@@ -1628,6 +1702,8 @@ describe(`Ordered windows across truncate replays`, () => {
         peerChecks: 0,
         windowMoves: 0,
         descendingRuns: 0,
+        joinedRuns: 0,
+        markChanges: 0,
       }
       await fc.assert(
         fc.asyncProperty(
