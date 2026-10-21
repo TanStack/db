@@ -44,8 +44,9 @@ AGENTS.md fail-fast rules.
 
 `hasAppliedOwnership` reports an entry only when it is not a release's entry.
 `removeQueryOwnership` marks its empty entry in a `WeakSet`. The guard and the
-on-demand direct-write skip use the helper. The production diff is 13 lines
-added and 3 removed in `src/query.ts`.
+on-demand direct-write skip use the helper. The result-application rollback
+snapshot keeps the entry by reference (CR-1 below). The production diff is 15
+lines added and 6 removed in `src/query.ts`.
 
 ## RED and GREEN
 
