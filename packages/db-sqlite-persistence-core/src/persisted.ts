@@ -1225,17 +1225,23 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
       value: T
     }
 
+type MetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
+
+function toMetadataMutations<K>(
+  writes: Map<K, MetadataWrite>,
+): Array<{ type: `set`; key: K; value: unknown } | { type: `delete`; key: K }> {
+  return Array.from(writes, ([key, write]) =>
+    write.type === `delete`
+      ? { type: `delete`, key }
+      : { type: `set`, key, value: write.value },
+  )
+}
+
 type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   operations: Array<NormalizedSyncOperation<T, TKey>>
   partialUpdateOperationIndexes: Set<number>
-  rowMetadataWrites: Map<
-    TKey,
-    { type: `set`; value: unknown } | { type: `delete` }
-  >
-  collectionMetadataWrites: Map<
-    string,
-    { type: `set`; value: unknown } | { type: `delete` }
-  >
+  rowMetadataWrites: Map<TKey, MetadataWrite>
+  collectionMetadataWrites: Map<string, MetadataWrite>
   deferredHydrationMetadataDeleteKeys: Set<TKey>
   hydrationContext?: { suppliedRowKeys: Set<TKey> }
   hydrationSequence?: number
@@ -4127,23 +4133,9 @@ class PersistedCollectionRuntime<
               value: operation.value as Record<string, unknown>,
             },
       ),
-      rowMetadataMutations: Array.from(
-        transaction.rowMetadataWrites.entries(),
-      ).map(([key, metadataWrite]) =>
-        metadataWrite.type === `delete`
-          ? { type: `delete` as const, key: key }
-          : {
-              type: `set` as const,
-              key: key,
-              value: metadataWrite.value,
-            },
-      ),
-      collectionMetadataMutations: Array.from(
-        transaction.collectionMetadataWrites.entries(),
-      ).map(([key, metadataWrite]) =>
-        metadataWrite.type === `delete`
-          ? { type: `delete`, key }
-          : { type: `set`, key, value: metadataWrite.value },
+      rowMetadataMutations: toMetadataMutations(transaction.rowMetadataWrites),
+      collectionMetadataMutations: toMetadataMutations(
+        transaction.collectionMetadataWrites,
       ),
     }
   }
@@ -5653,7 +5645,6 @@ function createWrappedSyncConfig<
         const settle = () => removePendingPublicationTransaction(transaction)
         void applied.then(settle, settle)
       }
-      type MetadataWrite = { type: `delete` } | { type: `set`; value: unknown }
       const metadataValue = (write: MetadataWrite) =>
         write.type === `delete` ? undefined : write.value
       const applyMetadataWrite = (
