@@ -66,7 +66,6 @@
   "syncStartDeferred": "bb",
   "getCollectionLayoutRevision": "bc",
   "leaseGeneration": "bd",
-  "primaryFailureDeliveryDepth": "bf",
   "syncEntryActive": "bg",
   "builderDependencies": "bh",
   "abandonOrderedPrefixRepair": "bi",
@@ -395,7 +394,6 @@
   "beginWrite": "gB",
   "detach": "gC",
   "copyRows": "gD",
-  "restore": "gE",
   "attach": "gF",
   "sortedExactValues": "gG",
   "retiringSupersededAcquisitions": "l",
@@ -413,5 +411,8 @@
   "moveWork": "ae",
   "checkCoherence": "gQ",
   "supersedes": "gR",
-  "oweDebt": "gS"
+  "oweDebt": "gS",
+  "windowRequestGeneration": "av",
+  "isDeferredSyncKey": "bf",
+  "overlayHeldAndActive": "c7"
 }
