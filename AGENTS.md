@@ -887,9 +887,15 @@ return allDone
 
 ## Code Weight and Fail-Fast Design
 
-Treat each line of production code as a continuing cost. Bug fixes should start
-with a net-neutral production-code budget. Prefer a negative production diff
-when the change makes the existing design simpler.
+Treat each line of production code as a continuing cost. Bug fixes and
+features should aim for a net-negative production diff. Pay for new behavior by
+refactoring the existing code it touches: merge duplicated logic and parallel
+structures, delete indirection, and remove branches that the change makes
+redundant. Refactoring existing code is the expected way to fix a bug or add a
+feature. Do not graft new code onto a design and leave the old code in place.
+
+When a change still grows production code after that work, state why. Name
+the refactors you tried and the evidence that ruled them out.
 
 Tests and contract documentation can grow to prove the behavior. Report their
 weight separately from production code. Do not compress code or weaken names
