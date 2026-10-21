@@ -636,8 +636,9 @@ export type RegularScope = (<T>(
   task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
 ) => Promise<T>) & {
   /**
-   * Resolves after every hydrate queued or running at the call completes. It
-   * takes no scheduler turn and does not count as a lane completion.
+   * Resolves after every operation, in either lane, queued or running at the
+   * call settles. It never rejects, takes no scheduler turn, and does not
+   * count as a lane completion.
    */
   afterQueuedWork: () => Promise<void>
 }
