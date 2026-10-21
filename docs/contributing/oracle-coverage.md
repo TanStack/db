@@ -1528,6 +1528,29 @@ pre-publication tick. This bounded history does not prove Windows/Edge behavior,
 offline recovery, arbitrary later re-inserts, or a durable-acknowledgment
 contract for `awaitTxId`.
 
+The [optimistic-history oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
+now owns the held-row law for sync transactions deferred behind a wrapping
+sync's durable step, and checks that every optimistic mutation is visible in
+the tick that makes it. Its
+[persisted lane](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts)
+runs the shared grammar through `persistedCollectionOptions` with
+`hold-store` and `release-store` steps and a handler that commits its own
+server row. The lane is RED on current
+production: when an earlier source transaction's store is held, a settled
+row drops to an older synced row before its deferred server row applies
+(insert-then-update and insert-then-delete histories). The class stays open
+until a repair turns it green. The lane uses an in-memory adapter.
+The [two-tab lane](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/two-tab-optimistic-history.test.ts)
+runs the same model and grammar with `peer-sync` steps: a second tab leads
+the real Browser coordinator, and its source transactions reach the tab under
+test through real SQLite and Node BroadcastChannel. `hold-store` holds the
+coordinator's writer lock. Ordinary peer histories pass. The lane is RED when
+a peer transaction applies by reloading durable rows while the tab's own
+earlier sync transaction is still queued or unannounced: a peer delete,
+truncate, or truncate-with-rows is lost or applied in parts, and the tab keeps
+a row the store and the peer do not have. Leadership transfer and a tab
+closing mid-history are outside this lane.
+
 The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
 preserves the held-checkpoint and extra-POST mutant results at the exact
 reviewed executable commit.
