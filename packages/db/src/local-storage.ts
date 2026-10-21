@@ -260,37 +260,57 @@ function describeJsonLoss(
 }
 
 /**
- * Validates that a fresh restore can return an authored row. A custom parser
- * owns its value domain, so only serialization failures apply to it.
+ * Validates that a fresh restore can return an authored row, and returns the
+ * checked JSON so the write stores exactly that text. A custom parser owns its
+ * value domain, so only serialization failures apply to it.
  */
 function validateStorableRow(
   parser: Parser,
   value: unknown,
   operation: string,
-): void {
+): string | undefined {
   if (parser !== JSON) {
     validateJsonSerializable(parser, value, operation)
-    return
+    return undefined
   }
   const paths = new Map<object, string>()
   let loss: string | undefined
-  const stringify = (row: unknown) =>
-    JSON.stringify(row, function (this: object, key: string, item: unknown) {
-      // After the first loss, stop descending; the result is discarded.
-      if (loss) return undefined
-      const parent = paths.get(this)
-      const path =
-        parent === undefined
-          ? `row`
-          : Array.isArray(this)
-            ? `${parent}[${key}]`
-            : `${parent}.${key}`
-      loss = describeJsonLoss(this, item, path)
-      if (typeof item === `object` && item !== null) paths.set(item, path)
-      return item
-    })
+  let json: string | undefined
+  function replacer(this: object, key: string, item: unknown): unknown {
+    // After the first loss, stop descending; the result is discarded.
+    if (loss) return undefined
+    const parent = paths.get(this)
+    const path =
+      parent === undefined
+        ? `row`
+        : Array.isArray(this)
+          ? `${parent}[${key}]`
+          : `${parent}.${key}`
+    loss = describeJsonLoss(this, item, path)
+    if (typeof item === `object` && item !== null) paths.set(item, path)
+    return item
+  }
+  const stringify = (row: unknown) => (json = JSON.stringify(row, replacer))
   validateJsonSerializable({ parse: JSON.parse, stringify }, value, operation)
   if (loss) throw new SerializationError(operation, loss)
+  return json
+}
+
+/**
+ * Writes the same text as JSON.stringify of the storage object, but reuses
+ * each written row's checked JSON. Serializing that row again could call a
+ * `toJSON` that now returns something else.
+ */
+function serializeJsonSnapshot(
+  dataMap: Map<string | number, StoredItem<unknown>>,
+  rowJson: Map<string | number, string>,
+): string {
+  const entries = Array.from(dataMap, ([key, { versionKey, data }]) => {
+    const row = rowJson.get(key) ?? JSON.stringify(data)
+    const item = `{"versionKey":${JSON.stringify(versionKey)},"data":${row}}`
+    return `${JSON.stringify(encodeStorageKey(key))}:${item}`
+  })
+  return `{${entries.join(`,`)}}`
 }
 
 /**
@@ -572,6 +592,7 @@ export function localStorageCollectionOptions(
   const saveToStorage = (
     dataMap: Map<string | number, StoredItem<any>>,
     mutations: Array<PendingMutation<Record<string, unknown>>>,
+    rowJson: Map<string | number, string>,
   ): {
     serialized: string
     persisted: Map<string | number, StoredItem<any>>
@@ -582,7 +603,10 @@ export function localStorageCollectionOptions(
       dataMap.forEach((storedItem, key) => {
         objectData[encodeStorageKey(key)] = storedItem
       })
-      const serialized = parser.stringify(objectData)
+      const serialized =
+        parser === JSON
+          ? serializeJsonSnapshot(dataMap, rowJson)
+          : parser.stringify(objectData)
       // A custom parser may normalize rows while serializing. Validate and
       // retain the exact snapshot before setItem makes the write durable.
       const persisted =
@@ -646,11 +670,15 @@ export function localStorageCollectionOptions(
       parser,
       config.getKey,
     )
+    const rowJson = new Map<string | number, string>()
     for (const mutation of mutations) {
       if (mutation.type === `delete`) staged.delete(mutation.key)
       else {
         if (parser === JSON) {
-          const restored = JSON.parse(JSON.stringify(mutation.modified))
+          const json =
+            checkedRows.get(mutation) ?? JSON.stringify(mutation.modified)
+          rowJson.set(mutation.key, json)
+          const restored = JSON.parse(json)
           if (!sameStorageKey(config.getKey(restored), mutation.key)) {
             throw new InvalidStorageDataFormatError(
               config.storageKey,
@@ -664,7 +692,11 @@ export function localStorageCollectionOptions(
         })
       }
     }
-    const { serialized: savedRaw, persisted } = saveToStorage(staged, mutations)
+    const { serialized: savedRaw, persisted } = saveToStorage(
+      staged,
+      mutations,
+      rowJson,
+    )
     try {
       for (const mutation of mutations) {
         const storedItem = persisted.get(mutation.key)
@@ -780,9 +812,19 @@ export function localStorageCollectionOptions(
     })
   }
 
+  // The checked JSON of each insert or update, stored as is by its write.
+  const checkedRows = new WeakMap<object, string>()
+  const checkRow = (
+    mutation: PendingMutation<Record<string, unknown>>,
+    operation: `insert` | `update`,
+  ) => {
+    const json = validateStorableRow(parser, mutation.modified, operation)
+    if (json !== undefined) checkedRows.set(mutation, json)
+  }
+
   const wrappedOnInsert = (params: InsertMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
-      validateStorableRow(parser, mutation.modified, `insert`)
+      checkRow(mutation, `insert`)
     })
     return persistAutomatic(
       params.transaction.mutations,
@@ -792,7 +834,7 @@ export function localStorageCollectionOptions(
 
   const wrappedOnUpdate = (params: UpdateMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
-      validateStorableRow(parser, mutation.modified, `update`)
+      checkRow(mutation, `update`)
     })
     return persistAutomatic(
       params.transaction.mutations,
@@ -847,7 +889,7 @@ export function localStorageCollectionOptions(
       switch (mutation.type) {
         case `insert`:
         case `update`:
-          validateStorableRow(parser, mutation.modified, mutation.type)
+          checkRow(mutation, mutation.type)
           break
         case `delete`:
           validateJsonSerializable(parser, mutation.original, mutation.type)

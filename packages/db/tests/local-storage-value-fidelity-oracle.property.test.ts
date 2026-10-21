@@ -421,6 +421,20 @@ describe(`LocalStorage value fidelity oracle`, () => {
             runHistory({ entry, handler, payload }))
         }
       }
+      // Storage must hold the JSON the check accepted. This `toJSON` returns
+      // the full value once and then a function, which JSON would drop, so a
+      // second serialization before the write would store a different row.
+      it(`${entry} stores the JSON that its check accepted`, () => {
+        let calls = 0
+        const payload = {
+          toJSON: () => (calls++ === 0 ? `checked` : () => `later`),
+        }
+        return runHistory({
+          entry,
+          handler: true,
+          payload: faithful(`toJSON that changes`, payload, `checked`),
+        })
+      })
     }
 
     fcTest.prop([historyArbitrary], {
