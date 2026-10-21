@@ -1543,16 +1543,16 @@ mutants that drop deferred keys from the hold, drop the held row at a drain,
 or skip the held overlay after a drain each fail it. A deferred transaction
 dropped without reaching the Collection (abort or claim loss while deferred)
 is not in the grammar. The lane uses an in-memory adapter.
-The [two-tab lane](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/two-tab-optimistic-history.test.ts)
-runs the same model and grammar with `peer-sync` steps: a second tab leads
-the real Browser coordinator, and its source transactions reach the tab under
-test through real SQLite and Node BroadcastChannel. `hold-store` holds the
-coordinator's writer lock. Ordinary peer histories pass. The lane is RED when
-a peer transaction applies by reloading durable rows while the tab's own
-earlier sync transaction is still queued or unannounced: a peer delete,
-truncate, or truncate-with-rows is lost or applied in parts, and the tab keeps
-a row the store and the peer do not have. Leadership transfer and a tab
-closing mid-history are outside this lane.
+Several tabs on one durable store each run their own source and store
+every source transaction they receive. DB promises only eventual
+consistency between them: while their streams interleave, a lagging tab's
+copy of an older transaction can be stored and announced after a newer one,
+so a tab can briefly show an older server state. Every tab delivers the
+same log in order, so durable state and every tab converge once the streams
+catch up. No lane checks this yet. Ordering the copies would need a generic
+source position on sync commits; Electric already stores `{ handle, offset }`
+with each commit, PowerSync does not use this wrapper, and persisted Query
+collections have no log position.
 
 The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
 preserves the held-checkpoint and extra-POST mutant results at the exact
