@@ -167,19 +167,18 @@ type SyncParams = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 type SourceName = `A` | `B`
 type Shape =
   `direct` | `join` | `self-join` | `nested` | `include` | `pooled-nested`
+// A source step that takes no other argument.
+type SourceStepKind =
+  | `ready`
+  | `fail`
+  | `report`
+  | `healthy`
+  | `crash`
+  | `reload`
+  | `reload-cleanup-fails`
+  | `cancel`
 type Step =
-  | {
-      kind:
-        | `ready`
-        | `fail`
-        | `report`
-        | `healthy`
-        | `crash`
-        | `reload`
-        | `reload-cleanup-fails`
-        | `cancel`
-      source: SourceName
-    }
+  | { kind: SourceStepKind; source: SourceName }
   // `write` adds a row to the sync run's open transaction, beginning one if
   // none is open; `commit` commits it (an empty transaction when none is
   // open). The transaction stays open across other steps.
@@ -1422,10 +1421,7 @@ const shapes: ReadonlyArray<Shape> = [
   `include`,
   `pooled-nested`,
 ]
-const on = (
-  kind: Exclude<Step[`kind`], `restart`>,
-  source: SourceName,
-): Step => ({
+const on = (kind: SourceStepKind, source: SourceName): Step => ({
   kind,
   source,
 })
