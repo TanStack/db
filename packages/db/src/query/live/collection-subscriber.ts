@@ -417,10 +417,15 @@ export class CollectionSubscriber<
         ) {
           return
         }
-        this.orderedLoader?.settleFullSourceReplay()
-        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
-          syncRunGeneration,
-        )
+        // A throwing lease release reports its error but cannot hold back
+        // the graph run that publishes and continues the replay.
+        try {
+          this.orderedLoader?.settleFullSourceReplay()
+        } finally {
+          this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+            syncRunGeneration,
+          )
+        }
       },
     }
   }

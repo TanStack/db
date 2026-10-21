@@ -1076,7 +1076,9 @@ full-source read. So full coverage absorbs what would otherwise raise debt: a
 failure or an invalidation under complete coverage owes nothing, and a
 full-source transport that fails after a replay reacquired its demand leaves
 the coverage and its lease in place. A replay that settles is the full-source
-read's success and pays the debt. A chain request owns authority only while its
+read's success: it pays the debt and retires the settled finite leases and the
+superseded failed leases, as a full-source success does. Its subscriber still
+schedules the graph run when one of those releases throws. A chain request owns authority only while its
 chain runs: when a replay finished the chain first, the request's later failure
 is superseded by that replay.
 

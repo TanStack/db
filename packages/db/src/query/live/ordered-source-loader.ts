@@ -540,7 +540,8 @@ export class OrderedSourceLoader {
     }
     // Replay repaired the retained logical acquisition. A later window retry
     // must not release that now-successful source demand. A failed finite
-    // page is still obsolete and must be released by that retry.
+    // page is still obsolete: the replay's full coverage releases it when
+    // authoritative work superseded it, and the retry releases it otherwise.
     if (this.work.kind === `full-source` && this.work.status === `failed`) {
       for (const [release, { kind }] of this.failedAcquisitions) {
         if (kind === `full-source`) this.failedAcquisitions.delete(release)
@@ -554,7 +555,11 @@ export class OrderedSourceLoader {
         [`held`, `failed`, `complete`],
         `none`,
       )
-      this.retireSettledFiniteAcquisitions()
+      // Like a full-source success, full coverage retires both kinds of lease.
+      runAllCallbacks([
+        () => this.retireSettledFiniteAcquisitions(),
+        () => this.retireSupersededFailures(),
+      ])
     }
   }
 

@@ -1242,7 +1242,7 @@ describe(`Ordered source request ownership`, () => {
       ),
     ),
   )(
-    `retains each failed release while replay repairs only full-source work: %j`,
+    `releases each failed lease once, at a covering replay or the explicit retry: %j`,
     async ({ fullFirst, replayed, releaseThrows }) => {
       const requests: Array<Observed> = []
       const releases: Array<LoadSubsetOptions> = []
@@ -1269,8 +1269,13 @@ describe(`Ordered source request ownership`, () => {
           requests[index]!.deferred.reject(failure)
           await expect(participants[index]).rejects.toBe(failure)
         }
-        if (replayed) loader.settleFullSourceReplay()
-        if (releaseThrows)
+        // A replay covers the source like a full-source success, so it
+        // releases the superseded page itself; a throwing release surfaces
+        // there. Without a replay, the explicit retry releases both.
+        if (replayed && releaseThrows) {
+          expect(() => loader.settleFullSourceReplay()).toThrow(cleanupError)
+        } else if (replayed) loader.settleFullSourceReplay()
+        if (releaseThrows && !replayed)
           expect(() => loader.loadMore(1)).toThrow(cleanupError)
         else loader.loadMore(1)
         const expected = order
@@ -1868,6 +1873,12 @@ type LedgerRequest = {
   replayed: boolean
   // The provider never answers the request, like a lost segment.
   hung: boolean
+  // Truncates before the request was issued, and before it failed, and the
+  // event clock at its failure. A request that fails after a truncate is
+  // dead; the replay, not the loader, owns its lease.
+  issuedTruncates: number
+  failedTruncates: number
+  failedAt: number
 }
 
 type AuthorityCommand =
@@ -2175,6 +2186,9 @@ async function checkAuthorityCase(
       released: false,
       replayed: false,
       hung: false,
+      issuedTruncates: truncates,
+      failedTruncates: -1,
+      failedAt: -1,
     }
     ledger.push(request)
     if (disposed) {
@@ -2352,9 +2366,13 @@ async function checkAuthorityCase(
   // before it: the last ledger index at that point, plus a half. The
   // full-source leases it reacquired are its coverage and stay held.
   let replayAuthority = -1
+  // Events in order, so a replay can be placed after a failure.
+  let clock = 0
+  let replaySettledAt = -1
   let replayCoverage = new Set<LedgerRequest>()
   const settleReplay = () => {
     truncatePending = false
+    replaySettledAt = ++clock
     for (const request of ledger) {
       if (!request.released && request.outcome !== `failed`) {
         request.replayed = true
@@ -2414,6 +2432,10 @@ async function checkAuthorityCase(
   const sentRows = new Map([[1, { id: 1, rank: 1 }]])
   const settle = async (request: LedgerRequest, ok: boolean) => {
     request.outcome = ok ? `ok` : `failed`
+    if (!ok) {
+      request.failedTruncates = truncates
+      request.failedAt = ++clock
+    }
     const chainMember = request.authoritative && !request.fullSource
     const before = ledger.length
     settlingChainMember = chainMember
@@ -2798,14 +2820,18 @@ async function checkAuthorityCase(
           failed.outcome === `failed` &&
           failed.superseded &&
           !failed.released &&
-          failed.index >= replayOwnedBefore &&
-          (replayAuthority > failed.index ||
-            ledger.some(
-              (request) =>
-                request.fullSource &&
-                request.index > failed.index &&
-                request.outcome === `ok`,
-            )),
+          // A covering replay that settles after a live failure retires its
+          // superseded lease, even one issued before the truncate.
+          ((replayAuthority > failed.index &&
+            failed.failedTruncates === failed.issuedTruncates &&
+            replaySettledAt > failed.failedAt) ||
+            (failed.index >= replayOwnedBefore &&
+              ledger.some(
+                (request) =>
+                  request.fullSource &&
+                  request.index > failed.index &&
+                  request.outcome === `ok`,
+              ))),
       )
       if (!isDisposed() && heldFailures.length > 0) {
         throw new Error(
@@ -2947,6 +2973,9 @@ describe(`Ordered source request authority`, () => {
   //   kept going and released the failed demand the replay owned).
   // - a release that runs the graph during another request's settlement (the
   //   pass issued a page, and the settling request then issued its tie);
+  // - a superseded failure before a truncate whose replay covers the source
+  //   (only a full-source read retired superseded failed leases, so the
+  //   replay left one held until a window move that an Effect never makes);
   // A superseded page that fails before a covering replay settles reaches
   // the failed-lease law through a replay, which the campaigns rarely do.
   // Two replays keep traces that first failed the lane's own model: a chain
@@ -3201,6 +3230,24 @@ describe(`Ordered source request authority`, () => {
           { type: `replaySucceeds` },
           { type: `optimisticDeparture` },
           { type: `joinedBusy` },
+        ],
+      },
+    },
+    {
+      name: `a superseded failure before a truncate whose replay covers the source`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        releaseTruncates: true,
+        releaseReenters: true,
+        history: [
+          { type: `invalidate`, react: true },
+          { type: `failOldest` },
+          { type: `replayFails` },
         ],
       },
     },
