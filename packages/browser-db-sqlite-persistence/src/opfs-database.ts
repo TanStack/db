@@ -1,6 +1,7 @@
 import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
+  SQLiteConnectionClosedError,
 } from '@tanstack/db-sqlite-persistence-core'
 import OPFSWorkerConstructor from './opfs-worker?worker'
 import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
@@ -243,7 +244,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
   ): Promise<T> => {
     if (disposed || closing) {
       return Promise.reject(
-        new InvalidPersistedCollectionConfigError(
+        new SQLiteConnectionClosedError(
           `Browser OPFS worker connection is closed`,
         ),
       )

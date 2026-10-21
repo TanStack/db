@@ -109,7 +109,7 @@ test(`close waits for a write that is waiting for the OPFS access handle`, async
       {
         label: `after-close`,
         status: `rejected`,
-        name: `InvalidPersistedCollectionConfigError`,
+        name: `SQLiteConnectionClosedError`,
         message: `Browser OPFS worker connection is closed`,
       },
     ])
@@ -124,7 +124,7 @@ test(`close waits for a write that is waiting for the OPFS access handle`, async
       {
         label: `after-close`,
         status: `rejected`,
-        name: `InvalidPersistedCollectionConfigError`,
+        name: `SQLiteConnectionClosedError`,
         message: `Browser OPFS worker connection is closed`,
       },
       { label: `insert`, status: `fulfilled`, value: [] },

@@ -73,13 +73,14 @@ contention beyond one held handle.
 `BrowserWASQLiteDriver.close()` does not wait for queued driver work, the same
 as the Node and OP-SQLite drivers. A probe showed that a transaction and
 queued work interrupted by close reject with the closed-connection error, and
-close succeeds; SQLite rolls back the open transaction. Whether driver close
-should drain queued work is a cross-host contract question, not part of this
-repair.
+close succeeds; SQLite rolls back the open transaction. This is the accepted
+driver contract: draining would make close wait for a transaction callback's
+own application code, which may itself wait for close.
 
-A closed connection reports `InvalidPersistedCollectionConfigError`, which
-names the wrong category. Changing it would alter public API and is outside
-this repair.
+A closed connection used to report `InvalidPersistedCollectionConfigError`.
+It now reports `SQLiteConnectionClosedError`, exported from the core and
+browser packages. Work accepted before close and then cancelled still rejects
+with `AbortError`, the same as pagehide.
 
 While writing the Chromium witness, a 63-character database name failed to
 open with a bare `sqlite3_open_v2` error, while a 56-character name opened.

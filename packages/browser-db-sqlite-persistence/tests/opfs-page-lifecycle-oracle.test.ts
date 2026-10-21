@@ -351,7 +351,7 @@ const pagehideAbort = {
 }
 
 const closedConnection = {
-  name: `InvalidPersistedCollectionConfigError`,
+  name: `SQLiteConnectionClosedError`,
   message: `Browser OPFS worker connection is closed`,
 }
 
