@@ -1057,6 +1057,75 @@ held-request checkpoint. These finite histories leave same-run external durable
 writers, larger overlapping-fetch schedules, and direct-patch provenance after
 Query cache dehydration outside their proven scope.
 
+A fixed accepted-ownership history acquires three exact subset claims for one
+row, then accepts two complete empty results while an unrelated optimistic
+mutation delays publication. Its independent model stores the latest complete
+result per active Query and exposes their union: the third result keeps the row
+public until its own release, after which the union is empty. The ordered
+refetch owner's held-delete replay is the killing witness for trusting stale
+published owners over accepted ownership. A release/reacquisition history also
+holds publication, reacquires the same cached Query, then proves the older
+release cannot erase the new claim by releasing it and observing an empty
+public row set. That history uses infinite `staleTime`, so reacquisition starts
+no fetch. A sibling table crosses a stale reacquisition whose refetch fails,
+returns the same rows, or returns no rows; the refetch settles while publication
+is held or after the older release publishes; zero to two peer leases own the
+first row until after the refetch; and the reacquired result has one or two
+rows. Its independent model keeps each active observer lease's latest
+successful result and compares public rows while held, after publication,
+after the refetch, after every peer's release, and after the reacquired
+release. On `main` at `31dad2dd3` 20 of its 42 cells fail: the older release's
+empty ownership entry made the cached result look already applied, so the
+reacquired lease owned nothing. A row only it owned disappeared at
+publication; a row a peer also owned disappeared when the last peer left. The repair marks a released lease's entry and
+lets only an applied entry satisfy the already-applied guard and the on-demand
+direct-write skip. The empty-result cells reject keeping the row for every
+reacquired demand. Removing the guard fails the persisted direct-write
+histories that keep an accepted write through a refetch start, and their
+sibling with an empty current result and an inserted row rejects treating
+every empty entry as unapplied: in on-demand mode the insert disappears at its
+receipt, and in eager mode Manual survives the Newer result. A second table
+rejects deleting the entry at release: lease `b` claims the row while `a`'s
+release is held or after it publishes, with or without a peer `c`, and a
+server DbClient's dehydrated owners are hydrated into a fresh client. Deleting
+the entry copies `a` back from unpublished metadata, which adds an owner edge
+and, without a peer, leaks the row after the hydrated client releases `b`. Its `reacquired` histories reacquire `a` without
+cached data and fail its fetch before `b` claims the row; deleting the entry
+at reacquisition copies `a` back the same way. A
+reacquisition behind a refresh barrier (`deferDataRefresh`) followed by a
+direct upsert requires the reacquired Query's cache to show the upsert; reading
+the released entry as applied leaves the cache stale, and only the Query cache
+shows it. A release whose durable commit fails leaves the row public and
+stored, puts the Collection in `error`, rejects a later acquisition with the
+persistence error, and a `cleanup()` and `preload()` restart starts from clean
+ownership; a host that swallows the failure fails it. A sibling holds the release's
+durable commit, reacquires, and fails the reacquired application's commit: the
+row leaves with the durable release, the Collection enters `error`, and a
+restart serves and releases the row. Eager mode cannot reach
+the reacquisition premise: it has no subset release, and ending an eager sync
+run removes its Query from the cache. A cleanup that skips entries without an
+observer passes this owner but fails the explicit-cleanup retention test in
+`tests/query.test.ts`. A receiving probe on the Node SQLite adapter does not
+match the controlled failed-release premise: when a SQLite trigger aborts
+the release's delete, the Collection enters `error` and storage keeps the row,
+but the public Collection drops it. The SQLite persistence owner has no
+witness for that divergence ([#2210](https://github.com/TanStack/db/issues/2210)). Persisted retention (`persistedGcTime`) is
+outside these histories. The
+[review record](oracle-reviews/2026-10-20-stale-reacquired-ownership.md)
+lists the mutant outcomes and open cells. Larger overlap schedules, window ownership outside the ordered
+replay, and durable-adapter ordering remain open under the owners named above.
+
+A controlled cold persisted scan gives one Query two rows in both scan orders,
+then returns a current result that omits one row. Its independent replacement
+model requires the survivor to remain public with its owner and the controlled
+persistence boundary to receive a deletion for the omission. A row-by-row
+reconstruction that treats the first persisted edge as a resolved Query fails
+one order. A sibling DbClient hydration history supplies the same two rows in
+both orders, then compares the public Collection with the same complete current
+result and releases its demand. A row-by-row reconstruction fails both orders
+at the public-row checkpoint. These finite histories do not cover larger cold
+results or hydration interleaved with another active Query result.
+
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the
 builder creates it must fail before child rows are read. Without that check,

@@ -17,7 +17,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/query-core": "^5.90.20",
-    "@tanstack/query-db-collection": "^1.4.6",
+    "@tanstack/query-db-collection": "^1.4.7",
     "@tanstack/react-db": "^0.5.11",
     "@tanstack/react-router": "^1.170.41",
     "@tanstack/react-router-devtools": "^1.159.5",

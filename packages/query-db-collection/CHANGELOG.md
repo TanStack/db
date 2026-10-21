@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 1.4.7
+
+### Patch Changes
+
+- Fix query ownership cleanup across overlapping refetch and observer lifecycles so removed rows do not remain visible because of stale persisted metadata. ([#2198](https://github.com/TanStack/db/pull/2198))
+
 ## 1.4.6
 
 ### Patch Changes
