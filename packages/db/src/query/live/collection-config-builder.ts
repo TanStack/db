@@ -401,10 +401,15 @@ export class CollectionConfigBuilder<
           this.settledWindow = requestedWindow
         }
       },
-      (error) => {
+      (error: unknown) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
-          this.windowFailed = true
-          this.currentWindow = this.settledWindow
+          // A release failure is reported, but the window still moved.
+          if (isOrderedCleanupFailure(error)) {
+            this.settledWindow = requestedWindow
+          } else {
+            this.windowFailed = true
+            this.currentWindow = this.settledWindow
+          }
         }
         throw error
       },

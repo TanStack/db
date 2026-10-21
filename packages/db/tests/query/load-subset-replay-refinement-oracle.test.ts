@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import {
@@ -1077,8 +1077,12 @@ describe(`loadSubset replay refinement`, () => {
  *   it is a settlement-phase release, which must not hold back publication.
  *   An unload that throws while the replay starts can fail the replay, which
  *   law 9 allows, so the law does not judge that case.
- * - **Convergence:** after a final truncate with no faults, the window equals
- *   the model.
+ * - **Convergence:** after a final truncate with no faults, and an explicit
+ *   window move that revalidates a window whose own move failed, the window
+ *   equals the model.
+ * - **Reported faults:** an injected fault may surface as a rejected load, a
+ *   thrown release, a rejected window move, or an error the subscription
+ *   rethrows from a microtask. No other error may escape.
  *
  * History grammar: rank moves, holding the next loads, settling the oldest
  * held load with success or failure, truncates (optionally arming the next
@@ -1095,6 +1099,25 @@ type OrderedCommand =
   | { type: `settle`; ok: boolean }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
+  | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
+
+// The query's order and window, whether ranks may tie, and whether a second
+// live query reads the same source.
+type OrderedScenario = {
+  direction: `asc` | `desc`
+  offset: 0 | 1
+  limit: 1 | 2 | 3
+  ties: boolean
+  peer: boolean
+}
+
+const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
+  direction: fc.constantFrom(`asc` as const, `desc` as const),
+  offset: fc.constantFrom(0 as const, 1 as const),
+  limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+  ties: fc.boolean(),
+  peer: fc.boolean(),
+})
 
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
   {
@@ -1126,6 +1149,14 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
     }),
   },
   { weight: 2, arbitrary: fc.constant({ type: `unloadThrows` as const }) },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`window` as const),
+      offset: fc.constantFrom(0 as const, 1 as const),
+      limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+    }),
+  },
 )
 
 type OrderedReach = {
@@ -1135,20 +1166,55 @@ type OrderedReach = {
   heldAcrossTruncate: number
   failedLoads: number
   settledWindowChecks: number
+  tiedWindows: number
+  peerChecks: number
+  windowMoves: number
+  descendingRuns: number
+}
+
+const ordinaryOrderedScenario: OrderedScenario = {
+  direction: `asc`,
+  offset: 0,
+  limit: 2,
+  ties: false,
+  peer: false,
 }
 
 async function checkOrderedReplay(
   history: Array<OrderedCommand>,
+  scenario: OrderedScenario = ordinaryOrderedScenario,
 ): Promise<OrderedReach> {
-  const limit = 2
+  const sign = scenario.direction === `asc` ? 1 : -1
+  let window = { offset: scenario.offset, limit: scenario.limit }
+  const peerWindow = { offset: scenario.offset, limit: scenario.limit }
   const truth = new Map<number, OrderedRow>(
     [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id * 10 }]),
   )
-  const expected = () =>
+  // Ties leave the order among equal ranks open, so the model predicts the
+  // window's rank sequence. Each shown row must also carry its current rank.
+  const expectedRanks = (shown: { offset: number; limit: number }) =>
     [...truth.values()]
-      .sort((left, right) => left.rank - right.rank)
-      .slice(0, limit)
-      .map(({ id }) => id)
+      .map(({ rank }) => rank)
+      .sort((left, right) => sign * (left - right))
+      .slice(shown.offset, shown.offset + shown.limit)
+  const checkWindow = (
+    label: string,
+    rows: Array<OrderedRow>,
+    shown: { offset: number; limit: number },
+  ) => {
+    expect(
+      rows.map(({ rank }) => rank),
+      label,
+    ).toEqual(expectedRanks(shown))
+    for (const row of rows) {
+      expect(row.rank, `${label}: row ${row.id} rank`).toBe(
+        truth.get(row.id)?.rank,
+      )
+    }
+    if (new Set(rows.map(({ rank }) => rank)).size < rows.length) {
+      reach.tiedWindows++
+    }
+  }
   const installed = new Map<number, OrderedRow>()
   // Each load records the truncate count it was issued after, so a fault can
   // be placed before or after the replay's loads settle.
@@ -1159,11 +1225,27 @@ async function checkOrderedReplay(
   let holding = false
   let truncates = 0
   let throwNextUnload = false
+  // Window moves whose settlement waits on held loads.
+  const pendingMoves: Array<Promise<void>> = []
   // The truncate starts its replay while it commits.
   let truncating = false
   let anyLoadFailed = false
   let earlyThrowSinceTruncate = false
   let violation: string | undefined
+  // The faults this history injects. They may surface as rejected loads, as
+  // thrown releases, or as errors the subscription rethrows from a microtask,
+  // which is how it reports async subscriber errors. Any other escaped error
+  // is a broken law.
+  const injected = new WeakSet<Error>()
+  // Release faults. A cleanup failure does not fail the load it follows
+  // (ARCHITECTURE.md), so a window move rejected only by one still moved.
+  const cleanupFaults = new WeakSet<Error>()
+  const inject = (error: Error) => {
+    injected.add(error)
+    return error
+  }
+  let escaped: unknown
+  const escapedError = () => escaped
   // Adapter callbacks set these flags, so read them through a call.
   const faultExcusesWindow = () => anyLoadFailed || earlyThrowSinceTruncate
   const reach: OrderedReach = {
@@ -1173,6 +1255,10 @@ async function checkOrderedReplay(
     heldAcrossTruncate: 0,
     failedLoads: 0,
     settledWindowChecks: 0,
+    tiedWindows: 0,
+    peerChecks: 0,
+    windowMoves: 0,
+    descendingRuns: scenario.direction === `desc` ? 1 : 0,
   }
   let sync!: Parameters<SyncConfig<OrderedRow, number>[`sync`]>[0]
   const source = createCollection<OrderedRow, number>({
@@ -1197,7 +1283,7 @@ async function checkOrderedReplay(
                 load.outcome = `failed`
                 anyLoadFailed = true
                 reach.failedLoads++
-                throw new Error(`load failed`)
+                throw inject(new Error(`load failed`))
               }
             } else await Promise.resolve()
             if (options.signal?.aborted) {
@@ -1215,7 +1301,15 @@ async function checkOrderedReplay(
                       row,
                     ) === true),
               )
-              .sort((left, right) => left.rank - right.rank)
+              .sort((left, right) => {
+                const direction =
+                  options.orderBy?.[0]?.compareOptions.direction === `desc`
+                    ? -1
+                    : 1
+                return (
+                  direction * (left.rank - right.rank) || left.id - right.id
+                )
+              })
             const offset = options.cursor ? 0 : (options.offset ?? 0)
             const selected = rows.slice(
               offset,
@@ -1255,25 +1349,49 @@ async function checkOrderedReplay(
               reach.replayStartThrows++
             } else if (truncates > 0) reach.throwsAfterReplay++
             else reach.settlementThrows++
-            throw new Error(`unload failed`)
+            const failure = inject(new Error(`unload failed`))
+            // One during a replay's start fails that replay instead.
+            if (!replayUnsettled) cleanupFaults.add(failure)
+            throw failure
           },
         }
       },
     },
   })
-  const live = createLiveQueryCollection((q) =>
-    q
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank)
-      .limit(limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank })),
+  const query = () =>
+    createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, scenario.direction)
+        .offset(scenario.offset)
+        .limit(scenario.limit)
+        .select(({ row }) => ({ id: row.id, rank: row.rank })),
+    )
+  const live = query()
+  // A peer reads the same source; its leases must survive the first
+  // query's retirements, so its window obeys the same law.
+  const peer = scenario.peer ? query() : undefined
+  // A subscriber keeps each live query from garbage collection while a
+  // history waits on held loads.
+  const subscriptions = [live, peer].flatMap((collection) =>
+    collection ? [collection.subscribeChanges(() => {})] : [],
   )
-  // Adapter faults surface as rejected loads and thrown releases. They are
-  // legal inputs; the laws judge only the quiet results.
   const swallow = (error: unknown) => {
-    if (!(error instanceof Error)) throw error
+    if (!(error instanceof Error && injected.has(error))) escaped ??= error
   }
   process.on(`unhandledRejection`, swallow)
+  const queueMicrotask = globalThis.queueMicrotask.bind(globalThis)
+  const microtasks = vi
+    .spyOn(globalThis, `queueMicrotask`)
+    .mockImplementation((callback) =>
+      queueMicrotask(() => {
+        try {
+          callback()
+        } catch (error) {
+          swallow(error)
+        }
+      }),
+    )
   const settleAll = async () => {
     for (let round = 0; round < 50; round++) {
       await flushPromises()
@@ -1301,6 +1419,7 @@ async function checkOrderedReplay(
   }
   try {
     await live.preload()
+    await peer?.preload()
     for (const command of history) {
       try {
         switch (command.type) {
@@ -1310,7 +1429,7 @@ async function checkOrderedReplay(
                 .filter(({ id }) => id !== command.id)
                 .map(({ rank }) => rank),
             )
-            if (ranks.has(command.rank)) break
+            if (!scenario.ties && ranks.has(command.rank)) break
             const value = { id: command.id, rank: command.rank }
             // The provider delivers every source change, as a live sync does.
             truth.set(command.id, value)
@@ -1338,6 +1457,34 @@ async function checkOrderedReplay(
           case `unloadThrows`:
             throwNextUnload = true
             break
+          // An explicit window move on the first query, which also retries
+          // its failed requests.
+          // A move that rejects, as one does after a failed source recovery,
+          // leaves the window where it was, unless only a release failed.
+          case `window`: {
+            const requested = { offset: command.offset, limit: command.limit }
+            reach.windowMoves++
+            const settled = live.utils.setWindow(requested)
+            if (settled === true) {
+              window = requested
+              break
+            }
+            const applied = settled.then(
+              () => {
+                window = requested
+              },
+              (error: unknown) => {
+                if (error instanceof Error && cleanupFaults.has(error)) {
+                  window = requested
+                }
+                swallow(error)
+              },
+            )
+            // A held load holds the move's settlement; the end settles it.
+            if (!holding && held.length === 0) await applied
+            else pendingMoves.push(applied)
+            break
+          }
         }
       } catch (error) {
         swallow(error)
@@ -1347,29 +1494,48 @@ async function checkOrderedReplay(
     holding = false
     throwNextUnload = false
     await settleAll()
+    await Promise.all(pendingMoves.splice(0))
+    await settleAll()
     await flushPromises()
     if (violation) throw new Error(`adapter release: ${violation}`)
+    if (escapedError() !== undefined) {
+      throw new Error(`escaped error: only injected faults may surface`, {
+        cause: escapedError(),
+      })
+    }
     if (!faultExcusesWindow()) {
       reach.settledWindowChecks++
-      expect(
-        live.toArray.map(({ id }) => id),
-        `settled window`,
-      ).toEqual(expected())
+      checkWindow(`settled window`, live.toArray, window)
+      if (peer) {
+        reach.peerChecks++
+        checkWindow(`settled peer window`, peer.toArray, peerWindow)
+      }
     }
     await truncate()
     await settleAll()
     await flushPromises()
     if (violation) throw new Error(`adapter release: ${violation}`)
-    expect(
-      live.toArray.map(({ id }) => id),
-      `convergence`,
-    ).toEqual(expected())
+    if (escapedError() !== undefined) {
+      throw new Error(`escaped error: only injected faults may surface`, {
+        cause: escapedError(),
+      })
+    }
+    // A failed window operation stays private until a later explicit move
+    // revalidates it (ARCHITECTURE.md), so recovery ends with one.
+    const revalidated = live.utils.setWindow(window)
+    if (revalidated !== true) await revalidated.catch(swallow)
+    await settleAll()
+    checkWindow(`convergence`, live.toArray, window)
+    if (peer) checkWindow(`peer convergence`, peer.toArray, peerWindow)
   } finally {
     holding = false
     for (const resolve of held.splice(0)) resolve(true)
+    for (const subscription of subscriptions) subscription.unsubscribe()
     await live.cleanup().catch(swallow)
+    await peer?.cleanup().catch(swallow)
     await flushPromises()
     process.off(`unhandledRejection`, swallow)
+    microtasks.mockRestore()
   }
   return reach
 }
@@ -1389,7 +1555,10 @@ describe(`Ordered windows across truncate replays`, () => {
   //   lease (the rejected participant counted as a failed load, so the
   //   builder held the window on the old rows);
   // - an unload that throws while a truncate replay settles (the replay's
-  //   graph run was never scheduled, so the window kept the old rows).
+  //   graph run was never scheduled, so the window kept the old rows);
+  // - an unload that throws during a window move whose load succeeded (the
+  //   builder recorded the cleanup error as the move's failure, so the
+  //   window stayed private until another move).
   it.each([
     {
       name: `a release that throws after a successful repair`,
@@ -1408,10 +1577,27 @@ describe(`Ordered windows across truncate replays`, () => {
         { type: `truncate`, armAfterStart: true },
       ],
     },
-  ] satisfies Array<{ name: string; history: Array<OrderedCommand> }>)(
+    {
+      name: `a release that throws during a successful window move`,
+      history: [
+        { type: `unloadThrows` },
+        { type: `hold` },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `settle`, ok: true },
+        { type: `move`, id: 1, rank: 41 },
+        { type: `settle`, ok: true },
+      ],
+      scenario: { ...ordinaryOrderedScenario, limit: 1 },
+    },
+  ] satisfies Array<{
+    name: string
+    history: Array<OrderedCommand>
+    scenario?: OrderedScenario
+  }>)(
     `keeps the ordered window for $name (generated replay)`,
-    async ({ history }) => {
-      await checkOrderedReplay(history)
+    async ({ history, scenario }) => {
+      await checkOrderedReplay(history, scenario)
     },
   )
 
@@ -1425,12 +1611,17 @@ describe(`Ordered windows across truncate replays`, () => {
         heldAcrossTruncate: 0,
         failedLoads: 0,
         settledWindowChecks: 0,
+        tiedWindows: 0,
+        peerChecks: 0,
+        windowMoves: 0,
+        descendingRuns: 0,
       }
       await fc.assert(
         fc.asyncProperty(
           fc.array(orderedCommand, { minLength: 1, maxLength: 12 }),
-          async (history) => {
-            const reach = await checkOrderedReplay(history)
+          orderedScenario,
+          async (history, scenario) => {
+            const reach = await checkOrderedReplay(history, scenario)
             for (const key of Object.keys(total) as Array<keyof OrderedReach>) {
               total[key] += reach[key]
             }

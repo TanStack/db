@@ -1248,7 +1248,9 @@ its boundary and continuation bookkeeping before surfacing the cleanup error.
 Cleanup failure does not turn the successful acquisition into a failed load. The
 loader marks an error that a lease release threw. Its participant still
 rejects with that error, so the error is reported, but the live query's
-publication barrier counts the load as successful and publishes its rows.
+publication barrier counts the load as successful and publishes its rows. An
+explicit window move whose load succeeded still settles at its new window when
+a release throws; its promise rejects with that cleanup error.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting
