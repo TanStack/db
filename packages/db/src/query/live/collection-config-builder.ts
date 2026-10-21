@@ -150,7 +150,10 @@ export class CollectionConfigBuilder<
           findProblems(collection.errors).some((node) => node.error !== null),
       )
     await Promise.all(failed.map((collection) => collection.reload()))
-    if (query?.status === `error`) await query._sync.reload()
+    // A recovered source may have restarted this query already; the reload
+    // settles with that run.
+    if (query?.status === `error` || query?._lifecycle.reloading)
+      await query._sync.reload()
   }
 
   /** This live query as its sources' `subscribers` list it. */
@@ -196,6 +199,9 @@ export class CollectionConfigBuilder<
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
     Map<string, BasicExpression<boolean>> | undefined
+  // Include sources with per-row child Collections. The query decides this,
+  // so it outlives the compiled cache that cleanup resets.
+  private readonly instancedSourceIds = new Set<string>()
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
   private bucketFacades: BucketFacadeAdapter | undefined
@@ -492,9 +498,7 @@ export class CollectionConfigBuilder<
     return this.collectionSources.map(({ sourceId, alias, collection }) => {
       const source = { id: sourceId, alias, collection }
       if (!this.includeSourceIds.has(sourceId)) return source
-      const instanced = this.bucketFacadesCache?.some((compilation) =>
-        compilation.sourceIds.includes(sourceId),
-      )
+      const instanced = this.instancedSourceIds.has(sourceId)
       return {
         ...source,
         kind: `include` as const,
@@ -535,7 +539,12 @@ export class CollectionConfigBuilder<
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    if (this.reportFailedRequest(planId, normalized)) return
+    if (this.reportFailedRequest(planId, normalized)) {
+      // The failure settles the demand: the request error shows it, and
+      // ordered work must not wait for a load that already ended.
+      demand.settled = true
+      return
+    }
     this.failQuery(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Subset demand '${planId}' failed: ${normalized.message}`
@@ -991,6 +1000,9 @@ export class CollectionConfigBuilder<
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.bucketFacadesCache = materialized.facades
+    for (const compilation of materialized.facades ?? [])
+      for (const sourceId of compilation.sourceIds)
+        this.instancedSourceIds.add(sourceId)
 
     const missingSources = this.collectionSources
       .map((source) => source.sourceId)

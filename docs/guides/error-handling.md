@@ -318,7 +318,7 @@ load failure in its `error`.
 
 A Collection used twice in one query, for example in a self-join, has one node
 per alias. An include has one node for all of its per-row child Collections,
-with `instances: { total, withErrors }`. A nested live query's node carries its
+with `instances: { withErrors }`, the number of them that have a problem. A nested live query's node carries its
 own sources.
 
 ### Collections without a live query

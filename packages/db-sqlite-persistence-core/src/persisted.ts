@@ -5913,10 +5913,21 @@ function createWrappedSyncConfig<
         if (startupState.cleanedUp || getTerminalFailure()) return
         adapterCalls = adapterCalls
           .then(() => fullStartPromise ?? runtime.ensureStarted())
-          .then(() => {
-            if (!isCleanedUp() && !getTerminalFailure()) return call()
-          })
-          .catch(() => undefined)
+          .then(
+            async () => {
+              if (isCleanedUp() || getTerminalFailure()) return
+              try {
+                await call()
+              } catch (error) {
+                // The call broke the Collection's state machine. It is too
+                // late to throw at the adapter, so it crashes the Collection,
+                // as a throwing sync function does.
+                params.collection._lifecycle.crash(error)
+              }
+            },
+            // A failed startup reports its own failure.
+            () => undefined,
+          )
       }
       const wrappedParams = {
         ...params,

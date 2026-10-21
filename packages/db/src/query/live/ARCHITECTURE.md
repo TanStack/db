@@ -1711,10 +1711,12 @@ every row before the top-K (a recorded limit).
     failed, the sync adapter stopped, the Collection crashed, or, on a
     query's own node, a request for more data failed). An include's source
     has `kind: 'include'`; when the include materializes a child Collection
-    per parent row, its node rolls those up as `instances: { total,
-withErrors }`, counting only that include's children even when another
-    include reads the same alias, and a child's change is relayed like a
-    source's. A pooled live query's tree is the tree a live-query Collection
+    per parent row, its node rolls those up as `instances: { withErrors }`,
+    counting only that include's children with a problem even when another
+    include reads the same alias, and a child's change of problem is relayed
+    like a source's. The roll-up has no child count: every change to the tree
+    is announced by `errors:change`, so readers can keep a tree until the next
+    event, and adding a healthy child changes nothing. A pooled live query's tree is the tree a live-query Collection
     over its source would have, so it also reaches deeper levels. The shape
     is fixed by the query. Each node mirrors its Collection when read, and
     the query emits `errors:change` whenever a node below it changes. When a

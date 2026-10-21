@@ -1276,15 +1276,19 @@ export function queryCollectionOptions(
     // A failed fetch or result application after Collection readiness is a
     // failureReason, since TanStack Query fetches again. It clears once no
     // observed Query is failing.
-    const failingQueries = new Set<string>()
+    // In failure order, so the latest failure still failing is last.
+    const failingQueries = new Map<string, unknown>()
     const reportFailing = (hashedQueryKey: string, error: unknown) => {
-      failingQueries.add(hashedQueryKey)
+      failingQueries.delete(hashedQueryKey)
+      failingQueries.set(hashedQueryKey, error)
       if (runReady) reportError(error)
     }
     const reportRecovered = (hashedQueryKey: string) => {
-      if (!failingQueries.delete(hashedQueryKey) || failingQueries.size > 0)
-        return
-      if (runReady) reportHealthy()
+      if (!failingQueries.delete(hashedQueryKey) || !runReady) return
+      // The node shows a Query that is still failing, or nothing.
+      const [stillFailing] = [...failingQueries.values()].slice(-1)
+      if (failingQueries.size > 0) reportError(stillFailing)
+      else reportHealthy()
     }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,

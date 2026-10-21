@@ -31,7 +31,7 @@
  * change replaces only the nodes on its path.
  *
  * An include's source node has `kind: 'include'` and rolls up the include's
- * per-row child Collections as `instances: { total, withErrors }`. A pooled
+ * per-row child Collections as `instances: { withErrors }`. A pooled
  * live query shows its source's status and the same tree a live-query
  * Collection over that source would have, so its tree also reaches through
  * a nested live query.
@@ -51,10 +51,9 @@
  * The model keeps, for each Collection, its status and its problem after
  * readiness (none, a failure reason, or an error), with a serial for each
  * reported problem. It derives
- * each live query's gate from its Collections, using only the rules above, and
- * the include's parent rows from whether `B` synced its row while the
- * sync run was running. It builds the expected tree from those facts. It does
- * not read production state.
+ * each live query's gate from its Collections, using only the rules above,
+ * and builds the expected tree from those facts. It does not read production
+ * state.
  *
  * ## The history grammar
  *
@@ -119,10 +118,11 @@ import { createLiveQueryCollection } from '../src/query/live-query-collection.js
 import { createEffect } from '../src/query/effect.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { Query } from '../src/query/builder/index.js'
-import { eq } from '../src/query/builder/functions.js'
+import { eq, isUndefined, not } from '../src/query/builder/functions.js'
 import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -177,13 +177,19 @@ type SourceModel = GateModel & {
   stopped: Problem
   failureFromReload: boolean
 }
+// A query's reload() reloads the Collections below it that show an error,
+// then reloads the query itself once they all settle, unless one failed.
+type PendingSelfReload = {
+  target: `query` | `inner`
+  waits: Set<SourceName | `inner`>
+  failed: boolean
+}
 type Model = {
   sources: Record<SourceName, SourceModel>
   query: GateModel
   inner: GateModel
   serial: number
-  // Parent rows the include query's sync run has received from `B`.
-  parentRows: number
+  selfReloads: Array<PendingSelfReload>
 }
 
 const shapeSources: Record<Shape, ReadonlyArray<SourceName>> = {
@@ -209,7 +215,7 @@ function freshModel(): Model {
     query: { gate: `loading`, cause: null, reloading: false },
     inner: { gate: `loading`, cause: null, reloading: false },
     serial: 0,
-    parentRows: 0,
+    selfReloads: [],
   }
 }
 
@@ -252,15 +258,6 @@ function deriveQueries(shape: Shape, model: Model): void {
     model.query = model.inner
   } else {
     model.query = deriveGate(model.query, gates(shapeSources[shape]))
-    // A running sync run receives `B`'s row once `B` syncs it, including a
-    // run that started again; a failed sync run receives nothing more.
-    if (
-      shape === `include` &&
-      (model.query.gate === `loading` || model.query.gate === `ready`) &&
-      model.sources.B.gate === `ready`
-    ) {
-      model.parentRows = 1
-    }
   }
 }
 
@@ -283,12 +280,38 @@ function applyModel(
     if (model.query.gate === `crashed`) return `throws`
     // The query reloads every Collection below it that shows an error,
     // through any nested live query; a reload in flight keeps its run.
-    for (const name of shapeSources[shape]) {
+    const reloaded = shapeSources[shape].filter((name) => {
       const source = model.sources[name]
-      if (source.gate === `error` || source.stopped !== null)
-        source.reloading = true
+      return source.gate === `error` || source.stopped !== null
+    })
+    for (const name of reloaded) model.sources[name].reloading = true
+    if (shape === `nested`) {
+      // The outer query reloads the inner query when A shows an error; the
+      // inner query reloads A, then itself.
+      const viaInner = reloaded.includes(`A`) || model.inner.gate === `error`
+      if (viaInner)
+        model.selfReloads.push({
+          target: `inner`,
+          waits: new Set(reloaded.includes(`A`) ? [`A`] : []),
+          failed: false,
+        })
+      model.selfReloads.push({
+        target: `query`,
+        waits: new Set([
+          ...reloaded.filter((name) => name !== `A`),
+          ...(viaInner ? [`inner` as const] : []),
+        ]),
+        failed: false,
+      })
+    } else {
+      model.selfReloads.push({
+        target: `query`,
+        waits: new Set(reloaded),
+        failed: false,
+      })
     }
     deriveQueries(shape, model)
+    settleSelfReloads(shape, model)
     return `ok`
   }
   // A step on a source this shape does not read has no effect.
@@ -385,7 +408,54 @@ function applyModel(
       break
   }
   deriveQueries(shape, model)
+  settleSelfReloads(shape, model)
   return outcome
+}
+
+// A reloaded Collection settles when its new run commits (ready) or fails.
+// Once a query's reload has nothing left to wait for, it reloads the query
+// itself if it still shows its failed first load.
+function settleSelfReloads(shape: Shape, model: Model): void {
+  let progressed = true
+  while (progressed) {
+    progressed = false
+    for (const pending of [...model.selfReloads]) {
+      for (const wait of [...pending.waits]) {
+        const settled =
+          wait === `inner`
+            ? !model.selfReloads.some((other) => other.target === `inner`)
+            : !model.sources[wait].reloading
+        if (!settled) continue
+        pending.waits.delete(wait)
+        const gate =
+          wait === `inner` ? model.inner.gate : model.sources[wait].gate
+        const stopped = wait !== `inner` && model.sources[wait].stopped
+        if (gate !== `ready` || stopped) pending.failed = true
+      }
+      if (pending.waits.size > 0) continue
+      model.selfReloads.splice(model.selfReloads.indexOf(pending), 1)
+      progressed = true
+      const current = model[pending.target]
+      if (pending.failed || current.gate !== `error`) continue
+      // The restarted run fails at once on an input that still failed, and
+      // is ready at once when every input is ready.
+      const inputs =
+        pending.target === `inner`
+          ? [model.sources.A]
+          : shape === `nested`
+            ? [model.inner, model.sources.B]
+            : shapeSources[shape].map((name) => model.sources[name])
+      const failedInput = inputs.find(
+        ({ gate }) => gate === `error` || gate === `crashed`,
+      )
+      model[pending.target] = failedInput
+        ? { gate: `error`, cause: failedInput.cause, reloading: false }
+        : inputs.every(({ gate }) => gate === `ready`)
+          ? { gate: `ready`, cause: null, reloading: false }
+          : { gate: `error`, cause: current.cause, reloading: true }
+      deriveQueries(shape, model)
+    }
+  }
 }
 
 // A problem's message says which cause the node shows; `serial` (identity
@@ -399,7 +469,7 @@ type ExpectedNode = {
   failureReason: ExpectedProblem
   error: ExpectedProblem
   reloading: boolean
-  instances?: { total: number; withErrors: number }
+  instances?: { withErrors: number }
   sources: Array<ExpectedNode>
 }
 
@@ -506,7 +576,7 @@ function expectedTree(
         source(`b`, B),
         {
           ...sourceNode(`a`, A, identity, `include`),
-          instances: { total: model.parentRows, withErrors: 0 },
+          instances: { withErrors: 0 },
         },
       ])
     case `pooled-nested`:
@@ -967,6 +1037,12 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`cancel`, `A`),
     on(`ready`, `A`),
   ],
+  'a reloaded source recovers while a nested source fails its first load': [
+    on(`fail`, `B`),
+    { kind: `reload-query` },
+    on(`fail`, `A`),
+    on(`ready`, `B`),
+  ],
   'an initial error is final for its sync run': [
     on(`fail`, `A`),
     on(`ready`, `A`),
@@ -1087,6 +1163,109 @@ describe(`source failure and health oracle`, () => {
 // invariant directly: after the reload no transaction stays open, and the
 // new run's own commit decides the row.
 describe(`reload invariant`, () => {
+  // A query's reload() settles with the query: when a failed source
+  // recovers, the query restarts, and the reload waits for that run to be
+  // ready (or to fail) instead of resolving while the query is `loading`.
+  it(`settles a query reload with the query's restarted run`, async () => {
+    let runs = 0
+    const loads: Array<ReturnType<typeof createDeferred<void>>> = []
+    const parents = createCollection<Row, number>({
+      id: `health-query-reload-parents-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          if (runs++ === 0) {
+            params.fail(new Error(`first load failed`))
+            return
+          }
+          params.begin()
+          params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    const children = createCollection<Row, number>({
+      id: `health-query-reload-children-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () => {
+              const load = createDeferred<void>()
+              loads.push(load)
+              return load.promise
+            },
+          }
+        },
+      },
+    })
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ parent: parents })
+        .leftJoin({ child: children }, ({ parent, child }) =>
+          eq(parent.id, child.parentId),
+        ),
+    )
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await query.preload().catch(() => undefined)
+      expect(query.status).toBe(`error`)
+      let settled = false
+      const reload = query.reload().finally(() => {
+        settled = true
+      })
+      await flushPromises()
+      // The restarted query waits for its join load, so the reload waits too.
+      expect(query.status).toBe(`loading`)
+      expect(settled, `reload settled while the query was loading`).toBe(false)
+      for (const load of loads) load.resolve()
+      await reload
+      expect(query.status).toBe(`ready`)
+    } finally {
+      console.error = consoleError
+      for (const load of loads) load.resolve()
+      await query.cleanup()
+      await parents.cleanup()
+      await children.cleanup()
+    }
+  })
+
+  // A throwing sync function is a programming error in any run. During a
+  // reload of a failed first load the status still shows `error`, but this
+  // run did not fail, so the throw crashes the Collection.
+  it(`crashes when a reload's sync function throws after a failed first load`, async () => {
+    let runs = 0
+    const collection = createCollection<Row, number>({
+      id: `health-reload-throw-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          if (runs++ === 0) params.fail(new Error(`first load failed`))
+          else throw new Error(`sync threw`)
+        },
+      },
+    })
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await collection.preload().catch(() => undefined)
+      expect(collection.status).toBe(`error`)
+      await expect(collection.reload()).rejects.toThrow(`sync threw`)
+      expect(collection.status).toBe(`crashed`)
+      expect(collection.errors.reloading).toBe(false)
+    } finally {
+      console.error = consoleError
+      await collection.cleanup()
+    }
+  })
+
   // A reload's next commit replaces every synced row, so the baseline an
   // adapter diffs against is empty until that commit. An adapter that writes
   // only rows missing from the baseline, as Query Collections do, must still
@@ -1357,6 +1536,107 @@ describe(`a query's own failed first load`, () => {
       await children.cleanup()
     }
   })
+})
+
+// An ordered window that filters on a lazily joined source waits for its join
+// loads before it moves. A join load that fails after readiness is a request
+// error on the query's node, and it settles that demand: the window must not
+// wait for it for good. A later move loads, moves the window, and clears the
+// error. Every marker row exists from the start, so only the load fails.
+describe(`a failed join load under an ordered filtered window`, () => {
+  it.each([`left`, `inner`] as const)(
+    `lets a later window move (%s join)`,
+    async (join) => {
+      let failLoads = false
+      const roots = createCollection<{ id: number; rank: number }, number>({
+        id: `health-window-roots-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            for (let id = 1; id <= 10; id++)
+              params.write({ type: `insert`, value: { id, rank: id } })
+            params.commit()
+            params.markReady()
+          },
+        },
+      })
+      const markers = createCollection<{ id: number; rootId: number }, number>({
+        id: `health-window-markers-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            for (let id = 1; id <= 10; id++)
+              params.write({
+                type: `insert`,
+                value: { id: 100 + id, rootId: id },
+              })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: () =>
+                failLoads
+                  ? Promise.reject(new Error(`marker load failed`))
+                  : Promise.resolve(),
+            }
+          },
+        },
+      })
+      const query = createLiveQueryCollection((q) => {
+        const from = q.from({ root: roots })
+        const joined =
+          join === `left`
+            ? from.leftJoin({ marker: markers }, ({ root, marker }) =>
+                eq(root.id, marker.rootId),
+              )
+            : from.join({ marker: markers }, ({ root, marker }) =>
+                eq(root.id, marker.rootId),
+              )
+        return joined
+          .where(({ marker }) => not(isUndefined(marker.id)))
+          .orderBy(({ root }) => root.rank)
+          .limit(2)
+      })
+      const subscription = query.subscribeChanges(() => {})
+      const consoleError = console.error
+      console.error = () => {}
+      const ids = () => query.toArray.map((row: any) => row.root.id as number)
+      try {
+        await query.preload()
+        expect(ids()).toEqual([1, 2])
+
+        failLoads = true
+        await expect(
+          Promise.resolve(query.utils.setWindow({ offset: 4, limit: 2 })),
+        ).rejects.toThrow(`marker load failed`)
+        expect(query.status).toBe(`ready`)
+        expect(query.errors.error).toMatchObject({
+          message: `marker load failed`,
+        })
+
+        failLoads = false
+        await query.utils.setWindow({ offset: 6, limit: 2 })
+        await flushPromises()
+        expect(ids(), `the window moves after the failure`).toEqual([7, 8])
+        expect(query.errors.error, `the later load clears it`).toBeNull()
+        expect(query.status).toBe(`ready`)
+      } finally {
+        console.error = consoleError
+        subscription.unsubscribe()
+        await query.cleanup()
+        await roots.cleanup()
+        await markers.cleanup()
+      }
+    },
+  )
 })
 
 describe(`root request errors`, () => {
@@ -1970,20 +2250,23 @@ describe(`include instances`, () => {
       await preload
       const includes = () => query.errors.sources.slice(1)
       expect(includes().map((node) => [node.kind, node.instances])).toEqual([
-        [`include`, { total: 2, withErrors: 0 }],
-        [`include`, { total: 2, withErrors: 0 }],
+        [`include`, { withErrors: 0 }],
+        [`include`, { withErrors: 0 }],
       ])
 
       let events = 0
       const stop = query.on(`errors:change`, () => {
         events++
       })
-      // New parent rows start healthy child Collections.
+      // New parent rows start healthy child Collections. Every tree change is
+      // announced, so with no event the tree is the same object.
+      const treeBefore = query.errors
       B.write({ id: 3, parentId: 3 })
       B.write({ id: 4, parentId: 4 })
       await flushPromises()
       expect(events, `healthy children emit no errors:change`).toBe(0)
-      expect(includes()[0]!.instances).toEqual({ total: 4, withErrors: 0 })
+      expect(query.errors, `no tree change without an event`).toBe(treeBefore)
+      expect(includes()[0]!.instances).toEqual({ withErrors: 0 })
       // One child Collection of `items` fails: its index throws on row 9.
       class FailingIndex extends BasicIndex<number> {
         override add(key: number, item: any): void {
@@ -2001,9 +2284,9 @@ describe(`include instances`, () => {
       expect(query.status).toBe(`ready`)
       expect(events, `errors:change relay`).toBeGreaterThan(0)
       const [itemsNode, sameNode] = includes()
-      expect(itemsNode!.instances).toEqual({ total: 4, withErrors: 1 })
+      expect(itemsNode!.instances).toEqual({ withErrors: 1 })
       expect(itemsNode!.hasErrors).toBe(true)
-      expect(sameNode!.instances).toEqual({ total: 4, withErrors: 0 })
+      expect(sameNode!.instances).toEqual({ withErrors: 0 })
       expect(sameNode!.hasErrors).toBe(false)
       expect(query.errors.hasErrors).toBe(true)
 
@@ -2019,8 +2302,16 @@ describe(`include instances`, () => {
       expect(retireEvents, `retiring a child in error relays`).toBeGreaterThan(
         0,
       )
-      expect(includes()[0]!.instances).toEqual({ total: 3, withErrors: 0 })
+      expect(includes()[0]!.instances).toEqual({ withErrors: 0 })
       expect(query.errors.hasErrors).toBe(false)
+
+      // The tree's shape comes from the query, so a cleaned-up query keeps
+      // its include nodes' `instances`.
+      await query.cleanup()
+      expect(includes().map((node) => node.instances)).toEqual([
+        { withErrors: 0 },
+        { withErrors: 0 },
+      ])
     } finally {
       console.error = consoleError
       await query.cleanup()

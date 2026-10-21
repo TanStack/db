@@ -312,6 +312,36 @@ describe(`persisted readiness oracle`, () => {
     },
   )
 
+  // The wrapper delivers the adapter's calls after startup, so a contract
+  // violation cannot throw back at the adapter. It crashes the Collection
+  // with the violation as its cause, as a throwing sync function does.
+  it(`crashes on an adapter call that breaks the state machine`, async () => {
+    const fixture = controlledAdapter()
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id: `contract-violation`,
+        getKey: (row) => row.id,
+        persistence: { adapter: fixture.adapter },
+        sync: {
+          sync: (params) => {
+            params.reportError(new Error(`reported before ready`))
+          },
+        },
+      }),
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      void collection.preload().catch(() => undefined)
+      fixture.load.resolve([])
+      await vi.advanceTimersByTimeAsync(0)
+      expect(collection.status).toBe(`crashed`)
+      expect(collection.errors.error?.message).toMatch(/reportError/)
+    } finally {
+      consoleError.mockRestore()
+      await collection.cleanup({ dependents: true })
+    }
+  })
+
   it(`keeps a Collection without initialRender on the network boundary`, async () => {
     const source = networkFirst(`no-initial-render`, false)
     try {

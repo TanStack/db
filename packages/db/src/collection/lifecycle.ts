@@ -315,6 +315,11 @@ export class CollectionLifecycleManager<
     reload?.reject(error)
   }
 
+  /** Whether the current sync run's adapter called `fail()`. */
+  public get stoppedThisRun(): boolean {
+    return this.adapterStopped
+  }
+
   /** Whether a reload's new sync run is in flight. */
   public get reloading(): boolean {
     return this.reloadRun !== undefined

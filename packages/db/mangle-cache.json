@@ -436,5 +436,8 @@
   "loadOrder": "ha",
   "reloadTruncateTransaction": "gY",
   "cancelSyncTransaction": "g7",
-  "startedBeforeFailure": "hb"
+  "startedBeforeFailure": "hb",
+  "publishedErrors": "hc",
+  "instancedSourceIds": "hd",
+  "views": "he"
 }

@@ -80,6 +80,8 @@ class Partition {
   // One source status listener serves every view of this partition.
   readonly statusListeners = new Set<StatusListener>()
   private listenerCount = 0
+  // Views built on this partition and not yet cleaned up.
+  private views = 0
   private gcTime = 0
   /**
    * Set when the partition ends for good: `crashed` when its source starts
@@ -162,6 +164,7 @@ class Partition {
    * one of its views' own live-query Collection would have.
    */
   retain(gcTime?: number): void {
+    this.views++
     if (gcTime !== undefined) {
       // As for a Collection, a non-positive or non-finite gcTime disables GC.
       const delay = gcTime > 0 && Number.isFinite(gcTime) ? gcTime : Infinity
@@ -259,14 +262,15 @@ class Partition {
   }
 
   /**
-   * Release the source subscription now if no view listens, as cleaning up a
-   * live-query Collection releases its source subscriptions at once. A later
-   * mount subscribes again.
+   * One view was cleaned up. The last one releases the source subscription
+   * now if no view listens, as cleaning up a live-query Collection releases
+   * its source subscriptions at once; a sibling view keeps its rows and its
+   * own grace period. A later mount subscribes again.
    */
-  releaseIfIdle(): void {
+  releaseView(): void {
+    if (--this.views > 0) return
     CleanupQueue.getInstance().cancel(this)
     this.releaseIfUnused()
-    this.scheduleRelease(0)
   }
 
   private readonly releaseIfUnused = (): void => {
@@ -527,6 +531,8 @@ class PooledLiveQuery {
   readonly _subscribeLayoutChanges = undefined
   private collection: Collection<any, any, any> | undefined = undefined
   private listenerCount = 0
+  // This view's share of its partition ends once, at its first cleanup.
+  private released = false
   private collectionHold: { unsubscribe: () => void } | undefined = undefined
 
   constructor(
@@ -676,7 +682,10 @@ class PooledLiveQuery {
 
   cleanup(options?: { dependents?: boolean }): Promise<void> {
     const cleanup = this.collection?.cleanup(options) ?? Promise.resolve()
-    this.partition.releaseIfIdle()
+    if (!this.released) {
+      this.released = true
+      this.partition.releaseView()
+    }
     return cleanup
   }
 

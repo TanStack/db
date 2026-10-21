@@ -99,12 +99,12 @@ export function findProblems(tree: ErrorTreeNode): Array<ErrorTreeNode> {
 
 function countInstances(
   collections: ReadonlyArray<CollectionImpl<any, any, any, any, any>>,
-): { total: number; withErrors: number } {
+): { withErrors: number } {
   let withErrors = 0
   for (const instance of collections) {
     if (hasOwnProblem(instance)) withErrors++
   }
-  return { total: collections.length, withErrors }
+  return { withErrors }
 }
 
 /** Return the cached node for this Collection and alias if nothing changed. */
@@ -130,7 +130,6 @@ function sameNode(a: ErrorTreeNode, b: ErrorTreeNode): boolean {
     a.failureReason === b.failureReason &&
     a.error === b.error &&
     a.reloading === b.reloading &&
-    a.instances?.total === b.instances?.total &&
     a.instances?.withErrors === b.instances?.withErrors &&
     a.sources.length === b.sources.length &&
     a.sources.every((source, index) => source === b.sources[index])

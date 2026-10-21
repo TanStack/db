@@ -11780,3 +11780,77 @@ describe(`reload settles on the new run's first result`, () => {
     },
   )
 })
+
+/**
+ * While any observed Query fails, the node's `failureReason` shows one that
+ * is still failing, the latest such failure. It clears once none fails. The
+ * lane fails two subsets' Queries in turn and recovers the one the node shows
+ * or the other one first.
+ */
+describe(`failureReason follows the still-failing Queries`, () => {
+  it.each([`shown`, `other`] as const)(
+    `recovering the %s Query first`,
+    async (first) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+      })
+      const failing = new Set<number>()
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `failing-queries-${first}`,
+          queryKey: [`failing-queries`, first],
+          queryClient: client,
+          getKey: (row: { id: number }) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          queryFn: (ctx): Promise<Array<{ id: number }>> => {
+            const limit = (
+              ctx.meta?.loadSubsetOptions as { limit?: number } | undefined
+            )?.limit
+            return failing.has(limit!)
+              ? Promise.reject(new Error(`subset ${limit} failed`))
+              : Promise.resolve([{ id: limit! }])
+          },
+        }),
+      )
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const refetch = async (limit: number) => {
+        const query = client
+          .getQueryCache()
+          .findAll()
+          .find(
+            (q) =>
+              (q.meta?.loadSubsetOptions as { limit?: number } | undefined)
+                ?.limit === limit,
+          )!
+        await query.fetch().catch(() => undefined)
+        await flushPromises()
+      }
+      const shown = () => collection.errors.failureReason?.message ?? null
+      try {
+        await collection._sync.loadSubset({ limit: 1 })
+        await collection._sync.loadSubset({ limit: 2 })
+        await flushPromises()
+        failing.add(1)
+        await refetch(1)
+        failing.add(2)
+        await refetch(2)
+        expect(shown()).toBe(`subset 2 failed`)
+        const recovered = first === `shown` ? 2 : 1
+        const remaining = first === `shown` ? 1 : 2
+        failing.delete(recovered)
+        await refetch(recovered)
+        expect(shown(), `after one recovers`).toBe(`subset ${remaining} failed`)
+        failing.delete(remaining)
+        await refetch(remaining)
+        expect(shown(), `after both recover`).toBeNull()
+      } finally {
+        consoleError.mockRestore()
+        await collection.cleanup()
+        client.clear()
+      }
+    },
+  )
+})

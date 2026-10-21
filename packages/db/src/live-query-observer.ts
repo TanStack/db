@@ -163,6 +163,9 @@ class LiveQueryObserverImpl<
   private cachedCollectionRevision: number | undefined
   private cachedCollectionLayoutRevision: number | undefined
   private snapshotDirty = true
+  // While attached, the tree from the last status or errors change. Every
+  // tree change is announced, so a snapshot reuses it instead of rebuilding.
+  private publishedErrors: { tree: ErrorTreeNode | undefined } | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
   private lastLayoutKeys: Array<TKey> | undefined
@@ -251,7 +254,9 @@ class LiveQueryObserverImpl<
         this.layoutRevision++
       }
 
-      const errors = (collection as { errors?: ErrorTreeNode }).errors
+      const errors = this.publishedErrors
+        ? this.publishedErrors.tree
+        : (collection as { errors?: ErrorTreeNode }).errors
       // Most consumers read only `data`; build the keyed view on first read.
       let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
@@ -673,15 +678,15 @@ class LiveQueryObserverImpl<
     // Each status change is followed by an errors change; tree identity
     // tells whether the errors change has anything left to publish.
     const errorsOf = () => (collection as { errors?: ErrorTreeNode }).errors
-    let publishedErrors = errorsOf()
+    this.publishedErrors = { tree: errorsOf() }
     const statusUnsub = collection.on(`status:change`, ({ status }) => {
-      publishedErrors = errorsOf()
+      this.publishedErrors = { tree: errorsOf() }
       notify(undefined, status)
     })
     const errorsUnsub = collection.on(`errors:change`, () => {
       const errors = errorsOf()
-      if (errors === publishedErrors) return
-      publishedErrors = errors
+      if (errors === this.publishedErrors?.tree) return
+      this.publishedErrors = { tree: errors }
       // No rows or status changed, so only this marks the snapshot stale.
       this.snapshotDirty = true
       notify(undefined, collection.status)
@@ -725,6 +730,7 @@ class LiveQueryObserverImpl<
           })
         : noop
     const release = () => {
+      this.publishedErrors = undefined
       clientUnsub()
       statusUnsub()
       errorsUnsub()

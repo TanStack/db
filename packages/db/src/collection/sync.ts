@@ -469,10 +469,10 @@ export class CollectionSyncManager<
       this.completePendingSyncEntryCleanup()
       finishReadyFailures()
       // A throwing sync function is a programming error, even after ready.
-      // A first load that already failed in this run reported its error.
-      // The sync function can change the status before it throws.
-      const status = this.lifecycle.status
-      if (isCurrentSync() && status !== `error`) this.lifecycle.crash(error)
+      // A run that already called fail() reported its error. Status cannot
+      // tell: during a reload it still shows the previous run's.
+      if (isCurrentSync() && !this.lifecycle.stoppedThisRun)
+        this.lifecycle.crash(error)
       throw error
     }
     if (readyFailure) throw readyFailure.error

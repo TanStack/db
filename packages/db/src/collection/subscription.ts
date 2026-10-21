@@ -311,16 +311,15 @@ export class CollectionSubscription
     }
   }
 
-  /** Detach logical demand from work owned by a discarded sync run. */
-  /** @internal A reload retired the sync run; detach its demand. */
   /**
-   * A reload keeps each retained demand's waiting caller: the new sync run
-   * re-acquires the demand and settles that caller.
+   * @internal A reload retired the sync run. It keeps each retained demand's
+   * waiting caller: the new sync run re-acquires the demand and settles it.
    */
   public retireSyncRun(): void {
     this.handleCollectionCleanup(true)
   }
 
+  /** Detach logical demand from work owned by a discarded sync run. */
   private handleCollectionCleanup(keepWaitingCallers = false): void {
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)

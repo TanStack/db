@@ -819,8 +819,8 @@ export interface ErrorTreeNode {
    * are the previous run's until it commits or fails.
    */
   readonly reloading: boolean
-  /** For an include node: its per-row child Collections, and how many have a problem. */
-  readonly instances?: { readonly total: number; readonly withErrors: number }
+  /** For an include node: how many of its per-row child Collections have a problem. */
+  readonly instances?: { readonly withErrors: number }
   readonly sources: ReadonlyArray<ErrorTreeNode>
 }
 
@@ -1176,9 +1176,6 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 
 /**
- * Options for subscribing to collection changes
- */
-/**
  * Something that reads a Collection, as listed by `collection.subscribers`:
  * a live query, an Effect, or a direct subscription.
  */
@@ -1199,6 +1196,9 @@ export interface CollectionDependent {
   end: () => Promise<void>
 }
 
+/**
+ * Options for subscribing to collection changes
+ */
 export interface SubscribeChangesOptions<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,

@@ -40,6 +40,21 @@ type InferConditionalResultType<TContext extends Context> =
     ? InferResultType<TContext> | []
     : InferResultType<TContext>
 
+/** Status and error fields every `useLiveQuery` result has. */
+type UseLiveQueryFlags = {
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
+  isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: boolean
+  errors: ErrorTreeNode | undefined
+}
+
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
@@ -109,20 +124,6 @@ type InferConditionalResultType<TContext extends Context> =
  *   </Suspense>
  * )
  */
-/** Status, persistence, and error fields every `useLiveQuery` result has. */
-type UseLiveQueryFlags = {
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: boolean
-  /** Local storage or an invariant broke; recovery is a new Collection. */
-  isCrashed: boolean
-  isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
-  isSyncError: boolean
-  errors: ErrorTreeNode | undefined
-}
 
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(

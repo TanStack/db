@@ -181,6 +181,46 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
+  // Cleaning up one view ends that view only. A sibling built during a
+  // render, still inside its grace period to subscribe, keeps its rows and
+  // its partition, as its own live-query Collection would.
+  it(`keeps a built sibling's rows when another view is cleaned up`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `pooled-gc-sibling-${serial++}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: `a`, g: `x` },
+          { id: `b`, g: `y` },
+        ],
+      }),
+    )
+    const view = (g: string) =>
+      createPooledLiveQuery(
+        new Query()
+          .from({ r: source })
+          .where(({ r }: any) => eq(r.g, g)) as any,
+        { gcTime: 100 },
+      )!
+    const first = view(`x`)
+    const sibling = view(`y`)
+    const stop = createLiveQueryObserver(first, {
+      mode: `wholesale`,
+    }).subscribe(() => {})
+    // Read the sibling without subscribing: it stays inside its grace period.
+    const siblingRows = () => [
+      ...createLiveQueryObserver(sibling, { mode: `wholesale` })
+        .getSnapshot()
+        .state!.keys(),
+    ]
+    await vi.advanceTimersByTimeAsync(0)
+    expect(siblingRows()).toEqual([`b`])
+    stop()
+    await first.cleanup()
+    expect(siblingRows()).toEqual([`b`])
+    expect(source.subscriberCount).toBe(1)
+  })
+
   it(`keeps a newer partition when an older one releases again`, async () => {
     const source = makeSource()
     const mount = () => {
