@@ -2317,6 +2317,7 @@ describe(`Query Collections`, () => {
           {
             value: {
               networkTimeoutMs,
+              onDemand: false,
               getOrStartNetworkDeadline: () =>
                 (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
               getSnapshot: () => ({ status: persistedStatus }),
@@ -2373,6 +2374,111 @@ describe(`Query Collections`, () => {
         }
       },
     )
+
+    // Receiving witness for the joined network-first gate in
+    // `db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`:
+    // the eager source restores but never becomes ready, as offline, and the
+    // first render waits for the on-demand demand to settle.
+    it(`releases a joined first render when the on-demand demand settles`, async () => {
+      type Parent = { id: string; name: string }
+      type Child = { id: string; parentId: string; label: string }
+      const readiness = (onDemand: boolean) => ({
+        networkTimeoutMs: 0,
+        onDemand,
+        getOrStartNetworkDeadline: () => Date.now(),
+        getSnapshot: () => ({ status: `ready` }),
+        subscribe: () => () => {},
+      })
+      const parents = createCollection<Parent>({
+        id: `solid-joined-parents`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({ type: `insert`, value: { id: `p1`, name: `Parent` } })
+            commit()
+            return {}
+          },
+        },
+      })
+      let settleChildLoad: (() => void) | undefined
+      const children = createCollection<Child>({
+        id: `solid-joined-children`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () =>
+                new Promise<void>((resolve) => {
+                  settleChildLoad = () => {
+                    begin()
+                    write({
+                      type: `insert`,
+                      value: { id: `c1`, parentId: `p1`, label: `Child` },
+                    })
+                    commit()
+                    resolve()
+                  }
+                }),
+            }
+          },
+        },
+      })
+      for (const [collection, onDemand] of [
+        [parents, false],
+        [children, true],
+      ] as const) {
+        Object.defineProperty(
+          collection.config,
+          Symbol.for(`@tanstack/db.persistedReadiness`),
+          { value: readiness(onDemand) },
+        )
+      }
+      let cleanupQuery: (() => Promise<void>) | undefined
+
+      function Joined() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ parent: parents })
+            .join({ child: children }, ({ parent, child }) =>
+              eq(child.parentId, parent.id),
+            )
+            .select(({ parent, child }) => ({
+              id: parent.id,
+              name: parent.name,
+              label: child.label,
+            })),
+        )
+        cleanupQuery = () => query.collection.cleanup()
+        return (
+          <div data-testid="joined">
+            {query()[0] ? `${query()[0]!.name}/${query()[0]!.label}` : `none`}
+          </div>
+        )
+      }
+      const view = render(() => (
+        <Suspense fallback={<div data-testid="joined-waiting">Waiting</div>}>
+          <Joined />
+        </Suspense>
+      ))
+      try {
+        await waitFor(() => expect(settleChildLoad).toBeDefined())
+        // The eager deadline has passed, but the on-demand demand is pending.
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        expect(view.getByTestId(`joined-waiting`)).toBeTruthy()
+        settleChildLoad!()
+        const content = await view.findByTestId(`joined`)
+        expect(content.textContent).toBe(`Parent/Child`)
+        expect(parents.status).toBe(`loading`)
+      } finally {
+        view.unmount()
+        await cleanupQuery?.()
+        await children.cleanup()
+        await parents.cleanup()
+      }
+    })
 
     it(`should work with Suspense boundaries`, async () => {
       const collection = createCollection(

@@ -2558,13 +2558,18 @@ in `packages/query-db-collection/tests/persisted-on-demand-offline-witness.test.
 receives it with a fresh QueryClient per session: a covered on-demand query
 stays loading until the wait and then shows its restored rows, a rejected
 `queryFn` settles it at once, and a never-loaded query keeps loading; a mutant
-that ignores coverage fails both covered histories. Ordered windows, cursor
+that ignores coverage fails both covered histories. React
+(`useLiveSuspenseQuery.test.tsx`) and Solid (`useLiveQuery.test.tsx`) Suspense
+receive the joined gate with capability fixtures: an eager source that restores
+but never becomes ready and an on-demand source keep the first render
+suspended until the on-demand load settles; a gate that lets the on-demand
+opt-in permit fallback alone fails both. Ordered windows, cursor
 pages, and later demand in session 2 (including a demand key that ignores
 offset or cursor but honors limit, which no history distinguishes),
 optimistic writes on a covered demand, a failure before the restore
 publishes, cache-claim rotation, must-refetch, schema reset,
-nested live queries over an on-demand source, and framework Suspense remain
-open.
+nested live queries over an on-demand source, and Suspense over a real
+persisted on-demand Collection remain open.
 
 ## Deferred contracts and evidence
 

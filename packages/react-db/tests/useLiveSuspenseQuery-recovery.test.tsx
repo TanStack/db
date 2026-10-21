@@ -130,6 +130,7 @@ describe(`useLiveSuspenseQuery preload recovery`, () => {
         {
           value: {
             networkTimeoutMs: 60_000,
+            onDemand: false,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: persistedStatus }),
             subscribe: (listener: () => void) => {

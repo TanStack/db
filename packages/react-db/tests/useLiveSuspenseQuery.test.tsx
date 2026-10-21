@@ -94,6 +94,7 @@ describe(`useLiveSuspenseQuery`, () => {
       {
         value: {
           networkTimeoutMs: 60_000,
+          onDemand: false,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -159,6 +160,7 @@ describe(`useLiveSuspenseQuery`, () => {
         {
           value: {
             networkTimeoutMs: 60_000,
+            onDemand: false,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: `ready` }),
             subscribe: () => () => {},
@@ -311,6 +313,7 @@ describe(`useLiveSuspenseQuery`, () => {
       {
         value: {
           networkTimeoutMs: 60_000,
+          onDemand: false,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -419,6 +422,7 @@ describe(`useLiveSuspenseQuery`, () => {
         {
           value: {
             networkTimeoutMs,
+            onDemand: false,
             getOrStartNetworkDeadline: () =>
               (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
             getSnapshot: () => ({ status: persistedStatus }),
@@ -476,6 +480,109 @@ describe(`useLiveSuspenseQuery`, () => {
       }
     },
   )
+
+  // Receiving witness for the joined network-first gate in
+  // `db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`:
+  // an eager source permits local rendering after its restore and deadline;
+  // an on-demand source permits it only when the query's demand on it has
+  // settled. The eager source never becomes ready, as offline.
+  it(`releases a joined first render when the on-demand demand settles`, async () => {
+    type Parent = { id: string; name: string }
+    type Child = { id: string; parentId: string; label: string }
+    const readiness = (onDemand: boolean) => ({
+      networkTimeoutMs: 0,
+      onDemand,
+      getOrStartNetworkDeadline: () => Date.now(),
+      getSnapshot: () => ({ status: `ready` }),
+      subscribe: () => () => {},
+    })
+    const parents = createCollection<Parent>({
+      id: `suspense-joined-parents`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Restored rows; the network never marks this source ready.
+          begin()
+          write({ type: `insert`, value: { id: `p1`, name: `Parent` } })
+          commit()
+          return {}
+        },
+      },
+    })
+    let settleChildLoad!: () => void
+    const children = createCollection<Child>({
+      id: `suspense-joined-children`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => {
+                settleChildLoad = () => {
+                  begin()
+                  write({
+                    type: `insert`,
+                    value: { id: `c1`, parentId: `p1`, label: `Child` },
+                  })
+                  commit()
+                  resolve()
+                }
+              }),
+          }
+        },
+      },
+    })
+    for (const [collection, onDemand] of [
+      [parents, false],
+      [children, true],
+    ] as const) {
+      Object.defineProperty(
+        collection.config,
+        Symbol.for(`@tanstack/db.persistedReadiness`),
+        { value: readiness(onDemand) },
+      )
+    }
+    let cleanupQuery: (() => Promise<void>) | undefined
+
+    function Joined() {
+      const result = useLiveSuspenseQuery((q) =>
+        q
+          .from({ parent: parents })
+          .join({ child: children }, ({ parent, child }) =>
+            eq(child.parentId, parent.id),
+          )
+          .select(({ parent, child }) => ({
+            id: parent.id,
+            name: parent.name,
+            label: child.label,
+          })),
+      )
+      cleanupQuery = () => result.collection.cleanup()
+      const row = result.data[0]
+      return <div>{row ? `${row.name}/${row.label}` : `no rows`}</div>
+    }
+    const view = renderComponent(
+      <Suspense fallback={<div>Waiting for demand</div>}>
+        <Joined />
+      </Suspense>,
+    )
+    try {
+      await waitFor(() => expect(settleChildLoad).toBeDefined())
+      // The eager deadline has passed, but the on-demand demand is pending.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)))
+      expect(view.getByText(`Waiting for demand`)).toBeTruthy()
+      await act(() => settleChildLoad())
+      await waitFor(() => expect(view.getByText(`Parent/Child`)).toBeTruthy())
+      expect(parents.status).toBe(`loading`)
+    } finally {
+      view.unmount()
+      await cleanupQuery?.()
+      await children.cleanup()
+      await parents.cleanup()
+    }
+  })
 
   it(`renders a streamed query snapshot until browser sync is authoritative`, async () => {
     let resolveServerLoad!: () => void

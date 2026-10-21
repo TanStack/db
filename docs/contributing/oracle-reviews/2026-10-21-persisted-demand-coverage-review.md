@@ -147,6 +147,9 @@ owns these. Each needs a witness:
 - optimistic writes on a covered demand;
 - nested live queries over an on-demand source (the gate reads the live query
   that directly owns the demand);
-- React and Solid Suspense receiving witnesses.
+- Suspense over a real persisted on-demand Collection. After the reviewed
+  head, React and Solid tests receive the joined gate with capability fixtures,
+  and the gate mutant that lets the on-demand opt-in permit fallback alone
+  fails both.
 
 This record claims a new law, not the closure of a bug class.
