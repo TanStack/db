@@ -21,12 +21,20 @@ import type {
  * without reaching the worker, and a concurrent close shares the first close's
  * outcome. A response that arrives while close is in flight settles its own
  * request. Work still pending when close settles rejects with AbortError,
- * whether close succeeds or reports a worker error.
+ * whether close succeeds or reports a worker error. Pagehide or a Worker
+ * terminal event during close wins: close and pending siblings reject with that
+ * event's failure.
+ *
+ * The real worker answers earlier requests before close; the request-order
+ * oracle owns that law. This file's controlled worker can answer in any order,
+ * so the close lane also checks that pending work settles when close settles
+ * first.
  *
  * Controlled page and worker objects implement only the browser event and
  * message grammar. Generated products vary pending request kind, delivery
  * stage, persisted flag, execute count, release direction, terminal event,
- * responses answered during close, close outcome, and admission during close.
+ * responses answered during close, close outcome, admission during close, and
+ * an interruption during close.
  * The driver observes exact requests, settlements, errors, listener counts,
  * held responses, close, and termination against this state machine. Fixed
  * open histories check the default, overridden, and zero-boundary deadlines
@@ -72,7 +80,10 @@ type CloseHistory = {
   closeCode: BrowserOPFSWorkerErrorCode | undefined
   concurrentClose: boolean
   executeDuringClose: boolean
+  interruption: CloseInterruption
 }
+
+type CloseInterruption = `none` | `pagehide` | TerminalEventType
 
 type TerminalEventHistory = {
   pending: RequestKind
@@ -361,18 +372,29 @@ function isReleased(
 
 // The close model: answered siblings keep their rows, the rest abort at close
 // settlement, admission after close starts is refused, and every close call
-// observes the worker's close outcome.
+// observes the worker's close outcome. An interruption before the close
+// response is a terminal event: it rejects the close request and every pending
+// sibling with its own failure, and the close response never arrives.
 function expectedCloseSettlements(history: CloseHistory): Array<Settlement> {
+  const interruptionFailure =
+    history.interruption === `none`
+      ? undefined
+      : history.interruption === `pagehide`
+        ? pagehideAbort
+        : terminalEventFailures[history.interruption]
+  const pendingFailure = interruptionFailure ?? closeAbort
   const closeOutcome: Omit<Settlement, `label`> =
-    history.closeCode === undefined
-      ? { status: `fulfilled`, observation: `closed` }
-      : {
-          status: `rejected`,
-          observation: {
-            name: workerFailureContracts[history.closeCode].name,
-            message: `${workerFailureContracts[history.closeCode].messagePrefix}controlled close failure`,
-          },
-        }
+    interruptionFailure !== undefined
+      ? { status: `rejected`, observation: interruptionFailure }
+      : history.closeCode === undefined
+        ? { status: `fulfilled`, observation: `closed` }
+        : {
+            status: `rejected`,
+            observation: {
+              name: workerFailureContracts[history.closeCode].name,
+              message: `${workerFailureContracts[history.closeCode].messagePrefix}controlled close failure`,
+            },
+          }
   return [
     ...Array.from({ length: history.executeCount }, (_, index): Settlement =>
       isReleased(
@@ -389,7 +411,7 @@ function expectedCloseSettlements(history: CloseHistory): Array<Settlement> {
         : {
             label: `execute-${index}`,
             status: `rejected`,
-            observation: closeAbort,
+            observation: pendingFailure,
           },
     ),
     { label: `close`, ...closeOutcome },
@@ -751,6 +773,11 @@ async function runCloseHistory(history: CloseHistory): Promise<void> {
       history.answeredDuringClose,
       history.releaseDirection,
     )
+    if (history.interruption === `pagehide`) {
+      page.dispatchPageHide(false)
+    } else if (history.interruption !== `none`) {
+      worker.emitTerminalEvent(history.interruption)
+    }
 
     // Close settlement is the checkpoint. Awaiting every tracked promise here
     // would turn an unsettled sibling into a timeout instead of a mismatch.
@@ -1007,6 +1034,13 @@ const closeCodes = [
   `INTERNAL`,
 ] as const satisfies ReadonlyArray<BrowserOPFSWorkerErrorCode | undefined>
 
+const closeInterruptions = [
+  `none`,
+  `pagehide`,
+  `error`,
+  `messageerror`,
+] as const satisfies ReadonlyArray<CloseInterruption>
+
 const closeHistory = fc.integer({ min: 0, max: 3 }).chain((executeCount) =>
   fc.record({
     executeCount: fc.constant(executeCount),
@@ -1015,6 +1049,7 @@ const closeHistory = fc.integer({ min: 0, max: 3 }).chain((executeCount) =>
     closeCode: fc.constantFrom(...closeCodes),
     concurrentClose: fc.boolean(),
     executeDuringClose: fc.boolean(),
+    interruption: fc.constantFrom(...closeInterruptions),
   }),
 )
 
@@ -1075,18 +1110,26 @@ const closeExamples: Array<[CloseHistory]> = [0, 1, 2, 3].flatMap(
           ? ([`fifo`, `reverse`] as const)
           : ([`fifo`] as const)
         ).flatMap((releaseDirection) =>
-          closeCodes.flatMap((closeCode) =>
-            [false, true].flatMap((concurrentClose) =>
-              [false, true].map((executeDuringClose): [CloseHistory] => [
-                {
-                  executeCount,
-                  answeredDuringClose,
-                  releaseDirection,
-                  closeCode,
-                  concurrentClose,
-                  executeDuringClose,
-                },
-              ]),
+          closeInterruptions.flatMap((interruption) =>
+            // An interruption hides the close response, so its outcome code
+            // adds no distinct expectation.
+            (interruption === `none`
+              ? closeCodes
+              : ([undefined] as const)
+            ).flatMap((closeCode) =>
+              [false, true].flatMap((concurrentClose) =>
+                [false, true].map((executeDuringClose): [CloseHistory] => [
+                  {
+                    executeCount,
+                    answeredDuringClose,
+                    releaseDirection,
+                    closeCode,
+                    concurrentClose,
+                    executeDuringClose,
+                    interruption,
+                  },
+                ]),
+              ),
             ),
           ),
         ),
@@ -1127,7 +1170,8 @@ completed/pending siblings; both persisted values; Worker error/messageerror;
 late delivery; repeated disposal; and every response code at init and close.
 Explicit close varies zero to three pending siblings, how many answer while
 close is in flight and in which order, every close outcome, a concurrent close,
-and an execute submitted during close.
+an execute submitted during close, and pagehide or a Worker terminal event
+before the close response.
 Fixed open cases cover default, overridden, minimum-positive, and disabled
 deadlines; pending and pre-aborted signals; an abort during synchronous option
 evaluation; a late response; and no cancellation after successful open.
