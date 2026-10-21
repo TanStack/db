@@ -1,9 +1,10 @@
 # Stale reacquired Query ownership oracle review
 
-Reviewed source: branch `investigate-finite-stale-reacquisition`, based on
-`origin/main` at `31dad2dd3`, with the production change and oracle additions
-in this change. Replace this line with the commit that adds this record before
-merging. Both independent reviews described below read the uncommitted tree.
+Reviewed source: `acaaf4c0a` on branch
+`investigate-finite-stale-reacquisition`, based on `origin/main` at
+`31dad2dd3`. Every run in this record used that tree before it was
+committed; the commit hook made no changes. The independent reviews read
+the same uncommitted tree.
 
 ## Contract and defect
 
