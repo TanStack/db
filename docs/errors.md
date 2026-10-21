@@ -823,7 +823,7 @@ Unknown expression type in HAVING clause: custom
 Development builds show the full message. For example:
 
 ```text
-Cannot write item because it cannot be JSON serialized: circular reference
+Cannot write item because its storage cannot represent it: circular reference
 ```
 
 <a id="error-75"></a>

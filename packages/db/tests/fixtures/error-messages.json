@@ -211,7 +211,7 @@
   ],
   "StorageError": ["Storage error"],
   "SerializationError": [
-    "Cannot write item because it cannot be JSON serialized: circular reference"
+    "Cannot write item because its storage cannot represent it: circular reference"
   ],
   "LocalStorageCollectionError": ["Storage error"],
   "StorageKeyRequiredError": [

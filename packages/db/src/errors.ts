@@ -1026,7 +1026,7 @@ export class SerializationError extends StorageError {
   constructor(operation: string, originalError: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Cannot ${operation} item because it cannot be JSON serialized: ${originalError}`
+        ? `Cannot ${operation} item because its storage cannot represent it: ${originalError}`
         : codedMessage(74, { operation, originalError }),
     )
   }

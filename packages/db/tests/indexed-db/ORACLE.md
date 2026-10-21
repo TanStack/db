@@ -282,7 +282,7 @@ The executable companions keep distinct responsibilities:
 | `cross-tab-boundary-oracle.test.ts`                                              | Stale-peer admission, genuine optional-field omission, caught/spurious/obsolete status, overlap and atomic replacement                                                                        | Positive boundary witnesses, partial-row and status controls, serial-fixture non-reach; 16 sender/delivery schedules in the history owner                                  |
 | `pending-history-oracle.test.ts`                                                 | One held multi-row intent, durable rows, exposed base, queued source batches and acknowledgement attribution; public/raw/downstream snapshots at handler entry, each peer step and settlement | 24 CRUD × peer action × decision cases, with all actual peer CRUD operations reached; 30+30 generated histories of up to four peer actions, 1–3 local rows; stress 300+300 |
 | `persistence-oracle.test.ts`                                                     | Three distinct Collection owners, mixed deletes/inserts, two stores and version isolation after each acceptance                                                                               | All six acceptance orders; no cross-Collection atomicity or same-ID identity policy                                                                                        |
-| `settlement-oracle.test.ts`                                                      | Failure before, within and after valid rows in a three-row native batch                                                                                                                       | First/middle/last clone failures × automatic/manual/import, with populated replacement rollback                                                                            |
+| `settlement-oracle.test.ts`                                                      | Failure before, within and after valid rows in a three-row native batch                                                                                                                       | First/middle/last clone failures × automatic/manual/import, each a `SerializationError`, with populated replacement rollback                                               |
 | `e2e/indexed-db/cross-tab-oracle.spec.ts`                                        | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; pinned receiving matrix and 10 fixed + 10 fresh histories per engine                                                                         |
 
 The transport model combines exposed base and public rows only when local
@@ -479,7 +479,8 @@ and realm-local observations. Date, odd ArrayBuffer, offset Uint8Array/DataView,
 BigInt64Array, Blob and a nested array pass through unrelated scalar updates,
 peers, export/import and fresh restore. Each shape crosses insert/import rejection
 at first/middle/last nested uncloneable values, with raw row and metadata rollback
-and a valid suffix. Inputs never share mutable objects with the expected result.
+and a valid suffix. Each rejection is a `SerializationError`, not the raw
+`DataCloneError`. Inputs never share mutable objects with the expected result.
 The approved capture extension below adds post-submission ownership. Cycles
 and arbitrary custom prototypes remain outside this adapter value corpus.
 
