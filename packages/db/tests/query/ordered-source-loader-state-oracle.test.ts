@@ -1731,6 +1731,10 @@ describe(`Successful finite demand retirement`, () => {
  *   the generated histories also fuzz that table.
  * - **No stale step:** a repair chain whose ordering epoch moved is replaced
  *   before it issues another tie or refill.
+ * - **Error identity:** a request that fails reports its own error through
+ *   its participant, or a release's cleanup error. A read the loader starts
+ *   while handling it cannot replace that error. A dead request's failure
+ *   belongs to its replay, and one a replay reacquired is absorbed.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -1809,6 +1813,10 @@ describe(`Successful finite demand retirement`, () => {
  * - `timer` runs the bounded backoff retry when that scenario enables it;
  * - `hang` makes the provider never answer the oldest open request, like a
  *   lost TCP segment; the drain leaves it in flight;
+ * - `startThrows` makes the next request throw while it starts, so it
+ *   acquires nothing; `failOldestThrowingRecovery` fails a superseded
+ *   request (the oldest, if none is) while the recovery read it starts
+ *   throws at its start;
  * - `dispose` disposes the loader. After it the loader issues no request and
  *   releases no lease, even as earlier requests settle; the end laws then
  *   judge nothing more.
@@ -1873,6 +1881,8 @@ type LedgerRequest = {
   replayed: boolean
   // The provider never answers the request, like a lost segment.
   hung: boolean
+  // The error the request failed with, if it failed.
+  error: Error | undefined
   // Truncates before the request was issued, and before it failed, and the
   // event clock at its failure. A request that fails after a truncate is
   // dead; the replay, not the loader, owns its lease.
@@ -1902,6 +1912,8 @@ type AuthorityCommand =
   | { type: `timer` }
   | { type: `hang` }
   | { type: `dispose` }
+  | { type: `startThrows` }
+  | { type: `failOldestThrowingRecovery` }
 
 type AuthorityCase = {
   indexed: boolean
@@ -2012,6 +2024,11 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
   { weight: 4, arbitrary: fc.constant({ type: `timer` as const }) },
   { weight: 1, arbitrary: fc.constant({ type: `hang` as const }) },
   { weight: 1, arbitrary: fc.constant({ type: `dispose` as const }) },
+  { weight: 1, arbitrary: fc.constant({ type: `startThrows` as const }) },
+  {
+    weight: 3,
+    arbitrary: fc.constant({ type: `failOldestThrowingRecovery` as const }),
+  },
 )
 
 const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
@@ -2078,6 +2095,8 @@ type AuthorityObservation = {
   truncatesAfterFailedReplay: number
   reentrantPasses: number
   disposals: number
+  startThrows: number
+  startThrowsDuringFailure: number
   hungRequests: number
   offsetWindows: number
 }
@@ -2112,6 +2131,19 @@ async function checkAuthorityCase(
   let epochMoves = 0
   let epochMovesAtLastStart = -1
   let concurrencyViolation: string | undefined
+  // Requests the fake has answered whose participant is not yet reported,
+  // and each request's participant with the reason it rejected with.
+  const answering: Array<LedgerRequest> = []
+  const participantOf = new Map<LedgerRequest, Promise<unknown>>()
+  const rejections = new Map<LedgerRequest, unknown>()
+  let throwNextStart = false
+  let startThrewDuringRetry = false
+  let settlingFailure = false
+  let startThrowsDuringFailure = 0
+  // The start-throw branch sets the flag, so read it through a call.
+  const retryStartThrew = () => startThrewDuringRetry
+  let startThrows = 0
+  let identityViolation: string | undefined
   // A request may fail, but the loader's own transition table must never
   // reject a move: that is a broken rule, wherever it surfaces.
   let invariantViolation: string | undefined
@@ -2186,6 +2218,7 @@ async function checkAuthorityCase(
       released: false,
       replayed: false,
       hung: false,
+      error: undefined,
       issuedTruncates: truncates,
       failedTruncates: -1,
       failedAt: -1,
@@ -2227,6 +2260,21 @@ async function checkAuthorityCase(
       if (overlapped) {
         concurrencyViolation ??= `request ${request.index} was issued while request ${overlapped.index} of the same authority was in flight`
       }
+    }
+    // The subscription throws while the request starts, so it acquires
+    // nothing: the loader's own failure, with no lease to release.
+    if (throwNextStart) {
+      throwNextStart = false
+      startThrows++
+      if (explicitRetrying) startThrewDuringRetry = true
+      // A recovery read that throws while the loader handles another failure.
+      if (settlingFailure) startThrowsDuringFailure++
+      request.outcome = `failed`
+      request.released = true
+      request.error = new Error(`request ${request.index} failed to start`)
+      request.failedTruncates = truncates
+      request.failedAt = ++clock
+      throw request.error
     }
     const release = () => {
       if (disposed) {
@@ -2295,6 +2343,7 @@ async function checkAuthorityCase(
       const settling = settlingChainMember
       settlingChainMember = true
       try {
+        answering.push(request)
         options.onLoadSubsetResult?.(true, acquisition, release)
       } finally {
         settlingChainMember = settling
@@ -2308,6 +2357,7 @@ async function checkAuthorityCase(
       invalidatingPages++
       loader.invalidateSourceOrdering()
     }
+    answering.push(request)
     options.onLoadSubsetResult?.(request.deferred.promise, acquisition, release)
   }
   // Installed rows in ascending rank. An unexpressible boundary makes the
@@ -2340,7 +2390,15 @@ async function checkAuthorityCase(
     subscription,
     `row`,
     (result) => {
-      if (result instanceof Promise) participants.push(result.catch(observe))
+      // The loader reports a request's participant once the request returns;
+      // nested requests issued meanwhile report first.
+      const request = answering.pop()
+      if (!(result instanceof Promise)) return
+      participants.push(result.catch(observe))
+      if (request) {
+        participantOf.set(request, result)
+        result.catch((reason: unknown) => rejections.set(request, reason))
+      }
     },
     () => testCase.retryTimer,
     () => revision,
@@ -2440,8 +2498,33 @@ async function checkAuthorityCase(
     const before = ledger.length
     settlingChainMember = chainMember
     if (ok) request.deferred.resolve()
-    else request.deferred.reject(new Error(`request ${request.index} failed`))
+    else {
+      request.error = new Error(`request ${request.index} failed`)
+      request.deferred.reject(request.error)
+    }
+    settlingFailure = !ok
     await flush()
+    settlingFailure = false
+    // A failed request's participant reports that request's own error; a
+    // read the loader starts while handling it cannot replace it.
+    if (!ok && participantOf.has(request)) {
+      const reason = rejections.get(request)
+      if (rejections.has(request)) {
+        if (reason !== request.error && !injectedCleanup(reason)) {
+          identityViolation ??= `request ${request.index} failed with its own error, but its participant rejected with ${String(reason)}`
+        }
+      } else if (
+        // A dead request's failure belongs to the replay, and one a replay
+        // reacquired is absorbed by its coverage; any other live failure is
+        // reported.
+        request.issuedTruncates === truncates &&
+        !request.replayed &&
+        // Dispose resets the cursor too.
+        !isDisposed()
+      ) {
+        identityViolation ??= `request ${request.index} failed, but its participant did not reject`
+      }
+    }
     settlingChainMember = false
     // An asynchronous settlement runs its continuation at once unless joined
     // work defers it; a settlement that issues nothing otherwise finished.
@@ -2471,7 +2554,15 @@ async function checkAuthorityCase(
     )
   const lastAuthoritativeSuccess = () =>
     Math.max(lastAuthoritativeRead(), replayAuthority)
+  // A release callback's own error may replace a request's: cleanup failure
+  // is reported through the participant (ARCHITECTURE.md).
+  function injectedCleanup(reason: unknown) {
+    return reason instanceof Error && reason.message.startsWith(`release `)
+  }
   const checkHeld = (checkpoint: string) => {
+    if (identityViolation) {
+      throw new Error(`error identity ${checkpoint}: ${identityViolation}`)
+    }
     if (disposeViolation) {
       throw new Error(`dispose ${checkpoint}: ${disposeViolation}`)
     }
@@ -2700,6 +2791,20 @@ async function checkAuthorityCase(
           if (command.react) graphPass()
           await flush()
           break
+        case `startThrows`:
+          throwNextStart = true
+          break
+        // A superseded request fails (the oldest, if none is), and the read
+        // the loader starts to recover it throws while it starts.
+        case `failOldestThrowingRecovery`: {
+          const open = inflight()
+          const request = open.find(({ superseded }) => superseded) ?? open[0]
+          if (!request) break
+          throwNextStart = true
+          await settle(request, false)
+          throwNextStart = false
+          break
+        }
         case `dispose`:
           if (!disposed) {
             disposed = true
@@ -2776,13 +2881,16 @@ async function checkAuthorityCase(
       if (ownFailureSince(lastFull)) {
         // A retry whose release callback throws reports that error; the next
         // explicit retry recovers (the failed-release contract above).
-        for (let attempt = 0; attempt < 2; attempt++) {
+        // A retry whose request throws while it starts is the loader's own
+        // failure again, so the next explicit retry recovers it.
+        for (let attempt = 0; attempt < 3; attempt++) {
           const before = ledger.length
+          startThrewDuringRetry = false
           explicitRetrying = true
           run(() => loader.loadMore(++windowOperation))
           explicitRetrying = false
           await flush()
-          if (ledger.length > before) break
+          if (ledger.length > before && !retryStartThrew()) break
         }
         await drain()
         checkHeld(`after the explicit retry`)
@@ -2891,6 +2999,8 @@ async function checkAuthorityCase(
     truncatesAfterFailedReplay,
     reentrantPasses,
     disposals,
+    startThrows,
+    startThrowsDuringFailure,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
   }
@@ -2976,6 +3086,8 @@ describe(`Ordered source request authority`, () => {
   // - a superseded failure before a truncate whose replay covers the source
   //   (only a full-source read retired superseded failed leases, so the
   //   replay left one held until a window move that an Effect never makes);
+  // - a superseded failure whose recovery read throws while it starts (the
+  //   start error replaced the request's own error in its participant);
   // A superseded page that fails before a covering replay settles reaches
   // the failed-lease law through a replay, which the campaigns rarely do.
   // Two replays keep traces that first failed the lane's own model: a chain
@@ -3252,6 +3364,25 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
+      name: `a superseded failure whose recovery read throws while it starts`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        needsMore: false,
+        history: [
+          { type: `report`, react: true },
+          { type: `settleNewest` },
+          { type: `settle`, pick: 7, ok: true },
+          { type: `failOldestThrowingRecovery` },
+          { type: `pass` },
+        ],
+      },
+    },
+    {
       name: `a page whose own delivery invalidates ordering`,
       testCase: {
         indexed: true,
@@ -3303,6 +3434,8 @@ describe(`Ordered source request authority`, () => {
         truncatesAfterFailedReplay: 0,
         reentrantPasses: 0,
         disposals: 0,
+        startThrows: 0,
+        startThrowsDuringFailure: 0,
         hungRequests: 0,
         offsetWindows: 0,
       }
@@ -3347,7 +3480,11 @@ describe(`Ordered source request authority`, () => {
         expect(releaseFaults).toBeGreaterThan(0)
         expect(syncRepairs).toBeGreaterThan(0)
         expect(invalidatingPages).toBeGreaterThan(0)
+        // A recovery start that throws while the loader handles a superseded
+        // failure is too rare to require of every campaign; a named replay
+        // reaches it.
         for (const [dimension, count] of Object.entries(later)) {
+          if (dimension === `startThrowsDuringFailure`) continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }

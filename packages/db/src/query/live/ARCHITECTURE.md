@@ -1086,7 +1086,11 @@ Each request carries one stamp from issue: the ordered-load generation, the
 authority generation, the ordering generation, and its role (finite, repair,
 or full-source). A request is dead after a cursor reset. A repair-chain request
 is stale once a newer authoritative start supersedes it; a finite request is
-stale once the ordering epoch moves; a full-source read stays current. Dispose
+stale once the ordering epoch moves; a full-source read stays current. A
+request that fails reports its own error. When the full-source read that a
+superseded failure starts throws while it starts, that read is the loader's
+own failure and is reported on its own; the superseded request still reports
+its error. Dispose
 resets the cursor, so a disposed loader's requests are dead and it issues and
 releases nothing more.
 

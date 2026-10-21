@@ -1079,7 +1079,12 @@ export class OrderedSourceLoader {
         this.lastBoundary = undefined
         // The loader's own recorded failure still waits for an explicit retry.
         if (this.failedRequest === undefined && this.work.kind === `idle`) {
-          this.loadFullSource(windowOperationGeneration)
+          // A recovery read that throws while it starts is the loader's own
+          // failure, recorded and reported on its own; this request still
+          // reports its error.
+          try {
+            this.loadFullSource(windowOperationGeneration)
+          } catch {}
         }
         throw error
       }
