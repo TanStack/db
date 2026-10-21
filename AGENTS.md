@@ -442,7 +442,7 @@ const dependentBuilders = [] // Accurately describes dependents
 ### Required reading: oracle tests
 
 Before designing, changing, or reviewing an oracle or generated-history test,
-read [Writing reliable oracle tests](docs/contributing/oracle-tests.md).
+read [Oracle Testing Rubric](docs/contributing/oracle-rubric.md).
 Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
 owner and its limits before adding another model. The guide explains testing
 methods; it does not authorize new product behavior or retire existing laws.
@@ -452,9 +452,9 @@ methods; it does not authorize new product behavior or retire existing laws.
 Write every oracle and generated-history test as a literate program.
 Combine explanatory prose with executable code so the file teaches the
 subsystem contract. Follow
-[ORC-003](docs/contributing/oracle-tests.md#orc-003-distinguishable-oracle-responsibilities)
+[ORC-003](docs/contributing/oracle-rubric.md#orc-003-distinguishable-oracle-responsibilities)
 and the guide's
-[literate-oracle guidance](docs/contributing/oracle-tests.md#write-the-oracle-as-executable-subsystem-documentation).
+[literate-oracle guidance](docs/contributing/oracle-rubric.md#write-the-oracle-as-executable-subsystem-documentation).
 
 Start with the promised law and its limits before introducing test mechanics.
 Explain the central law beside the independent model. Describe the legal
@@ -887,9 +887,15 @@ return allDone
 
 ## Code Weight and Fail-Fast Design
 
-Treat each line of production code as a continuing cost. Bug fixes should start
-with a net-neutral production-code budget. Prefer a negative production diff
-when the change makes the existing design simpler.
+Treat each line of production code as a continuing cost. Bug fixes and
+features should aim for a net-negative production diff. Pay for new behavior by
+refactoring the existing code it touches: merge duplicated logic and parallel
+structures, delete indirection, and remove branches that the change makes
+redundant. Refactoring existing code is the expected way to fix a bug or add a
+feature. Do not graft new code onto a design and leave the old code in place.
+
+When a change still grows production code after that work, state why. Name
+the refactors you tried and the evidence that ruled them out.
 
 Tests and contract documentation can grow to prove the behavior. Report their
 weight separately from production code. Do not compress code or weaken names

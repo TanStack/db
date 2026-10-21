@@ -9,7 +9,7 @@ Start by making the law clear enough that someone could predict an observation
 without reading production. The hard part is deciding what is owed, to whom,
 under which conditions, and when. An executable model enacts that account.
 
-Read [the oracle guide](../../../docs/contributing/oracle-tests.md),
+Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
 [the glossary](../../../docs/contributing/glossary.md), and the relevant owner
 and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).
 Follow the subsystem reading requirements in AGENTS.md.

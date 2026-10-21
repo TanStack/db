@@ -32,7 +32,7 @@ These are dimensions of one contract, not six proposed production classes.
 | P3 | Representation mapping: runtime value ↔ tagged wire/storage value, plus operation-specific query representation | Stored spelling alone cannot establish query semantics or old-reader behavior. | E1/E3/E4 |
 | P4 | Operation and observation: encode/revive, equality, order, candidate filtering, pagination, index lifecycle, accepted/rejected committed write | Storing a value does not imply it can be ordered or safely filtered in SQL. | E2–E7 |
 | P5 | Execution boundary: direct core, transaction driver, persisted wrapper/coordinator, platform host | Erasing boundary borrows admission, ordering or native-host evidence from a different route. | E5/E7/E8/E10 |
-| P6 | Evidence obligation: positive path reach, independent expected result, checkpoint, wrong-design control, declared limit | Removing it promotes a green serializer/control into end-to-end support. | oracle-tests.md and E10 |
+| P6 | Evidence obligation: positive path reach, independent expected result, checkpoint, wrong-design control, declared limit | Removing it promotes a green serializer/control into end-to-end support. | oracle-rubric.md and E10 |
 
 ## Relations, overlaps and grammar rules
 

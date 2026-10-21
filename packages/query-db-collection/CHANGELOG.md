@@ -1,5 +1,20 @@
 # @tanstack/query-db-collection
 
+## 1.4.7
+
+### Patch Changes
+
+- Fix query ownership cleanup across overlapping refetch and observer lifecycles so removed rows do not remain visible because of stale persisted metadata. ([#2198](https://github.com/TanStack/db/pull/2198))
+
+## 1.4.6
+
+### Patch Changes
+
+- Show the right ordered window after an on-demand Query Collection refetches. When a refetch changes a page that has a later page after it, or moves a page's end earlier, a row could sort past the page's end and be in neither result. Query DB now reports that through the new sync-adapter call `invalidateLoadedSubsets()`, and each ordered live query and Effect re-establishes its window with a bounded repair. A window that lies inside its own first page, such as a top-N list after an insert, skips the repair. This covers `utils.refetch()` and Query refetches such as `invalidateQueries`. An ordering repair that overlaps in-flight page or tie work now reads a bounded prefix instead of the full source. The SQLite persistence wrapper forwards the new call. Ordered live queries also keep paging when a source answers a request synchronously from its cache, and a finished repair no longer leaves a second first page that every later refetch re-reads. ([#2154](https://github.com/TanStack/db/pull/2154))
+
+- Updated dependencies [[`468db85`](https://github.com/TanStack/db/commit/468db85fb5deeb286d08c8d9ca73c74613766d8c), [`3c481f6`](https://github.com/TanStack/db/commit/3c481f6c0455fbfe82ea94d9cf457cf00b20d3e7), [`a09ba67`](https://github.com/TanStack/db/commit/a09ba670b0e4e51821c20b958e5257d3d7a83c9d), [`92b11b0`](https://github.com/TanStack/db/commit/92b11b006edc46cea23ae4423046bf9eb29fc50e), [`fcd539a`](https://github.com/TanStack/db/commit/fcd539a515f43ab1a2bd06163548e839d7a576f3), [`2c83fdc`](https://github.com/TanStack/db/commit/2c83fdc53bd762fa8b8d5e5a8b82e092710618be)]:
+  - @tanstack/db@0.15.1
+
 ## 1.4.5
 
 ### Patch Changes

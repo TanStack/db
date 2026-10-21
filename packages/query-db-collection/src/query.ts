@@ -980,6 +980,14 @@ export function queryCollectionOptions(
   // queryKey → Set<RowKey>. Entry presence means ownership is resolved;
   // an empty set represents a resolved query that currently owns no rows.
   const queryToRows = new Map<string, Set<string | number>>()
+  // A released query keeps an empty entry until its release publishes, so
+  // unpublished metadata cannot restore it as an owner. That entry is not a
+  // result applied by a later acquisition of the same query.
+  const releasedOwnership = new WeakSet<Set<string | number>>()
+  const hasAppliedOwnership = (hashedQueryKey: string) => {
+    const ownedRows = queryToRows.get(hashedQueryKey)
+    return ownedRows !== undefined && !releasedOwnership.has(ownedRows)
+  }
 
   // RowKey → Set<queryKey>
   const rowToQueries = new Map<string | number, Set<string>>()
@@ -1110,21 +1118,17 @@ export function queryCollectionOptions(
   const removeQueryOwnership = (hashedQueryKey: string) => {
     const nextOwnersByRow = new Map<string | number, Set<string>>()
 
-    const rowKeys =
-      queryToRows.get(hashedQueryKey) ?? new Set<string | number>()
-
-    rowKeys.forEach((rowKey) => {
-      const owners = rowToQueries.get(rowKey)
-
-      if (!owners) {
-        return
-      }
-
-      const nextOwners = new Set(owners)
+    queryToRows.get(hashedQueryKey)?.forEach((rowKey) => {
+      const nextOwners = new Set(rowToQueries.get(rowKey))
       nextOwners.delete(hashedQueryKey)
       nextOwnersByRow.set(rowKey, nextOwners)
+      if (nextOwners.size === 0) rowToQueries.delete(rowKey)
+      else rowToQueries.set(rowKey, nextOwners)
     })
 
+    const released = new Set<string | number>()
+    releasedOwnership.add(released)
+    queryToRows.set(hashedQueryKey, released)
     return nextOwnersByRow
   }
 
@@ -1504,26 +1508,34 @@ export function queryCollectionOptions(
         Record<string, unknown> | undefined
     }
 
-    const getOwnersFromMetadata = (rowMetadata: unknown) => {
-      if (!rowMetadata || typeof rowMetadata !== `object`) {
+    const getOwnersFromMetadata = (
+      rowMetadata: unknown,
+      rowKey?: string | number,
+    ) => {
+      if (!rowMetadata || typeof rowMetadata !== `object`)
         return new Set<string>()
-      }
       const queryMetadata = (rowMetadata as Record<string, unknown>)
         .queryCollection
-      if (!queryMetadata || typeof queryMetadata !== `object`) {
+      if (!queryMetadata || typeof queryMetadata !== `object`)
         return new Set<string>()
-      }
 
       const owners = (queryMetadata as Record<string, unknown>).owners
-      if (!owners || typeof owners !== `object`) {
-        return new Set<string>()
-      }
+      if (!owners || typeof owners !== `object`) return new Set<string>()
 
-      return new Set(Object.keys(owners as Record<string, true>))
+      const result = new Set(Object.keys(owners as Record<string, true>))
+      if (rowKey === undefined) return result
+      // Resolved Queries supersede stale persisted edges; accepted in-memory
+      // edges supplement owners whose metadata has not published yet.
+      result.forEach((owner) => {
+        const rows = queryToRows.get(owner)
+        if (rows && !rows.has(rowKey)) result.delete(owner)
+      })
+      rowToQueries.get(rowKey)?.forEach((owner) => result.add(owner))
+      return result
     }
 
     const getPersistedOwners = (rowKey: string | number) =>
-      getOwnersFromMetadata(getRowMetadata(rowKey))
+      getOwnersFromMetadata(getRowMetadata(rowKey), rowKey)
 
     const setPersistedOwners = (
       rowKey: string | number,
@@ -1612,8 +1624,11 @@ export function queryCollectionOptions(
       }
 
       const ownedRows = new Set<string | number>()
-      for (const [rowKey] of collection._state.syncedData.entries()) {
-        const owners = getPersistedOwners(rowKey)
+      const hydratedOwners = Array.from(
+        collection._state.syncedData.keys(),
+        (rowKey) => [rowKey, getPersistedOwners(rowKey)] as const,
+      )
+      for (const [rowKey, owners] of hydratedOwners) {
         if (owners.size === 0) {
           continue
         }
@@ -1695,19 +1710,13 @@ export function queryCollectionOptions(
         return baseline
       }
 
-      scannedRows.forEach((row) => {
-        const rowMetadata = row.metadata as Record<string, unknown> | undefined
-        const queryMetadata = rowMetadata?.queryCollection
-        if (!queryMetadata || typeof queryMetadata !== `object`) {
-          return
-        }
-
-        const owners = (queryMetadata as Record<string, unknown>).owners
-        if (!owners || typeof owners !== `object`) {
-          return
-        }
-
-        const ownerSet = new Set(Object.keys(owners as Record<string, true>))
+      // Project the whole scan before adding any reconstructed edges, so one
+      // row cannot make a persisted owner look resolved for the next row.
+      const scannedOwners = scannedRows.map((row) =>
+        getOwnersFromMetadata(row.metadata, row.key),
+      )
+      scannedRows.forEach((row, index) => {
+        const ownerSet = scannedOwners[index]!
         if (ownerSet.size === 0) {
           return
         }
@@ -2570,9 +2579,8 @@ export function queryCollectionOptions(
       const settledDirectPositions = new Map<string | number, number>()
       const removedRows = new Set<string | number>()
 
-      const previousOwnedRows = queryToRows.has(hashedQueryKey)
-        ? new Set(queryToRows.get(hashedQueryKey))
-        : undefined
+      // Application replaces this entry rather than mutating it.
+      const previousOwnedRows = queryToRows.get(hashedQueryKey)
       const affectedRowKeys = new Set([
         ...previouslyOwnedRows,
         ...newItemsMap.keys(),
@@ -2652,10 +2660,7 @@ export function queryCollectionOptions(
       try {
         // From this point onward the result, including an empty result, is the
         // authoritative ownership baseline until this query is cleaned up.
-        queryToRows.set(
-          hashedQueryKey,
-          queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
-        )
+        queryToRows.set(hashedQueryKey, new Set(previouslyOwnedRows))
 
         begin()
         transactionActive = true
@@ -3007,7 +3012,7 @@ export function queryCollectionOptions(
             if (
               result.isFetching &&
               !collection.deferDataRefresh &&
-              queryToRows.has(hashedQueryKey) &&
+              hasAppliedOwnership(hashedQueryKey) &&
               queryCollectionSuccessfulFetchData.get(observedQuery) ===
                 observedQuery.state.data
             ) {
@@ -3432,6 +3437,11 @@ export function queryCollectionOptions(
       invalidatePendingResultApplication(hashedQueryKey)
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
+      const ownershipTombstone = queryToRows.get(hashedQueryKey)
+      const retireOwnership = () => {
+        if (queryToRows.get(hashedQueryKey) === ownershipTombstone)
+          queryToRows.delete(hashedQueryKey)
+      }
       const rowsToDelete: Array<any> = []
 
       nextOwnersByRow.forEach((nextOwners, rowKey) => {
@@ -3453,12 +3463,6 @@ export function queryCollectionOptions(
       }
 
       nextOwnersByRow.forEach((owners, rowKey) => {
-        if (owners.size === 0) {
-          rowToQueries.delete(rowKey)
-        } else {
-          rowToQueries.set(rowKey, owners)
-        }
-
         if (shouldWriteMetadata) {
           setPersistedOwners(rowKey, owners)
         }
@@ -3474,24 +3478,23 @@ export function queryCollectionOptions(
         metadata.collection.delete(retentionKey)
       }
 
-      if (needsTransaction) {
-        const applied = commit()
-        const retireDeletedPositions = () => {
-          rowsToDelete.forEach((row) => {
-            const key = getKey(row)
-            if (collection._state.getAcceptedSyncedRow(key) === undefined)
-              acceptedRowPositions.delete(key)
-          })
-        }
-        const accepted = whenSyncAccepted(applied)
-        if (accepted === true) retireDeletedPositions()
-        else void accepted.then(retireDeletedPositions, () => undefined)
+      const applied = needsTransaction ? commit() : true
+      const retireDeletedPositions = () => {
+        rowsToDelete.forEach((row) => {
+          const key = getKey(row)
+          if (collection._state.getAcceptedSyncedRow(key) === undefined)
+            acceptedRowPositions.delete(key)
+        })
       }
+      const accepted = whenSyncAccepted(applied)
+      if (accepted === true) retireDeletedPositions()
+      else void accepted.then(retireDeletedPositions, () => undefined)
+      if (applied === true) retireOwnership()
+      else void applied.then(retireOwnership, () => undefined)
 
       state.observers.delete(hashedQueryKey)
       if (query?.state.fetchStatus !== `fetching`)
         fetchStartGenerations.delete(hashedQueryKey)
-      queryToRows.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
@@ -4277,7 +4280,7 @@ export function queryCollectionOptions(
         // cached rows, so inspect those entries before their owner is known.
         if (
           !affectedOwners.has(hashedQueryKey) &&
-          queryToRows.has(hashedQueryKey) &&
+          hasAppliedOwnership(hashedQueryKey) &&
           query.state.fetchStatus !== `fetching` &&
           !pendingResultApplications.has(hashedQueryKey)
         )
