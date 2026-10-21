@@ -1169,7 +1169,7 @@ it.each(heldPlans)(
  * reach it, and a later on-demand load does not wait for a new subscription.
  * The load lists the service's current rows. Because the sync adapter stops
  * receiving changes, it reports the Collection's `error`, so an application can
- * see that the rows can grow stale; only a restart subscribes again. This
+ * see that the rows can grow stale; only a reload or restart subscribes again. This
  * lane makes that limit executable; reconnecting is left to the TrailBase
  * provider, and the lane does not claim the limit is the right product
  * behavior.
@@ -1253,6 +1253,64 @@ it.each([`close`, `read-error`] as const)(
       expect(collection.errors, `${ending} error after the load`).toMatchObject(
         stopped,
       )
+    } finally {
+      await collection.cleanup()
+      reported.mockRestore()
+    }
+  },
+)
+
+/**
+ * ## Does a reload recover a failed startup?
+ *
+ * Law (the error surface's reload contract): `reload()` runs `sync` again
+ * while the Collection still shows `error`. The new run's own outcome decides
+ * the reload: a subscription that listens makes it ready and the reload
+ * resolves; a subscription that rejects fails the reload, and the status stays
+ * `error`. The adapter cannot read Collection status to learn whether this run
+ * is ready, because status still shows the failed run.
+ *
+ * Grammar (exhaustive, 2 histories): the first subscription rejects; the
+ * reload's subscription listens or rejects. Checkpoints: after the reload
+ * settles (or a bounded wait), compare its outcome, status, and subscribe
+ * calls.
+ */
+it.each([`listens`, `rejects`] as const)(
+  `a reload after a failed startup settles when the new subscription %s`,
+  async (outcome) => {
+    const stream = new ReadableStream<Event>({ start() {} })
+    const api = new MockRecordApi<RaceRow>()
+    api.subscribe
+      .mockImplementationOnce(() => Promise.reject(failure))
+      .mockImplementationOnce(() =>
+        outcome === `listens`
+          ? Promise.resolve(stream)
+          : Promise.reject(new Error(`reload subscription failed`)),
+      )
+    api.list.mockImplementation(() => Promise.resolve({ records: [] }))
+    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi: api,
+        getKey: (row: RaceRow) => row.id,
+        startSync: true,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    try {
+      await collection.preload().catch(() => undefined)
+      expect(collection.status).toBe(`error`)
+      const settled = await Promise.race([
+        collection.reload().then(
+          () => `resolved`,
+          () => `rejected`,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(`pending`), 500)),
+      ])
+      expect(settled).toBe(outcome === `listens` ? `resolved` : `rejected`)
+      expect(collection.status).toBe(outcome === `listens` ? `ready` : `error`)
+      expect(api.subscribe).toHaveBeenCalledTimes(2)
     } finally {
       await collection.cleanup()
       reported.mockRestore()

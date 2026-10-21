@@ -115,6 +115,8 @@ export class CollectionStateManager<
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
+  /** A reload armed its truncate for the new run's next transaction. */
+  public reloadTruncatePending = false
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
@@ -903,6 +905,8 @@ export class CollectionStateManager<
 
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
+    // A reload's next commit replaces every synced row, so it builds on none.
+    if (this.reloadTruncatePending) return
     const { states, truncated } = this.pendingSyncedProjection
     if (!truncated) {
       for (const entry of this.syncedData.entries()) {

@@ -142,6 +142,48 @@ describe(`RxDB Integration`, () => {
       }
     })
 
+    // A reload runs `sync` again while the Collection still shows `error`.
+    // The new run's readiness, not that status, decides its outcome.
+    it.each([`ok`, `fail`] as const)(
+      `settles a reload after a failed first load: new run %s`,
+      async (outcome) => {
+        const db = await getDatababase(getTestData(1))
+        const rxCollection: RxCollection<TestDocType> = db.test
+        const query = vi
+          .spyOn(rxCollection.storageInstance, `query`)
+          .mockRejectedValueOnce(new Error(`first query failed`))
+        if (outcome === `fail`)
+          query.mockRejectedValueOnce(new Error(`reload query failed`))
+        const collection = createCollection(
+          rxdbCollectionOptions({
+            rxCollection,
+            startSync: true,
+            syncBatchSize: 10,
+          }),
+        )
+        try {
+          await collection.preload().catch(() => undefined)
+          expect(collection.status).toBe(`error`)
+          const settled = await Promise.race([
+            collection.reload().then(
+              () => `resolved`,
+              () => `rejected`,
+            ),
+            new Promise((resolve) => setTimeout(() => resolve(`pending`), 500)),
+          ])
+          expect(settled).toBe(outcome === `ok` ? `resolved` : `rejected`)
+          expect(collection.status).toBe(outcome === `ok` ? `ready` : `error`)
+          if (outcome === `ok`) expect(collection.size).toBe(1)
+          else
+            expect(collection.errors.error?.message).toBe(`reload query failed`)
+        } finally {
+          query.mockRestore()
+          await collection.cleanup()
+          await db.remove()
+        }
+      },
+    )
+
     it(`marks initial sync ready only after its rows are applied`, async () => {
       const db = await getDatababase([{ id: `server`, name: `Server` }])
       const rxCollection: RxCollection<TestDocType> = db.test

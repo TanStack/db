@@ -900,11 +900,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
+      this.settleWhenLoaded(sourceId, update.ready)
       void update.ready.then(
         () => {
-          if (this.disposed) return
-          this.settleLoad(sourceId)
-          this.scheduleGraphRun()
+          if (!this.disposed) this.scheduleGraphRun()
         },
         () => {},
       )
@@ -1124,6 +1123,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private settleLoad(sourceId: string): void {
+    if (this.disposed) return
     if (this.requests.settle(sourceId)) this.reportErrors()
   }
 

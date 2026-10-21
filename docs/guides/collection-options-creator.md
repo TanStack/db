@@ -79,7 +79,7 @@ function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
-  const { begin, write, commit, markReady, fail, collection } = params
+  const { begin, write, commit, markReady, fail } = params
   
   // 1. Initialize connection to your sync engine
   const connection = initializeConnection(config)
@@ -147,9 +147,9 @@ const sync: SyncConfig<T>['sync'] = (params) => {
     } catch (error) {
       if (initialSyncAbort.signal.aborted) return
       console.error('Initial sync failed:', error)
-      // No usable initial snapshot exists, and this example does not retry.
-      // After readiness, report failures with reportError() instead.
-      if (collection.status === 'loading') fail(error)
+      // No usable initial snapshot exists in this run, and this example does
+      // not retry. After readiness, report failures with reportError() instead.
+      fail(error)
     }
   }
 
@@ -190,6 +190,10 @@ still kept up to date. Follow these rules so both stay truthful:
 3. After the first `markReady()`, call `reportError(error)` for a problem
    while you keep trying, and `reportHealthy()` when sync works again. Never
    discard rows because sync failed.
+4. Track the run's readiness in your `sync` function, as `ready` does below.
+   A reload calls `sync` again while `collection.status` still shows the
+   previous run, so status cannot tell you whether this run is ready. Write a
+   full snapshot on the run's first commit: a reload replaces every row then.
 
 ```ts
 sync: ({ begin, write, commit, markReady, fail, reportError, reportHealthy }) => {

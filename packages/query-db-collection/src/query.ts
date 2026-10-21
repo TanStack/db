@@ -1123,6 +1123,27 @@ export function queryCollectionOptions(
       metadata,
     } = params
 
+    // Readiness of this sync run. A reload calls `sync` again while the
+    // Collection still shows the previous run's status, so status cannot say
+    // whether this run has reached its first ready.
+    let runReady = false
+    let runFailed = false
+    const readyRun = () => {
+      if (runReady || runFailed) return
+      runReady = true
+      markReady()
+    }
+    // A failure before this run's first ready fails its load; after it, a
+    // failureReason, since TanStack Query fetches again.
+    const failBeforeReady = (error: unknown): boolean => {
+      if (runReady) return false
+      if (!runFailed) {
+        runFailed = true
+        fail(error)
+      }
+      return true
+    }
+
     /**
      * The LoadSubset contract: a sync adapter that refetches loaded subsets on
      * its own either keeps served prefixes whole, or reports that they may
@@ -1258,12 +1279,12 @@ export function queryCollectionOptions(
     const failingQueries = new Set<string>()
     const reportFailing = (hashedQueryKey: string, error: unknown) => {
       failingQueries.add(hashedQueryKey)
-      if (collection.status === `ready`) reportError(error)
+      if (runReady) reportError(error)
     }
     const reportRecovered = (hashedQueryKey: string) => {
       if (!failingQueries.delete(hashedQueryKey) || failingQueries.size > 0)
         return
-      if (collection.status === `ready`) reportHealthy()
+      if (runReady) reportHealthy()
     }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,
@@ -2775,8 +2796,8 @@ export function queryCollectionOptions(
           })
           if (!signal?.aborted) {
             // A later successful refetch does not revive a failed initial
-            // load; only a restart does.
-            if (collection.status !== `error`) markReady()
+            // load; only a reload does.
+            readyRun()
           }
         }
         const accepted = whenSyncAccepted(applied)
@@ -2875,8 +2896,7 @@ export function queryCollectionOptions(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
-          if (collection.status === `loading`) fail(error)
-          else reportFailing(hashedQueryKey, error)
+          if (!failBeforeReady(error)) reportFailing(hashedQueryKey, error)
         },
       )
     }
@@ -3246,8 +3266,8 @@ export function queryCollectionOptions(
           // snapshot available and report a failureReason.
           // A re-notified error is the same failure, so it is not reported
           // again.
-          if (collection.status === `loading`) fail(result.error)
-          else if (isNewError) reportFailing(hashedQueryKey, result.error)
+          if (!failBeforeReady(result.error) && isNewError)
+            reportFailing(hashedQueryKey, result.error)
         }
       }
       return handleQueryResult
@@ -3354,15 +3374,11 @@ export function queryCollectionOptions(
       }
     } else {
       if (startupRetentionSettled) {
-        markReady()
+        readyRun()
       } else {
         // In on-demand mode, there is no initial query, but retained-placeholder
         // maintenance still needs to finish before the collection is treated as ready.
-        void startupRetentionMaintenancePromise.then(() => {
-          if (collection.status === `loading`) {
-            markReady()
-          }
-        })
+        void startupRetentionMaintenancePromise.then(readyRun)
       }
     }
 

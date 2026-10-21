@@ -789,21 +789,23 @@ export class RequestErrors {
 }
 
 /**
- * @internal Orders one source's loads: a success clears only the request
- * errors of loads started before it, never a later load's failure.
+ * @internal Orders one source's loads: a request error clears only when a
+ * load started after the failure succeeds. A load already in flight cannot
+ * cover the data whose request failed.
  */
 export class LoadOrder {
   private started = 0
-  private latestFailed = 0
+  // Loads started before the latest failure; their success clears nothing.
+  private startedBeforeFailure = 0
 
   track(result: unknown, settle: () => void): void {
     const order = ++this.started
     void Promise.resolve(result).then(
       () => {
-        if (order > this.latestFailed) settle()
+        if (order > this.startedBeforeFailure) settle()
       },
       () => {
-        this.latestFailed = Math.max(this.latestFailed, order)
+        this.startedBeforeFailure = this.started
       },
     )
   }

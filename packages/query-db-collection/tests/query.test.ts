@@ -11717,3 +11717,66 @@ describe(`QueryCollection`, () => {
     })
   })
 })
+
+/**
+ * A reload runs the Query Collection's `sync` again while the Collection still
+ * shows the previous run's status. The new run's first successful result makes
+ * it ready, and a failure before that fails the reload, whatever status the
+ * Collection showed when the reload began. The lane crosses the status before
+ * the reload (a failed first load, or ready) with the new run's outcome.
+ */
+describe(`reload settles on the new run's first result`, () => {
+  const histories = [`error`, `ready`].flatMap((before) =>
+    [`ok`, `fail`].map((outcome) => ({ before, outcome })),
+  ) as Array<{ before: `error` | `ready`; outcome: `ok` | `fail` }>
+
+  it.each(histories)(
+    `from $before, the new run's first fetch is $outcome`,
+    async ({ before, outcome }) => {
+      const answers: Array<`ok` | `fail`> = [
+        before === `error` ? `fail` : `ok`,
+        outcome,
+      ]
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `reload-${before}-${outcome}`,
+          queryKey: [`reload`, before, outcome],
+          queryClient: client,
+          getKey: (row: { id: number }) => row.id,
+          queryFn: (): Promise<Array<{ id: number }>> =>
+            answers.shift() === `fail`
+              ? Promise.reject(new Error(`backend down`))
+              : Promise.resolve([{ id: 1 }]),
+        }),
+      )
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      try {
+        await collection.preload().catch(() => undefined)
+        expect(collection.status).toBe(before)
+        const settled = await Promise.race([
+          collection.reload().then(
+            () => `resolved`,
+            () => `rejected`,
+          ),
+          new Promise((resolve) => setTimeout(() => resolve(`pending`), 200)),
+        ])
+        expect(settled).toBe(outcome === `ok` ? `resolved` : `rejected`)
+        expect(collection.status).toBe(outcome === `ok` ? `ready` : before)
+        expect(collection.errors.reloading).toBe(false)
+        expect(collection.errors.error?.message ?? null).toBe(
+          outcome === `ok` ? null : `backend down`,
+        )
+        if (outcome === `ok`) expect(collection.size).toBe(1)
+      } finally {
+        consoleError.mockRestore()
+        await collection.cleanup()
+        client.clear()
+      }
+    },
+  )
+})

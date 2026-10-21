@@ -185,7 +185,7 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, fail, collection } = params
+      const { begin, write, commit, markReady, fail } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
@@ -398,14 +398,13 @@ export function trailBaseCollectionOptions<
       }
 
       // The adapter does not resubscribe, so it stops when its stream ends;
-      // the first end reports why, and fail() may be called once.
+      // the first end reports why, and fail() may be called once. These flags
+      // belong to this sync run: a reload runs `sync` again while the
+      // Collection still shows the previous run's status.
       let streamEnded = false
       function reportStreamEnd(error: unknown, closed = false) {
         if (cancelled) return
-        if (
-          !streamEnded &&
-          (collection.status === `loading` || collection.status === `ready`)
-        ) {
+        if (!streamEnded) {
           streamEnded = true
           fail(error)
         } else if (!closed)
@@ -454,7 +453,7 @@ export function trailBaseCollectionOptions<
             if (cancelled) return
             fullSyncCompleted = true
           }
-          if (!cancelled && collection.status === `loading`) {
+          if (!cancelled && !streamEnded) {
             markReady()
           }
         } catch (error) {

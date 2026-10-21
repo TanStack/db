@@ -325,16 +325,22 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const {
-        begin,
-        write,
-        collection,
-        commit,
-        markReady,
-        fail,
-        reportError,
-        reportHealthy,
-      } = params
+      const { begin, write, collection, commit, reportError, reportHealthy } =
+        params
+      // Readiness of this sync run: a reload runs `sync` again while the
+      // Collection still shows the previous run's status.
+      let ready = false
+      let failed = false
+      const markReady = () => {
+        ready = true
+        params.markReady()
+      }
+      // A failure before this run's first ready fails its load, once.
+      const fail = (error: unknown) => {
+        if (failed) return
+        failed = true
+        params.fail(error)
+      }
       const abortController = new AbortController()
 
       let disposeTracking:
@@ -634,9 +640,7 @@ function createPowerSyncCollectionConfig<
             message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
           })
-          if (collection.status === `loading`) {
-            fail(error)
-          }
+          if (!ready) fail(error)
         })
 
         const invokeOnUnload = (): void | Promise<void> => {
@@ -839,10 +843,10 @@ function createPowerSyncCollectionConfig<
                 // Collection readiness this is a failureReason, not fail().
                 if (stopped) {
                   // Cleanup owns the outcome.
-                } else if (collection.status === `ready`) {
+                } else if (ready) {
                   trackingOutage = true
                   reportError(error)
-                } else if (collection.status === `loading`) fail(error)
+                } else fail(error)
                 throw error
               })
               .finally(() => {

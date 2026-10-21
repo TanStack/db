@@ -81,11 +81,13 @@ The same interpreter runs a fixed corpus and generated histories.
 - The adapter subscribes once per sync run and does not resubscribe. After the
   stream closes or fails, the Collection keeps its rows and stays ready, a
   later service change does not reach it, and a later on-demand load lists
-  the service's current rows without waiting. Collection health holds a final
-  health error from the end onward, with a stream failure as its cause, and
-  only a restart clears it. Reconnecting is left to the TrailBase provider.
-  A mutant that reports the end as a health error that is not final fails 29
-  lifecycle cells. Two histories make this limit
+  the service's current rows without waiting. The Collection's node shows an
+  `error` from the end onward, with a stream failure as its cause, and only
+  `reload()` or a restart clears it. Reconnecting is left to the TrailBase
+  provider. A mutant that reports the end as a `failureReason` fails 29
+  lifecycle cells. A separate lane checks that a reload after a failed startup
+  settles on the new subscription's outcome while the Collection still shows
+  `error`. Two histories make this limit
   executable; they do not claim it is the right product behavior. They pin
   one stream end followed by one change and one load. A page whose newer
   event never arrives because the stream ended keeps the value the fence

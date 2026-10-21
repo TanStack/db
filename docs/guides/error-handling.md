@@ -527,6 +527,9 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
   nothing, so you can call it after every commit.
 - An `error` from `fail` clears only through `reload()`, which calls your
   `sync` function again for a new run.
+- Keep the run's readiness in your `sync` function, as `ready` above does.
+  Do not read `collection.status` to learn whether this run is ready: during
+  a reload it still shows the previous run's status.
 
 ### Migrating
 

@@ -415,7 +415,6 @@
   "crashQuery": "gN",
   "failQuery": "gW",
   "assertReady": "gX",
-  "reloadTruncatePending": "gY",
   "reloadRun": "gZ",
   "adapterStopped": "g_",
   "recovering": "g$",
@@ -432,8 +431,10 @@
   "windowIsInsideOwnPrefix": "gE",
   "failureReasonFromReload": "g5",
   "failedBySource": "g6",
-  "latestFailed": "g7",
   "loadOrders": "g8",
   "endReload": "g9",
-  "loadOrder": "ha"
+  "loadOrder": "ha",
+  "reloadTruncateTransaction": "gY",
+  "cancelSyncTransaction": "g7",
+  "startedBeforeFailure": "hb"
 }

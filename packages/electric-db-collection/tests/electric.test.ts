@@ -229,6 +229,44 @@ describe(`Electric Integration`, () => {
     expect(collection.status).toEqual(`ready`)
   })
 
+  // A reload runs `sync` again while the Collection still shows `error`.
+  // The new stream's outcome, not that status, decides the reload.
+  it.each([`up-to-date`, `stream error`] as const)(
+    `settles a reload after a failed first load: new stream %s`,
+    async (outcome) => {
+      const loggedError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const lastStreamOptions = () =>
+        vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+          { onError?: (error: unknown) => void } | undefined
+      try {
+        const preload = collection.preload()
+        lastStreamOptions()?.onError?.(new Error(`initial stream failed`))
+        await preload.catch(() => undefined)
+        expect(collection.status).toBe(`error`)
+
+        const reload = collection.reload().then(
+          () => `resolved`,
+          () => `rejected`,
+        )
+        if (outcome === `up-to-date`)
+          subscriber([{ headers: { control: `up-to-date` } }])
+        else lastStreamOptions()?.onError?.(new Error(`reload stream failed`))
+        const settled = await Promise.race([
+          reload,
+          new Promise((resolve) => setTimeout(() => resolve(`pending`), 200)),
+        ])
+        expect(settled).toBe(outcome === `up-to-date` ? `resolved` : `rejected`)
+        expect(collection.status).toBe(
+          outcome === `up-to-date` ? `ready` : `error`,
+        )
+      } finally {
+        loggedError.mockRestore()
+      }
+    },
+  )
+
   it(`reports an initial stream error instead of publishing an empty ready snapshot`, async () => {
     const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
     const preload = collection.preload()

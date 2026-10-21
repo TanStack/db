@@ -273,15 +273,17 @@ export function rxdbCollectionOptions(
         }
 
         if (!isCleanedUp()) {
+          ready = true
           markReady()
         }
       }
 
+      // Readiness of this sync run: a reload runs `sync` again while the
+      // Collection still shows the previous run's status.
+      let ready = false
       void start().catch((error: unknown) => {
         stopOngoingFetch()
-        if (collection.status === `loading`) {
-          fail(error)
-        }
+        if (!ready) fail(error)
       })
 
       return stopOngoingFetch
