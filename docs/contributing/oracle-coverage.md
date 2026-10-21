@@ -1064,7 +1064,45 @@ refetch owner's held-delete replay is the killing witness for trusting stale
 published owners over accepted ownership. A release/reacquisition history also
 holds publication, reacquires the same cached Query, then proves the older
 release cannot erase the new claim by releasing it and observing an empty
-public row set. Larger overlap schedules, window ownership outside the ordered
+public row set. That history uses infinite `staleTime`, so reacquisition starts
+no fetch. A sibling table crosses a stale reacquisition whose refetch fails,
+returns the same rows, or returns no rows; the refetch settles while publication
+is held or after the older release publishes; and an optional peer lease owns
+the same row until after the refetch. Its independent model keeps each active
+observer lease's latest successful result and compares public rows while held,
+after publication, after the refetch, after the peer's release, and after the
+reacquired release. On `main` at `31dad2dd3` six stale cells fail: the older
+release's empty ownership entry made the cached result look already applied, so
+the reacquired lease owned nothing and the row disappeared at publication, or,
+with a peer, when the peer left. The repair marks a released lease's entry and
+lets only an applied entry satisfy the already-applied guard and the on-demand
+direct-write skip. The empty-result cells reject keeping the row for every
+reacquired demand. Removing the guard fails the persisted direct-write
+histories that keep an accepted write through a refetch start, and their
+sibling with an empty current result and an inserted row rejects treating
+every empty entry as unapplied: in on-demand mode the insert disappears at its
+receipt, and in eager mode Manual survives the Newer result. A second table
+rejects deleting the entry at release: lease `b` claims the row while `a`'s
+release is held or after it publishes, with or without a peer `c`, and a
+server DbClient's dehydrated owners are hydrated into a fresh client. Deleting
+the entry copies `a` back from unpublished metadata, which adds an owner edge
+and, without a peer, leaks the row after the hydrated client releases `b`. Its `reacquired` histories reacquire `a` without
+cached data and fail its fetch before `b` claims the row; deleting the entry
+at reacquisition copies `a` back the same way. A
+reacquisition behind a refresh barrier (`deferDataRefresh`) followed by a
+direct upsert requires the reacquired Query's cache to show the upsert; reading
+the released entry as applied leaves the cache stale, and only the Query cache
+shows it. A release whose durable commit fails leaves the row public and
+stored, puts the Collection in `error`, rejects a later acquisition with the
+persistence error, and a `cleanup()` and `preload()` restart starts from clean
+ownership; a host that swallows the failure fails it. Eager mode cannot reach
+the reacquisition premise: it has no subset release, and ending an eager sync
+run removes its Query from the cache. A cleanup that skips entries without an
+observer passes the failed-commit witness, because the restarted run fetches
+before any cached replay; no history reaching a carried entry is known.
+Persisted retention (`persistedGcTime`) is outside these histories. The
+[review record](oracle-reviews/2026-10-20-stale-reacquired-ownership.md)
+lists the mutant outcomes and open cells. Larger overlap schedules, window ownership outside the ordered
 replay, and durable-adapter ordering remain open under the owners named above.
 
 A controlled cold persisted scan gives one Query two rows in both scan orders,
