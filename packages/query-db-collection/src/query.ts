@@ -2579,9 +2579,8 @@ export function queryCollectionOptions(
       const settledDirectPositions = new Map<string | number, number>()
       const removedRows = new Set<string | number>()
 
-      const previousOwnedRows = queryToRows.has(hashedQueryKey)
-        ? new Set(queryToRows.get(hashedQueryKey))
-        : undefined
+      // Application replaces this entry rather than mutating it.
+      const previousOwnedRows = queryToRows.get(hashedQueryKey)
       const affectedRowKeys = new Set([
         ...previouslyOwnedRows,
         ...newItemsMap.keys(),

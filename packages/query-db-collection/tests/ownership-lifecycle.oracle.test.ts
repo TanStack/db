@@ -6561,6 +6561,102 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * The same fail-loud law covers a reacquired lease whose own durable commit
+   * fails. The release's commit is held at the persistence boundary while the
+   * Query is reacquired; the reacquired application's commit then fails. The
+   * release is durable, so the row leaves; the reacquired result never became
+   * durable, so it cannot keep the row. The Collection enters `error`, the
+   * acquisition rejects with the persistence failure, and a restart serves and
+   * releases the row normally. A history that keeps the row public after the
+   * failure would report a result that storage never accepted.
+   */
+  it(`fails loudly when a reacquired lease's commit fails after a held release`, async () => {
+    const id = `reacquired-commit-fails`
+    const storage = createOwnershipStorage(undefined, 2)
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([shared]))
+    let commits = 0
+    const applyCommittedTx = storage.adapter.applyCommittedTx
+    storage.adapter.applyCommittedTx = (...args) => {
+      // Commit 1 loads the row, 2 is the held release, 3 is the reacquisition.
+      if (++commits === 3) return Promise.reject(new Error(`storage failed`))
+      return applyCommittedTx(...args)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<
+        Item,
+        string | number,
+        never,
+        QueryCollectionUtils<Item, string | number, Item, unknown>
+      >({
+        ...queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          persistedGcTime: 0,
+          startSync: true,
+        }),
+        persistence: { adapter: storage.adapter },
+      }),
+    )
+    cleanups.push(async () => {
+      storage.release()
+      await collection.cleanup().catch(() => undefined)
+      queryClient.clear()
+    })
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+    const detail = categorySubset(`detail`)
+
+    await collection._sync.loadSubset(detail)
+    collection._sync.unloadSubset(detail)
+    await storage.entered
+    const reacquisition = Promise.resolve(
+      collection._sync.loadSubset(detail),
+    ).then(
+      () => `fulfilled`,
+      (error: unknown) =>
+        error instanceof Error ? error.message : String(error),
+    )
+    await settleTurn()
+    const held = { rows: rows(collection), status: collection.status }
+
+    storage.release()
+    const reacquired = await reacquisition
+    await settleTurn()
+    const failed = { rows: rows(collection), status: collection.status }
+
+    await collection.cleanup()
+    await collection.preload()
+    await collection._sync.loadSubset(detail)
+    const restartedLoad = rows(collection)
+    collection._sync.unloadSubset(detail)
+    await settleTurn()
+
+    expect({
+      held,
+      reacquired,
+      failed,
+      restartedLoad,
+      restartedRelease: {
+        rows: rows(collection),
+        stored: storedItems(storage).map((item) => item.id),
+      },
+    }).toEqual({
+      held: { rows: [shared.id], status: `ready` },
+      reacquired: `Failed to durably persist collection "${id}": storage failed`,
+      failed: { rows: [], status: `error` },
+      restartedLoad: [shared.id],
+      restartedRelease: { rows: [], stored: [] },
+    })
+  })
+
+  /**
    * Accepted Query results update ownership in acceptance order even while
    * publication is held. The independent model stores each active Query's
    * latest complete result and exposes their union: after the detail and list

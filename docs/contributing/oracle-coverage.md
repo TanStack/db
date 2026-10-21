@@ -1095,7 +1095,10 @@ the released entry as applied leaves the cache stale, and only the Query cache
 shows it. A release whose durable commit fails leaves the row public and
 stored, puts the Collection in `error`, rejects a later acquisition with the
 persistence error, and a `cleanup()` and `preload()` restart starts from clean
-ownership; a host that swallows the failure fails it. Eager mode cannot reach
+ownership; a host that swallows the failure fails it. A sibling holds the release's
+durable commit, reacquires, and fails the reacquired application's commit: the
+row leaves with the durable release, the Collection enters `error`, and a
+restart serves and releases the row. Eager mode cannot reach
 the reacquisition premise: it has no subset release, and ending an eager sync
 run removes its Query from the cache. A cleanup that skips entries without an
 observer passes the failed-commit witness, because the restarted run fetches

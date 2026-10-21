@@ -1,10 +1,11 @@
 # Stale reacquired Query ownership oracle review
 
-Reviewed source: `acaaf4c0a` on branch
-`investigate-finite-stale-reacquisition`, based on `origin/main` at
-`31dad2dd3`. Every run in this record used that tree before it was
-committed; the commit hook made no changes. The independent reviews read
-the same uncommitted tree.
+Reviewed source: branch `investigate-finite-stale-reacquisition`, based on
+`origin/main` at `31dad2dd3`. The first runs used `acaaf4c0a`. The counts,
+RED/GREEN table, and mutant table were rerun on the commit that follows
+`8ff1db49f`, which adds the CodeRabbit follow-up below; that commit's tree was
+measured before it was committed. The independent reviews read the
+`acaaf4c0a` tree.
 
 ## Contract and defect
 
@@ -55,9 +56,10 @@ added and 3 removed in `src/query.ts`.
 | Reacquired cache patch behind `deferDataRefresh` | Fails: cache `["Shared"]`, model `["Manual"]` | Passes |
 | Empty-result direct insert (eager, on-demand) | 2 pass | 2 pass |
 | Failed release commit (3 cells) | 3 pass | 3 pass |
+| Reacquired commit fails after a held release | Passes | Passes |
 
-The oracle file passes 555 of 555 tests with the repair. The Query Collection
-package passes 1430 tests with 2 skipped, and the type check reports no errors.
+The oracle file passes 557 of 557 tests with the repair. The Query Collection
+package passes 1432 tests with 2 skipped, and the type check reports no errors.
 Three repeated runs of the new tables gave identical results.
 
 ## Mutant results
@@ -85,6 +87,18 @@ survivors without a distinguishing history; the concrete versions above were
 written from its descriptions. Deleting the released entry at reacquisition
 survived every test until the `reacquired` published-owner histories were
 added; it fails them and passes nothing else differently.
+
+## CodeRabbit review of `8ff1db49f`
+
+Review 5600814169 had one inline finding and a summary. Ledger:
+
+| ID | Claim | Verdict | Action |
+| --- | --- | --- | --- |
+| CR-1 | The rollback snapshot in result application clones the entry, so a failed application that restores it drops a release's mark | True at the code level. No public consequence reached: in persisted histories the release retires its entry before the reacquired application snapshots (instrumented with the release commit gated and ungated), and in non-persisted histories the held commit rejects only by cancellation, which the restore guards skip | Fixed: the snapshot keeps the entry by reference, because application replaces the entry rather than mutating it. No witness distinguishes this; reverting it passes all 557 tests |
+| CR-2 | Add a history with reacquisition during a held release, a commit failure before publication, and a failed refetch; the row must remain until the reacquired lease is released | The history runs; its expected result conflicts with the fail-loud law. The release is durable and the reacquired result is not, so the row leaves and the Collection enters `error` | Added "fails loudly when a reacquired lease's commit fails after a held release"; a storage adapter that swallows the failure fails it |
+| CR-3 | Docstring coverage 0% for touched functions | True; the touched closure helpers use line comments like their neighbours | No change, per AGENTS.md's rule to match surrounding comment density |
+| CR-4 | CodeRabbit's ESLint tool timed out | A tool note, not a code claim; the repository Lint check passed on `8ff1db49f` | No change |
+| CR-5 | Title, description, and issue checks passed | Informational | No change |
 
 ## ORC outcomes
 
@@ -139,5 +153,6 @@ adapter. Observations: public rows, stored rows, owners, status, and Query
 cache at the named checkpoints.
 
 Open in-scope cells: a cache entry that outlives sync cleanup (the surviving
-mutant), real SQLite commit failure, more than one row per lease, and more
+mutant), a history that restores a release's entry after a failed application
+(CR-1, unreached), real SQLite commit failure, more than one row per lease, and more
 than one peer.
