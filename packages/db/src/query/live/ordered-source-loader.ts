@@ -518,28 +518,16 @@ export class OrderedSourceLoader {
       this.subscription.hasPendingTruncateReplacement
     )
       return
-    const orderedLoadGeneration = this.orderedLoadGeneration
-    runAllCallbacks(
-      Array.from(this.settledFiniteAcquisitions, ([release, entry]) => () => {
-        const { count } = entry
-        if (keptChain !== undefined && entry.chain === keptChain) return
-        if (
-          !this.active ||
-          orderedLoadGeneration !== this.orderedLoadGeneration
-        )
-          return
-        if (
-          !this.coversSource() &&
-          keptChain === undefined &&
-          (!prefix ||
-            release === prefix.release ||
-            count === undefined ||
-            count > prefix.count)
-        )
-          return
-        this.settledFiniteAcquisitions.delete(release)
-        release()
-      }),
+    this.releaseOwned(
+      this.settledFiniteAcquisitions,
+      (release, { count, chain }) =>
+        keptChain !== undefined
+          ? chain !== keptChain
+          : this.coversSource() ||
+            (prefix !== undefined &&
+              release !== prefix.release &&
+              count !== undefined &&
+              count <= prefix.count),
     )
   }
 
@@ -547,11 +535,32 @@ export class OrderedSourceLoader {
   // of each failed request that authoritative work had superseded.
   private retireSupersededFailures(): void {
     if (this.subscription.hasPendingTruncateReplacement) return
-    const failed = [...this.failedAcquisitions]
-      .filter(([, { superseded }]) => superseded)
-      .map(([release]) => release)
-    for (const release of failed) this.failedAcquisitions.delete(release)
-    runAllCallbacks(failed)
+    this.releaseOwned(
+      this.failedAcquisitions,
+      (_, { superseded }) => superseded,
+    )
+  }
+
+  // Release each selected lease once. A release that resets the cursor or
+  // disposes the loader stops the pass; the replay that follows owns the
+  // remaining leases.
+  private releaseOwned<TEntry>(
+    owner: Map<ReleaseLoadSubset, TEntry>,
+    selected: (release: ReleaseLoadSubset, entry: TEntry) => boolean,
+  ): void {
+    const orderedLoadGeneration = this.orderedLoadGeneration
+    runAllCallbacks(
+      Array.from(owner, ([release, entry]) => () => {
+        if (
+          !this.active ||
+          orderedLoadGeneration !== this.orderedLoadGeneration ||
+          !selected(release, entry)
+        )
+          return
+        owner.delete(release)
+        release()
+      }),
+    )
   }
 
   invalidateCursor(): void {
@@ -1171,11 +1180,9 @@ export class OrderedSourceLoader {
   }
 
   private releaseFailedAcquisitions(): void {
-    const failed = this.failedAcquisitions
-    this.failedAcquisitions = new Map()
     this.requesting = true
     try {
-      runAllCallbacks(failed.keys())
+      this.releaseOwned(this.failedAcquisitions, () => true)
     } finally {
       this.requesting = false
     }

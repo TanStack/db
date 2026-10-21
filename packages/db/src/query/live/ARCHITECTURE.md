@@ -1045,7 +1045,10 @@ A repair chain is superseded once a newer repair or full-source read starts.
 A request of the superseded chain proves no current coverage: it issues no
 tie or refill, and its failure is not the loader's own. A chain that finished
 still owns a request that settles late. Once a full-source read covers the source, any
-finite or repair request that settles later is retired at once.
+finite or repair request that settles later is retired at once. Every lease
+release pass, including the explicit and backoff retries' release of failed
+acquisitions, stops when a release resets the cursor or disposes the loader.
+The replay that follows owns the leases the pass did not reach.
 A request issued before a cursor reset that later fails still raises the repair
 debt, but it cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has

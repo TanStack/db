@@ -411,5 +411,6 @@
   "coversSource": "gL",
   "standing": "gM",
   "windowIsInsideOwnPrefix": "gN",
-  "debt": "gO"
+  "debt": "gO",
+  "releaseOwned": "gP"
 }
