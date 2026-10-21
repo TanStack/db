@@ -20,6 +20,7 @@ const staticOracleProperties = [
   `cursor-pagination.failure`,
   `query-db.refetch-ordered-prefix`,
   `ordered-loader.request-authority`,
+  `replay.ordered-window-faults`,
   `oracle-replay.calibration`,
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,

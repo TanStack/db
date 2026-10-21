@@ -1,3 +1,4 @@
+import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -7,8 +8,14 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
@@ -1046,4 +1053,405 @@ describe(`loadSubset replay refinement`, () => {
       ])
     }
   })
+})
+
+/**
+ * # Ordered windows across truncate replays with adapter faults
+ *
+ * Contract: ARCHITECTURE.md, "Ordered requests, continuation, and recovery"
+ * and the truncate-replay rules. An ordered live query shows the source's
+ * first `limit` rows by rank. A truncate replays the demands its subscription
+ * holds, and a failed replay keeps the prior public rows (law 9). A lease
+ * release that throws reports its error, but it does not undo an acquisition
+ * and it does not hold back the graph run that publishes a replay.
+ *
+ * Model: the source rows, with distinct ranks. The expected window sorts them
+ * by rank and keeps the first `limit`.
+ *
+ * Laws, checked once loading is quiet:
+ * - **Adapter release:** `unloadSubset` releases only a demand that
+ *   `loadSubset` acquired, and no more often than it was acquired.
+ * - **Settled window:** when no load failed, and no unload threw while a load
+ *   issued after the last truncate was still unsettled, the window equals the
+ *   model. An unload that throws after those loads settle is inside this law:
+ *   it is a settlement-phase release, which must not hold back publication.
+ *   An unload that throws while the replay starts can fail the replay, which
+ *   law 9 allows, so the law does not judge that case.
+ * - **Convergence:** after a final truncate with no faults, the window equals
+ *   the model.
+ *
+ * History grammar: rank moves, holding the next loads, settling the oldest
+ * held load with success or failure, truncates (optionally arming the next
+ * unload once the replay has started), and arming the next unload to throw. The driver uses a real on-demand Collection with an index and an
+ * ordered live query. At the end, every held load succeeds in order.
+ *
+ * Limits: one source, one live query with limit 2, no joins or includes, and
+ * a provider that reads its rows at the time it answers.
+ */
+type OrderedRow = { id: number; rank: number }
+type OrderedCommand =
+  | { type: `move`; id: number; rank: number }
+  | { type: `hold` }
+  | { type: `settle`; ok: boolean }
+  | { type: `truncate`; armAfterStart: boolean }
+  | { type: `unloadThrows` }
+
+const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      type: fc.constant(`move` as const),
+      id: fc.integer({ min: 1, max: 5 }),
+      rank: fc.integer({ min: 1, max: 60 }),
+    }),
+  },
+  { weight: 2, arbitrary: fc.constant({ type: `hold` as const }) },
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      type: fc.constant(`settle` as const),
+      ok: fc.oneof(
+        { weight: 3, arbitrary: fc.constant(true) },
+        { weight: 1, arbitrary: fc.constant(false) },
+      ),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`truncate` as const),
+      // Arm the next unload once the replay has started, so it can throw
+      // while the replay settles.
+      armAfterStart: fc.boolean(),
+    }),
+  },
+  { weight: 2, arbitrary: fc.constant({ type: `unloadThrows` as const }) },
+)
+
+type OrderedReach = {
+  settlementThrows: number
+  throwsAfterReplay: number
+  replayStartThrows: number
+  heldAcrossTruncate: number
+  failedLoads: number
+  settledWindowChecks: number
+}
+
+async function checkOrderedReplay(
+  history: Array<OrderedCommand>,
+): Promise<OrderedReach> {
+  const limit = 2
+  const truth = new Map<number, OrderedRow>(
+    [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id * 10 }]),
+  )
+  const expected = () =>
+    [...truth.values()]
+      .sort((left, right) => left.rank - right.rank)
+      .slice(0, limit)
+      .map(({ id }) => id)
+  const installed = new Map<number, OrderedRow>()
+  // Each load records the truncate count it was issued after, so a fault can
+  // be placed before or after the replay's loads settle.
+  type Load = { epoch: number; outcome: `pending` | `ok` | `failed` }
+  const loads: Array<Load> = []
+  const acquired = new Map<LoadSubsetOptions, number>()
+  const held: Array<(ok: boolean) => void> = []
+  let holding = false
+  let truncates = 0
+  let throwNextUnload = false
+  // The truncate starts its replay while it commits.
+  let truncating = false
+  let anyLoadFailed = false
+  let earlyThrowSinceTruncate = false
+  let violation: string | undefined
+  // Adapter callbacks set these flags, so read them through a call.
+  const faultExcusesWindow = () => anyLoadFailed || earlyThrowSinceTruncate
+  const reach: OrderedReach = {
+    settlementThrows: 0,
+    throwsAfterReplay: 0,
+    replayStartThrows: 0,
+    heldAcrossTruncate: 0,
+    failedLoads: 0,
+    settledWindowChecks: 0,
+  }
+  let sync!: Parameters<SyncConfig<OrderedRow, number>[`sync`]>[0]
+  const source = createCollection<OrderedRow, number>({
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        sync.markReady()
+        return {
+          loadSubset: async (options) => {
+            acquired.set(options, (acquired.get(options) ?? 0) + 1)
+            const load: Load = { epoch: truncates, outcome: `pending` }
+            loads.push(load)
+            if (holding) {
+              const ok = await new Promise<boolean>((resolve) =>
+                held.push(resolve),
+              )
+              if (!ok) {
+                load.outcome = `failed`
+                anyLoadFailed = true
+                reach.failedLoads++
+                throw new Error(`load failed`)
+              }
+            } else await Promise.resolve()
+            if (options.signal?.aborted) {
+              load.outcome = `ok`
+              return
+            }
+            const rows = [...truth.values()]
+              .filter(
+                (row) =>
+                  (!options.where ||
+                    evaluateReferenceExpression(options.where, row) === true) &&
+                  (!options.cursor ||
+                    evaluateReferenceExpression(
+                      options.cursor.whereFrom,
+                      row,
+                    ) === true),
+              )
+              .sort((left, right) => left.rank - right.rank)
+            const offset = options.cursor ? 0 : (options.offset ?? 0)
+            const selected = rows.slice(
+              offset,
+              options.limit === undefined ? undefined : offset + options.limit,
+            )
+            sync.begin()
+            for (const value of selected) {
+              if (installed.get(value.id) === value) continue
+              sync.write({
+                type: installed.has(value.id) ? `update` : `insert`,
+                value,
+              })
+              installed.set(value.id, value)
+            }
+            await sync.commit()
+            load.outcome = `ok`
+          },
+          unloadSubset: (options) => {
+            const count = acquired.get(options) ?? 0
+            if (count === 0) {
+              violation ??= `unloadSubset released a demand it did not hold`
+            }
+            acquired.set(options, count - 1)
+            if (!throwNextUnload) return
+            throwNextUnload = false
+            // A release during the replay's start, while one of its loads is
+            // unsettled, may fail the replay; one after they settle may not.
+            const replayUnsettled =
+              truncating ||
+              (truncates > 0 &&
+                loads.some(
+                  ({ epoch, outcome }) =>
+                    epoch === truncates && outcome === `pending`,
+                ))
+            if (replayUnsettled) {
+              earlyThrowSinceTruncate = true
+              reach.replayStartThrows++
+            } else if (truncates > 0) reach.throwsAfterReplay++
+            else reach.settlementThrows++
+            throw new Error(`unload failed`)
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank)
+      .limit(limit)
+      .select(({ row }) => ({ id: row.id, rank: row.rank })),
+  )
+  // Adapter faults surface as rejected loads and thrown releases. They are
+  // legal inputs; the laws judge only the quiet results.
+  const swallow = (error: unknown) => {
+    if (!(error instanceof Error)) throw error
+  }
+  process.on(`unhandledRejection`, swallow)
+  const settleAll = async () => {
+    for (let round = 0; round < 50; round++) {
+      await flushPromises()
+      const next = held.shift()
+      if (!next) return
+      next(true)
+    }
+    throw new Error(`held loads did not drain`)
+  }
+  const truncate = async () => {
+    truncates++
+    earlyThrowSinceTruncate = false
+    if (held.length > 0) reach.heldAcrossTruncate++
+    installed.clear()
+    truncating = true
+    try {
+      sync.begin()
+      sync.truncate()
+      await sync.commit()
+    } catch (error) {
+      swallow(error)
+    } finally {
+      truncating = false
+    }
+  }
+  try {
+    await live.preload()
+    for (const command of history) {
+      try {
+        switch (command.type) {
+          case `move`: {
+            const ranks = new Set(
+              [...truth.values()]
+                .filter(({ id }) => id !== command.id)
+                .map(({ rank }) => rank),
+            )
+            if (ranks.has(command.rank)) break
+            const value = { id: command.id, rank: command.rank }
+            // The provider delivers every source change, as a live sync does.
+            truth.set(command.id, value)
+            sync.begin()
+            sync.write({
+              type: installed.has(command.id) ? `update` : `insert`,
+              value,
+            })
+            installed.set(command.id, value)
+            await sync.commit()
+            break
+          }
+          case `hold`:
+            holding = true
+            break
+          case `settle`: {
+            holding = false
+            held.shift()?.(command.ok)
+            break
+          }
+          case `truncate`:
+            await truncate()
+            if (command.armAfterStart) throwNextUnload = true
+            break
+          case `unloadThrows`:
+            throwNextUnload = true
+            break
+        }
+      } catch (error) {
+        swallow(error)
+      }
+      await flushPromises()
+    }
+    holding = false
+    throwNextUnload = false
+    await settleAll()
+    await flushPromises()
+    if (violation) throw new Error(`adapter release: ${violation}`)
+    if (!faultExcusesWindow()) {
+      reach.settledWindowChecks++
+      expect(
+        live.toArray.map(({ id }) => id),
+        `settled window`,
+      ).toEqual(expected())
+    }
+    await truncate()
+    await settleAll()
+    await flushPromises()
+    if (violation) throw new Error(`adapter release: ${violation}`)
+    expect(
+      live.toArray.map(({ id }) => id),
+      `convergence`,
+    ).toEqual(expected())
+  } finally {
+    holding = false
+    for (const resolve of held.splice(0)) resolve(true)
+    await live.cleanup().catch(swallow)
+    await flushPromises()
+    process.off(`unhandledRejection`, swallow)
+  }
+  return reach
+}
+
+const orderedReplayProperty = `replay.ordered-window-faults`
+const orderedReplayConfig = readOracleRunConfig()
+const orderedReplayCampaigns =
+  orderedReplayConfig.replayPath === undefined
+    ? ([`fixed`, `random`] as const)
+    : orderedReplayConfig.replayProperty === orderedReplayProperty
+      ? ([`replay`] as const)
+      : ([] as const)
+
+describe(`Ordered windows across truncate replays`, () => {
+  // Traces the campaigns found, kept as replays. Each failed before its fix:
+  // - an unload that throws while a successful repair retires an older
+  //   lease (the rejected participant counted as a failed load, so the
+  //   builder held the window on the old rows);
+  // - an unload that throws while a truncate replay settles (the replay's
+  //   graph run was never scheduled, so the window kept the old rows).
+  it.each([
+    {
+      name: `a release that throws after a successful repair`,
+      history: [
+        { type: `unloadThrows` },
+        { type: `move`, id: 2, rank: 1 },
+        { type: `unloadThrows` },
+      ],
+    },
+    {
+      name: `a release that throws while a replay settles`,
+      history: [
+        { type: `unloadThrows` },
+        { type: `truncate`, armAfterStart: false },
+        { type: `move`, id: 1, rank: 21 },
+        { type: `truncate`, armAfterStart: true },
+      ],
+    },
+  ] satisfies Array<{ name: string; history: Array<OrderedCommand> }>)(
+    `keeps the ordered window for $name (generated replay)`,
+    async ({ history }) => {
+      await checkOrderedReplay(history)
+    },
+  )
+
+  it.each(orderedReplayCampaigns)(
+    `keeps the ordered window under load and release faults (%s campaign)`,
+    async (campaign) => {
+      const total: OrderedReach = {
+        settlementThrows: 0,
+        throwsAfterReplay: 0,
+        replayStartThrows: 0,
+        heldAcrossTruncate: 0,
+        failedLoads: 0,
+        settledWindowChecks: 0,
+      }
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(orderedCommand, { minLength: 1, maxLength: 12 }),
+          async (history) => {
+            const reach = await checkOrderedReplay(history)
+            for (const key of Object.keys(total) as Array<keyof OrderedReach>) {
+              total[key] += reach[key]
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { seed: 20261021, numRuns: oracleRuns(300) }
+          : {
+              ...oraclePropertyOptions(300, orderedReplayProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      // Reach witnesses: releases throw without a truncate, while a replay
+      // starts, and while it settles; loads fail and stay held across a
+      // truncate; and the settled-window law is checked.
+      if (campaign !== `replay`) {
+        for (const [dimension, count] of Object.entries(total)) {
+          expect(count, dimension).toBeGreaterThan(0)
+        }
+      }
+    },
+    120_000,
+  )
 })

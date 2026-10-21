@@ -28,6 +28,7 @@ import {
   extractCollectionsFromQuery,
   sourcePermitsInitialReadiness,
 } from './utils.js'
+import { isOrderedCleanupFailure } from './ordered-source-loader.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
@@ -560,9 +561,11 @@ export class CollectionConfigBuilder<
         this.scheduleGraphRun()
       }
     }
+    // A release that throws after a successful load is reported, but the
+    // load still succeeded and its rows may publish.
     void promise.then(
       () => finish(true),
-      () => finish(false),
+      (error: unknown) => finish(isOrderedCleanupFailure(error)),
     )
   }
 

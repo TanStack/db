@@ -58,6 +58,17 @@ const workState = (work: AuthoritativeWork): WorkState =>
 /** The loader's work slot or debt reached a state its rules forbid. */
 export class OrderedLoaderInvariantError extends Error {}
 
+// Errors a lease release threw. The request that retired the lease still
+// succeeded: its participant reports the error, but the load did not fail.
+const cleanupFailures = new WeakSet<object>()
+
+/** Whether an ordered participant rejected only because a release threw. */
+export function isOrderedCleanupFailure(error: unknown): boolean {
+  return (
+    typeof error === `object` && error !== null && cleanupFailures.has(error)
+  )
+}
+
 class OrderedPostSettlementError {
   constructor(readonly cause: unknown) {}
 }
@@ -626,7 +637,14 @@ export class OrderedSourceLoader {
             )
           }
           owner.delete(release)
-          release()
+          try {
+            release()
+          } catch (error) {
+            if (typeof error === `object` && error !== null) {
+              cleanupFailures.add(error)
+            }
+            throw error
+          }
         }),
       )
     } finally {
