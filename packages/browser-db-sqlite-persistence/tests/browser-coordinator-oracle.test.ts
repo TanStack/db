@@ -794,7 +794,7 @@ describe(`BrowserCollectionCoordinator`, () => {
             }
             return task(formerAdapter)
           },
-          { afterQueuedHydrates: () => Promise.resolve() },
+          { afterQueuedWork: () => Promise.resolve() },
         )
         const newAdapter = createStubAdapter()
         const formerLeader = createCoordinator(formerAdapter)
@@ -1258,7 +1258,7 @@ describe(`BrowserCollectionCoordinator`, () => {
    * Model: the reference is the need table below. Every listed request is a
    * leadership need, so the term must exist while the queued read is still
    * held. The read is a deferred hydrate: the scheduler barrier
-   * (`runInRegularScope.afterQueuedHydrates`) and all regular work wait for it,
+   * (`runInRegularScope.afterQueuedWork`) and all regular work wait for it,
    * so it also holds the leader-side write for mutating requests. After
    * the read is released, each request settles well before the RPC timeout.
    * A remote request posts one RPC of its kind. Remote subset demand may also
@@ -1359,7 +1359,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           await queuedRead.promise
           return task(adapter)
         },
-        { afterQueuedHydrates: () => queuedRead.promise },
+        { afterQueuedWork: () => queuedRead.promise },
       )
       adapter.reconcileCommittedTx = (target, tx) => {
         adapter.appliedTxs.push({ collectionId: storageId(target), tx })
@@ -2833,7 +2833,7 @@ describe(`BrowserCollectionCoordinator`, () => {
               events.push(`scheduler-exit`)
             }
           },
-          { afterQueuedHydrates: () => Promise.resolve() },
+          { afterQueuedWork: () => Promise.resolve() },
         )
         const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
         adapter.applyCommittedTx = async (...args) => {

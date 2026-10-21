@@ -24,13 +24,16 @@
  * wrapper identity or treating a function key as a getter synchronously admits
  * the second query and fails the exact admission assertion.
  *
- * Hydrate barrier: `runInRegularScope.afterQueuedHydrates()` resolves after
- * every hydrate queued or running at the call. It ignores regular work and
- * hydrates queued after the call, and it resolves on the next microtask when
- * no hydrate is queued. The relation is checked at the held first query, so
- * a barrier that waits for the whole hydrate lane or for regular work stays
- * pending at that cut. The shared-driver fairness oracle checks that the
- * barrier is not a K=1 lane completion.
+ * Queued-work barrier: `runInRegularScope.afterQueuedWork()` settles after
+ * every operation, in either lane, that was queued or running at the call.
+ * It ignores operations queued after the call, settles on the next microtask
+ * when the scheduler is idle, and never rejects, even when the work it waits
+ * for fails. A hydrate adopted through promise discovery counts as running
+ * work, whether or not the scheduler was already busy when it was adopted.
+ * Each relation is checked at a held query, so a barrier that waits too
+ * long, too briefly, or only for one lane is pending or settled at the wrong
+ * cut. The shared-driver fairness oracle checks that the barrier is not a
+ * K=1 lane completion.
  *
  * Known omissions: promise-only discovery coordinates adapters over the same
  * wrapper identity. Distinct unbranded wrappers must forward the shared key
@@ -409,26 +412,31 @@ describe(`shared logical scheduling`, () => {
     expect(events).toEqual([`failed-hydrate`, `query`, `next-hydrate`, `query`])
   })
 
-  describe(`hydrate barrier`, () => {
+  describe(`queued-work barrier`, () => {
     async function settlesNow(promise: Promise<void>): Promise<boolean> {
       let settled = false
-      void promise.then(() => {
-        settled = true
-      })
+      void promise.then(
+        () => {
+          settled = true
+        },
+        () => {
+          throw new Error(`the queued-work barrier rejected`)
+        },
+      )
       await new Promise((resolve) => setTimeout(resolve, 0))
       return settled
     }
 
-    it(`resolves at once when no hydrate is queued`, async () => {
+    it(`resolves at once when the scheduler is idle`, async () => {
       const driver = new FirstQueryGatedDriver()
       const adapter = createSQLiteCorePersistenceAdapter({ driver })
       driver.releaseFirstQuery()
       expect(
-        await settlesNow(adapter.runInRegularScope!.afterQueuedHydrates()),
+        await settlesNow(adapter.runInRegularScope!.afterQueuedWork()),
       ).toBe(true)
     })
 
-    it(`ignores regular work that holds the scheduler`, async () => {
+    it(`waits for regular work queued or running before the call`, async () => {
       const driver = new FirstQueryGatedDriver()
       const adapter = createSQLiteCorePersistenceAdapter({ driver })
       const regular = adapter.loadCollectionMetadata!({
@@ -436,11 +444,15 @@ describe(`shared logical scheduling`, () => {
         collectionId: `regular`,
       })
       await driver.firstQueryEntered.promise
-      expect(
-        await settlesNow(adapter.runInRegularScope!.afterQueuedHydrates()),
-      ).toBe(true)
+      const queuedRegular = adapter.loadCollectionMetadata!({
+        kind: `eager`,
+        collectionId: `queued-regular`,
+      })
+      const barrier = adapter.runInRegularScope!.afterQueuedWork()
+      expect(await settlesNow(barrier)).toBe(false)
       driver.releaseFirstQuery()
-      await regular
+      await Promise.all([regular, queuedRegular])
+      expect(await settlesNow(barrier)).toBe(true)
     })
 
     it(`waits for a hydrate adopted through promise discovery`, async () => {
@@ -454,14 +466,90 @@ describe(`shared logical scheduling`, () => {
         })
       })
       await driver.firstQueryEntered.promise
-      const barrier = barrierAdapter.runInRegularScope!.afterQueuedHydrates()
+      const barrier = barrierAdapter.runInRegularScope!.afterQueuedWork()
       expect(await settlesNow(barrier)).toBe(false)
       driver.releaseFirstQuery()
       await hydrate
       expect(await settlesNow(barrier)).toBe(true)
     })
 
-    it(`waits for hydrates queued before the call, not after it`, async () => {
+    // A second wrapper over the same key discovers it only from a promise.
+    // Its unscheduled hydrate is adopted while the scheduler already runs
+    // the first wrapper's held regular read.
+    it.each([`succeeds`, `fails`] as const)(
+      `waits for a hydrate adopted while the scheduler is busy, when it %s`,
+      async (outcome) => {
+        const key = {}
+        const busyDriver = new PromiseBrandedFirstQueryGatedDriver(key)
+        const adoptedDriver = new PromiseBrandedFirstQueryGatedDriver(key)
+        const busyAdapter = createSQLiteCorePersistenceAdapter({
+          driver: busyDriver,
+        })
+        const adoptedAdapter = createSQLiteCorePersistenceAdapter({
+          driver: adoptedDriver,
+        })
+        // Discover the key through a non-metadata read, then queue a
+        // regular metadata read that holds the turn.
+        await busyAdapter.getStreamPosition!({
+          kind: `eager`,
+          collectionId: `discover`,
+        })
+        const busy = busyAdapter.loadCollectionMetadata!({
+          kind: `eager`,
+          collectionId: `busy`,
+        })
+        await busyDriver.firstQueryEntered.promise
+        const adopted = adoptedAdapter.runInHydrationScope!(async (scoped) => {
+          await scoped.loadCollectionMetadata!({
+            kind: `eager`,
+            collectionId: `adopted`,
+          })
+          if (outcome === `fails`) throw new Error(`adopted hydrate failed`)
+        })
+        const adoptedSettled = adopted.then(
+          () => undefined,
+          () => undefined,
+        )
+        await adoptedDriver.firstQueryEntered.promise
+        const barrier = busyAdapter.runInRegularScope!.afterQueuedWork()
+        busyDriver.releaseFirstQuery()
+        await busy
+        // The busy read is done; the adopted hydrate is still held.
+        expect(await settlesNow(barrier)).toBe(false)
+        adoptedDriver.releaseFirstQuery()
+        await adoptedSettled
+        expect(await settlesNow(barrier)).toBe(true)
+      },
+    )
+
+    it(`keeps waiting for other queued work after one queued operation fails`, async () => {
+      const driver = new FirstQueryGatedDriver()
+      const adapter = createSQLiteCorePersistenceAdapter({ driver })
+      const heldGate = createDeferred()
+      const running = adapter.loadCollectionMetadata!({
+        kind: `eager`,
+        collectionId: `running`,
+      })
+      await driver.firstQueryEntered.promise
+      const failing = adapter.runInHydrationScope!(() => {
+        throw new Error(`queued hydrate failed`)
+      })
+      const failingSettled = failing.then(
+        () => undefined,
+        () => undefined,
+      )
+      const held = adapter.runInRegularScope!(() => heldGate.promise)
+      const barrier = adapter.runInRegularScope!.afterQueuedWork()
+      driver.releaseFirstQuery()
+      await Promise.all([running, failingSettled])
+      // The failed hydrate has settled, but the held regular task has not.
+      expect(await settlesNow(barrier)).toBe(false)
+      heldGate.resolve()
+      await held
+      expect(await settlesNow(barrier)).toBe(true)
+    })
+
+    it(`waits for work queued before the call, not after it`, async () => {
       const driver = new FirstQueryGatedDriver()
       const hydrateAdapter = createSQLiteCorePersistenceAdapter({ driver })
       const barrierAdapter = createSQLiteCorePersistenceAdapter({ driver })
@@ -477,7 +565,7 @@ describe(`shared logical scheduling`, () => {
       })
       await driver.firstQueryEntered.promise
       const barrier = barrierAdapter
-        .runInRegularScope!.afterQueuedHydrates()
+        .runInRegularScope!.afterQueuedWork()
         .then(() => {
           events.push(`barrier`)
         })
@@ -485,17 +573,20 @@ describe(`shared logical scheduling`, () => {
         await laterGate.promise
         events.push(`later-hydrate`)
       })
+      const laterRegular = barrierAdapter.runInRegularScope!(async () => {
+        await laterGate.promise
+        events.push(`later-regular`)
+      })
 
       expect(await settlesNow(barrier)).toBe(false)
       driver.releaseFirstQuery()
       await earlier
-      // The barrier settles while the hydrate queued after it is still held.
+      // The barrier settles while the work queued after it is still held.
       expect(await settlesNow(barrier)).toBe(true)
       expect(events).toEqual([`earlier-hydrate`, `barrier`])
       laterGate.resolve()
-      await later
-      expect(events).toEqual([`earlier-hydrate`, `barrier`, `later-hydrate`])
-      await Promise.all([earlier, later])
+      await Promise.all([later, laterRegular])
+      expect(events.slice(0, 2)).toEqual([`earlier-hydrate`, `barrier`])
     })
   })
 

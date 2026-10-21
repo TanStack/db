@@ -251,7 +251,7 @@ try {
             },
           }),
         ),
-      { afterQueuedHydrates: originalScope.afterQueuedHydrates },
+      { afterQueuedWork: originalScope.afterQueuedWork },
     )
     const collection = createCollection(options)
     cleanupTasks.unshift(() => collection.cleanup())

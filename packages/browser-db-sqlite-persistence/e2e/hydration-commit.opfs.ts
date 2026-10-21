@@ -311,7 +311,7 @@ async function run(): Promise<void> {
         admitOrdinary()
         return result
       },
-      { afterQueuedHydrates: cScope.afterQueuedHydrates },
+      { afterQueuedWork: cScope.afterQueuedWork },
     )
     const nested = new Set<string>()
     const tailTransactions = new Set<string>()
@@ -326,7 +326,7 @@ async function run(): Promise<void> {
           tailScheduling.push(`regular-scope`)
         return result
       },
-      { afterQueuedHydrates: aScope.afterQueuedHydrates },
+      { afterQueuedWork: aScope.afterQueuedWork },
     )
     const request = resolved.coordinator!.requestApplyCommittedTx.bind(
       resolved.coordinator!,

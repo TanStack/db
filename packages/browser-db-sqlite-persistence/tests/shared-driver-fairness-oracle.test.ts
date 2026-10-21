@@ -689,11 +689,13 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   )
 
   // An election barrier waits between two queued hydrates while persists are
-  // queued. It is not logical work, so the K=1 checkpoints and the full
-  // interleaving must equal the same history without it. The scheduler trace
-  // shows that it settled after the hydrate queued before it and before the
-  // hydrate queued after it. An empty hydrate scope used as the barrier is a
-  // hydrate completion for K=1 and lets a second persist through.
+  // queued. It waits for the work queued before it (persist-0 and hydrate-0)
+  // and is not logical work, so the K=1 checkpoints and the full interleaving
+  // must equal the same history without it. The scheduler trace shows that it
+  // settled after the hydrate queued before it and before the hydrate queued
+  // after it. An empty hydrate scope used as the barrier is a hydrate
+  // completion for K=1 and lets a second persist through; an empty regular
+  // task takes the persist slot after hydrate-0 and delays persist-1.
   describe(`election barrier between queued hydrates`, () => {
     const id = `barrier-between-hydrates`
     const hydrate = (index: number): SharedDriverFairnessWork => ({
@@ -737,6 +739,31 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
         expect(settled).toBeGreaterThan(trace.indexOf(`hydrate-scope-end:1`))
         expect(settled).toBeLessThan(trace.indexOf(`hydrate-scope-end:2`))
       })
+    })
+
+    it(`rejects an empty regular task used as the barrier`, async () => {
+      let baseline: ReadonlyArray<string> | undefined
+      await withNodeScenario(withoutBarrier, (observation) => {
+        baseline = observation.logicalCompletionOrder
+      })
+      let observed: ReadonlyArray<string> | undefined
+      let checkerFailure: unknown
+      await withNodeScenario(
+        withBarrier,
+        (observation) => {
+          observed = observation.logicalCompletionOrder
+          try {
+            expectFairObservation(observation)
+          } catch (error) {
+            checkerFailure = error
+          }
+        },
+        { barrierFault: `empty-regular` },
+      )
+      expect({
+        sameInterleaving: JSON.stringify(observed) === JSON.stringify(baseline),
+        checkerFailed: checkerFailure !== undefined,
+      }).not.toEqual({ sameInterleaving: true, checkerFailed: false })
     })
 
     it(`rejects an empty hydrate scope used as the barrier`, async () => {

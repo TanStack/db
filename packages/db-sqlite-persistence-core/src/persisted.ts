@@ -639,7 +639,7 @@ export type RegularScope = (<T>(
    * Resolves after every hydrate queued or running at the call completes. It
    * takes no scheduler turn and does not count as a lane completion.
    */
-  afterQueuedHydrates: () => Promise<void>
+  afterQueuedWork: () => Promise<void>
 }
 
 export type HydrationPersistenceAdapter = PersistenceAdapter & {

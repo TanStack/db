@@ -293,7 +293,7 @@ try {
             },
           }),
         ),
-      { afterQueuedHydrates: originalScope.afterQueuedHydrates },
+      { afterQueuedWork: originalScope.afterQueuedWork },
     )
   }
   collection = createCollection(options)

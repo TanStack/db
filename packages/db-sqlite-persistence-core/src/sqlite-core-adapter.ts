@@ -116,29 +116,26 @@ class SharedPersistenceScheduler {
   private readonly hydrateQueue: Array<ScheduledOperation<unknown>> = []
   private running = false
   private lastCompletedKind: ScheduledOperationKind | undefined
-  private lastHydrate: Promise<void> = Promise.resolve()
+  private readonly unsettled = new Set<Promise<void>>()
 
   runRegular<T>(task: () => Promise<T>): Promise<T> {
     return this.enqueue(`regular`, task)
   }
 
   runHydrate<T>(task: () => Promise<T>): Promise<T> {
-    const result = this.enqueue(`hydrate`, task)
-    this.lastHydrate = settled(result)
-    return result
+    return this.enqueue(`hydrate`, task)
   }
 
-  // Hydrates run one at a time in FIFO order, so the last one queued settles
-  // after every earlier one. Waiting on it takes no turn and leaves the K=1
-  // alternation unchanged.
-  afterQueuedHydrates(): Promise<void> {
-    return this.lastHydrate
+  // Settles once every operation queued or running at the call has settled.
+  // Waiting takes no turn, so the K=1 alternation is unchanged.
+  afterQueuedWork(): Promise<void> {
+    return settled(Promise.all(this.unsettled))
   }
 
   adoptRunningHydrate(completion: Promise<unknown>): void {
+    this.track(completion)
     if (this.running) return
     this.running = true
-    this.lastHydrate = settled(completion)
     const finish = () => {
       this.lastCompletedKind = `hydrate`
       this.running = false
@@ -161,8 +158,15 @@ class SharedPersistenceScheduler {
       const queue = kind === `hydrate` ? this.hydrateQueue : this.regularQueue
       queue.push(operation as ScheduledOperation<unknown>)
     })
+    this.track(result)
     this.drain()
     return result
+  }
+
+  private track(completion: Promise<unknown>): void {
+    const done = settled(completion)
+    this.unsettled.add(done)
+    void done.then(() => this.unsettled.delete(done))
   }
 
   private drain(): void {
@@ -2097,8 +2101,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ): Promise<T> => this.runRegular(() => task(this.hydrationAdapter)),
     {
       // Without a shared scheduler, nothing is queued ahead of this caller.
-      afterQueuedHydrates: (): Promise<void> =>
-        this.resolveScheduler()?.afterQueuedHydrates() ?? Promise.resolve(),
+      afterQueuedWork: (): Promise<void> =>
+        this.resolveScheduler()?.afterQueuedWork() ?? Promise.resolve(),
     },
   )
 

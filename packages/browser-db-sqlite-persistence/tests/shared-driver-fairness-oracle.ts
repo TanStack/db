@@ -34,14 +34,17 @@
  * OPFS fixture separately refines the provider boundary.
  *
  * Election barrier: a `barrier` work item calls the scheduler's
- * `runInRegularScope.afterQueuedHydrates()` after every earlier hydrate has
+ * `runInRegularScope.afterQueuedWork()` after every earlier work item has
  * entered the scheduler. A coordinator uses it to hold a durable election term
- * behind queued hydrates. The barrier is not logical work: the K=1 reference
- * ignores it, so it must not let an additional persist through or change the
- * interleaving. The scheduler trace records hydrate scope ends and barrier
- * settlement, so a test can check that the barrier waited for exactly the
- * hydrates queued before it. The hostile `empty-hydrate` control enqueues an
- * empty hydrate scope instead, which the scheduler counts as a hydrate.
+ * behind work already queued on the shared scheduler, in either lane. The
+ * barrier is not logical work: the K=1 reference ignores it, so it must not
+ * let an additional persist through or change the interleaving. The scheduler
+ * trace records hydrate scope ends and barrier settlement, so a test can
+ * check that the barrier waited for the work queued before it and not for
+ * later work. Two hostile controls take a scheduler turn instead:
+ * `empty-hydrate` enqueues an empty hydrate scope, which K=1 counts as a
+ * hydrate, and `empty-regular` enqueues an empty regular task, which K=1
+ * counts as the persist slot after a hydrate.
  *
  * Challenge and replay: the named persist-first FIFO wrong answer must violate
  * the same K=1 checker while using the public/core/driver path. The generated
@@ -149,8 +152,8 @@ export type SharedDriverFairnessViolation = {
 export type SharedDriverFairnessOptions = {
   /** Test-only hostile control that preserves the current global FIFO fault. */
   schedulingFault?: `persist-first-fifo`
-  /** Test-only hostile barrier: an empty hydrate scope counted by K=1. */
-  barrierFault?: `empty-hydrate`
+  /** Test-only hostile barriers that take a scheduler turn K=1 counts. */
+  barrierFault?: `empty-hydrate` | `empty-regular`
 }
 
 type Deferred = {
@@ -697,7 +700,9 @@ export async function observeSharedDriverFairness(
         const barrier =
           options.barrierFault === `empty-hydrate`
             ? runInHydrationScope(async () => {})
-            : adapter.runInRegularScope!.afterQueuedHydrates()
+            : options.barrierFault === `empty-regular`
+              ? adapter.runInRegularScope!(async () => {})
+              : adapter.runInRegularScope!.afterQueuedWork()
         barrierPromises.push(
           barrier.then(() => {
             schedulerTrace.push(`barrier-settled:${work.id}`)

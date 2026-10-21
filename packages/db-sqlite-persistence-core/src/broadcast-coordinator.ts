@@ -973,7 +973,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             // the durable term write. A leadership need skips the wait,
             // because a scheduled hydrate may be waiting for this route.
             await Promise.race([
-              adapter.runInRegularScope?.afterQueuedHydrates(),
+              adapter.runInRegularScope?.afterQueuedWork(),
               state.leadershipNeeded,
               new Promise((resolve) => {
                 abortController.signal.addEventListener(`abort`, resolve, {
