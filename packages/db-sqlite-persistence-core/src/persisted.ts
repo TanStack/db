@@ -1227,6 +1227,17 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
 
 type MetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
 
+function applyMetadataWrite<K>(
+  target:
+    | { set: (key: K, value: unknown) => unknown; delete: (key: K) => unknown }
+    | undefined,
+  key: K,
+  write: MetadataWrite,
+): void {
+  if (write.type === `delete`) target?.delete(key)
+  else target?.set(key, write.value)
+}
+
 function toMetadataMutations<K>(
   writes: Map<K, MetadataWrite>,
 ): Array<{ type: `set`; key: K; value: unknown } | { type: `delete`; key: K }> {
@@ -5078,25 +5089,19 @@ class PersistedCollectionRuntime<
         // A DbClient hydration seed owns both its row and row metadata until
         // an accepted source transaction confirms the key.
         if (this.collection?._hasHydratedKey(mutation.key as TKey)) return
-        if (mutation.type === `delete`) {
-          this.syncControls.metadata?.row.delete(mutation.key as TKey)
-        } else {
-          this.syncControls.metadata?.row.set(
-            mutation.key as TKey,
-            mutation.value,
-          )
-        }
+        applyMetadataWrite(
+          this.syncControls.metadata?.row,
+          mutation.key as TKey,
+          mutation,
+        )
       })
 
       txCommitted.collectionMetadataMutations?.forEach((mutation) => {
-        if (mutation.type === `delete`) {
-          this.syncControls.metadata?.collection.delete(mutation.key)
-        } else {
-          this.syncControls.metadata?.collection.set(
-            mutation.key,
-            mutation.value,
-          )
-        }
+        applyMetadataWrite(
+          this.syncControls.metadata?.collection,
+          mutation.key,
+          mutation,
+        )
       })
 
       return this.syncControls.commit?.() ?? true
@@ -5647,14 +5652,6 @@ function createWrappedSyncConfig<
       }
       const metadataValue = (write: MetadataWrite) =>
         write.type === `delete` ? undefined : write.value
-      const applyMetadataWrite = (
-        merged: Map<string, unknown>,
-        key: string,
-        write: MetadataWrite,
-      ) => {
-        if (write.type === `delete`) merged.delete(key)
-        else merged.set(key, write.value)
-      }
       // A metadata read sees the open transaction's write, then the newest
       // staged one, then the Collection's. A truncate hides older row
       // metadata. Reading a staged write makes its transaction a dependency.
@@ -5817,13 +5814,10 @@ function createWrappedSyncConfig<
           }
           if (params.metadata) {
             for (const [key, write] of transaction.rowMetadataWrites) {
-              if (write.type === `delete`) params.metadata.row.delete(key)
-              else params.metadata.row.set(key, write.value)
+              applyMetadataWrite(params.metadata.row, key, write)
             }
             for (const [key, write] of transaction.collectionMetadataWrites) {
-              if (write.type === `delete`)
-                params.metadata.collection.delete(key)
-              else params.metadata.collection.set(key, write.value)
+              applyMetadataWrite(params.metadata.collection, key, write)
             }
           }
 
