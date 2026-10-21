@@ -118,7 +118,6 @@
   "sentToD2RowsBySource": "b3",
   "dispatching": "b4",
   "cleanupPromise": "b5",
-  "isInErrorState": "b6",
   "orderedLoaders": "b7",
   "retainedWindow": "b8",
   "setReadyIfIdle": "b9",
@@ -398,7 +397,6 @@
   "reportFailedRequest": "gJ",
   "includeSourceIds": "gL",
   "latchReady": "gO",
-  "bucketFacades": "gP",
   "reportedTree": "gQ",
   "settleLoad": "gR",
   "endedProblem": "gS",
@@ -408,7 +406,6 @@
   "assertAdapterActive": "bI",
   "statusError": "cI",
   "stoppedError": "eN",
-  "onInstanceErrorsChange": "e8",
   "statusAllowsError": "gI",
   "reportErrors": "gK",
   "enterErrorState": "gM",
@@ -430,7 +427,6 @@
   "graphHasProcessedInput": "dk",
   "windowIsInsideOwnPrefix": "gE",
   "failureReasonFromReload": "g5",
-  "failedBySource": "g6",
   "loadOrders": "g8",
   "endReload": "g9",
   "loadOrder": "ha",
@@ -438,6 +434,5 @@
   "cancelSyncTransaction": "g7",
   "startedBeforeFailure": "hb",
   "publishedErrors": "hc",
-  "instancedSourceIds": "hd",
   "views": "he"
 }

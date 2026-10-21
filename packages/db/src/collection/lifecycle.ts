@@ -130,7 +130,7 @@ export class CollectionLifecycleManager<
       // problem is error tree detail.
       ready: [`cleaned-up`, `crashed`],
       // A failed first load is final for its sync run. Only a reload leaves
-      // it for `ready` or `loading` (see `recovering`).
+      // it for `ready` (see `recovering`).
       error: [`cleaned-up`, `idle`, `crashed`],
       // A crash is permanent for the Collection instance.
       crashed: [`cleaned-up`],
@@ -139,11 +139,7 @@ export class CollectionLifecycleManager<
 
     if (
       !validTransitions[from].includes(to) &&
-      !(
-        this.recovering &&
-        from === `error` &&
-        (to === `ready` || to === `loading`)
-      )
+      !(this.recovering && from === `error` && to === `ready`)
     ) {
       throw new InvalidCollectionStatusTransitionError(from, to, this.id)
     }
@@ -364,17 +360,6 @@ export class CollectionLifecycleManager<
       }
     }
     run.resolve()
-  }
-
-  /** A live query whose sources recovered starts again, shown `loading`. */
-  public restartFromError(): void {
-    this.statusError = null
-    this.recovering = true
-    try {
-      this.setStatus(`loading`)
-    } finally {
-      this.recovering = false
-    }
   }
 
   /** A reload retired the sync run; subscriptions detach its demand. */

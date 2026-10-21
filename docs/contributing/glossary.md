@@ -74,7 +74,7 @@ until cleanup ends the run.
 | failure reason | A node's `failureReason`: the latest problem while the sync adapter keeps trying, after TanStack Query's `failureReason`. | An error or a retry count. |
 | request error | A rejected subset load for demand that a live query or Effect started after its initial-query readiness, shown as the `error` on that query's own node. The source Collection's node does not change. The public name stays general on purpose: an application sees a failed request for more data, not the subset-load mechanism. It clears when a later subset load for that demand fulfills or the demand retires. | Sync error or request data. |
 | error tree | The `errors` value of a Collection, live query, or Effect: one node for a Collection; for a query, one error tree node per query alias, in query order, fixed by the query definition. It keeps stable object identity while its content is unchanged, and `errors:change` announces a change. | An error list. |
-| error tree node | One `ErrorTreeNode` in an error tree, for a source Collection, a nested live-query Collection, or one include. It shows at most one problem, `failureReason` or `error`. An include node summarizes all its per-row child Collections in `instances`. A nested live-query node carries its own error tree in `sources`. | Bucket or Collection facade. |
+| error tree node | One `ErrorTreeNode` in an error tree, for a source Collection, a nested live-query Collection, or one include. It shows at most one problem, `failureReason` or `error`. A nested live-query node carries its own error tree in `sources`. | Bucket or Collection facade. |
 
 ## Persistence coordination terms
 

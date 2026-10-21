@@ -123,10 +123,7 @@ export class CollectionConfigBuilder<
   public currentSyncState: FullSyncState | undefined
 
   // Error state tracking
-  private isInErrorState = false
   private fatalQueryError = false
-  // A source's failed first load, not this query's own, ended the first load.
-  private failedBySource = false
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -150,8 +147,8 @@ export class CollectionConfigBuilder<
           findProblems(collection.errors).some((node) => node.error !== null),
       )
     await Promise.all(failed.map((collection) => collection.reload()))
-    // A recovered source may have restarted this query already; the reload
-    // settles with that run.
+    // The query reloads itself after its sources; a reload of it already in
+    // flight settles with that run.
     if (query?.status === `error` || query?._lifecycle.reloading)
       await query._sync.reload()
   }
@@ -199,12 +196,8 @@ export class CollectionConfigBuilder<
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
     Map<string, BasicExpression<boolean>> | undefined
-  // Include sources with per-row child Collections. The query decides this,
-  // so it outlives the compiled cache that cleanup resets.
-  private readonly instancedSourceIds = new Set<string>()
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
-  private bucketFacades: BucketFacadeAdapter | undefined
   private readonly includeSourceIds = new Set<string>()
 
   // Map of opaque source ID to subscription
@@ -495,21 +488,16 @@ export class CollectionConfigBuilder<
 
   /** The source aliases of this query, in query order, for its error tree. */
   errorTreeSources(): ReadonlyArray<ErrorTreeSource> {
-    return this.collectionSources.map(({ sourceId, alias, collection }) => {
-      const source = { id: sourceId, alias, collection }
-      if (!this.includeSourceIds.has(sourceId)) return source
-      const instanced = this.instancedSourceIds.has(sourceId)
-      return {
-        ...source,
-        kind: `include` as const,
-        ...(instanced
-          ? {
-              instances: () => this.bucketFacades?.instancesFor(sourceId) ?? [],
-            }
-          : {}),
-      }
-    })
+    return this.collectionSources.map(({ sourceId, alias, collection }) => ({
+      id: sourceId,
+      alias,
+      collection,
+      ...(this.includeSourceIds.has(sourceId)
+        ? { kind: `include` as const }
+        : {}),
+    }))
   }
+
 
   settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
@@ -736,7 +724,7 @@ export class CollectionConfigBuilder<
         this.currentSyncState === syncState
 
       // Don't run if the live query is in an error state
-      if (this.isInErrorState) {
+      if (this.fatalQueryError) {
         return
       }
 
@@ -848,9 +836,7 @@ export class CollectionConfigBuilder<
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
     // Reset error state from any previous sync run so a restarted sync can become ready again.
-    this.isInErrorState = false
     this.fatalQueryError = false
-    this.failedBySource = false
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -931,9 +917,7 @@ export class CollectionConfigBuilder<
     this.loadMoreFn = undefined
     this.currentWindow = undefined
     this.settledWindow = this.initialWindow
-    this.isInErrorState = false
     this.fatalQueryError = false
-    this.failedBySource = false
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -1000,9 +984,6 @@ export class CollectionConfigBuilder<
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.bucketFacadesCache = materialized.facades
-    for (const compilation of materialized.facades ?? [])
-      for (const sourceId of compilation.sourceIds)
-        this.instancedSourceIds.add(sourceId)
 
     const missingSources = this.collectionSources
       .map((source) => source.sourceId)
@@ -1057,10 +1038,8 @@ export class CollectionConfigBuilder<
           (count) => {
             syncState.messagesCount += count
           },
-          () => this.liveQueryCollection?._emitErrorsChange(),
         )
       : undefined
-    this.bucketFacades = bucketFacades
     if (bucketFacades) {
       syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
     }
@@ -1258,7 +1237,6 @@ export class CollectionConfigBuilder<
     // node: the query keeps its status and rows.
     if (status === `error`) {
       if (this.liveQueryCollection?.status === `ready`) return
-      this.failedBySource = true
       this.failQuery(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Source collection '${collectionId}' failed its first load`
@@ -1272,25 +1250,6 @@ export class CollectionConfigBuilder<
     // but could happen if user manually calls cleanup()
     if (status === `cleaned-up`) {
       this.handleSourceCleanupStart(collectionId)
-      return
-    }
-
-    // A query whose first load failed because a source failed starts a new
-    // sync run once no source has a failure left, for example after the
-    // source reloaded. It shows `loading` until that run is ready.
-    if (
-      status === `ready` &&
-      this.failedBySource &&
-      this.liveQueryCollection?.status === `error` &&
-      this.collectionSources.every(
-        ({ collection }) =>
-          collection.status !== `error` && collection.status !== `crashed`,
-      )
-    ) {
-      this.failedBySource = false
-      void this.liveQueryCollection._sync
-        .reload({ showLoading: true })
-        .catch(() => undefined)
       return
     }
 
@@ -1327,7 +1286,7 @@ export class CollectionConfigBuilder<
     const { markReady } = config
 
     // Don't update status if already in error
-    if (this.isInErrorState) {
+    if (this.fatalQueryError) {
       return
     }
 
@@ -1371,7 +1330,6 @@ export class CollectionConfigBuilder<
   private enterErrorState(message: string): boolean {
     if (this.fatalQueryError) return false
     this.fatalQueryError = true
-    this.isInErrorState = true
     console.error(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `[Live Query Error] ${message}`

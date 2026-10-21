@@ -819,8 +819,6 @@ export interface ErrorTreeNode {
    * are the previous run's until it commits or fails.
    */
   readonly reloading: boolean
-  /** For an include node: how many of its per-row child Collections have a problem. */
-  readonly instances?: { readonly withErrors: number }
   readonly sources: ReadonlyArray<ErrorTreeNode>
 }
 

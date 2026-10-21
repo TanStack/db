@@ -9,10 +9,6 @@ export interface ErrorTreeSource {
   readonly id?: string
   readonly collection: CollectionImpl<any, any, any, any, any>
   readonly kind?: ErrorTreeNode[`kind`]
-  /** An include's per-row child Collections, for its `instances` roll-up. */
-  readonly instances?: () => ReadonlyArray<
-    CollectionImpl<any, any, any, any, any>
-  >
 }
 
 // One cached node per Collection and source. A node keeps its identity until
@@ -28,7 +24,7 @@ const nodeCache = new WeakMap<object, Map<string, ErrorTreeNode>>()
  */
 export function buildErrorTree(
   collection: CollectionImpl<any, any, any, any, any>,
-  { alias, id, kind, instances }: Omit<ErrorTreeSource, `collection`> = {
+  { alias, id, kind }: Omit<ErrorTreeSource, `collection`> = {
     alias: `root`,
   },
   // The reader that caches this node, so a source's node lives only as long
@@ -50,7 +46,6 @@ export function buildErrorTree(
     failureReason,
     error,
     reloading: collection._lifecycle.reloading,
-    ...(instances ? { instances: countInstances(instances()) } : {}),
     sources: children,
   })
 }
@@ -64,47 +59,25 @@ export function errorTreeNode(
   id: string | undefined,
   fields: Omit<ErrorTreeNode, `hasErrors`>,
 ): ErrorTreeNode {
-  const { failureReason, error, instances, sources } = fields
+  const { failureReason, error, sources } = fields
   return cachedNode(owner, id ?? fields.alias, {
     ...fields,
     hasErrors:
       failureReason !== null ||
       error !== null ||
-      (instances?.withErrors ?? 0) > 0 ||
       sources.some((child) => child.hasErrors),
   })
 }
 
-/** Whether a Collection's own node shows a problem. */
-export function hasOwnProblem(
-  collection: Pick<CollectionImpl<any, any, any, any, any>, `_lifecycle`>,
-): boolean {
-  const { failureReason, error } = collection._lifecycle.problems
-  return failureReason !== null || error !== null
-}
-
 /**
  * Every node in an error tree that shows a problem of its own, in tree order:
- * a `failureReason`, an `error`, or include instances with problems. A node
- * whose only problems are below it is not listed; its descendants are.
+ * a `failureReason` or an `error`. A node whose only problems are below it is
+ * not listed; its descendants are.
  */
 export function findProblems(tree: ErrorTreeNode): Array<ErrorTreeNode> {
   if (!tree.hasErrors) return []
-  const ownProblem =
-    tree.failureReason !== null ||
-    tree.error !== null ||
-    (tree.instances?.withErrors ?? 0) > 0
+  const ownProblem = tree.failureReason !== null || tree.error !== null
   return [...(ownProblem ? [tree] : []), ...tree.sources.flatMap(findProblems)]
-}
-
-function countInstances(
-  collections: ReadonlyArray<CollectionImpl<any, any, any, any, any>>,
-): { withErrors: number } {
-  let withErrors = 0
-  for (const instance of collections) {
-    if (hasOwnProblem(instance)) withErrors++
-  }
-  return { withErrors }
 }
 
 /** Return the cached node for this Collection and alias if nothing changed. */
@@ -130,7 +103,6 @@ function sameNode(a: ErrorTreeNode, b: ErrorTreeNode): boolean {
     a.failureReason === b.failureReason &&
     a.error === b.error &&
     a.reloading === b.reloading &&
-    a.instances?.withErrors === b.instances?.withErrors &&
     a.sources.length === b.sources.length &&
     a.sources.every((source, index) => source === b.sources[index])
   )

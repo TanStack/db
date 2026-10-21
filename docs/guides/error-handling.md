@@ -317,9 +317,9 @@ too: when `isLoadingError` is true, the first node it returns holds the first
 load failure in its `error`.
 
 A Collection used twice in one query, for example in a self-join, has one node
-per alias. An include has one node for all of its per-row child Collections,
-with `instances: { withErrors }`, the number of them that have a problem. A nested live query's node carries its
-own sources.
+per alias. An include has one node, which shows the include's source; its
+per-row child Collections are not in the tree. A nested live query's node
+carries its own sources.
 
 ### Collections without a live query
 
@@ -368,9 +368,8 @@ sync-side truncate: nothing visible changes until the new run's first commit.
 
 On a live query, `reload()` reloads each of its sources that has an `error`,
 then the query itself if it failed its first load. To reload one source
-instead, call `reload()` on that source's Collection. When a failed source
-becomes ready and no other source is in `error` or `crashed`, a query in
-`error` restarts by itself and shows `loading` until it is ready.
+instead, call `reload()` on that source's Collection; a query in `error`
+stays there until its own `reload()`.
 
 ```ts
 // Retry a failed first load every 30 seconds until the backend is back.
@@ -540,7 +539,7 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 | `markError(error)` | `fail(error)` |
 | `reportError(error, { final })` | `reportError(error)` or `fail(error)` |
 | node `phase`, `final`, `isError` | node `failureReason` or `error` |
-| node `instances.inError` | `instances.withErrors` |
+| node `instances` | removed |
 | `cleanup()` then `preload()` to recover | `reload()` |
 | `cleanup()` with live queries mounted | rejects; unmount first or `cleanup({ dependents: true })` |
 | `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()` | `status` and `errors` |

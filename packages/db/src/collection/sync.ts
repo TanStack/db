@@ -211,7 +211,7 @@ export class CollectionSyncManager<
    * its first `markReady()` replaces them with none. A reload in flight
    * returns its promise; a crashed Collection cannot reload.
    */
-  public reload(options: { showLoading?: boolean } = {}): Promise<void> {
+  public reload(): Promise<void> {
     const status = this.lifecycle.status
     if (status === `crashed`) {
       return Promise.reject(new CollectionReloadCrashedError(this.id))
@@ -230,9 +230,6 @@ export class CollectionSyncManager<
     // truncate replays it through the new run's loader.
     this.lifecycle.retireSubscriptionDemand()
     this.state.reloadTruncatePending = true
-    if (options.showLoading && status === `error`) {
-      this.lifecycle.restartFromError()
-    }
     try {
       this.enterSync(syncCallbackEpoch)
     } catch (error) {
