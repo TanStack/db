@@ -1270,6 +1270,9 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
     reject: (error: unknown) => void
   }>
   terminalFailure?: { error: unknown }
+  // Set just before the transaction is handed to the Collection; from then
+  // on core holds its keys itself.
+  handedToCollection?: boolean
 }
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
@@ -5616,8 +5619,20 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
         const index = pendingPublicationTransactions.indexOf(transaction)
-        if (index !== -1) pendingPublicationTransactions.splice(index, 1)
+        if (index === -1) return
+        pendingPublicationTransactions.splice(index, 1)
+        // A deferred transaction that never reaches the Collection releases
+        // the optimistic rows it held.
+        if (!transaction.handedToCollection)
+          params.collection._state.recomputeOptimisticState(false)
       }
+      // Committed source transactions not yet handed to the Collection. Core
+      // holds settled optimistic rows on their keys until they apply.
+      params.collection._state.setDeferredSyncKeys(function* () {
+        for (const transaction of pendingPublicationTransactions) {
+          if (!transaction.handedToCollection) yield* transaction.operationKeys
+        }
+      })
       const settlePendingTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
@@ -5765,6 +5780,7 @@ function createWrappedSyncConfig<
         }
         try {
           assertHydrationSequenceCurrent(transaction)
+          transaction.handedToCollection = true
           for (const key of transaction.deferredHydrationMetadataDeleteKeys) {
             if (
               !transaction.hydrationContext?.suppliedRowKeys.has(key) &&

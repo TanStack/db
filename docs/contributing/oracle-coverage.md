@@ -1535,11 +1535,14 @@ the tick that makes it. Its
 [persisted lane](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts)
 runs the shared grammar through `persistedCollectionOptions` with
 `hold-store` and `release-store` steps and a handler that commits its own
-server row. The lane is RED on current
-production: when an earlier source transaction's store is held, a settled
-row drops to an older synced row before its deferred server row applies
-(insert-then-update and insert-then-delete histories). The class stays open
-until a repair turns it green. The lane uses an in-memory adapter.
+server row. It was RED before the wrapper reported deferred sync keys to
+core: when an earlier source transaction's store was held, a settled row
+dropped to an older synced row before its deferred server row applied
+(insert-then-update and insert-then-delete histories). It is green now, and
+mutants that drop deferred keys from the hold, drop the held row at a drain,
+or skip the held overlay after a drain each fail it. A deferred transaction
+dropped without reaching the Collection (abort or claim loss while deferred)
+is not in the grammar. The lane uses an in-memory adapter.
 The [two-tab lane](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/two-tab-optimistic-history.test.ts)
 runs the same model and grammar with `peer-sync` steps: a second tab leads
 the real Browser coordinator, and its source transactions reach the tab under

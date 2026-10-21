@@ -438,8 +438,14 @@ class HistoryModel {
     for (const batch of this.queue) {
       // One atomic source transaction has one attribution per key. Snapshot
       // ownership at its start, then consume it for later transactions only.
-      // Repeated writes within this batch retain the same attribution.
-      const batchLocalKeys = new Set([...attributed, ...activeKeys])
+      // Repeated writes within this batch retain the same attribution. A
+      // truncate ends completed one-use attribution, including for its own
+      // writes; only active keys attribute them. Core applies a truncate at
+      // once, so only a deferred truncate can meet completed attribution.
+      const batchLocalKeys = new Set([
+        ...(batch.truncate ? [] : attributed),
+        ...activeKeys,
+      ])
       if (batch.truncate) {
         this.base.clear()
         this.origins.clear()
