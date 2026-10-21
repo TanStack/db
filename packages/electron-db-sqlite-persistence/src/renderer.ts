@@ -209,7 +209,8 @@ class RendererQueuedWork {
     return work
   }
 
-  // Settles once every hydration scope outstanding at the call settles.
+  // Settles once every hydration scope and request outstanding at the call
+  // settles.
   afterQueuedWork(): Promise<void> {
     return Promise.all(this.unsettled).then(() => undefined)
   }
@@ -602,12 +603,16 @@ export function createElectronSQLitePersistence(
   const invoke = resolveInvoke(options)
   const coordinator = options.coordinator ?? new SingleProcessCoordinator()
   const claimCollections = new Map<string, string>()
-  const executeRequest = createRendererRequestExecutor({
+  const sendRequest = createRendererRequestExecutor({
     invoke,
     channel: options.channel,
     timeoutMs: options.timeoutMs,
     claimCollections,
   })
+  // Every request is queued work: an unscheduled restart reads outside any
+  // hydration scope. A request never waits for a leader route.
+  const executeRequest: RendererRequestExecutor = (...args) =>
+    queuedWork.track(sendRequest(...args))
   const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
 
   const getAdapterForCollection = (

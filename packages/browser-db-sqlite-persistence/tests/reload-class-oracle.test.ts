@@ -54,6 +54,7 @@ function nodeBrowserHost(): ReloadHost {
   }
   return {
     controlsLatency: true,
+    adapterPerTab: true,
     record: (next) => {
       recorder = next
     },

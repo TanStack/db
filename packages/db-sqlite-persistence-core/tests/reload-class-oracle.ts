@@ -21,8 +21,9 @@
  * - (c) Need. A leader need ends that wait. A local write during another
  *   startup read still gets its Collection's term and settles. A follower's
  *   write settles through the leader.
- * - (e) Budget. Each tab reads each Collection's registry row once and its
- *   rows once. An eager Collection takes two startup snapshots: its metadata
+ * - (e) Budget. Each adapter reads each Collection's registry row once (a
+ *   Browser tab has its own; Electron renderers share their main process's),
+ *   and each tab reads an eager Collection's rows once. An eager Collection takes two startup snapshots: its metadata
  *   before its source starts, then its rows at the baseline hydrate. The
  *   second is required, not avoidable: the source has started by then, and
  *   the hydrate must bind its rows and key-set evidence to durable state at
@@ -48,9 +49,13 @@
  * one optionally reopened with a new schema version. A lock grant 1, 2, or 5
  * tasks after the request; each SQL statement immediate or one task late
  * (where the host controls latency). At most one need: a local write while
- * another startup read is held, or a follower tab's write. At most one
- * lifecycle event: a follower tab takes over after the leader tab closes, the
- * first Collection restarts, or the tab closes while its terms still wait.
+ * another startup read is held, a local write held in flight when a second
+ * Collection's lock is granted (that write is queued work at the grant, so
+ * the second term follows it), or a follower tab's write. At most one
+ * lifecycle event: a follower tab takes over after the leader tab closes
+ * (optionally while one of its reads is held, so every takeover grant meets
+ * a queued read), the first Collection restarts, or the tab closes while its
+ * terms still wait.
  * A second tab opens after the first is ready, so the first tab's reload is
  * observed alone. Excluded: managed schema changes (they rotate the cache
  * generation, owned by the resume-snapshot oracle), and dropped row tables.
@@ -107,8 +112,13 @@ export type ReloadHistory = {
   collections: ReadonlyArray<CollectionHistory>
   grantTasks: 1 | 2 | 5
   statementLatency: 0 | 1
-  need: `none` | `local-write` | `follower-write`
-  lifecycle: `none` | `takeover` | `restart` | `dispose-while-waiting`
+  need: `none` | `local-write` | `write-queued-at-grant` | `follower-write`
+  lifecycle:
+    | `none`
+    | `takeover`
+    | `takeover-while-read-held`
+    | `restart`
+    | `dispose-while-waiting`
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +140,11 @@ export type ReloadTab = {
 export type ReloadHost = {
   /** Whether `statementLatency` reaches the database. */
   controlsLatency: boolean
+  /**
+   * Whether each tab has its own adapter. Electron renderers share their
+   * main process's adapter, so a second renderer reuses its setup reads.
+   */
+  adapterPerTab: boolean
   openTab: (dbName: string) => Promise<ReloadTab>
   /** Record every statement the database runs, in order, or stop. */
   record: (
@@ -146,6 +161,7 @@ export type ReloadHost = {
 export type Logged = { sql: string; params: ReadonlyArray<unknown> }
 
 export type ReloadObservation = {
+  adapterPerTab: boolean
   ids: ReadonlyArray<string>
   storageIds: Record<string, string>
   /** Statements while the first tab reloads, before a second tab opens. */
@@ -156,6 +172,11 @@ export type ReloadObservation = {
   termDuringHold: boolean | undefined
   needSettled: boolean | undefined
   followerLeadsAll: boolean | undefined
+  /** Takeover grants, and follower terms, while the follower's read waits. */
+  grantsWhileFollowerReadHeld: number
+  termsWhileFollowerReadHeld: number
+  /** Whether the gated grant arrived while the queued write was held. */
+  grantedWhileWriteHeld: boolean | undefined
   factsPresent: Record<string, boolean>
   storedRow: Record<string, boolean>
 }
@@ -216,7 +237,8 @@ function openCollections(
 function delayLeaderGrants(
   dbName: string,
   tasks: number,
-  onGrant: () => void,
+  onGrant: (storageId: string) => void,
+  gateFor: (storageId: string) => Promise<void> | undefined = () => undefined,
 ): () => void {
   const locks = navigator.locks
   const request = locks.request.bind(locks)
@@ -229,10 +251,13 @@ function delayLeaderGrants(
       typeof optionsOrCallback === `function`
         ? optionsOrCallback
         : maybeCallback!
+    const prefix = `tsdb:leader:${dbName}:`
     const granted: LockGrantedCallback<unknown> = async (lock) => {
-      if (name.startsWith(`tsdb:leader:${dbName}:`)) {
+      if (name.startsWith(prefix)) {
+        const storageId = name.slice(prefix.length)
         for (let task = 0; task < tasks; task++) await nextTask()
-        onGrant()
+        await gateFor(storageId)
+        onGrant(storageId)
       }
       return callback(lock)
     }
@@ -289,6 +314,52 @@ function holdFirstRowSnapshot(storageId: string) {
     restore: () => {
       release()
       seam.loadResumeSnapshotUnscheduled = original
+    },
+  }
+}
+
+type HeldWriteSeam = {
+  applyCommittedTxUnscheduled: (
+    target: Parameters<typeof resolvePersistedStorageTarget>[0],
+    ...rest: Array<unknown>
+  ) => Promise<unknown>
+}
+
+/**
+ * Holds one Collection's first committed write at its first adapter call,
+ * inside its scheduler turn and writer lock, before any SQL.
+ */
+function holdFirstWrite(storageId: string) {
+  const seam =
+    SQLiteCorePersistenceAdapter.prototype as unknown as HeldWriteSeam
+  const original = seam.applyCommittedTxUnscheduled
+  let release!: () => void
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const state = { held: false, used: false }
+  seam.applyCommittedTxUnscheduled = async function (
+    this: HeldWriteSeam,
+    target,
+    ...rest
+  ) {
+    if (
+      !state.used &&
+      resolvePersistedStorageTarget(target).collectionId === storageId
+    ) {
+      state.used = true
+      state.held = true
+      await released
+      state.held = false
+    }
+    return original.call(this, target, ...rest)
+  }
+  return {
+    isHeld: () => state.held,
+    release: () => release(),
+    restore: () => {
+      release()
+      seam.applyCommittedTxUnscheduled = original
     },
   }
 }
@@ -402,10 +473,46 @@ export async function observeReload(
     cleanups.push(() => host.setStatementLatency(0))
     let preloadsCalled = false
     let preloadsCalledAtEveryGrant = true
+    let followerHold: ReturnType<typeof holdFirstRowSnapshot> | undefined
+    let grantsWhileFollowerReadHeld = 0
+    let termsWhileFollowerReadHeld = 0
+    // A write queued at a grant: the second eager Collection's grant waits
+    // until the first one's write is held in flight.
+    const queuedWrite =
+      history.need === `write-queued-at-grant`
+        ? {
+            writer: ids[0]!,
+            gated:
+              ids[
+                history.collections.findIndex(
+                  (c, index) => index > 0 && c.kind === `eager`,
+                )
+              ]!,
+            hold: holdFirstWrite(ids[0]!),
+          }
+        : undefined
+    if (queuedWrite) cleanups.push(queuedWrite.hold.restore)
+    let openGate!: () => void
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve
+    })
+    cleanups.push(() => openGate())
+    let grantedWhileWriteHeld: boolean | undefined
     cleanups.push(
-      delayLeaderGrants(dbName, history.grantTasks, () => {
-        preloadsCalledAtEveryGrant &&= preloadsCalled
-      }),
+      delayLeaderGrants(
+        dbName,
+        history.grantTasks,
+        (storageId) => {
+          preloadsCalledAtEveryGrant &&= preloadsCalled
+          if (followerHold?.isHeld()) grantsWhileFollowerReadHeld++
+          // Only the first tab's grant meets the queued write; a later
+          // takeover grant for the same Collection does not.
+          if (storageId === queuedWrite?.gated) {
+            grantedWhileWriteHeld ??= queuedWrite.hold.isHeld()
+          }
+        },
+        (storageId) => (storageId === queuedWrite?.gated ? gate : undefined),
+      ),
     )
     const heldId = heldCollection(history)
     const hold =
@@ -443,6 +550,25 @@ export async function observeReload(
       await write
       needSettled = true
     }
+    if (queuedWrite) {
+      await preloads[0]
+      await waitFor(
+        () => leader.isLeader(queuedWrite.writer),
+        `writer leadership`,
+      )
+      const write = leaderCollections[0]!.insert({ id: `local`, title: `l` })
+        .isPersisted.promise
+      await waitFor(queuedWrite.hold.isHeld, `held queued write`)
+      openGate()
+      await waitFor(
+        () => grantedWhileWriteHeld !== undefined,
+        `gated grant during the held write`,
+      )
+      for (let task = 0; task < 20; task++) await nextTask()
+      queuedWrite.hold.release()
+      await write
+      needSettled = true
+    }
     if (history.lifecycle === `dispose-while-waiting` && hold) {
       // The tab closes while a startup read is still queued: its coordinator
       // and connection close first and must not wait for that read. A
@@ -476,7 +602,11 @@ export async function observeReload(
     const reloadLog = [...log]
 
     // A second tab opens after the first is ready, as a follower.
-    if (history.need === `follower-write` || history.lifecycle === `takeover`) {
+    if (
+      history.need === `follower-write` ||
+      history.lifecycle === `takeover` ||
+      history.lifecycle === `takeover-while-read-held`
+    ) {
       const follower = await host.openTab(dbName)
       const followerCollections = openCollections(
         follower.persistence,
@@ -503,6 +633,38 @@ export async function observeReload(
         )
         followerLeadsAll = true
       }
+      if (history.lifecycle === `takeover-while-read-held`) {
+        // The follower restarts its first eager Collection and holds that
+        // read, so every takeover grant arrives while a read is queued.
+        const restarted = history.collections.findIndex(
+          (c) => c.kind === `eager`,
+        )
+        followerHold = holdFirstRowSnapshot(storageIds[ids[restarted]!]!)
+        cleanups.push(followerHold.restore)
+        await followerCollections[restarted]!.cleanup()
+        const restart = followerCollections[restarted]!.preload()
+        await waitFor(followerHold.isHeld, `held follower read`)
+        const termsBefore = log.length
+        leaderOpen = false
+        await closeTab(leader, leaderCollections)
+        await waitFor(
+          () => grantsWhileFollowerReadHeld >= ids.length,
+          `takeover grants while the follower read is held`,
+        ).catch(() => undefined)
+        for (let task = 0; task < 20; task++) await nextTask()
+        termsWhileFollowerReadHeld = log
+          .slice(termsBefore)
+          .filter((entry) =>
+            ids.some((id) => isTermFor(entry, storageIds[id]!)),
+          ).length
+        followerHold.release()
+        await restart
+        await waitFor(
+          () => ids.every((id) => follower.isLeader(storageIds[id]!)),
+          `follower takeover`,
+        )
+        followerLeadsAll = true
+      }
     }
     return await finish(reloadLog)
 
@@ -522,6 +684,7 @@ export async function observeReload(
         }
       }
       return {
+        adapterPerTab: host.adapterPerTab,
         ids,
         storageIds,
         reloadLog,
@@ -530,6 +693,9 @@ export async function observeReload(
         termDuringHold,
         needSettled,
         followerLeadsAll,
+        grantsWhileFollowerReadHeld,
+        termsWhileFollowerReadHeld,
+        grantedWhileWriteHeld,
         factsPresent,
         storedRow,
       }
@@ -617,7 +783,8 @@ function isSetupStatementFor(entry: Logged, storageId: string): boolean {
 
 // Database setup: DDL, writes, or schema reads on tables no Collection owns.
 function isDatabaseSetupStatement(entry: Logged): boolean {
-  if (/^PRAGMA /.test(entry.sql)) return true
+  // Connection settings such as journal_mode are per connection, not schema.
+  if (/^PRAGMA table_info/.test(entry.sql)) return true
   if (/^(CREATE|ALTER) /.test(entry.sql)) {
     return !/"[ct]_[a-z0-9]+_[a-z0-9]+/.test(entry.sql)
   }
@@ -638,21 +805,36 @@ type ExpectedCollection = {
   terms: number
 }
 
-export function expectedReload(history: ReloadHistory): {
+export function expectedReload(
+  history: ReloadHistory,
+  topology: { adapterPerTab: boolean } = { adapterPerTab: true },
+): {
   collections: Array<ExpectedCollection>
   tabs: number
   writerExemptFromOrder: number | undefined
 } {
+  const heldTakeover = history.lifecycle === `takeover-while-read-held`
   const secondTab =
-    history.need === `follower-write` || history.lifecycle === `takeover`
+    history.need === `follower-write` ||
+    history.lifecycle === `takeover` ||
+    heldTakeover
+  const followerRestarts = heldTakeover
+    ? history.collections.findIndex((c) => c.kind === `eager`)
+    : -1
   const disposed = history.lifecycle === `dispose-while-waiting`
   const tabs = secondTab ? 2 : 1
   const held = heldCollection(history)
   return {
     tabs,
-    writerExemptFromOrder: history.need === `local-write` ? 0 : undefined,
+    writerExemptFromOrder:
+      history.need === `local-write` || history.need === `write-queued-at-grant`
+        ? 0
+        : undefined,
     collections: history.collections.map((collection, index) => {
-      const restarted = history.lifecycle === `restart` && index === 0
+      // A restart reads again; so does the follower's restart before takeover.
+      const restarted =
+        (history.lifecycle === `restart` && index === 0) ||
+        index === followerRestarts
       const eager = collection.kind === `eager`
       // Setup and a schema reset happen at a Collection's first read. A tab
       // closed during the held read may never reach the reads queued behind
@@ -667,7 +849,11 @@ export function expectedReload(history: ReloadHistory): {
         // Each tab's adapter reads the registry once; a restart reuses it.
         // A held first snapshot reads it after the hold, so a tab closed
         // during the hold may never read it.
-        registryReads: neverRead ? undefined : tabs,
+        registryReads: neverRead
+          ? undefined
+          : topology.adapterPerTab
+            ? tabs
+            : 1,
         // Each tab reads an eager Collection's rows once; a restart rereads.
         rowScans: eager && !disposed ? tabs + (restarted ? 1 : 0) : undefined,
         // A held snapshot may or may not run after its tab closes.
@@ -677,8 +863,8 @@ export function expectedReload(history: ReloadHistory): {
         terms: disposed
           ? 0
           : 1 +
-            (history.lifecycle === `takeover` ? 1 : 0) +
-            (restarted ? 1 : 0),
+            (history.lifecycle === `takeover` || heldTakeover ? 1 : 0) +
+            (history.lifecycle === `restart` && index === 0 ? 1 : 0),
       }
     }),
   }
@@ -689,7 +875,7 @@ export function reloadViolations(
   observed: ReloadObservation,
 ): Array<string> {
   const violations: Array<string> = []
-  const expected = expectedReload(history)
+  const expected = expectedReload(history, observed)
   const { ids, storageIds, log, reloadLog } = observed
   const count = (
     entries: ReadonlyArray<Logged>,
@@ -775,6 +961,29 @@ export function reloadViolations(
       }
     }
   })
+  // (b) order: a write queued at a grant precedes that grant's term
+  if (history.need === `write-queued-at-grant`) {
+    const gatedIndex = history.collections.findIndex(
+      (c, index) => index > 0 && c.kind === `eager`,
+    )
+    const gated = storageIds[ids[gatedIndex]!]!
+    const writer = storageIds[ids[0]!]!
+    if (observed.grantedWhileWriteHeld !== true) {
+      violations.push(`premise: the gated grant did not meet the queued write`)
+    }
+    const write = log.findIndex(
+      (e) =>
+        e.sql.startsWith(
+          `INSERT INTO "${createPersistedTableName(writer, `c`)}"`,
+        ) && e.params.includes(`s:local`),
+    )
+    const term = log.findIndex((e) => isTermFor(e, gated))
+    if (write === -1 || term === -1 || term < write) {
+      violations.push(
+        `${ids[gatedIndex]} term before the write queued at its grant`,
+      )
+    }
+  }
   // (c) need
   if (history.need === `local-write` && observed.termDuringHold !== true) {
     violations.push(`${ids[0]}: no term while another startup read was held`)
@@ -782,8 +991,25 @@ export function reloadViolations(
   if (history.need !== `none` && observed.needSettled !== true) {
     violations.push(`the leader need did not settle`)
   }
-  if (history.lifecycle === `takeover` && observed.followerLeadsAll !== true) {
+  if (
+    (history.lifecycle === `takeover` ||
+      history.lifecycle === `takeover-while-read-held`) &&
+    observed.followerLeadsAll !== true
+  ) {
     violations.push(`the follower did not take over`)
+  }
+  // (b) order at takeover: no follower term while its queued read waits
+  if (history.lifecycle === `takeover-while-read-held`) {
+    if (observed.grantsWhileFollowerReadHeld === 0) {
+      violations.push(
+        `premise: no takeover grant while the follower read waited`,
+      )
+    }
+    if (observed.termsWhileFollowerReadHeld !== 0) {
+      violations.push(
+        `${observed.termsWhileFollowerReadHeld} follower terms while its queued read waited`,
+      )
+    }
   }
   // (e) database setup is complete after the fill
   const databaseSetup = count(log, isDatabaseSetupStatement)
@@ -816,10 +1042,18 @@ function legal(history: ReloadHistory): ReloadHistory {
   // A local write needs an eager writer first and another eager read held.
   if (need === `local-write` && !(firstEager && eager >= 2)) need = `none`
   if (need === `follower-write` && eager === 0) need = `none`
+  if (need === `write-queued-at-grant` && !(firstEager && eager >= 2))
+    need = `none`
   if (lifecycle === `restart` && !firstEager) lifecycle = `none`
   if (lifecycle === `dispose-while-waiting` && (eager === 0 || need !== `none`))
     lifecycle = `none`
-  if (lifecycle === `takeover` && need === `local-write`) lifecycle = `none`
+  if (
+    (lifecycle === `takeover` || lifecycle === `takeover-while-read-held`) &&
+    need === `local-write`
+  )
+    lifecycle = `none`
+  if (lifecycle === `takeover-while-read-held` && eager === 0)
+    lifecycle = `none`
   return { ...history, need, lifecycle }
 }
 
@@ -831,11 +1065,13 @@ export const reloadHistoryArb: fc.Arbitrary<ReloadHistory> = fc
     need: fc.constantFrom(
       `none` as const,
       `local-write` as const,
+      `write-queued-at-grant` as const,
       `follower-write` as const,
     ),
     lifecycle: fc.constantFrom(
       `none` as const,
       `takeover` as const,
+      `takeover-while-read-held` as const,
       `restart` as const,
       `dispose-while-waiting` as const,
     ),
@@ -925,12 +1161,28 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
     },
   ],
   [
+    `write queued at another grant`,
+    {
+      ...base,
+      need: `write-queued-at-grant`,
+      collections: [eager, managed, eager],
+    },
+  ],
+  [
     `follower write`,
     { ...base, need: `follower-write`, collections: [eager, eager] },
   ],
   [
     `takeover`,
     { ...base, lifecycle: `takeover`, collections: [eager, managed] },
+  ],
+  [
+    `takeover while a follower read is held`,
+    {
+      ...base,
+      lifecycle: `takeover-while-read-held`,
+      collections: [eager, managed, eager],
+    },
   ],
   [`restart`, { ...base, lifecycle: `restart`, collections: [eager, eager] }],
   [

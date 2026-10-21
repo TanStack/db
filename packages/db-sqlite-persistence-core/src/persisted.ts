@@ -2209,9 +2209,25 @@ class PersistedCollectionRuntime<
             }
             return result
           })
-        } else {
+        } else if (this.persistence.adapter.runInHydrationScope) {
           // Preserve the existing unscheduled-adapter lifecycle contract: a
-          // replacement upstream may start while stale hydration is settling.
+          // replacement upstream may start while stale hydration is settling,
+          // so this restart takes no mutex and waits for no scheduler. One
+          // scope still marks both startup reads as queued work, which an
+          // election term must not run ahead of.
+          startup = await this.runInHydrationScope(async (adapter) =>
+            (await loadStartupMetadata(adapter))
+              ? this.startInternal(
+                  lifecycleGeneration,
+                  adapter,
+                  resolveStartupMetadata,
+                )
+              : undefined,
+          )
+          if (startup && lifecycleGeneration === this.lifecycleGeneration) {
+            await this.flushQueuedTxCommittedUnsafe()
+          }
+        } else {
           if (await loadStartupMetadata(this.persistence.adapter)) {
             if (this.persistence.adapter.isHydrationScopeScheduled?.()) {
               startup = await this.applyMutex.run(async () => {
