@@ -1801,7 +1801,10 @@ describe(`Successful finite demand retirement`, () => {
  *   overlay, and `sourceDelete` deletes it from the source;
  * - `timer` runs the bounded backoff retry when that scenario enables it;
  * - `hang` makes the provider never answer the oldest open request, like a
- *   lost TCP segment; the drain leaves it in flight.
+ *   lost TCP segment; the drain leaves it in flight;
+ * - `dispose` disposes the loader. After it the loader issues no request and
+ *   releases no lease, even as earlier requests settle; the end laws then
+ *   judge nothing more.
  * Passes are ordinary graph passes, which the subscriber skips while a
  * truncate replay is pending; a window move still runs. Scenarios cross an
  * indexed loader (pages and ties) with an unindexed one (prefix reads),
@@ -1812,7 +1815,8 @@ describe(`Successful finite demand retirement`, () => {
  * order source, one or three installed rows (three let a report fall inside
  * the loader's own first page), whether the window needs more rows,
  * whether the backoff retry is enabled, whether the first release callback
- * starts a truncate of its own (a reentrant reset), whether each release
+ * starts a truncate of its own (a reentrant reset), whether the first
+ * release callback disposes the loader, whether each release
  * callback runs an ordinary pass synchronously (as a graph run does when a
  * release delivers deletes outside a transaction), and a window offset of 0
  * or 1.
@@ -1883,6 +1887,7 @@ type AuthorityCommand =
   | { type: `sourceDelete`; react: boolean }
   | { type: `timer` }
   | { type: `hang` }
+  | { type: `dispose` }
 
 type AuthorityCase = {
   indexed: boolean
@@ -1915,6 +1920,8 @@ type AuthorityCase = {
   // Each release callback runs an ordinary pass synchronously, as a graph run
   // that reacts to the removed rows does.
   releaseReenters: boolean
+  // The first release callback disposes the loader, as adapter cleanup can.
+  releaseDisposes: boolean
   history: Array<AuthorityCommand>
 }
 
@@ -1990,6 +1997,7 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
   // The backoff retry needs a failed repair first, so it runs more often.
   { weight: 4, arbitrary: fc.constant({ type: `timer` as const }) },
   { weight: 1, arbitrary: fc.constant({ type: `hang` as const }) },
+  { weight: 1, arbitrary: fc.constant({ type: `dispose` as const }) },
 )
 
 const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
@@ -2016,6 +2024,10 @@ const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
   offset: fc.constantFrom(0 as const, 1 as const),
   releaseReenters: fc.oneof(
     { weight: 3, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
+  releaseDisposes: fc.oneof(
+    { weight: 5, arbitrary: fc.constant(false) },
     { weight: 1, arbitrary: fc.constant(true) },
   ),
   history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
@@ -2049,6 +2061,7 @@ type AuthorityObservation = {
   shrinkingMoves: number
   reentrantTruncates: number
   reentrantPasses: number
+  disposals: number
   hungRequests: number
   offsetWindows: number
 }
@@ -2092,6 +2105,13 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  // A disposed loader owns nothing: it issues no request and releases no
+  // lease, even as requests it issued earlier settle.
+  let disposed = false
+  // A release callback can dispose the loader, so read the flag through a call.
+  const isDisposed = () => disposed
+  let disposeViolation: string | undefined
+  let disposals = 0
   let explicitRetrying = false
   let reentrantTruncates = 0
   let reentering = false
@@ -2149,6 +2169,9 @@ async function checkAuthorityCase(
       hung: false,
     }
     ledger.push(request)
+    if (disposed) {
+      disposeViolation ??= `request ${request.index} was issued after dispose`
+    }
     if (startsAuthority(request)) epochMovesAtLastStart = epochMoves
     // An issued request consumes an owed continuation. An ordinary page also
     // shows the chain finished, since none is issued while a repair runs.
@@ -2174,6 +2197,9 @@ async function checkAuthorityCase(
       }
     }
     const release = () => {
+      if (disposed) {
+        disposeViolation ??= `request ${request.index} was released after dispose`
+      }
       // A full-source lease that covers the source stays held: its read
       // succeeded, or a successful replay reacquired its demand. Its own
       // transport failing later does not undo that coverage.
@@ -2199,6 +2225,12 @@ async function checkAuthorityCase(
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
       }
       request.released = true
+      if (testCase.releaseDisposes && !disposed) {
+        disposed = true
+        disposals++
+        loader.dispose()
+        return
+      }
       if (testCase.releaseReenters && !reentering) {
         reentering = true
         reentrantPasses++
@@ -2394,6 +2426,9 @@ async function checkAuthorityCase(
   const lastAuthoritativeSuccess = () =>
     Math.max(lastAuthoritativeRead(), replayAuthority)
   const checkHeld = (checkpoint: string) => {
+    if (disposeViolation) {
+      throw new Error(`dispose ${checkpoint}: ${disposeViolation}`)
+    }
     if (invariantViolation) {
       throw new Error(`invariant ${checkpoint}: ${invariantViolation}`)
     }
@@ -2616,6 +2651,13 @@ async function checkAuthorityCase(
           if (command.react) graphPass()
           await flush()
           break
+        case `dispose`:
+          if (!disposed) {
+            disposed = true
+            disposals++
+            loader.dispose()
+          }
+          break
         // The provider never answers the oldest open request.
         case `hang`: {
           const request = inflight()[0]
@@ -2638,121 +2680,132 @@ async function checkAuthorityCase(
     }
     await drain()
     checkHeld(`after the drain`)
-    const lastFull = ledger.reduce(
-      (last, request) =>
-        request.fullSource && request.outcome === `ok` ? request.index : last,
-      -1,
-    )
-    // Each superseded failure is checked against the full-source reads issued
-    // before it. When no own failure happened since the last of those, the
-    // failure law does not excuse a block, so a later full-source read must
-    // have recovered it.
-    for (const failed of ledger.filter(
-      (request) =>
-        request.outcome === `failed` &&
-        request.superseded &&
-        request.index >= replayOwnedBefore,
-    )) {
-      const base = ledger.reduce(
+    // A disposed loader owes nothing more; the drain above settled what it
+    // had issued, and the dispose law has judged those settlements.
+    if (!disposed) {
+      const lastFull = ledger.reduce(
         (last, request) =>
-          request.fullSource &&
-          request.outcome === `ok` &&
-          request.index < failed.index
-            ? request.index
-            : last,
+          request.fullSource && request.outcome === `ok` ? request.index : last,
         -1,
       )
-      if (ownFailureSince(base)) continue
-      checkedStrandPremises++
-      // A recovery read that the provider never answers still started, and a
-      // hung repair still owes the full-source read it restarts as.
-      const recovered = ledger.some(
+      // Each superseded failure is checked against the full-source reads issued
+      // before it. When no own failure happened since the last of those, the
+      // failure law does not excuse a block, so a later full-source read must
+      // have recovered it.
+      for (const failed of ledger.filter(
         (request) =>
-          (request.fullSource &&
-            request.index > failed.index &&
-            request.outcome === `ok`) ||
-          (request.hung && request.authoritative),
-      )
-      if (!recovered) {
-        throw new Error(
-          `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+          request.outcome === `failed` &&
+          request.superseded &&
+          request.index >= replayOwnedBefore,
+      )) {
+        const base = ledger.reduce(
+          (last, request) =>
+            request.fullSource &&
+            request.outcome === `ok` &&
+            request.index < failed.index
+              ? request.index
+              : last,
+          -1,
         )
-      }
-    }
-    if (ownFailureSince(lastFull)) {
-      // A retry whose release callback throws reports that error; the next
-      // explicit retry recovers (the failed-release contract above).
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const before = ledger.length
-        explicitRetrying = true
-        run(() => loader.loadMore(++windowOperation))
-        explicitRetrying = false
-        await flush()
-        if (ledger.length > before) break
-      }
-      await drain()
-      checkHeld(`after the explicit retry`)
-    }
-    const authority = lastAuthoritativeSuccess()
-    const leaked = ledger.filter(
-      (request) =>
-        request.outcome === `ok` &&
-        !request.released &&
-        request.index >= replayOwnedBefore &&
-        !replayCoverage.has(request) &&
-        request.index < authority,
-    )
-    // A chain left unfinished by a hung request has not retired anything yet.
-    const unfinishedChain = ledger.some(
-      (request) =>
-        request.hung && request.authoritative && request.index > authority,
-    )
-    if (authority >= 0 && !unfinishedChain && leaked.length > 0) {
-      throw new Error(
-        `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
-      )
-    }
-    // A superseded request's failure owes only a full-source read; once one
-    // issued after it succeeds, or a covering replay settles after it, its
-    // lease is retired without a retry.
-    const heldFailures = ledger.filter(
-      (failed) =>
-        failed.outcome === `failed` &&
-        failed.superseded &&
-        !failed.released &&
-        failed.index >= replayOwnedBefore &&
-        (replayAuthority > failed.index ||
-          ledger.some(
-            (request) =>
-              request.fullSource &&
+        if (ownFailureSince(base)) continue
+        checkedStrandPremises++
+        // A recovery read that the provider never answers still started, and a
+        // hung repair still owes the full-source read it restarts as.
+        const recovered = ledger.some(
+          (request) =>
+            (request.fullSource &&
               request.index > failed.index &&
-              request.outcome === `ok`,
-          )),
-    )
-    if (heldFailures.length > 0) {
-      throw new Error(
-        `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
-      )
-    }
-    // Progress: once loading is quiet, an invalidation and an ordinary pass
-    // issue a read, unless a full-source read covers the source.
-    const lastRead = lastAuthoritativeRead()
-    const coveredByFullSource =
-      replayCoverage.size > 0 || (lastRead >= 0 && ledger[lastRead]!.fullSource)
-    // The loader has no request timeout, so a hung authoritative request may
-    // hold its work slot. A hung finite request must not block the repair.
-    const hungAuthority = ledger.some(
-      (request) => request.hung && request.authoritative,
-    )
-    if (!coveredByFullSource && !hungAuthority) {
-      const before = ledger.length
-      loader.invalidateSourceOrdering()
-      run(() => loader.loadMore())
-      await flush()
-      if (ledger.length === before) {
-        throw new Error(
-          `progress: an invalidation after the drain issued no request`,
+              request.outcome === `ok`) ||
+            (request.hung && request.authoritative),
         )
+        if (!recovered) {
+          throw new Error(
+            `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+          )
+        }
+      }
+      if (ownFailureSince(lastFull)) {
+        // A retry whose release callback throws reports that error; the next
+        // explicit retry recovers (the failed-release contract above).
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const before = ledger.length
+          explicitRetrying = true
+          run(() => loader.loadMore(++windowOperation))
+          explicitRetrying = false
+          await flush()
+          if (ledger.length > before) break
+        }
+        await drain()
+        checkHeld(`after the explicit retry`)
+      }
+      const authority = lastAuthoritativeSuccess()
+      const leaked = ledger.filter(
+        (request) =>
+          request.outcome === `ok` &&
+          !request.released &&
+          request.index >= replayOwnedBefore &&
+          !replayCoverage.has(request) &&
+          request.index < authority,
+      )
+      // A chain left unfinished by a hung request has not retired anything yet.
+      const unfinishedChain = ledger.some(
+        (request) =>
+          request.hung && request.authoritative && request.index > authority,
+      )
+      // A release during the retry can dispose the loader; it owes nothing more.
+      if (
+        !isDisposed() &&
+        authority >= 0 &&
+        !unfinishedChain &&
+        leaked.length > 0
+      ) {
+        throw new Error(
+          `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
+        )
+      }
+      // A superseded request's failure owes only a full-source read; once one
+      // issued after it succeeds, or a covering replay settles after it, its
+      // lease is retired without a retry.
+      const heldFailures = ledger.filter(
+        (failed) =>
+          failed.outcome === `failed` &&
+          failed.superseded &&
+          !failed.released &&
+          failed.index >= replayOwnedBefore &&
+          (replayAuthority > failed.index ||
+            ledger.some(
+              (request) =>
+                request.fullSource &&
+                request.index > failed.index &&
+                request.outcome === `ok`,
+            )),
+      )
+      if (!isDisposed() && heldFailures.length > 0) {
+        throw new Error(
+          `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
+        )
+      }
+      // Progress: once loading is quiet, an invalidation and an ordinary pass
+      // issue a read, unless a full-source read covers the source.
+      const lastRead = lastAuthoritativeRead()
+      const coveredByFullSource =
+        replayCoverage.size > 0 ||
+        (lastRead >= 0 && ledger[lastRead]!.fullSource)
+      // The loader has no request timeout, so a hung authoritative request may
+      // hold its work slot. A hung finite request must not block the repair.
+      const hungAuthority = ledger.some(
+        (request) => request.hung && request.authoritative,
+      )
+      if (!coveredByFullSource && !hungAuthority && !isDisposed()) {
+        const before = ledger.length
+        loader.invalidateSourceOrdering()
+        run(() => loader.loadMore())
+        await flush()
+        if (ledger.length === before) {
+          throw new Error(
+            `progress: an invalidation after the drain issued no request`,
+          )
+        }
       }
     }
   } finally {
@@ -2782,6 +2835,7 @@ async function checkAuthorityCase(
     shrinkingMoves,
     reentrantTruncates,
     reentrantPasses,
+    disposals,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
   }
@@ -2797,6 +2851,7 @@ const ordinaryScenario = {
   releaseTruncates: false,
   offset: 0,
   releaseReenters: false,
+  releaseDisposes: false,
 } as const
 
 const authorityProperty = `ordered-loader.request-authority`
@@ -3169,6 +3224,7 @@ describe(`Ordered source request authority`, () => {
         shrinkingMoves: 0,
         reentrantTruncates: 0,
         reentrantPasses: 0,
+        disposals: 0,
         hungRequests: 0,
         offsetWindows: 0,
       }

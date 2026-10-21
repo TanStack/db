@@ -343,7 +343,7 @@ export class OrderedSourceLoader {
       if (this.failedRequest) {
         this.failedRequest.windowOperationGeneration = windowOperationGeneration
       }
-      this.releaseFailedAcquisitions()
+      this.releaseOwned(this.failedAcquisitions, () => true)
       // Adapter cleanup can synchronously tear down this loader.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!this.active) return
@@ -436,7 +436,11 @@ export class OrderedSourceLoader {
 
   loadFullSource(windowOperationGeneration?: number): void {
     if (!this.active || this.work.kind !== `idle`) return
-    this.releaseSupersededPending()
+    // An authoritative read supersedes an in-flight finite request; the old
+    // request still settles its own participant, and its result is ignored
+    // for the boundary. Authority must not wait behind it, or nothing resumes
+    // the work when the old request settles.
+    this.pending = undefined
     this.moveWork({ kind: `full-source`, status: `held` }, [`idle`])
     this.requestAndObserve(
       (onLoadSubsetResult) => {
@@ -451,17 +455,10 @@ export class OrderedSourceLoader {
     )
   }
 
-  // An authoritative read supersedes an in-flight finite request; the old
-  // request still settles its own participant, and its result is ignored for
-  // the boundary. A repair that answers at once must not then wait behind it,
-  // or nothing resumes the repair when the old request settles.
-  private releaseSupersededPending(): void {
-    this.pending = undefined
-  }
-
   private loadOrderedPrefixRepair(windowOperationGeneration?: number): void {
     if (!this.active || this.work.kind !== `idle`) return
-    this.releaseSupersededPending()
+    // As for a full-source read, the repair does not wait behind it.
+    this.pending = undefined
     // Any older finite request may still settle, but it cannot refine from a
     // boundary that predates this authoritative prefix.
     this.moveWork(
@@ -550,9 +547,8 @@ export class OrderedSourceLoader {
       }
     }
     if (this.work.kind !== `idle`) {
-      // The replay is the full-source read's success: it pays the debt.
-      this.cancelRepairRetry()
-      this.repairRetries = 0
+      // The replay is the full-source read's success: it pays the debt. The
+      // truncate's cursor reset already cancelled any backoff retry.
       this.moveWork(
         { kind: `full-source`, status: `complete` },
         [`held`, `failed`, `complete`],
@@ -598,8 +594,8 @@ export class OrderedSourceLoader {
     )
   }
 
-  // Release each selected lease once. A release that resets the cursor or
-  // disposes the loader stops the pass; the replay that follows owns the
+  // Release each selected lease once. A release that resets the cursor, which
+  // dispose also does, stops the pass; the replay that follows owns the
   // remaining leases. A release can run the graph synchronously, so
   // refinement stays blocked until the pass unwinds, and a lease that a
   // nested pass already released is skipped.
@@ -614,7 +610,6 @@ export class OrderedSourceLoader {
       runAllCallbacks(
         Array.from(owner, ([release, entry]) => () => {
           if (
-            !this.active ||
             orderedLoadGeneration !== this.orderedLoadGeneration ||
             owner.get(release) !== entry ||
             !selected(release, entry)
@@ -1015,7 +1010,7 @@ export class OrderedSourceLoader {
       if (trackedRequest && this.pending === trackedRequest) {
         this.pending = undefined
       }
-      if (!this.active) return
+      // Dispose resets the cursor, so a disposed loader's requests are dead.
       // A replay already reacquired this full-source read's demand. Its late
       // transport failure leaves that coverage, and its lease, in place.
       if (isFullSource && this.coversSource()) return
@@ -1260,10 +1255,6 @@ export class OrderedSourceLoader {
     this.repairTimer = undefined
   }
 
-  private releaseFailedAcquisitions(): void {
-    this.releaseOwned(this.failedAcquisitions, () => true)
-  }
-
   private scheduleRepairRetry(): void {
     if (
       !this.active ||
@@ -1287,7 +1278,7 @@ export class OrderedSourceLoader {
           )
             return
           this.moveWork({ kind: `idle` }, [`idle`, `failed`])
-          this.releaseFailedAcquisitions()
+          this.releaseOwned(this.failedAcquisitions, () => true)
           // Release may dispose or start a new replay; neither belongs to this retry.
           if (
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- release callbacks can dispose the loader

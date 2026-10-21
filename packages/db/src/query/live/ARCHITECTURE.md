@@ -1083,7 +1083,17 @@ Each request carries one stamp from issue: the ordered-load generation, the
 authority generation, the ordering generation, and its role (finite, repair,
 or full-source). A request is dead after a cursor reset. A repair-chain request
 is stale once a newer authoritative start supersedes it; a finite request is
-stale once the ordering epoch moves; a full-source read stays current.
+stale once the ordering epoch moves; a full-source read stays current. Dispose
+resets the cursor, so a disposed loader's requests are dead and it issues and
+releases nothing more.
+
+A truncate replay owns every request the loader issued before the truncate:
+their results and failures change no loader state beyond the debt a failure
+raises, and the replay settles their demands. The loader has no request
+timeout. A request the provider never answers keeps its work slot, so an
+authoritative read that never settles holds its repair or recovery until the
+subscription ends; recovery from a provider that stops answering belongs to the
+adapter or the subscription lifecycle.
 A request issued before a cursor reset that later fails still raises the repair
 debt, but it cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has
