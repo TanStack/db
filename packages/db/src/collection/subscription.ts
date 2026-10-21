@@ -416,9 +416,9 @@ export class CollectionSubscription
   private handleTruncate() {
     // Eager demand is satisfied by source readiness, even when the adapter
     // happens to expose a loader. Only on-demand demand reacquires a subset.
-    const reloadsSubsets =
-      this.collection.config.syncMode === `on-demand` &&
-      this.collection._sync.syncLoadSubsetFn !== null
+    // A reload's truncate can apply inside the new run's `sync()`, before it
+    // returns its loader; the requests below start after it has.
+    const reloadsSubsets = this.collection.config.syncMode === `on-demand`
     // Deferred demand never acquired, so a truncate gives it nothing to
     // reload; it acquires the replacement rows when acquisition resumes.
     const demandsToReload =

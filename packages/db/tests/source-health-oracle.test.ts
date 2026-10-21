@@ -95,12 +95,15 @@
  * load that fails after initial-query readiness is a request error on the query's
  * node, and that it clears. Effect lanes check the Effect's gate, and that a
  * failed load after it still ends the Effect: an Effect has no request errors.
+ * The on-demand reload lane checks that a reload of an on-demand Collection
+ * keeps a query's rows until the new run reloads its subset.
  *
  * ## Limits
  *
- * Collections are eager, so a live query cannot become ready while a Collection is
- * still loading. The on-demand case, where a Collection fails its first load
- * after the live query is ready, is not generated here. Per-row child
+ * The generated Collections are eager, so a live query cannot become ready
+ * while a Collection is still loading. The on-demand case, where a
+ * Collection fails its first load after the live query is ready, is not
+ * generated; a focused lane enumerates it. Per-row child
  * Collections are not in the tree; an include's node shows its source. Pooled histories do not restart: a pooled view ends for good when
  * its Collection is cleaned up. The ordering check reads the observed query
  * only, not its Collections.
@@ -1797,6 +1800,335 @@ describe(`overlapping root loads`, () => {
       }
     },
   )
+})
+
+// ---------------------------------------------------------------------------
+// On-demand reload lane
+// ---------------------------------------------------------------------------
+
+/**
+ * A live query over an on-demand Collection holds rows only for the subsets
+ * it loaded. A reload retires the sync run that loaded them, so the new run
+ * must load each subset again. The law: the query keeps its rows until the
+ * new run has reloaded its subset, and then shows the new run's rows. This
+ * holds whenever the new run first commits. An adapter often calls
+ * `markReady()` inside `sync()`, before core has its `loadSubset`.
+ *
+ * The provider has rows 1 to 4. Their `parentId` names the run that serves
+ * them (run 1 gives `id`, run 2 gives `id + 10`), so a read shows which run
+ * served each row. Histories cross the new run's first commit (an empty
+ * `markReady()` inside `sync()`, a commit of row 5 inside `sync()`, or an
+ * empty `markReady()` after `sync()` returns) with an unfiltered query and a
+ * query for row 1.
+ *
+ * The model filters the provider's rows for a run through the query's
+ * predicate. The driver checks two cuts. While the new run's loads are in
+ * flight, the query still shows run 1's rows. A direct read of the Collection
+ * shows only what the new run committed itself: an on-demand Collection holds
+ * only loaded rows, and a reload's truncate replaced them, as any truncate
+ * does. When the loads settle, the query and the Collection show run 2's
+ * rows, and the reload resolves.
+ */
+type OnDemandReloadHistory = {
+  firstCommit: `empty-inside-sync` | `row-inside-sync` | `empty-after-sync`
+  query: `all` | `row-1`
+}
+
+function providerRows(run: number): Array<Row> {
+  return [1, 2, 3, 4].map((id) => ({
+    id,
+    parentId: run === 1 ? id : id + 10,
+  }))
+}
+
+function expectedOnDemandReload(
+  history: OnDemandReloadHistory,
+  run: number,
+): Array<Row> {
+  const ownCommit =
+    run === 2 && history.firstCommit === `row-inside-sync`
+      ? [{ id: 5, parentId: 15 }]
+      : []
+  return [...providerRows(run), ...ownCommit].filter(
+    (row) => history.query === `all` || row.id === 1,
+  )
+}
+
+describe(`on-demand reload`, () => {
+  const histories: Array<OnDemandReloadHistory> = []
+  for (const firstCommit of [
+    `empty-inside-sync`,
+    `row-inside-sync`,
+    `empty-after-sync`,
+  ] as const)
+    for (const query of [`all`, `row-1`] as const)
+      histories.push({ firstCommit, query })
+
+  it.each(histories)(
+    `first commit $firstCommit, query $query`,
+    async (history) => {
+      let runs = 0
+      const runLoads: Array<Array<() => void>> = [[], [], []]
+      const newRunReady = createDeferred<void>()
+      const source = createCollection<Row, number>({
+        id: `health-on-demand-reload-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            const run = ++runs
+            if (run === 1 || history.firstCommit === `empty-inside-sync`) {
+              params.markReady()
+            } else if (history.firstCommit === `row-inside-sync`) {
+              params.begin()
+              params.write({ type: `insert`, value: { id: 5, parentId: 15 } })
+              params.commit()
+              params.markReady()
+            } else {
+              void newRunReady.promise.then(() => params.markReady())
+            }
+            return {
+              loadSubset: () => {
+                const serve = () => {
+                  params.begin()
+                  for (const row of providerRows(run))
+                    params.write({ type: `insert`, value: row })
+                  params.commit()
+                }
+                if (run === 1) {
+                  serve()
+                  return true
+                }
+                const load = createDeferred<void>()
+                runLoads[run]!.push(() => {
+                  serve()
+                  load.resolve()
+                })
+                return load.promise
+              },
+            }
+          },
+        },
+      })
+      const query = createLiveQueryCollection((q) => {
+        const rows = q.from({ row: source })
+        return history.query === `all`
+          ? rows
+          : rows.where(({ row }) => eq(row.id, 1))
+      })
+      const sorted = (rows: Array<Row>) =>
+        [...rows]
+          .map(({ id, parentId }) => ({ id, parentId }))
+          .sort((a, b) => a.id - b.id)
+      try {
+        await query.preload()
+        expect(sorted(query.toArray)).toEqual(
+          expectedOnDemandReload(history, 1),
+        )
+
+        let reloaded = false
+        const reload = source.reload().then(() => {
+          reloaded = true
+        })
+        newRunReady.resolve()
+        await flushPromises()
+        expect(
+          runLoads[2]!.length,
+          `the new run reloads the query's subset`,
+        ).toBeGreaterThan(0)
+        expect(sorted(query.toArray), `while the loads are in flight`).toEqual(
+          expectedOnDemandReload(history, 1),
+        )
+        expect(
+          sorted(source.toArray),
+          `a direct read while the loads are in flight`,
+        ).toEqual(
+          history.firstCommit === `row-inside-sync`
+            ? [{ id: 5, parentId: 15 }]
+            : [],
+        )
+
+        for (const serve of runLoads[2]!.splice(0)) serve()
+        await reload
+        await flushPromises()
+        expect(reloaded).toBe(true)
+        expect(sorted(query.toArray), `after the loads settle`).toEqual(
+          expectedOnDemandReload(history, 2),
+        )
+        expect(query.status).toBe(`ready`)
+        expect(source.errors.hasErrors).toBe(false)
+      } finally {
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+})
+
+// ---------------------------------------------------------------------------
+// On-demand first load after query readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * A live query over an on-demand Collection becomes ready when its subsets
+ * settle, so the Collection can still be in its first load when the query is
+ * ready. The generated Collections are eager and never reach this state.
+ * The laws are the ones above. After the query has shown data, only a crash
+ * changes its status. The Collection's own node shows its first-load failure
+ * (`error` status) or its stop after readiness (`ready` status, with an
+ * `error`). The query's `reload()` reloads the Collection, and the new run's
+ * readiness clears the node. A crashed query's `reload()` rejects.
+ *
+ * Histories cross the Collection's step (`fail` before its first ready,
+ * `fail` after a `markReady()`, or `crash`) with a direct query and an
+ * inner join to an eager Collection. Each history then calls the query's
+ * `reload()`. The model gives the node's status and error message, the
+ * query's status, and its row count at each cut.
+ */
+type LateFirstLoadHistory = {
+  step: `fail-before-ready` | `fail-after-ready` | `crash`
+  shape: `direct` | `join`
+}
+
+type LateFirstLoadCut = {
+  queryStatus: CollectionStatus
+  rows: number | null
+  node: { status: CollectionStatus; error: string | null }
+}
+
+function expectedLateFirstLoad(history: LateFirstLoadHistory): {
+  afterStep: LateFirstLoadCut
+  afterReload: LateFirstLoadCut | `rejects`
+} {
+  if (history.step === `crash`)
+    return {
+      afterStep: {
+        queryStatus: `crashed`,
+        rows: null,
+        node: { status: `crashed`, error: `stopped` },
+      },
+      afterReload: `rejects`,
+    }
+  return {
+    afterStep: {
+      queryStatus: `ready`,
+      rows: 1,
+      node: {
+        status: history.step === `fail-before-ready` ? `error` : `ready`,
+        error: `stopped`,
+      },
+    },
+    afterReload: {
+      queryStatus: `ready`,
+      rows: 1,
+      node: { status: `ready`, error: null },
+    },
+  }
+}
+
+describe(`on-demand first load after query readiness`, () => {
+  const histories: Array<LateFirstLoadHistory> = []
+  for (const step of [
+    `fail-before-ready`,
+    `fail-after-ready`,
+    `crash`,
+  ] as const)
+    for (const shape of [`direct`, `join`] as const)
+      histories.push({ step, shape })
+
+  it.each(histories)(`step $step, shape $shape`, async (history) => {
+    let runs = 0
+    let firstRun!: SyncParams
+    const lazy = createCollection<Row, number>({
+      id: `health-late-first-load-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          // The first run stays in its first load; a reload's run is ready.
+          if (runs++ === 0) firstRun = params
+          else params.markReady()
+          return {
+            loadSubset: () => {
+              params.begin()
+              params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+              params.commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const eager = createCollection<Row, number>({
+      id: `health-late-first-load-eager-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          params.begin()
+          params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    const query = createLiveQueryCollection((q) =>
+      history.shape === `direct`
+        ? q.from({ lazy })
+        : q
+            .from({ eager })
+            .join({ lazy }, ({ eager, lazy }) => eq(eager.id, lazy.id)),
+    )
+    const lazyNode = () =>
+      query.errors.sources.find((node) => node.alias === `lazy`)!
+    const cut = (): LateFirstLoadCut => ({
+      queryStatus: query.status,
+      rows: query.status === `ready` ? query.size : null,
+      node: {
+        status: lazyNode().status,
+        error: lazyNode().error?.message ?? null,
+      },
+    })
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await query.preload()
+      // Premise: the query is ready while the Collection is still loading.
+      expect(lazy.status).toBe(`loading`)
+      expect(query.size).toBe(1)
+
+      const model = expectedLateFirstLoad(history)
+      const stopped = new Error(`stopped`)
+      if (history.step === `crash`)
+        firstRun.collection._lifecycle.crash(stopped)
+      else {
+        if (history.step === `fail-after-ready`) firstRun.markReady()
+        firstRun.fail(stopped)
+      }
+      await flushPromises()
+      expect(cut(), `after the step`).toEqual(model.afterStep)
+      expect(
+        findProblems(query.errors).some((node) => node.alias === `lazy`),
+      ).toBe(true)
+
+      if (model.afterReload === `rejects`) {
+        await expect(query.reload()).rejects.toBeDefined()
+        expect(runs, `a crashed query does not reload its sources`).toBe(1)
+      } else {
+        await query.reload()
+        await flushPromises()
+        expect(cut(), `after the query's reload`).toEqual(model.afterReload)
+        expect(findProblems(query.errors)).toEqual([])
+      }
+    } finally {
+      console.error = consoleError
+      await query.cleanup()
+      await lazy.cleanup()
+      await eager.cleanup()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
