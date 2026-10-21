@@ -1,5 +1,14 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.4.12
+
+### Patch Changes
+
+- Keep a settled optimistic row visible while its server row waits behind an earlier persisted write. Previously, two quick writes to one row in a persisted Collection could briefly show the row before the second write. ([#2208](https://github.com/TanStack/db/pull/2208))
+
+- Updated dependencies [[`5a1b286`](https://github.com/TanStack/db/commit/5a1b286910bdf56917a76732ba160c99d7b1ad66), [`9aecbab`](https://github.com/TanStack/db/commit/9aecbab4cacb3f1123b1716e6f063abb5affc74f)]:
+  - @tanstack/db@0.15.2
+
 ## 0.4.11
 
 ### Patch Changes

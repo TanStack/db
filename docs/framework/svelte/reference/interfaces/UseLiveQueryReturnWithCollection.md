@@ -3,7 +3,7 @@ id: UseLiveQueryReturnWithCollection
 title: UseLiveQueryReturnWithCollection
 ---
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:85](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L85)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:86](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L86)
 
 ## Type Parameters
 
@@ -31,7 +31,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:85](https://github.co
 collection: Collection<T, TKey, TUtils>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:93](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L93)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:94](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L94)
 
 ***
 
@@ -41,7 +41,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:93](https://github.co
 data: TData;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:92](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L92)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:93](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L93)
 
 ***
 
@@ -51,7 +51,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:92](https://github.co
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:102](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L102)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:103](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L103)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:102](https://github.c
 isError: boolean;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:101](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L101)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:102](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L102)
 
 ***
 
@@ -71,7 +71,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:101](https://github.c
 isIdle: boolean;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:100](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L100)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:101](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L101)
 
 ***
 
@@ -81,7 +81,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:100](https://github.c
 isLoading: boolean;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:95](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L95)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:96](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L96)
 
 ***
 
@@ -91,7 +91,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:95](https://github.co
 isPersistedReady: boolean;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:98](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L98)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:99](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L99)
 
 ***
 
@@ -101,7 +101,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:98](https://github.co
 isReady: boolean;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:96](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L96)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:97](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L97)
 
 ***
 
@@ -111,7 +111,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:96](https://github.co
 persistedError: unknown;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:99](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L99)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:100](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L100)
 
 ***
 
@@ -121,7 +121,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:99](https://github.co
 persistedStatus: LiveQueryPersistedStatus;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:97](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L97)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:98](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L98)
 
 ***
 
@@ -131,7 +131,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:97](https://github.co
 state: Map<TKey, T>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:91](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L91)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:92](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L92)
 
 ***
 
@@ -141,4 +141,4 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:91](https://github.co
 status: CollectionStatus;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:94](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L94)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:95](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L95)
