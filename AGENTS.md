@@ -887,19 +887,27 @@ return allDone
 
 ## Code Weight and Fail-Fast Design
 
-Treat each line of production code as a continuing cost. Bug fixes and
-features should aim for a net-negative production diff. Pay for new behavior by
+Treat production code as a continuing cost. Bug fixes and features should aim
+for a net-negative production diff. Pay for new behavior by
 refactoring the existing code it touches: merge duplicated logic and parallel
 structures, delete indirection, and remove branches that the change makes
 redundant. Refactoring existing code is the expected way to fix a bug or add a
 feature. Do not graft new code onto a design and leave the old code in place.
 
-When a change still grows production code after that work, state why. Name
+Measure production code weight in shipped bytes, not lines. Run
+`pnpm size:compare` (add `--files` for a per-file breakdown). It builds the
+changed packages with the same minified build that the Compressed size CI
+check uses and compares gzip and brotli bytes with the merge-base on
+`origin/main`. Comments, names, and formatting cost nothing in that measure, so
+keep useful comments and clear names. Never delete a comment, shorten a name,
+or reformat code to improve a code-weight number. Reduce states, branches,
+helpers, and recovery paths.
+
+When a change still grows production bytes after that work, state why. Name
 the refactors you tried and the evidence that ruled them out.
 
 Tests and contract documentation can grow to prove the behavior. Report their
-weight separately from production code. Do not compress code or weaken names
-to reduce a line count. Reduce states, branches, helpers, and recovery paths.
+weight separately from production code.
 
 Use the test-first and bug-class guidance above to reproduce the failure and
 identify the violated contract. Strengthen or simplify existing control flow
