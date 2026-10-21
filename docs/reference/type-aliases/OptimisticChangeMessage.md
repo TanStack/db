@@ -9,7 +9,7 @@ type OptimisticChangeMessage<T, TKey> =
   | DeleteKeyMessage<TKey> & object;
 ```
 
-Defined in: [packages/db/src/types.ts:599](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L599)
+Defined in: [packages/db/src/types.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L621)
 
 ## Type Parameters
 

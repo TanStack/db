@@ -3,7 +3,7 @@ id: SyncConfig
 title: SyncConfig
 ---
 
-Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L431)
+Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L445)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:478](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L478)
+Defined in: [packages/db/src/types.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L500)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L472)
+Defined in: [packages/db/src/types.ts:494](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L494)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:483](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L483)
+Defined in: [packages/db/src/types.ts:505](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L505)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:488](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L488)
+Defined in: [packages/db/src/types.ts:510](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L510)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:497](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L497)
+Defined in: [packages/db/src/types.ts:519](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L519)
 
 The row update mode used to sync to the collection.
 
@@ -130,7 +130,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:435](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L435)
+Defined in: [packages/db/src/types.ts:449](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L449)
 
 #### Parameters
 
@@ -158,6 +158,16 @@ visible when that transaction settles, together with the drop of its
 optimistic state. A signal that is already aborted abandons the
 transaction before acceptance, and the receipt rejects with an error
 named `AbortError`. Aborting after acceptance has no effect.
+
+###### invalidateLoadedSubsets
+
+() => `void`
+
+Report that rows this adapter serves for loaded subsets may have shifted
+between served pages, after a refetch that the adapter started on its
+own has applied. Each ordered live query then re-establishes its window
+with a bounded repair from the start of its order. Calls in one turn are
+coalesced. Do not call it for results that answer a `loadSubset` call.
 
 ###### markError
 

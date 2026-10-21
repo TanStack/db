@@ -7,7 +7,7 @@ title: SyncConfigRes
 type SyncConfigRes = object;
 ```
 
-Defined in: [packages/db/src/types.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L417)
+Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L431)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/types.ts:417](https://github.com/TanStack/db/blob/m
 optional cleanup: CleanupFn;
 ```
 
-Defined in: [packages/db/src/types.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L418)
+Defined in: [packages/db/src/types.ts:432](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L432)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/types.ts:418](https://github.com/TanStack/db/blob/m
 optional loadSubset: LoadSubsetFn;
 ```
 
-Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L419)
+Defined in: [packages/db/src/types.ts:433](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L433)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/m
 optional restartAfterScopedRecovery: (cacheRotated) => void | Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:427](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L427)
+Defined in: [packages/db/src/types.ts:441](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L441)
 
 Optional provider-controlled restart for a lost managed cache claim.
 Retire old provider callbacks synchronously and start the replacement only
@@ -62,4 +62,4 @@ absent, the persistence wrapper cleans up and reenters `sync` itself.
 optional unloadSubset: UnloadSubsetFn;
 ```
 
-Defined in: [packages/db/src/types.ts:420](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L420)
+Defined in: [packages/db/src/types.ts:434](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L434)

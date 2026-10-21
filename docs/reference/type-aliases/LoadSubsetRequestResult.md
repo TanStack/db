@@ -7,7 +7,7 @@ title: LoadSubsetRequestResult
 type LoadSubsetRequestResult = true | Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:375](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L375)
+Defined in: [packages/db/src/types.ts:382](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L382)
 
 **`Internal`**
 

@@ -7,7 +7,7 @@ title: SyncPersistenceKeySetEvidence
 type SyncPersistenceKeySetEvidence = object;
 ```
 
-Defined in: [packages/db/src/types.ts:529](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L529)
+Defined in: [packages/db/src/types.ts:551](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L551)
 
 ## Properties
 
@@ -17,4 +17,4 @@ Defined in: [packages/db/src/types.ts:529](https://github.com/TanStack/db/blob/m
 status: "unknown" | "consistent" | "incompatible";
 ```
 
-Defined in: [packages/db/src/types.ts:530](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L530)
+Defined in: [packages/db/src/types.ts:552](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L552)
