@@ -600,24 +600,33 @@ export class OrderedSourceLoader {
 
   // Release each selected lease once. A release that resets the cursor or
   // disposes the loader stops the pass; the replay that follows owns the
-  // remaining leases.
+  // remaining leases. A release can run the graph synchronously, so
+  // refinement stays blocked until the pass unwinds, and a lease that a
+  // nested pass already released is skipped.
   private releaseOwned<TEntry>(
     owner: Map<ReleaseLoadSubset, TEntry>,
     selected: (release: ReleaseLoadSubset, entry: TEntry) => boolean,
   ): void {
     const orderedLoadGeneration = this.orderedLoadGeneration
-    runAllCallbacks(
-      Array.from(owner, ([release, entry]) => () => {
-        if (
-          !this.active ||
-          orderedLoadGeneration !== this.orderedLoadGeneration ||
-          !selected(release, entry)
-        )
-          return
-        owner.delete(release)
-        release()
-      }),
-    )
+    const requesting = this.requesting
+    this.requesting = true
+    try {
+      runAllCallbacks(
+        Array.from(owner, ([release, entry]) => () => {
+          if (
+            !this.active ||
+            orderedLoadGeneration !== this.orderedLoadGeneration ||
+            owner.get(release) !== entry ||
+            !selected(release, entry)
+          )
+            return
+          owner.delete(release)
+          release()
+        }),
+      )
+    } finally {
+      this.requesting = requesting
+    }
   }
 
   invalidateCursor(): void {
@@ -1252,12 +1261,7 @@ export class OrderedSourceLoader {
   }
 
   private releaseFailedAcquisitions(): void {
-    this.requesting = true
-    try {
-      this.releaseOwned(this.failedAcquisitions, () => true)
-    } finally {
-      this.requesting = false
-    }
+    this.releaseOwned(this.failedAcquisitions, () => true)
   }
 
   private scheduleRepairRetry(): void {

@@ -1048,7 +1048,10 @@ still owns a request that settles late. Once a full-source read covers the sourc
 finite or repair request that settles later is retired at once. Every lease
 release pass, including the explicit and backoff retries' release of failed
 acquisitions, stops when a release resets the cursor or disposes the loader.
-The replay that follows owns the leases the pass did not reach.
+The replay that follows owns the leases the pass did not reach. A release
+can deliver deletes that run the graph synchronously, so ordered refinement
+stays blocked until the pass unwinds, and a lease that a nested pass already
+released is not released again.
 
 The loader's authoritative work is a small state machine. Its work slot is
 idle, a repair chain, or a full-source read that is held, complete, or failed;

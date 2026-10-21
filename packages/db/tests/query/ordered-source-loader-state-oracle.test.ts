@@ -1812,7 +1812,9 @@ describe(`Successful finite demand retirement`, () => {
  * order source, one or three installed rows (three let a report fall inside
  * the loader's own first page), whether the window needs more rows,
  * whether the backoff retry is enabled, whether the first release callback
- * starts a truncate of its own (a reentrant reset), and a window offset of 0
+ * starts a truncate of its own (a reentrant reset), whether each release
+ * callback runs an ordinary pass synchronously (as a graph run does when a
+ * release delivers deletes outside a transaction), and a window offset of 0
  * or 1.
  *
  * ## Checkpoints
@@ -1910,6 +1912,9 @@ type AuthorityCase = {
   releaseTruncates: boolean
   // The window starts after this many rows of the order.
   offset: 0 | 1
+  // Each release callback runs an ordinary pass synchronously, as a graph run
+  // that reacts to the removed rows does.
+  releaseReenters: boolean
   history: Array<AuthorityCommand>
 }
 
@@ -2009,6 +2014,10 @@ const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
     { weight: 1, arbitrary: fc.constant(true) },
   ),
   offset: fc.constantFrom(0 as const, 1 as const),
+  releaseReenters: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
   history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
 })
 
@@ -2039,6 +2048,7 @@ type AuthorityObservation = {
   timerRetries: number
   shrinkingMoves: number
   reentrantTruncates: number
+  reentrantPasses: number
   hungRequests: number
   offsetWindows: number
 }
@@ -2084,6 +2094,8 @@ async function checkAuthorityCase(
   let releaseViolation: string | undefined
   let explicitRetrying = false
   let reentrantTruncates = 0
+  let reentering = false
+  let reentrantPasses = 0
   let hungRequests = 0
   let settlingChainMember = false
   let continuationOwed = false
@@ -2187,6 +2199,15 @@ async function checkAuthorityCase(
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
       }
       request.released = true
+      if (testCase.releaseReenters && !reentering) {
+        reentering = true
+        reentrantPasses++
+        try {
+          run(() => loader.loadMore())
+        } finally {
+          reentering = false
+        }
+      }
       if (testCase.releaseTruncates && reentrantTruncates === 0) {
         reentrantTruncates++
         truncate()
@@ -2760,6 +2781,7 @@ async function checkAuthorityCase(
     timerRetries,
     shrinkingMoves,
     reentrantTruncates,
+    reentrantPasses,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
   }
@@ -2774,6 +2796,7 @@ const ordinaryScenario = {
   retryTimer: false,
   releaseTruncates: false,
   offset: 0,
+  releaseReenters: false,
 } as const
 
 const authorityProperty = `ordered-loader.request-authority`
@@ -2838,6 +2861,8 @@ describe(`Ordered source request authority`, () => {
   //   failure counted as the loader's own; the transition table rejected it);
   // - a backoff retry whose first release starts a truncate (the release pass
   //   kept going and released the failed demand the replay owned).
+  // - a release that runs the graph during another request's settlement (the
+  //   pass issued a page, and the settling request then issued its tie);
   // A superseded page that fails before a covering replay settles reaches
   // the failed-lease law through a replay, which the campaigns rarely do.
   // Two replays keep traces that first failed the lane's own model: a chain
@@ -3078,6 +3103,24 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
+      name: `a release that runs the graph during another request's settlement`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        releaseReenters: true,
+        history: [
+          { type: `truncate` },
+          { type: `replaySucceeds` },
+          { type: `optimisticDeparture` },
+          { type: `joinedBusy` },
+        ],
+      },
+    },
+    {
       name: `a page whose own delivery invalidates ordering`,
       testCase: {
         indexed: true,
@@ -3125,6 +3168,7 @@ describe(`Ordered source request authority`, () => {
         timerRetries: 0,
         shrinkingMoves: 0,
         reentrantTruncates: 0,
+        reentrantPasses: 0,
         hungRequests: 0,
         offsetWindows: 0,
       }
