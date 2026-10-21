@@ -78,6 +78,9 @@ type Row = { id: string; group: string; rank: number; value: string }
 // - `other-window`: the same filter with `orderBy rank, limit 1` settles,
 //   along with its tie-boundary load. SQLite holds `a1`. Neither demand key
 //   is D's key, so D has no coverage.
+// - `durable-write-failed`: D's upstream load answers with `a1` and `a2`,
+//   but SQLite rejects the transaction that writes those rows. Neither the
+//   rows nor coverage may become durable, so D has no coverage.
 // - `settled-empty`: D settles with no rows. The empty answer is complete.
 // - `settled`: D settles with `a1` and `a2`.
 //
@@ -98,6 +101,7 @@ type Row = { id: string; group: string; rank: number; value: string }
 // `not-requested` and `failed` reject "any local read counts";
 // `overlapping-demand` rejects "coverage per Collection" and "matching rows
 // count"; `other-window` rejects "coverage keyed by filter only";
+// `durable-write-failed` rejects "coverage written before the rows commit";
 // `settled-empty` rejects "nonempty rows count"; `settled` carries every
 // positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
 // `fails-early` rejects "failure errors a covered demand"; `answers-late`
@@ -114,6 +118,7 @@ const COVERAGE_HISTORIES = [
   `failed`,
   `overlapping-demand`,
   `other-window`,
+  `durable-write-failed`,
   `settled-empty`,
   `settled`,
 ] as const
@@ -146,6 +151,8 @@ const SESSION_1_ROWS: Record<CoverageHistory, ReadonlyArray<Row>> = {
   failed: [],
   'overlapping-demand': [A1],
   'other-window': [A1],
+  // The upstream answer was A1 and A2, but no row became durable.
+  'durable-write-failed': [],
   'settled-empty': [],
   settled: [A1, A2],
 }
@@ -588,16 +595,39 @@ function session1Query(
   return filterQuery(source, `a`)
 }
 
+// An adapter that rejects every committed transaction that writes rows.
+// Transactions with only metadata pass, so an implementation that writes
+// coverage separately from the rows makes coverage durable without them.
+function rejectingRowWrites(adapter: SQLiteCorePersistenceAdapter) {
+  const rejected = { count: 0 }
+  const proxy = new Proxy(adapter, {
+    get(target, property) {
+      if (property === `applyCommittedTx`) {
+        return (...args: Parameters<typeof target.applyCommittedTx>) => {
+          if (args[1].mutations.length > 0) {
+            rejected.count++
+            return Promise.reject(new Error(`injected row-write failure`))
+          }
+          return target.applyCommittedTx(...args)
+        }
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === `function` ? value.bind(target) : value
+    },
+  })
+  return { adapter: proxy, rejected }
+}
+
 // Runs session 1 online and returns the demand keys it sent upstream.
 async function settleSession1(
   driver: SQLiteDriver,
   history: CoverageHistory,
 ): Promise<Array<string | undefined>> {
   if (history === `not-requested`) return []
-  const { collection, upstream } = onDemandSource(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    0,
-  )
+  const base = new SQLiteCorePersistenceAdapter({ driver })
+  const writes =
+    history === `durable-write-failed` ? rejectingRowWrites(base) : undefined
+  const { collection, upstream } = onDemandSource(writes?.adapter ?? base, 0)
   const query = session1Query(collection, history)
   return withCleanup(async () => {
     const preloadState = { settled: false }
@@ -612,13 +642,24 @@ async function settleSession1(
       if (isSettled()) break
       if (history === `failed`) {
         upstream.fail(new Error(`session 1 upstream failed`))
+      } else if (history === `durable-write-failed`) {
+        await upstream.answer([A1, A2]).catch(() => undefined)
+        // The load may reject or stay pending after a durable failure; the
+        // law only needs the rows and coverage to stay out of SQLite.
+        await Promise.race([
+          preload.catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 200)),
+        ])
+        // Positive witness: SQLite really rejected the row write.
+        expect(writes?.rejected.count).toBeGreaterThan(0)
+        break
       } else {
         await upstream.answer(SESSION_1_ROWS[history])
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
-    if (history === `failed`) await preload.catch(() => undefined)
-    else await preload
+    if (history === `settled-empty` || history === `settled`) await preload
+    else await preload.catch(() => undefined)
     return upstream.calls.map(getLoadSubsetDemandKey)
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
@@ -681,9 +722,26 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
     expect(session1Keys.includes(keyD)).toBe(
       cell.history === `settled` ||
         cell.history === `settled-empty` ||
-        cell.history === `failed`,
+        cell.history === `failed` ||
+        cell.history === `durable-write-failed`,
     )
     await drain()
+    // Checkpoint witness: the persisted subset restore has published every
+    // durable row that matches D. Missing rows mean the checkpoint was not
+    // reached, not that the law was violated.
+    const restoredIds = new Set(
+      collection.toArray
+        .filter((row) => row.group === `a`)
+        .map((row) => row.id),
+    )
+    const missing = SESSION_1_ROWS[cell.history].filter(
+      (row) => !restoredIds.has(row.id),
+    )
+    if (missing.length > 0) {
+      throw new Error(
+        `checkpoint not reached: restore had not published ${missing.map((row) => row.id).join(`, `)}`,
+      )
+    }
     actual.restored = observe()
 
     if (cell.upstream === `answers-early`) {
@@ -733,7 +791,13 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
 // query 2 at 1400 and query 3 at 1600. Release keeps coverage. Checkpoints
 // sit 1 ms either side of 1000, 1400, and 1600 to reject a deadline measured
 // from the sync run, carried over from the released load, or dropped with
-// coverage on release.
+// coverage on release. Each query's rows are compared when it is ready, so a
+// load cannot settle on rows from a sibling demand's restore.
+//
+// Ablation: removing the release removes the "release clears coverage" and
+// "deadline carried over" distinctions; removing query 3 removes the second
+// independent deadline; removing the 1 ms offsets lets a displaced deadline
+// pass.
 // ===========================================================================
 
 type LifecycleDesign = {
@@ -751,9 +815,12 @@ const LIFECYCLE_LAW: LifecycleDesign = {
 const LIFECYCLE_CHECKPOINTS = [999, 1000, 1399, 1400, 1599, 1600] as const
 
 type LifecycleObservation = {
-  query2Ready: boolean
-  query3Ready: boolean
+  query2: ReadonlyArray<string> | `loading`
+  query3: ReadonlyArray<string> | `loading`
 }
+
+const QUERY2_ROWS = rowLabels([A1, A2])
+const QUERY3_ROWS = [`b1:v1`]
 
 function expectedLifecycle(
   design: LifecycleDesign = LIFECYCLE_LAW,
@@ -768,7 +835,10 @@ function expectedLifecycle(
   return Object.fromEntries(
     LIFECYCLE_CHECKPOINTS.map((t) => [
       t,
-      { query2Ready: t >= query2At, query3Ready: t >= query3At },
+      {
+        query2: t >= query2At ? QUERY2_ROWS : `loading`,
+        query3: t >= query3At ? QUERY3_ROWS : `loading`,
+      },
     ]),
   )
 }
@@ -813,9 +883,13 @@ async function runLifecycle(): Promise<{
       await drain()
     }
     const record = () => {
+      const rowsWhenReady = (query: typeof query2) =>
+        query?.status === `ready`
+          ? rowLabels(query.toArray as Array<Row>)
+          : (`loading` as const)
       observations[now] = {
-        query2Ready: query2?.status === `ready`,
-        query3Ready: query3?.status === `ready`,
+        query2: rowsWhenReady(query2),
+        query3: rowsWhenReady(query3),
       }
     }
     void query1.preload().catch(() => undefined)
@@ -862,9 +936,11 @@ async function runLifecycle(): Promise<{
 
 type ChildHistory = `covered by the same joined query` | `never requested`
 
+// `initialRenderReleased` is the network-first wait; `collectionReady` is the
+// live query's own readiness, which needs P's Collection to be ready.
 type JoinedObservation = {
-  released: boolean
-  isReady: boolean
+  initialRenderReleased: boolean
+  collectionReady: boolean
   rows: unknown
 }
 
@@ -877,8 +953,8 @@ function expectedJoined(
   const covered = history === `covered by the same joined query`
   const released = covered || optInPermitsAlone
   return {
-    released,
-    isReady: false,
+    initialRenderReleased: released,
+    collectionReady: false,
     rows: released ? (covered ? [JOINED_ROW] : []) : undefined,
   }
 }
@@ -1003,8 +1079,8 @@ async function runJoined(history: ChildHistory): Promise<JoinedObservation> {
     await vi.advanceTimersByTimeAsync(1)
     await drain()
     return {
-      released: initialRender.released,
-      isReady: observer.getSnapshot().isReady,
+      initialRenderReleased: initialRender.released,
+      collectionReady: observer.getSnapshot().isReady,
       rows: initialRender.released ? observer.getSnapshot().data : undefined,
     }
   }, [
@@ -1114,6 +1190,19 @@ describe(`persisted demand coverage oracle`, () => {
           LAW.isCovered(history) || history === `other-window`,
       },
       witness: { history: `other-window`, waitMs: 0, upstream: `pending` },
+    },
+    {
+      design: {
+        ...LAW,
+        name: `coverage written before the rows commit`,
+        isCovered: (history) =>
+          LAW.isCovered(history) || history === `durable-write-failed`,
+      },
+      witness: {
+        history: `durable-write-failed`,
+        waitMs: 0,
+        upstream: `pending`,
+      },
     },
     {
       design: { ...LAW, name: `wait ignored`, honorsWait: false },

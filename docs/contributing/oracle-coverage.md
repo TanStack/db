@@ -2477,25 +2477,28 @@ The persisted demand coverage oracle in
 owns the proposed on-demand law: an opted-in wrapper may settle a demand's
 load from SQLite only when that exact demand has persisted demand coverage,
 after the configured wait or an upstream failure. Its bounded enumeration
-crosses six session-1 histories (not requested, failed, overlapping filter,
-same filter with another window, settled empty, settled), two waits, and six
+crosses seven session-1 histories (not requested, failed, overlapping filter,
+same filter with another window, rejected durable row write, settled empty,
+settled), two waits, and six
 session-2 upstream schedules (pending, early and late failure, early and late
 answer, late empty answer), over the real wrapper and
 `SQLiteCorePersistenceAdapter` on `node:sqlite`. Session 1 creates coverage
 only through real loads, and a positive witness checks whether it sent the
 session-2 demand key. A pure trace model predicts status, `preload()` state,
 and exact rows at five checkpoints. A fixed lifecycle history checks that each
-load measures its own wait, that release aborts the upstream load, and that
-coverage survives release. A joined history checks that the network-first
+load measures its own wait and settles on its own restored rows, that
+release aborts the upstream load, and that coverage survives release. A joined history checks that the network-first
 wait releases an eager and an on-demand source only when the on-demand demand
-is covered. Model-level calibration shows that twelve wrong designs each
+is covered. Model-level calibration shows that thirteen wrong designs each
 differ from the law at a named case. The law is not implemented: on main every
 production case fails at setup because `initialRender` rejects
 `syncMode: 'on-demand'`. Without the opt-in, main matches every uncovered cell
 and diverges at the first checkpoint where the law applies for every covered
 cell except an early network answer. Production mutants, Electric and Query DB
 receiving witnesses, ordered windows, cursor pages, and later demand in
-session 2, a failure before the restore publishes, cache-claim rotation,
+session 2 (including a demand key that ignores offset or cursor but honors
+limit, which no history distinguishes), optimistic writes on a covered
+demand, a failure before the restore publishes, cache-claim rotation,
 truncate, must-refetch, schema reset, and framework Suspense remain open.
 
 ## Deferred contracts and evidence

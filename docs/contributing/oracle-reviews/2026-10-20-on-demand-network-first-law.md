@@ -75,8 +75,10 @@ hold:
 3. The configured wait has passed since the load started, or the demand's
    upstream load has failed.
 
-Until then, the load waits for the upstream load as it does today. A demand
-without coverage never settles from SQLite.
+All three must hold, in any order of arrival. An upstream failure that
+arrives before the persisted subset restore publishes settles the demand
+once the restore publishes. Until then, the load waits for the upstream load
+as it does today. A demand without coverage never settles from SQLite.
 
 After the load settles from SQLite, its upstream load continues as work that
 the wrapper owns. Rows from that load publish as ordinary source writes. A
@@ -191,6 +193,13 @@ the rows and writing the coverage must not leave coverage without rows.
   waits for the network.
 - **Uncovered demand while offline.** It waits indefinitely. The in-progress
   error-reporting work owns how that condition is reported.
+- **A failure after a settlement from SQLite.** The query stays ready and the
+  failure does not reach it, so the application cannot tell that a refresh
+  failed. The in-progress error-reporting work owns whether such a failure is
+  reported elsewhere; the guides must state the behavior.
+- **Optimistic writes while offline.** An optimistic mutation that touches a
+  covered demand's rows is outside this law. Optimistic overlay rules apply as
+  usual, and this proposal has no witness for them.
 - **Electric's own load.** Electric's upstream load may stay pending after the
   wrapper settles from SQLite. Its release and abort ownership need a receiving
   test.
