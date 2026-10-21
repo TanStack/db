@@ -648,7 +648,14 @@ export class CollectionConfigBuilder<
   /** A source's truncate replay loaded these demands again. */
   settleReplayedRequests(sourceId: string, planIds: Iterable<string>): void {
     this.settleRootLoad(sourceId)
+    this.clearFailedRequest(`replay:${sourceId}`)
     for (const planId of planIds) this.clearFailedRequest(planId)
+  }
+
+  /** A source's truncate replay could not load the query's data again. */
+  failReplay(sourceId: string, error: Error): void {
+    if (this.reportFailedRequest(`replay:${sourceId}`, error)) return
+    this.failQuery(error.message, error)
   }
 
   // After the first ready, a failed load is a request error on this query's

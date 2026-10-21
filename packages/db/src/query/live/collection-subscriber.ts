@@ -444,6 +444,15 @@ export class CollectionSubscriber<
           syncRunGeneration,
         )
       },
+      // The query keeps its last snapshot, which no longer updates: a
+      // request error, or a failed first load before readiness.
+      fail: (error) => {
+        if (
+          syncRunGeneration ===
+          this.collectionConfigBuilder.getSyncRunGeneration()
+        )
+          this.collectionConfigBuilder.failReplay(this.sourceId, error)
+      },
     }
   }
 

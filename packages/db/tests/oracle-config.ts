@@ -30,6 +30,7 @@ const staticOracleProperties = [
   `sqlite-persistence.optimistic-history`,
   `trailbase.lifecycle`,
   `source-health.history`,
+  `source-health.on-demand`,
   `source-health.request-errors`,
   `trailbase.page-event`,
   `electric.bound-descriptor-history`,

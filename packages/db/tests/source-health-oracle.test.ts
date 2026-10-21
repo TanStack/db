@@ -127,13 +127,16 @@
  *
  * ## Limits
  *
- * The generated Collections are eager, so a live query cannot become ready
- * while a Collection is still loading. The on-demand case, where a
- * Collection fails its first load after the live query is ready, is not
- * generated; a focused lane enumerates it. Per-row child
- * Collections are not in the tree; an include's node shows its source. Pooled histories do not restart: a pooled view ends for good when
- * its Collection is cleaned up. The ordering check reads the observed query
- * only, not its Collections.
+ * The main grammar's Collections are eager, so a live query cannot become
+ * ready while a Collection is still loading; a focused lane enumerates an
+ * on-demand Collection that fails its first load after the query is ready.
+ * The on-demand demand grammar covers a root window only: lazy join demand
+ * keeps its focused lanes, and it settles all pending loads at once (the
+ * overlapping-load lane owns their order). Per-row child Collections are not
+ * in the tree; an include's node shows its source. Pooled histories do not
+ * restart or clean up: a pooled view ends for good when its Collection is
+ * cleaned up. The ordering check reads the observed query only, not its
+ * Collections. Grammar exclusions are listed with the history grammar.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
@@ -3096,6 +3099,318 @@ describe(`on-demand first load after query readiness`, () => {
       await eager.cleanup()
     }
   })
+})
+
+// ---------------------------------------------------------------------------
+// On-demand demand grammar
+// ---------------------------------------------------------------------------
+
+/**
+ * A live query over an on-demand Collection loads only the window it shows.
+ * The law, from the request-error rules above: a load that fails before the
+ * query's initial-query readiness fails the query's first load; one that
+ * fails after it is a request error on the query's own node, and the source
+ * stays healthy. A request error clears only when a load that started after
+ * the failure succeeds; a source's reload loads the window again and clears
+ * it when that replay succeeds. The source's own problems after readiness
+ * are error tree detail and never change the query's status; its crash
+ * crashes the query.
+ *
+ * The provider has rows 1 to 99. It answers a request without a limit with
+ * every row, and a limited request with the rows up to the end of the
+ * window. The query shows two rows ordered by id. Steps: `window` moves the
+ * window two rows on; `settle-ok` settles every pending load, and any load
+ * the query requests after it, until none is pending; `settle-fail` rejects
+ * every pending load at once (the overlapping-load lane owns the order of
+ * two loads); `reload` reloads the source; `report`, `healthy`, and `fail`
+ * are the source adapter's calls after readiness; `crash` crashes the
+ * source.
+ *
+ * Which loads a window needs is the loader's choice, so the model does not
+ * predict requests: the driver reports each load the query requests, as the
+ * adapter sees it. The model keeps the query's gate, its request error,
+ * whether a load was requested after that error, the pending loads, the
+ * window, and the source's node. The comparison checks, after every step,
+ * the query's status, its own error, the source's node, and, when no load is
+ * pending and no error shows, the rows in the window.
+ */
+type DemandStep =
+  | `window`
+  | `settle-ok`
+  | `settle-fail`
+  | `reload`
+  | `report`
+  | `healthy`
+  | `fail`
+  | `crash`
+
+type DemandModel = {
+  gate: `loading` | `ready` | `error` | `crashed`
+  requestError: string | null
+  // A load started after the shown request error.
+  laterLoad: boolean
+  pending: number
+  offset: number
+  // The window whose load last succeeded; the query shows it.
+  shown: number
+  source: { failure: string | null; stopped: string | null; crashed: boolean }
+  serial: number
+}
+
+// The query requested `count` loads at the adapter boundary. A window move
+// that requests none is served from rows the query already loaded.
+function requestedLoads(
+  model: DemandModel,
+  count: number,
+  step?: DemandStep,
+): void {
+  if (count === 0) {
+    if (step === `window` && model.pending === 0) model.shown = model.offset
+    return
+  }
+  model.pending += count
+  if (model.requestError) model.laterLoad = true
+}
+
+function applyDemandModel(model: DemandModel, step: DemandStep): void {
+  if (model.gate === `crashed`) return
+  switch (step) {
+    case `window`:
+      if (model.gate === `ready`) model.offset += 2
+      return
+    case `settle-ok`:
+      if (model.pending === 0) return
+      model.pending = 0
+      if (model.gate === `loading`) model.gate = `ready`
+      if (model.requestError && model.laterLoad) model.requestError = null
+      model.shown = model.offset
+      return
+    case `settle-fail`:
+      if (model.pending === 0) return
+      model.pending = 0
+      if (model.gate === `loading`) {
+        model.gate = `error`
+        return
+      }
+      model.requestError = `root load ${++model.serial} failed`
+      model.laterLoad = false
+      // A failed window move keeps the last good window; the app retries
+      // with setWindow().
+      model.offset = model.shown
+      return
+    case `reload`:
+      // The new run is ready inside sync(), so its first commit at once
+      // clears the node; the replay loads the window again.
+      if (model.source.crashed) return
+      model.source.failure = null
+      model.source.stopped = null
+      return
+    case `report`:
+      if (model.source.stopped) return
+      model.source.failure = `source problem`
+      return
+    case `healthy`:
+      if (model.source.stopped) return
+      model.source.failure = null
+      return
+    case `fail`:
+      if (model.source.stopped) return
+      model.source.failure = null
+      model.source.stopped = `source gave up`
+      return
+    case `crash`:
+      model.source.crashed = true
+      model.gate = `crashed`
+      return
+  }
+}
+
+async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
+  const model: DemandModel = {
+    gate: `loading`,
+    requestError: null,
+    laterLoad: false,
+    pending: 0,
+    offset: 0,
+    shown: 0,
+    source: { failure: null, stopped: null, crashed: false },
+    serial: 0,
+  }
+  const loads: Array<ReturnType<typeof createDeferred<void>>> = []
+  let params!: SyncParams
+  const source = createCollection<Row, number>({
+    id: `health-demand-${Math.random().toString(36).slice(2)}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    gcTime: 0,
+    sync: {
+      sync: (next) => {
+        params = next
+        // Rows this sync run has served; a reload's run serves them again.
+        const served = new Set<number>()
+        next.markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const load = createDeferred<void>()
+            loads.push(load)
+            const end = options.limit === undefined ? 99 : model.offset + 2
+            return load.promise.then(() => {
+              next.begin()
+              for (let id = 1; id <= end; id++) {
+                if (served.has(id)) continue
+                served.add(id)
+                next.write({ type: `insert`, value: { id, parentId: id } })
+              }
+              next.commit()
+            })
+          },
+        }
+      },
+    },
+  })
+  void params
+  const query = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.id)
+      .limit(2),
+  )
+  const consoleError = console.error
+  console.error = () => {}
+  try {
+    void query.preload().catch(() => undefined)
+    await flushPromises()
+    requestedLoads(model, loads.length)
+    for (const [index, step] of steps.entries()) {
+      const label = `step ${index} ${step}`
+      applyDemandModel(model, step)
+      let requested = 0
+      const before = loads.length
+      if (step === `window`) {
+        if (query.status === `ready`)
+          void Promise.resolve(
+            query.utils.setWindow({ offset: model.offset, limit: 2 }),
+          ).catch(() => undefined)
+      } else if (step === `settle-ok`) {
+        // Ordered loading may follow a load with more requests; settle until
+        // the window asks for nothing more.
+        for (let round = 0; round < 5 && loads.length > 0; round++) {
+          for (const load of loads.splice(0)) load.resolve()
+          await flushPromises()
+        }
+        requested = 0
+      } else if (step === `settle-fail`) {
+        for (const load of loads.splice(0))
+          load.reject(new Error(`root load ${model.serial} failed`))
+      } else if (step === `reload`) {
+        void source.reload().catch(() => undefined)
+      } else if (step === `crash`) {
+        source._lifecycle.crash(new Error(`source crashed`))
+      } else {
+        try {
+          const current = source._lifecycle
+          void current
+          if (step === `report`) params.reportError(new Error(`source problem`))
+          else if (step === `healthy`) params.reportHealthy()
+          else params.fail(new Error(`source gave up`))
+        } catch {
+          // After fail(), the adapter's calls throw; the model ignores them.
+        }
+      }
+      await flushPromises()
+      requested += Math.max(
+        0,
+        loads.length -
+          (step === `settle-fail` || step === `settle-ok` ? 0 : before),
+      )
+      requestedLoads(model, requested, step)
+
+      expect(query.status, `${label}: query status`).toBe(model.gate)
+      if (model.gate === `ready`) {
+        expect(
+          query.errors.error?.message ?? null,
+          `${label}: request error`,
+        ).toBe(model.requestError)
+      }
+      const sourceNode = query.errors.sources[0]!
+      if (!model.source.crashed) {
+        expect(
+          sourceNode.failureReason?.message ?? null,
+          `${label}: source failureReason`,
+        ).toBe(model.source.stopped ? null : model.source.failure)
+        expect(
+          sourceNode.error?.message ?? null,
+          `${label}: source error`,
+        ).toBe(model.source.stopped)
+      }
+      if (
+        model.gate === `ready` &&
+        model.pending === 0 &&
+        model.requestError === null
+      ) {
+        expect(
+          query.toArray.map((row) => row.id),
+          `${label}: window rows`,
+        ).toEqual([model.shown + 1, model.shown + 2])
+      }
+    }
+  } finally {
+    console.error = consoleError
+    for (const load of loads.splice(0)) load.resolve()
+    await query.cleanup()
+    await source.cleanup({ dependents: true })
+  }
+}
+
+describe(`on-demand demand grammar`, () => {
+  // Named histories, one per distinction the law draws.
+  const named: Record<string, ReadonlyArray<DemandStep>> = {
+    'a failed load after readiness is a request error, and a later load clears it':
+      [`settle-ok`, `window`, `settle-fail`, `window`, `settle-ok`],
+    'a failed first load fails the query': [`settle-fail`],
+    "a failed source reload's replay is a request error": [
+      `settle-ok`,
+      `window`,
+      `reload`,
+      `settle-fail`,
+    ],
+    "a successful replay clears the replay's request error": [
+      `settle-ok`,
+      `reload`,
+      `settle-fail`,
+      `reload`,
+      `settle-ok`,
+    ],
+    "the source's own problems stay on its node": [
+      `settle-ok`,
+      `report`,
+      `window`,
+      `fail`,
+      `settle-ok`,
+      `crash`,
+    ],
+  }
+  for (const [name, steps] of Object.entries(named))
+    it(name, () => runDemandHistory(steps))
+
+  const step = fc.constantFrom<DemandStep>(
+    `window`,
+    `settle-ok`,
+    `settle-fail`,
+    `reload`,
+    `report`,
+    `healthy`,
+    `fail`,
+    `crash`,
+  )
+  fcTest.prop(
+    [fc.array(step, { maxLength: 10 })],
+    oraclePropertyOptions(60, `source-health.on-demand`),
+  )(
+    `generated demand histories refine the model`,
+    (steps) => withDeadline(runDemandHistory(steps)),
+    120_000,
+  )
 })
 
 // ---------------------------------------------------------------------------

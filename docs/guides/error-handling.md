@@ -172,7 +172,8 @@ availability does not mean the remote request succeeded. Background coordinator
 retry, where supported, does not change the failed caller's outcome.
 
 When a must-refetch truncate cannot reload every active subset, a subscription
-keeps its last successful snapshot and reports the subset error. It discards
+keeps its last successful snapshot and reports the subset error. A live query
+shows it as an `error` on its own node until a later replay succeeds. It discards
 the incomplete replay batch and keeps later source changes private because they
 cannot prove a complete replacement. The next truncate retries every active
 subset. Overlapping truncates form one atomic replay: all in-flight requests

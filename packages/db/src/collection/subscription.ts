@@ -95,6 +95,9 @@ type CollectionSubscriptionOptions = {
 type TruncateReplayPublicationControl = Readonly<{
   start: () => void
   succeed: () => void
+  // The replay could not load every active demand again; a live query
+  // reports it on its node.
+  fail?: (error: Error) => void
 }>
 
 type TruncatePublicationState = {
@@ -671,6 +674,7 @@ export class CollectionSubscription
   ): void {
     if (this.truncateReplayState !== replayState) return
     replayState.completion.reject(failure)
+    this.options.truncateReplayPublication?.fail?.(failure)
     // Delegated publication already delivered its rows. Only a private buffer
     // returns the caller's pagination position to the public snapshot; the
     // private rows and their sent-key tracking stay together for a retry.

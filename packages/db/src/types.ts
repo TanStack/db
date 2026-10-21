@@ -1265,6 +1265,8 @@ export interface SubscribeChangesOptions<
   truncateReplayPublication?: {
     readonly start: () => void
     readonly succeed: () => void
+    /** The replay could not load every active demand again. */
+    readonly fail?: (error: Error) => void
   }
 }
 
