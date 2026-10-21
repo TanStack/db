@@ -11779,6 +11779,47 @@ describe(`reload settles on the new run's first result`, () => {
       }
     },
   )
+
+  // A failed reload keeps the rows. A direct write after it writes the
+  // Query cache from the rows the Collection holds, so the cache keeps row 1.
+  it(`a direct write after a failed reload keeps the kept rows in the Query cache`, async () => {
+    const answers: Array<`ok` | `fail`> = [`ok`, `fail`]
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    const queryKey = [`reload-then-write`]
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `reload-then-write`,
+        queryKey,
+        queryClient: client,
+        getKey: (row: { id: number }) => row.id,
+        queryFn: (): Promise<Array<{ id: number }>> =>
+          answers.shift() === `fail`
+            ? Promise.reject(new Error(`backend down`))
+            : Promise.resolve([{ id: 1 }]),
+      }),
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      await collection.preload()
+      await collection.reload().catch(() => undefined)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.errors.error?.message).toBe(`backend down`)
+      collection.utils.writeInsert({ id: 3 })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(collection.toArray.map((row) => row.id).sort()).toEqual([1, 3])
+      expect(
+        (client.getQueryData(queryKey) as Array<{ id: number }>)
+          .map((row) => row.id)
+          .sort(),
+      ).toEqual([1, 3])
+    } finally {
+      consoleError.mockRestore()
+      await collection.cleanup()
+      client.clear()
+    }
+  })
 })
 
 /**

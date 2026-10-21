@@ -122,8 +122,8 @@ export class CollectionSubscriber<
         // Lazy demand owns its fatal-error path. For eager sources, one
         // successful page does not finish initial ordered refinement.
         !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
-          this.collectionConfigBuilder.liveQueryCollection?.status ===
-            `loading`,
+          this.collectionConfigBuilder.liveQueryCollection?._lifecycle
+            .inFirstLoad === true,
       )
       if (!this.collectionConfigBuilder.isLazySource(this.sourceId)) {
         this.collectionConfigBuilder.failRootLoad(this.sourceId, error)
@@ -208,7 +208,8 @@ export class CollectionSubscriber<
       // Preserve unrelated graph/programming errors as throws.
       if (!Object.is(subscription.lastError, error)) throw error
       const isInitialSync =
-        this.collectionConfigBuilder.liveQueryCollection?.status === `loading`
+        this.collectionConfigBuilder.liveQueryCollection?._lifecycle
+          .inFirstLoad === true
       const generation = this.collectionConfigBuilder.beginDemand(plan.id)
       this.collectionConfigBuilder.failDemand(plan.id, generation, error)
       if (isInitialSync) throw error

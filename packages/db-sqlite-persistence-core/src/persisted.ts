@@ -6332,6 +6332,12 @@ function createWrappedSyncConfig<
           fail: (error: unknown) => {
             if (active()) wrappedParams.fail(error)
           },
+          reportError: (error: unknown) => {
+            if (active()) wrappedParams.reportError(error)
+          },
+          reportHealthy: () => {
+            if (active()) wrappedParams.reportHealthy()
+          },
           begin: () => {
             if (active()) wrappedParams.begin()
           },

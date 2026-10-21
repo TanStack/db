@@ -216,6 +216,11 @@ export class CollectionSyncManager<
     if (status === `crashed`) {
       return Promise.reject(new CollectionReloadCrashedError(this.id))
     }
+    try {
+      this.lifecycle.assertCanStartSync()
+    } catch (error) {
+      return Promise.reject(error)
+    }
     if (this.lifecycle.reloading) return this.lifecycle.beginReload()
     if (status === `idle` || status === `cleaned-up`) return this.preload()
     if (this.syncEntryActive) {
@@ -378,7 +383,10 @@ export class CollectionSyncManager<
             this.lifecycle.markReady()
           },
           fail: (error: unknown) => {
-            if (isCurrentSync()) this.lifecycle.fail(error)
+            if (!isCurrentSync()) return
+            this.lifecycle.fail(error)
+            // The reload ended without a commit, so its rows stay the baseline.
+            this.state.reloadTruncatePending = false
           },
           reportError: (error: unknown) => {
             if (isCurrentSync()) this.lifecycle.reportError(error)

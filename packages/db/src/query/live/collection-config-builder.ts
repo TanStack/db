@@ -498,7 +498,6 @@ export class CollectionConfigBuilder<
     }))
   }
 
-
   settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
@@ -599,7 +598,7 @@ export class CollectionConfigBuilder<
     if (
       !holdPublication &&
       !this.activeWindowOperation &&
-      this.liveQueryCollection?.status !== `loading` &&
+      this.liveQueryCollection?._lifecycle.inFirstLoad !== true &&
       this.pendingOrderedLoads.size === 0
     ) {
       return
@@ -740,7 +739,7 @@ export class CollectionConfigBuilder<
               // load that threw, reported its error.
               if (
                 isCurrentSyncRun() &&
-                this.liveQueryCollection?.status !== `error`
+                this.liveQueryCollection?._lifecycle.stoppedThisRun !== true
               ) {
                 this.crashQuery(
                   devBuild() && process.env.NODE_ENV !== `production`
@@ -1032,13 +1031,9 @@ export class CollectionConfigBuilder<
     // and pays for no facade state.
     const facadeCompilations = this.bucketFacadesCache
     const bucketFacades = facadeCompilations
-      ? new BucketFacadeAdapter(
-          this.id,
-          facadeCompilations,
-          (count) => {
-            syncState.messagesCount += count
-          },
-        )
+      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
+          syncState.messagesCount += count
+        })
       : undefined
     if (bucketFacades) {
       syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())

@@ -316,6 +316,17 @@ export class CollectionLifecycleManager<
     return this.adapterStopped
   }
 
+  /**
+   * Whether the current sync run is in its first load: `loading`, or a reload
+   * of a failed first load that is not ready yet. A failure now fails that
+   * first load.
+   */
+  public get inFirstLoad(): boolean {
+    return (
+      this.status === `loading` || (this.reloading && this.status === `error`)
+    )
+  }
+
   /** Whether a reload's new sync run is in flight. */
   public get reloading(): boolean {
     return this.reloadRun !== undefined

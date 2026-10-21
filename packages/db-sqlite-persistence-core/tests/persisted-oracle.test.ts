@@ -23796,6 +23796,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             tx.mutations.some(({ key }) => key === `late-old`),
           ),
         ).toBe(false)
+        // The retired session's reports have no authority over the node:
+        // its error does not show, and its recovery does not clear the live
+        // session's problem.
+        oldSource.reportError(new Error(`retired session`))
+        await flushAsyncWork()
+        expect(collection.errors.failureReason).toBeNull()
+        sourceSessions[1]!.reportError(new Error(`live session`))
+        await flushAsyncWork()
+        oldSource.reportHealthy()
+        await flushAsyncWork()
+        expect(collection.errors.failureReason?.message).toBe(`live session`)
       } finally {
         releaseOldCallback.resolve()
         await Promise.allSettled([lateCallback])

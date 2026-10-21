@@ -1277,6 +1277,55 @@ describe(`reload invariant`, () => {
     await source.collection.cleanup()
   })
 
+  // Cleanup start closes restart admission (ARCHITECTURE law 14), and a
+  // reload starts a sync run. While adapter cleanup is pending, a reload
+  // rejects as a start would, and no sync run starts under the cleanup.
+  it(`rejects a reload while adapter cleanup is pending`, async () => {
+    let runs = 0
+    const adapterCleanup = createDeferred<void>()
+    const collection = createCollection<Row, number>({
+      id: `health-reload-during-cleanup-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          runs++
+          params.markReady()
+          return () => adapterCleanup.promise
+        },
+      },
+    })
+    await collection.preload()
+    const cleaned = collection.cleanup()
+    await expect(collection.reload()).rejects.toThrow(/during cleanup/)
+    expect(runs).toBe(1)
+    adapterCleanup.resolve()
+    await cleaned
+    expect(collection.status).toBe(`cleaned-up`)
+    expect(runs).toBe(1)
+  })
+
+  // A reload whose new run fails keeps the rows, so they stay the baseline
+  // that a diffing adapter, such as query-db, reads for its next write.
+  it(`keeps the rows as the baseline after the reload's new run fails`, async () => {
+    const source = createSource(`A`)
+    source.collection.startSyncImmediate()
+    source.params.begin()
+    source.params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+    source.params.commit()
+    source.params.markReady()
+    const reload = source.collection.reload().catch(() => undefined)
+    source.params.fail(new Error(`reload failed`))
+    await reload
+    const baseline = [
+      ...source.params.collection._state.acceptedSyncedEntries(),
+    ]
+    expect(baseline.map(([key]) => key)).toEqual([1])
+    expect([...source.collection.keys()]).toEqual([1])
+    expect(source.collection.errors.error?.message).toBe(`reload failed`)
+    await source.collection.cleanup()
+  })
+
   // The oracle's driver writes one row key, so it cannot see rows that a
   // reload failed to replace. This witness writes a new key in the new run.
   it(`replaces the rows at the commit after a canceled first commit`, async () => {
@@ -1522,6 +1571,85 @@ describe(`a query's own failed first load`, () => {
       await children.cleanup()
     }
   })
+
+  // The query's own reload starts a new run while the status still shows the
+  // failed first load. That run is in its first load too, so its outcome
+  // decides the reload: a load that fails again fails it (status `error`,
+  // the new cause), and a graph that throws crashes the query.
+  it.each([`ok`, `load-fails`, `graph-throws`] as const)(
+    `settles the query's reload with its new run: %s`,
+    async (outcome) => {
+      const answers: Array<`fail` | `ok`> = [
+        `fail`,
+        outcome === `load-fails` ? `fail` : `ok`,
+      ]
+      const source = createCollection<Row, number>({
+        id: `health-own-reload-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              loadSubset: () => {
+                const answer = answers.shift() ?? `ok`
+                if (answer === `fail`)
+                  return Promise.reject(
+                    new Error(`load ${2 - answers.length} failed`),
+                  )
+                // The rows arrive after the run's sync entry, so a graph
+                // that throws on them does so in a later graph run.
+                return Promise.resolve().then(() => {
+                  params.begin()
+                  params.write({
+                    type: `insert`,
+                    value: { id: 1, parentId: 1 },
+                  })
+                  params.commit()
+                })
+              },
+            }
+          },
+        },
+      })
+      const query = createLiveQueryCollection((q) =>
+        q.from({ row: source }).fn.select(({ row }) => {
+          if (outcome === `graph-throws`) throw new Error(`select threw`)
+          return row
+        }),
+      )
+      const consoleError = console.error
+      console.error = () => {}
+      try {
+        await query.preload().catch(() => undefined)
+        expect(query.status).toBe(`error`)
+        const settled = await Promise.race([
+          query.reload().then(
+            () => `resolved`,
+            () => `rejected`,
+          ),
+          new Promise((resolve) => setTimeout(() => resolve(`pending`), 200)),
+        ])
+        expect(settled).toBe(outcome === `ok` ? `resolved` : `rejected`)
+        expect(query.status).toBe(
+          outcome === `ok`
+            ? `ready`
+            : outcome === `load-fails`
+              ? `error`
+              : `crashed`,
+        )
+        expect(query.errors.reloading).toBe(false)
+        if (outcome === `ok`) expect(query.size).toBe(1)
+        if (outcome === `load-fails`)
+          expect(query.errors.error?.message).toContain(`load 2 failed`)
+      } finally {
+        console.error = consoleError
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 })
 
 // An ordered window that filters on a lazily joined source waits for its join
