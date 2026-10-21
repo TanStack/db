@@ -302,21 +302,14 @@ export class OrderedSourceLoader {
       return this.pending
     }
     this.blockedLoadMore = undefined
+    // Ordering debt never leaves a finite continuation staged: an
+    // invalidation or failure clears it, and a finite request that settles
+    // after its own delivery invalidated ordering is stale and stages nothing.
     if (this.stagedContinuation) {
-      // A synchronous finite request can deliver an order-changing mutation.
-      // Its continuation is staged after that mutation invalidates ordering,
-      // so authoritative repair must supersede the stale finite chain.
-      if (
-        this.needsOrderingRepair &&
-        this.stagedContinuation.role === `finite`
-      ) {
-        this.stagedContinuation = undefined
-      } else {
-        this.consumeStagedContinuation(windowOperationGeneration)
-        // The consumed continuation can synchronously dispose this loader.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (!this.active || this.pending) return this.pending
-      }
+      this.consumeStagedContinuation(windowOperationGeneration)
+      // The consumed continuation can synchronously dispose this loader.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!this.active || this.pending) return this.pending
     }
     const mayRetryFailure =
       this.failedRequest === undefined ||
@@ -343,10 +336,9 @@ export class OrderedSourceLoader {
       if (this.failedRequest) {
         this.failedRequest.windowOperationGeneration = windowOperationGeneration
       }
+      // Adapter cleanup can synchronously tear down this loader; every later
+      // step checks that it is still active.
       this.releaseOwned(this.failedAcquisitions, () => true)
-      // Adapter cleanup can synchronously tear down this loader.
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (!this.active) return
     }
     if (
       this.work.kind !== `idle` &&
@@ -443,13 +435,7 @@ export class OrderedSourceLoader {
     this.pending = undefined
     this.moveWork({ kind: `full-source`, status: `held` }, [`idle`])
     this.requestAndObserve(
-      (onLoadSubsetResult) => {
-        this.subscription.requestSnapshot({
-          ...(this.needsOrderingRepair ? { refetch: true } : {}),
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult,
-        })
-      },
+      (tracking) => this.subscription.requestSnapshot(tracking),
       `full-source`,
       windowOperationGeneration,
     )
@@ -467,16 +453,13 @@ export class OrderedSourceLoader {
     )
     this.ownPrefixCount = this.info.offset + this.info.limit
     this.requestAndObserve(
-      (onLoadSubsetResult) => {
+      (tracking) =>
         this.subscription.requestSnapshot({
-          refetch: true,
+          ...tracking,
           orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
           limit: this.info.offset + this.info.limit,
           boundedPrefix: this.readsBoundedPrefix,
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult,
-        })
-      },
+        }),
       `ordered-repair`,
       windowOperationGeneration,
       true,
@@ -500,16 +483,13 @@ export class OrderedSourceLoader {
       return
     }
     this.requestAndObserve(
-      (onLoadSubsetResult) => {
+      (tracking) =>
         this.subscription.requestSnapshot({
-          ...(continuesOrderedPrefixRepair ? { refetch: true } : {}),
+          ...tracking,
           orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
           limit: count,
           boundedPrefix: this.readsBoundedPrefix,
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult,
-        })
-      },
+        }),
       `ordered`,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
@@ -721,7 +701,6 @@ export class OrderedSourceLoader {
       // running. Start its replacement before the current participant settles
       // so Collection and Effect publication remain behind one continuous gate.
       this.moveWork({ kind: `idle` }, [`repair`])
-      if (!this.active) return
       // A failure during the chain raised the debt to a full-source read.
       if (this.debt === `full`) {
         this.loadFullSource(windowOperationGeneration)
@@ -810,332 +789,21 @@ export class OrderedSourceLoader {
     this.lastPage = { count, boundary }
     this.ownPrefixCount = startsFromSourcePrefix ? count : undefined
     this.requestAndObserve(
-      (onLoadSubsetResult) => {
+      (tracking) =>
         this.subscription.requestLimitedSnapshot({
-          ...(continuesOrderedPrefixRepair ? { refetch: true } : {}),
+          ...tracking,
           orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
           limit: count,
           minValues,
           // Local rows seen before the first provider request prove neither
           // a cursor nor a remote offset. Start the first acquisition at zero.
           offset: startsFromSourcePrefix ? 0 : this.countAcquiredRows(),
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult,
-        })
-      },
+        }),
       `ordered`,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
       count,
     )
-  }
-
-  private observe(
-    result: LoadSubsetRequestResult,
-    releaseAcquisition: ReleaseLoadSubset,
-    kind: OrderedRequestKind,
-    windowOperationGeneration?: number,
-    options?: LoadSubsetOptions,
-    continuesOrderedPrefixRepair = false,
-    requestGraphInputRevision?: number,
-    requestedCount?: number,
-    issuedOrderingGeneration = this.orderingInvalidationGeneration,
-  ): Promise<void> | undefined {
-    const isFullSource = kind === `full-source`
-    const isOrderedRepair = kind === `ordered-repair`
-    const isAuthoritativeRequest =
-      isFullSource || isOrderedRepair || continuesOrderedPrefixRepair
-    const retryRepair =
-      isAuthoritativeRequest &&
-      this.hasSettledSourceRequest &&
-      this.needsOrderingRepair &&
-      windowOperationGeneration === undefined
-    // A repair request belongs to the chain it is issued in. One that settles
-    // after its replacement started is outside the replacement's chain.
-    const chain =
-      (isOrderedRepair || continuesOrderedPrefixRepair) &&
-      this.work.kind === `repair`
-        ? this.work.epoch
-        : undefined
-    const stamp: RequestStamp = {
-      orderedLoadGeneration: this.orderedLoadGeneration,
-      authorityGeneration: this.authorityGeneration,
-      orderingInvalidationGeneration: issuedOrderingGeneration,
-      role: isFullSource
-        ? `full-source`
-        : isAuthoritativeRequest
-          ? `repair`
-          : `finite`,
-    }
-    const settlesAsync = result instanceof Promise
-    const canSettleSynchronously =
-      !settlesAsync &&
-      windowOperationGeneration === undefined &&
-      // A full-source request without ordering-repair debt can finish in the
-      // current graph turn, including an initial fallback. A bounded prefix
-      // repair reads only installed rows and can also finish in that turn.
-      // Other repairs keep asynchronous settlement.
-      (!isAuthoritativeRequest ||
-        (isFullSource ? !this.needsOrderingRepair : this.readsBoundedPrefix)) &&
-      requestGraphInputRevision !== undefined
-    let synchronousCompletionFailure: { error: unknown } | undefined
-    const continuation = (
-      continuationKind: OrderedContinuation[`kind`],
-    ): OrderedContinuation => ({
-      ...stamp,
-      kind: continuationKind,
-      windowOperationGeneration,
-      continuesOrderedPrefixRepair,
-    })
-    const continueOrStage = (
-      next: OrderedContinuation,
-      deferContinuation: boolean,
-    ): void => {
-      if (deferContinuation) {
-        this.stagedContinuation = next
-      } else {
-        this.runContinuation(next)
-      }
-    }
-    const complete = (
-      trackedRequest?: Promise<void>,
-      deferContinuation = false,
-    ): void => {
-      if (trackedRequest && this.pending === trackedRequest) {
-        this.pending = undefined
-      }
-      if (!this.active) return
-      // A callback that fails after a successful acquisition does not undo
-      // it. Finish its boundary and continuation, then report the first error.
-      runAllCallbacks([
-        () => {
-          if (!isFullSource) {
-            // A replay can replace the acquisition lease while this older
-            // transport finishes. Retire its logical owner only outside the
-            // replay barrier.
-            const prefixCount =
-              options?.orderBy && !options.cursor ? options.limit : undefined
-            this.settledFiniteAcquisitions.set(releaseAcquisition, {
-              count: prefixCount,
-              chain,
-            })
-            // Full-source coverage also retires a repair request that
-            // settles after it.
-            this.retireSettledFiniteAcquisitions()
-            // A prefix issued before an ordering invalidation proves no
-            // current coverage, so it cannot supersede the repair's prefix.
-            if (
-              !continuesOrderedPrefixRepair &&
-              this.standing(stamp) === `current` &&
-              prefixCount !== undefined
-            ) {
-              this.retireSettledFiniteAcquisitions({
-                release: releaseAcquisition,
-                count: prefixCount,
-              })
-            }
-            // A request issued before an ordering invalidation that settles
-            // after the repair finished is already superseded by that repair.
-            if (
-              this.standing(stamp) === `stale` &&
-              this.work.kind === `idle` &&
-              !this.needsOrderingRepair &&
-              this.settledFiniteAcquisitions.delete(releaseAcquisition)
-            ) {
-              this.retiringSupersededAcquisitions = true
-              try {
-                releaseAcquisition()
-              } catch (error) {
-                reportUncaught(error)
-              } finally {
-                this.retiringSupersededAcquisitions = false
-              }
-            }
-          }
-        },
-        () => {
-          if (this.standing(stamp) !== `current`) return
-          // A finite request may finish behind an authoritative repair. It cannot
-          // clear that repair's failure or resume finite refinement around it.
-          if (
-            !isAuthoritativeRequest &&
-            (this.failedRequest || this.work.kind !== `idle`)
-          )
-            return
-          this.failedRequest = undefined
-          if (kind !== `boundary`) {
-            this.hasSettledSourceRequest = true
-            // Source delivery can invalidate the in-flight prefix marker.
-            if (options?.orderBy && !options.cursor) {
-              this.lastPrefixCount = options.limit
-            }
-            if (!isFullSource && options?.orderBy) {
-              try {
-                this.settledSourceBoundary =
-                  this.subscription
-                    .readOrderedSnapshot({
-                      ...options,
-                      // Provider limits include optimistic headroom. Those
-                      // extra local ranks do not prove a source boundary.
-                      limit: requestedCount ?? options.limit,
-                    })
-                    .at(-1)?.value ?? this.settledSourceBoundary
-              } catch (error) {
-                if (canSettleSynchronously) {
-                  synchronousCompletionFailure = { error }
-                  throw error
-                }
-                fail(error)
-              }
-            }
-          }
-          if (
-            (isOrderedRepair || continuesOrderedPrefixRepair) &&
-            (this.work.kind !== `repair` || this.repairNeedsReplacement())
-          ) {
-            // The settled request may apply its rows, but a later mutation has
-            // already invalidated this chain. Replace it before issuing stale
-            // tie or refill work.
-            this.finishOrderedPrefixRepair(windowOperationGeneration)
-            return
-          }
-          if (isFullSource) {
-            this.cancelRepairRetry()
-            this.repairRetries = 0
-            this.moveWork(
-              { kind: `full-source`, status: `complete` },
-              [`held`, `complete`],
-              `none`,
-            )
-            // A throwing release in one pass must not skip the other.
-            runAllCallbacks([
-              () => this.retireSettledFiniteAcquisitions(),
-              () => this.retireSupersededFailures(),
-            ])
-          }
-          if (isOrderedRepair || kind === `ordered`) {
-            continueOrStage(continuation(`boundary`), deferContinuation)
-            return
-          }
-          // A boundary request may add tied rows without filling the query's
-          // window. Resume forward loading once it settles.
-          continueOrStage(continuation(`more`), deferContinuation)
-        },
-      ])
-    }
-    const fail = (error: unknown, trackedRequest?: Promise<void>) => {
-      this.settledFiniteAcquisitions.delete(releaseAcquisition)
-      if (trackedRequest && this.pending === trackedRequest) {
-        this.pending = undefined
-      }
-      // Dispose resets the cursor, so a disposed loader's requests are dead.
-      // A replay already reacquired this full-source read's demand. Its late
-      // transport failure leaves that coverage, and its lease, in place.
-      if (isFullSource && this.coversSource()) return
-      // A failed request may already have written only part of its result.
-      // None of those rows is a safe continuation boundary.
-      this.requireFullSourceRepair()
-      // Work staged after a cursor reset belongs to the new generation.
-      if (this.standing(stamp) === `dead`) return
-      // Only the running authoritative work owns its staged step; a replaced
-      // chain's request is stale and drops nothing. A chain request owns
-      // authority only while its chain runs: one whose chain a replay
-      // finished is superseded by that replay.
-      const ownsAuthority =
-        isAuthoritativeRequest &&
-        this.standing(stamp) === `current` &&
-        (isFullSource || this.work.kind === `repair`)
-      if (
-        ownsAuthority ||
-        (this.stagedContinuation?.role ?? `finite`) === `finite`
-      ) {
-        this.stagedContinuation = undefined
-      }
-      // Authoritative work started after this request supersedes it. Its
-      // failure is not the loader's own: its partial writes only raise the
-      // debt to the full-source read that the overlap replaced. A running
-      // repair restarts as that read; otherwise it starts now, unless the
-      // loader's own failure is waiting for an explicit retry.
-      if (isAuthoritativeRequest ? !ownsAuthority : this.supersedes(stamp)) {
-        this.failedAcquisitions.set(releaseAcquisition, {
-          kind,
-          superseded: true,
-        })
-        // Full-source coverage may already have covered its rows.
-        if (this.coversSource()) {
-          this.retireSupersededFailures()
-        }
-        this.invalidateCursor()
-        this.lastBoundary = undefined
-        // The loader's own recorded failure still waits for an explicit retry.
-        if (this.failedRequest === undefined && this.work.kind === `idle`) {
-          // A recovery read that throws while it starts is the loader's own
-          // failure, recorded and reported on its own; this request still
-          // reports its error.
-          try {
-            this.loadFullSource(windowOperationGeneration)
-          } catch {}
-        }
-        throw error
-      }
-      // A failed request proves no full-source coverage. An explicit window
-      // move or later replay may retry it, but an ordinary graph pass must
-      // not start an eager retry loop.
-      if (isFullSource) {
-        this.moveWork({ kind: `full-source`, status: `failed` }, [`held`])
-      } else if (isAuthoritativeRequest) {
-        this.moveWork({ kind: `idle` }, [`repair`])
-      }
-      this.recordRequestFailure(windowOperationGeneration)
-      this.failedAcquisitions.set(releaseAcquisition, {
-        kind,
-        superseded: false,
-      })
-      if (retryRepair) this.scheduleRepairRetry()
-      throw error
-    }
-    if (canSettleSynchronously) {
-      try {
-        runAllCallbacks([
-          () => complete(undefined, true),
-          () => {
-            if (!synchronousCompletionFailure) {
-              this.onResult(true, false, false)
-            }
-          },
-          () => {
-            if (
-              !synchronousCompletionFailure &&
-              this.graphHasProcessedInput(requestGraphInputRevision)
-            ) {
-              this.drainNoInputContinuations(requestGraphInputRevision)
-            }
-          },
-        ])
-      } catch (error) {
-        if (synchronousCompletionFailure) {
-          throw synchronousCompletionFailure.error
-        }
-        throw new OrderedPostSettlementError(error)
-      }
-      return this.pending
-    }
-    const request: Promise<void> = settlesAsync ? result : Promise.resolve()
-    const tracked: Promise<void> = request.then(
-      () => complete(tracked),
-      (error) => fail(error, tracked),
-    )
-    this.pending = tracked
-    void tracked.catch(() => {})
-    // Register each request separately. The operation tracker observes the
-    // next request before this promise settles, so the logical chain remains
-    // pending without retaining every ancestor promise until the final page.
-    this.onResult(
-      tracked,
-      isAuthoritativeRequest && this.needsOrderingRepair,
-      settlesAsync,
-    )
-    return tracked
   }
 
   // A result is dead after a cursor reset. A non-authoritative result is stale
@@ -1252,14 +920,7 @@ export class OrderedSourceLoader {
     }
     this.lastBoundary = value
     return this.requestAndObserve(
-      (onLoadSubsetResult) => {
-        this.subscription.requestSnapshot({
-          ...(continuesOrderedPrefixRepair ? { refetch: true } : {}),
-          where,
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult,
-        })
-      },
+      (tracking) => this.subscription.requestSnapshot({ ...tracking, where }),
       `boundary`,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
@@ -1368,21 +1029,24 @@ export class OrderedSourceLoader {
 
   /** Observe settlement only after all synchronous request work succeeds. */
   private requestAndObserve(
-    request: (
-      onResult: (
+    request: (tracking: {
+      refetch?: true
+      trackLoadSubsetPromise: false
+      onLoadSubsetResult: (
         result: LoadSubsetRequestResult,
         options: LoadSubsetOptions,
         release: ReleaseLoadSubset,
-      ) => void,
-    ) => void,
+      ) => void
+    }) => void,
     kind: OrderedRequestKind,
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
     requestedCount?: number,
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
+    const isOrderedRepair = kind === `ordered-repair`
     const isAuthoritativeRequest =
-      isFullSource || kind === `ordered-repair` || continuesOrderedPrefixRepair
+      isFullSource || isOrderedRepair || continuesOrderedPrefixRepair
     let observed:
       | {
           result: LoadSubsetRequestResult
@@ -1400,30 +1064,321 @@ export class OrderedSourceLoader {
     const issuedOrderingGeneration = this.orderingInvalidationGeneration
     try {
       try {
-        request((result, options, release) => {
-          observed = { result, options, release }
+        // Authoritative work re-reads the source, except a full-source read
+        // that owes no ordering repair.
+        request({
+          ...((isFullSource ? this.needsOrderingRepair : isAuthoritativeRequest)
+            ? { refetch: true }
+            : {}),
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result, options, release) => {
+            observed = { result, options, release }
+          },
         })
       } finally {
         this.requesting = false
       }
       // An authoritative read supersedes in-flight finite requests once it
       // is issued; one that throws while starting supersedes nothing.
-      if (kind === `full-source` || kind === `ordered-repair`) {
+      if (isFullSource || isOrderedRepair) {
         this.authorityGeneration++
       }
       if (!observed) return
       observing = true
-      return this.observe(
-        observed.result,
-        observed.release,
-        kind,
+      const { result, options, release } = observed
+      const retryRepair =
+        isAuthoritativeRequest &&
+        this.hasSettledSourceRequest &&
+        this.needsOrderingRepair &&
+        windowOperationGeneration === undefined
+      // A repair request belongs to the chain it is issued in. One that settles
+      // after its replacement started is outside the replacement's chain.
+      const chain =
+        (isOrderedRepair || continuesOrderedPrefixRepair) &&
+        this.work.kind === `repair`
+          ? this.work.epoch
+          : undefined
+      const stamp: RequestStamp = {
+        orderedLoadGeneration: this.orderedLoadGeneration,
+        authorityGeneration: this.authorityGeneration,
+        orderingInvalidationGeneration: issuedOrderingGeneration,
+        role: isFullSource
+          ? `full-source`
+          : isAuthoritativeRequest
+            ? `repair`
+            : `finite`,
+      }
+      const settlesAsync = result instanceof Promise
+      const canSettleSynchronously =
+        !settlesAsync &&
+        windowOperationGeneration === undefined &&
+        // A full-source request without ordering-repair debt can finish in the
+        // current graph turn, including an initial fallback. A bounded prefix
+        // repair reads only installed rows and can also finish in that turn.
+        // Other repairs keep asynchronous settlement.
+        (!isAuthoritativeRequest ||
+          (isFullSource
+            ? !this.needsOrderingRepair
+            : this.readsBoundedPrefix)) &&
+        graphInputRevision !== undefined
+      let synchronousCompletionFailure: { error: unknown } | undefined
+      const continuation = (
+        continuationKind: OrderedContinuation[`kind`],
+      ): OrderedContinuation => ({
+        ...stamp,
+        kind: continuationKind,
         windowOperationGeneration,
-        observed.options,
         continuesOrderedPrefixRepair,
-        graphInputRevision,
-        requestedCount,
-        issuedOrderingGeneration,
+      })
+      const continueOrStage = (
+        next: OrderedContinuation,
+        deferContinuation: boolean,
+      ): void => {
+        if (deferContinuation) {
+          this.stagedContinuation = next
+        } else {
+          this.runContinuation(next)
+        }
+      }
+      const complete = (
+        trackedRequest?: Promise<void>,
+        deferContinuation = false,
+      ): void => {
+        if (trackedRequest && this.pending === trackedRequest) {
+          this.pending = undefined
+        }
+        if (!this.active) return
+        // A callback that fails after a successful acquisition does not undo
+        // it. Finish its boundary and continuation, then report the first error.
+        runAllCallbacks([
+          () => {
+            if (!isFullSource) {
+              // A replay can replace the acquisition lease while this older
+              // transport finishes. Retire its logical owner only outside the
+              // replay barrier.
+              const prefixCount =
+                options.orderBy && !options.cursor ? options.limit : undefined
+              this.settledFiniteAcquisitions.set(release, {
+                count: prefixCount,
+                chain,
+              })
+              // Full-source coverage also retires a repair request that
+              // settles after it.
+              this.retireSettledFiniteAcquisitions()
+              // A prefix issued before an ordering invalidation proves no
+              // current coverage, so it cannot supersede the repair's prefix.
+              if (
+                !continuesOrderedPrefixRepair &&
+                this.standing(stamp) === `current` &&
+                prefixCount !== undefined
+              ) {
+                this.retireSettledFiniteAcquisitions({
+                  release: release,
+                  count: prefixCount,
+                })
+              }
+              // A request issued before an ordering invalidation that settles
+              // after the repair finished is already superseded by that repair.
+              if (
+                this.standing(stamp) === `stale` &&
+                this.work.kind === `idle` &&
+                !this.needsOrderingRepair &&
+                this.settledFiniteAcquisitions.delete(release)
+              ) {
+                this.retiringSupersededAcquisitions = true
+                try {
+                  release()
+                } catch (error) {
+                  reportUncaught(error)
+                } finally {
+                  this.retiringSupersededAcquisitions = false
+                }
+              }
+            }
+          },
+          () => {
+            if (this.standing(stamp) !== `current`) return
+            // A finite request may finish behind an authoritative repair. It cannot
+            // clear that repair's failure or resume finite refinement around it.
+            if (
+              !isAuthoritativeRequest &&
+              (this.failedRequest || this.work.kind !== `idle`)
+            )
+              return
+            this.failedRequest = undefined
+            if (kind !== `boundary`) {
+              this.hasSettledSourceRequest = true
+              // Source delivery can invalidate the in-flight prefix marker.
+              if (options.orderBy && !options.cursor) {
+                this.lastPrefixCount = options.limit
+              }
+              if (!isFullSource && options.orderBy) {
+                try {
+                  this.settledSourceBoundary =
+                    this.subscription
+                      .readOrderedSnapshot({
+                        ...options,
+                        // Provider limits include optimistic headroom. Those
+                        // extra local ranks do not prove a source boundary.
+                        limit: requestedCount ?? options.limit,
+                      })
+                      .at(-1)?.value ?? this.settledSourceBoundary
+                } catch (error) {
+                  if (canSettleSynchronously) {
+                    synchronousCompletionFailure = { error }
+                    throw error
+                  }
+                  fail(error)
+                }
+              }
+            }
+            if (
+              (isOrderedRepair || continuesOrderedPrefixRepair) &&
+              (this.work.kind !== `repair` || this.repairNeedsReplacement())
+            ) {
+              // The settled request may apply its rows, but a later mutation has
+              // already invalidated this chain. Replace it before issuing stale
+              // tie or refill work.
+              this.finishOrderedPrefixRepair(windowOperationGeneration)
+              return
+            }
+            if (isFullSource) {
+              this.cancelRepairRetry()
+              this.repairRetries = 0
+              this.moveWork(
+                { kind: `full-source`, status: `complete` },
+                [`held`, `complete`],
+                `none`,
+              )
+              // A throwing release in one pass must not skip the other.
+              runAllCallbacks([
+                () => this.retireSettledFiniteAcquisitions(),
+                () => this.retireSupersededFailures(),
+              ])
+            }
+            if (isOrderedRepair || kind === `ordered`) {
+              continueOrStage(continuation(`boundary`), deferContinuation)
+              return
+            }
+            // A boundary request may add tied rows without filling the query's
+            // window. Resume forward loading once it settles.
+            continueOrStage(continuation(`more`), deferContinuation)
+          },
+        ])
+      }
+      const fail = (error: unknown, trackedRequest?: Promise<void>) => {
+        this.settledFiniteAcquisitions.delete(release)
+        if (trackedRequest && this.pending === trackedRequest) {
+          this.pending = undefined
+        }
+        // Dispose resets the cursor, so a disposed loader's requests are dead.
+        // A replay already reacquired this full-source read's demand. Its late
+        // transport failure leaves that coverage, and its lease, in place.
+        if (isFullSource && this.coversSource()) return
+        // A failed request may already have written only part of its result.
+        // None of those rows is a safe continuation boundary.
+        this.requireFullSourceRepair()
+        // Work staged after a cursor reset belongs to the new generation.
+        if (this.standing(stamp) === `dead`) return
+        // Only the running authoritative work owns its staged step; a replaced
+        // chain's request is stale and drops nothing. A chain request owns
+        // authority only while its chain runs: one whose chain a replay
+        // finished is superseded by that replay.
+        const ownsAuthority =
+          isAuthoritativeRequest &&
+          this.standing(stamp) === `current` &&
+          (isFullSource || this.work.kind === `repair`)
+        if (
+          ownsAuthority ||
+          (this.stagedContinuation?.role ?? `finite`) === `finite`
+        ) {
+          this.stagedContinuation = undefined
+        }
+        // Authoritative work started after this request supersedes it. Its
+        // failure is not the loader's own: its partial writes only raise the
+        // debt to the full-source read that the overlap replaced. A running
+        // repair restarts as that read; otherwise it starts now, unless the
+        // loader's own failure is waiting for an explicit retry.
+        if (isAuthoritativeRequest ? !ownsAuthority : this.supersedes(stamp)) {
+          this.failedAcquisitions.set(release, {
+            kind,
+            superseded: true,
+          })
+          // Full-source coverage may already have covered its rows.
+          if (this.coversSource()) {
+            this.retireSupersededFailures()
+          }
+          this.invalidateCursor()
+          this.lastBoundary = undefined
+          // The loader's own recorded failure still waits for an explicit retry.
+          if (this.failedRequest === undefined && this.work.kind === `idle`) {
+            // A recovery read that throws while it starts is the loader's own
+            // failure, recorded and reported on its own; this request still
+            // reports its error.
+            try {
+              this.loadFullSource(windowOperationGeneration)
+            } catch {}
+          }
+          throw error
+        }
+        // A failed request proves no full-source coverage. An explicit window
+        // move or later replay may retry it, but an ordinary graph pass must
+        // not start an eager retry loop.
+        if (isFullSource) {
+          this.moveWork({ kind: `full-source`, status: `failed` }, [`held`])
+        } else if (isAuthoritativeRequest) {
+          this.moveWork({ kind: `idle` }, [`repair`])
+        }
+        this.recordRequestFailure(windowOperationGeneration)
+        this.failedAcquisitions.set(release, {
+          kind,
+          superseded: false,
+        })
+        if (retryRepair) this.scheduleRepairRetry()
+        throw error
+      }
+      if (canSettleSynchronously) {
+        try {
+          runAllCallbacks([
+            () => complete(undefined, true),
+            () => {
+              if (!synchronousCompletionFailure) {
+                this.onResult(true, false, false)
+              }
+            },
+            () => {
+              if (
+                !synchronousCompletionFailure &&
+                this.graphHasProcessedInput(graphInputRevision)
+              ) {
+                this.drainNoInputContinuations(graphInputRevision)
+              }
+            },
+          ])
+        } catch (error) {
+          if (synchronousCompletionFailure) {
+            throw synchronousCompletionFailure.error
+          }
+          throw new OrderedPostSettlementError(error)
+        }
+        return this.pending
+      }
+      const transport: Promise<void> = settlesAsync ? result : Promise.resolve()
+      const tracked: Promise<void> = transport.then(
+        () => complete(tracked),
+        (error) => fail(error, tracked),
       )
+      this.pending = tracked
+      void tracked.catch(() => {})
+      // Register each request separately. The operation tracker observes the
+      // next request before this promise settles, so the logical chain remains
+      // pending without retaining every ancestor promise until the final page.
+      this.onResult(
+        tracked,
+        isAuthoritativeRequest && this.needsOrderingRepair,
+        settlesAsync,
+      )
+      return tracked
     } catch (error) {
       if (error instanceof OrderedPostSettlementError) throw error.cause
       if (error instanceof OrderedLoaderInvariantError) throw error

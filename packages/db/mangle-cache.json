@@ -151,7 +151,6 @@
   "canCompleteInitialLoad": "cD",
   "registerClientResource": "cE",
   "createSubsetAcquisitionRecord": "cF",
-  "cancelRepairRetry": "cG",
   "getVisibleEntries": "cH",
   "transitionToError": "cI",
   "baselineWindow": "cJ",
@@ -414,5 +413,6 @@
   "oweDebt": "gS",
   "windowRequestGeneration": "av",
   "isDeferredSyncKey": "bf",
-  "overlayHeldAndActive": "c7"
+  "overlayHeldAndActive": "c7",
+  "cancelRepairRetry": "cG"
 }
