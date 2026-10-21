@@ -155,8 +155,8 @@ try {
 }
 ```
 
-After an Effect's initial load, a subset failure is a request error on its
-`errors` tree, reported through `onErrorsChange`; the Effect keeps running.
+Effects report subset failures through `onSourceError` and dispose because
+their incremental result can no longer be kept complete.
 
 When a source change invalidates an ordered window, automatic full-source
 repair keeps the last complete snapshot visible. A failed repair exposes
@@ -429,10 +429,10 @@ empty restore keeps it `loading`, and a failed restore crashes it. See
 
 ### Effects
 
-An Effect ends when a source it reads fails its first load or crashes; it calls
-`onSourceError(error)`. After its initial load, any other problem calls
-`onErrorsChange(errors)` with the same tree a live query returns, and the
-Effect keeps running.
+An Effect ends when a source it reads fails its first load or crashes, or when
+a load it needs fails; it calls `onSourceError(error)`. After its initial
+load, a sync problem on a source calls `onErrorsChange(errors)` with the same
+tree a live query returns, and the Effect keeps running.
 
 ```ts
 createEffect({

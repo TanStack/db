@@ -93,17 +93,15 @@
  * the current tree. `findProblems` must list, in tree order, exactly the
  * expected nodes with a problem of their own. Request lanes check that a lazy load or a root Collection's
  * load that fails after initial-query readiness is a request error on the query's
- * node, and that it clears. Effect lanes check the Effect's gate and its
- * request errors after its initial-query readiness.
+ * node, and that it clears. Effect lanes check the Effect's gate, and that a
+ * failed load after it still ends the Effect: an Effect has no request errors.
  *
  * ## Limits
  *
  * Collections are eager, so a live query cannot become ready while a Collection is
  * still loading. The on-demand case, where a Collection fails its first load
  * after the live query is ready, is not generated here. Per-row child
- * Collections are not in the tree; an include's node shows its source. An Effect's request
- * error clears on a later successful load of the same Collection; release of
- * only the failed demand is not exercised. Pooled histories do not restart: a pooled view ends for good when
+ * Collections are not in the tree; an include's node shows its source. Pooled histories do not restart: a pooled view ends for good when
  * its Collection is cleaned up. The ordering check reads the observed query
  * only, not its Collections.
  */
@@ -1801,164 +1799,6 @@ describe(`overlapping root loads`, () => {
   )
 })
 
-// An Effect's lazy join loads for one source overlap when two parents arrive
-// before the first child load settles. The same law and model apply.
-describe(`overlapping Effect loads`, () => {
-  const histories: Array<OverlapHistory> = []
-  for (const a of [`ok`, `fail`] as const)
-    for (const b of [`ok`, `fail`] as const)
-      for (const first of [0, 1] as const)
-        histories.push({ outcomes: [a, b], first })
-
-  it.each(histories)(
-    `outcomes $outcomes, load $first settles first`,
-    async (history) => {
-      const loads: Array<ReturnType<typeof createDeferred<void>>> = []
-      let deferLoads = false
-      const parents = createSource(`B`)
-      const children = createCollection<Row, number>({
-        id: `health-effect-overlap-${Math.random().toString(36).slice(2)}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        gcTime: 0,
-        sync: {
-          sync: (params) => {
-            params.markReady()
-            return {
-              loadSubset: () => {
-                if (!deferLoads) return Promise.resolve()
-                const load = createDeferred<void>()
-                loads.push(load)
-                return load.promise
-              },
-            }
-          },
-        },
-      })
-      const trees: Array<ErrorTreeNode> = []
-      parents.collection.startSyncImmediate()
-      const insertParent = (id: number) => {
-        parents.params.begin()
-        parents.params.write({ type: `insert`, value: { id, parentId: id } })
-        parents.params.commit()
-      }
-      const consoleError = console.error
-      console.error = () => {}
-      const effect = createEffect({
-        query: (q) =>
-          q
-            .from({ parent: parents.collection })
-            .leftJoin({ child: children }, ({ parent, child }) =>
-              eq(parent.id, child.parentId),
-            ),
-        onBatch: () => {},
-        onErrorsChange: (errors) => trees.push(errors),
-      })
-      try {
-        insertParent(10)
-        parents.params.markReady()
-        await flushPromises()
-        deferLoads = true
-        insertParent(11)
-        await flushPromises()
-        insertParent(12)
-        await flushPromises()
-        // Premise: both child loads are in flight at once.
-        expect(loads).toHaveLength(2)
-        const model = expectedOverlap(history)
-        const order = history.first === 0 ? [0, 1] : [1, 0]
-        for (const [step, load] of order.entries()) {
-          if (history.outcomes[load] === `ok`) loads[load]!.resolve()
-          else loads[load]!.reject(new Error(`load ${load} failed`))
-          await flushPromises()
-          expect(
-            trees.at(-1)?.error?.message ?? null,
-            `after load ${load} settles`,
-          ).toBe(model[step])
-        }
-        // A load started after the failure clears it when it succeeds.
-        if (model.at(-1) !== null) {
-          insertParent(13)
-          await flushPromises()
-          expect(loads).toHaveLength(3)
-          loads[2]!.resolve()
-          await flushPromises()
-          expect(
-            trees.at(-1)?.error ?? null,
-            `after a later load succeeds`,
-          ).toBeNull()
-        }
-      } finally {
-        console.error = consoleError
-        await effect.dispose()
-        await parents.collection.cleanup()
-        await children.cleanup()
-      }
-    },
-  )
-})
-
-// As for a live query, an Effect's request error clears when the demand
-// that failed is released: its rows are no longer needed.
-it(`clears an Effect's request error when the failed demand is released`, async () => {
-  let failChildren = false
-  const parents = createSource(`B`)
-  const children = createCollection<Row, number>({
-    id: `health-effect-release-${Math.random().toString(36).slice(2)}`,
-    getKey: (row) => row.id,
-    syncMode: `on-demand`,
-    gcTime: 0,
-    sync: {
-      sync: (params) => {
-        params.markReady()
-        return {
-          loadSubset: () =>
-            failChildren
-              ? Promise.reject(new Error(`child load failed`))
-              : Promise.resolve(),
-        }
-      },
-    },
-  })
-  const trees: Array<ErrorTreeNode> = []
-  parents.collection.startSyncImmediate()
-  const writeParent = (id: number, type: `insert` | `delete` = `insert`) => {
-    parents.params.begin()
-    parents.params.write({ type, value: { id, parentId: id } })
-    parents.params.commit()
-  }
-  const consoleError = console.error
-  console.error = () => {}
-  const effect = createEffect({
-    query: (q) =>
-      q
-        .from({ parent: parents.collection })
-        .leftJoin({ child: children }, ({ parent, child }) =>
-          eq(parent.id, child.parentId),
-        ),
-    onBatch: () => {},
-    onErrorsChange: (errors) => trees.push(errors),
-  })
-  try {
-    parents.params.markReady()
-    await flushPromises()
-    failChildren = true
-    writeParent(1)
-    await flushPromises()
-    expect(trees.at(-1)?.error?.message).toBe(`child load failed`)
-    writeParent(1, `delete`)
-    await flushPromises()
-    expect(trees.at(-1)?.error ?? null, `after the demand is released`).toBe(
-      null,
-    )
-  } finally {
-    console.error = consoleError
-    await effect.dispose()
-    await parents.collection.cleanup()
-    await children.cleanup()
-  }
-})
-
 // ---------------------------------------------------------------------------
 // Effect lane
 // ---------------------------------------------------------------------------
@@ -2132,14 +1972,13 @@ describe(`effect errors`, () => {
 })
 
 /**
- * A load that fails after the Effect's gate is a request error, as it is on
- * a live query's node: the Effect is not disposed, `onErrorsChange` receives
- * a tree whose root node has a `request` error, and a later successful load
- * of the same source clears it. The parents lead the Effect, and a lazy join
- * loads the children each new parent row reaches. The lane crosses
- * `skipInitial` with the parents' source mode.
+ * An Effect has no request errors: a load that fails after its gate, as
+ * before it, ends the Effect through `onSourceError`, and no tree it reported
+ * shows the failure. The parents lead the Effect, and a lazy join loads the
+ * children each new parent row reaches. The lane crosses `skipInitial` with
+ * the parents' source mode.
  */
-describe(`effect request errors`, () => {
+describe(`effect load failures`, () => {
   type RequestHistory = {
     skipInitial: boolean
     parentMode: `eager` | `on-demand`
@@ -2215,24 +2054,15 @@ describe(`effect request errors`, () => {
       if (parentMode === `eager`) parentParams.markReady()
       await flushPromises()
 
-      // Model: after initial-query readiness, a failed load is a request error.
+      // Model: after initial-query readiness, a failed load ends the Effect.
       outcomes.push(`fail`)
       writeParent(2)
       await flushPromises()
-      expect(effect.disposed).toBe(false)
-      expect(sourceErrors).toEqual([])
-      expect(trees.at(-1)?.error).toMatchObject({
-        message: `child load failed`,
-      })
-      expect(trees.at(-1)?.hasErrors).toBe(true)
-
-      // Model: a later successful load of the same source clears it.
-      outcomes.push(`ok`)
-      writeParent(3)
-      await flushPromises()
-      expect(effect.disposed).toBe(false)
-      expect(trees.at(-1)?.error).toBeNull()
-      expect(trees.at(-1)?.hasErrors).toBe(false)
+      expect(effect.disposed).toBe(true)
+      expect(sourceErrors.map((error) => error.message)).toEqual([
+        `child load failed`,
+      ])
+      expect(trees.every((tree) => tree.error === null)).toBe(true)
     } finally {
       console.error = consoleError
       await effect.dispose()

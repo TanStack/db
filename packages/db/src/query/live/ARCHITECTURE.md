@@ -1701,9 +1701,11 @@ every row before the top-K (a recorded limit).
     violations, such as a graph failure or a Collection cleaned up under the
     query, crash the query. An Effect follows the same rules, with its
     initial-query readiness at its settled initial loads: a crashed source,
-    or a source whose first load fails before that readiness, ends it through
-    `onSourceError`; after it, every other problem is error tree detail
-    delivered through `onErrorsChange`, while the Effect keeps running.
+    a source whose first load fails before that readiness, or a failed load
+    it needs ends it through `onSourceError`, because its incremental result
+    can no longer be complete. An Effect has no request errors; after that
+    readiness, a source's sync problem is error tree detail delivered through
+    `onErrorsChange`, while the Effect keeps running.
 17. **Error tree:** a Collection's `errors` is one node; a live query's has
     one node for itself and one per source alias in query order, recursing
     through nested live queries. A node shows at most one problem:

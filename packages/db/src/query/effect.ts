@@ -6,7 +6,6 @@ import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
-import { LoadOrder, RequestErrors } from '../collection/lifecycle.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -481,8 +480,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // initial load has settled, with or without skipInitial. After it,
   // a sync problem does not dispose the Effect.
   private reachedReady = false
-  private readonly requests = new RequestErrors()
-  private readonly loadOrders = new Map<string, LoadOrder>()
   private reportedTree: ErrorTreeNode | undefined
   private readonly onErrorsChange: ((errors: ErrorTreeNode) => void) | undefined
   // This Effect as its sources' `subscribers` list it.
@@ -650,7 +647,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         ),
         owner: this.dependent,
         onLoadSubsetError: ({ error }) =>
-          this.failLoad(sourceId, normalizeError(error)),
+          this.onSourceError(normalizeError(error)),
         // subscribeChanges can report a result before it returns the
         // subscription, so read it from the record when a load fails.
         onLoadSubsetResult: (result) => {
@@ -658,7 +655,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
             result,
             () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
           )
-          this.settleWhenLoaded(sourceId, result)
         },
       })
 
@@ -698,7 +694,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
         lazyCallbacks.setDemand = (plan: LazyDemandPlan, keys: Set<unknown>) =>
-          this.setDemand(sourceId, subscription, plan, keys)
+          this.setDemand(subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
           if (plan.initialKeys.size > 0) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
@@ -718,7 +714,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
               result,
               () => subscription.pendingTruncateReplacement,
             )
-            this.settleWhenLoaded(sourceId, result)
             const holdsInitialPublication =
               this.skipInitial && !this.initialLoadComplete
             if (holdPublication || holdsInitialPublication) {
@@ -876,14 +871,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private setDemand(
-    sourceId: string,
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
     let update
-    // A release can fail during this update; only an earlier failure clears.
-    const problemBefore = this.requests.problem
     try {
       update = this.demand.setDemand(subscription, plan, keys)
     } catch (error) {
@@ -894,14 +886,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (this.starting) throw error
       return
     }
-    // A released demand needs none of its rows, so its earlier failure no
-    // longer stands, as for a live query's retired demand.
-    if (
-      update.changed &&
-      update.empty &&
-      this.requests.problem === problemBefore
-    )
-      this.settleLoad(sourceId)
     if (update.ready instanceof Promise) {
       this.trackInitialLoad(
         update.ready,
@@ -910,7 +894,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
-      this.settleWhenLoaded(sourceId, update.ready)
       void update.ready.then(
         () => {
           if (!this.disposed) this.scheduleGraphRun()
@@ -1116,27 +1099,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return this.reachedReady
   }
 
-  // Before the gate, a failed load ends the Effect. After it, the failure is
-  // a request error on the Effect's own node, as on a live query's, until a
-  // later load of that source settles.
-  private failLoad(sourceId: string, error: Error): void {
-    if (!this.reachedReady) return this.onSourceError(error)
-    this.requests.fail(sourceId, error)
-    this.reportErrors()
-  }
-
-  /** A load that later succeeds clears the source's request error. */
-  private settleWhenLoaded(sourceId: string, result: unknown): void {
-    let order = this.loadOrders.get(sourceId)
-    if (!order) this.loadOrders.set(sourceId, (order = new LoadOrder()))
-    order.track(result, () => this.settleLoad(sourceId))
-  }
-
-  private settleLoad(sourceId: string): void {
-    if (this.disposed) return
-    if (this.requests.settle(sourceId)) this.reportErrors()
-  }
-
   /** The error tree for this effect's sources, in query order. */
   private errorTree(): ErrorTreeNode {
     return errorTreeNode(this, undefined, {
@@ -1145,7 +1107,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       kind: `live-query`,
       status: this.reachedReady ? `ready` : `loading`,
       failureReason: null,
-      error: this.requests.problem,
+      error: null,
       reloading: false,
       sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
         buildErrorTree(collection, { alias, id: sourceId }, this),
