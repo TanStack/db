@@ -203,53 +203,58 @@ function validateJsonSerializable(
   }
 }
 
+// JSON writes instances of these types as `{}`, losing their contents.
+const opaqueTypes: Array<abstract new (...args: Array<never>) => object> = [
+  Map,
+  Set,
+  WeakMap,
+  WeakSet,
+  RegExp,
+  Promise,
+  ArrayBuffer,
+  ...(typeof SharedArrayBuffer === `undefined` ? [] : [SharedArrayBuffer]),
+]
+
 /**
- * Names the first part of an acyclic value that JSON.stringify would omit or
- * replace, so a restore could not return it. A `toJSON` result is checked in
- * place of its owner. An `undefined` property reads back as absent, so it is
- * kept. Other class instances keep only their own enumerable data.
+ * Describes a value that JSON.stringify would omit or replace, so a restore
+ * could not return it. A replacer sees each value after `toJSON` and before a
+ * boxed primitive is unwrapped. An `undefined` property reads back as absent,
+ * so it is kept. Other class instances keep only their enumerable data.
  */
-function findJsonLoss(
+function describeJsonLoss(
+  holder: object,
   value: unknown,
   path: string,
-  key = ``,
 ): string | undefined {
-  const toJSON = (value as { toJSON?: unknown } | null)?.toJSON
-  if (typeof value === `object` && typeof toJSON === `function`) {
-    value = toJSON.call(value, key)
+  if (value === undefined) {
+    return Array.isArray(holder) || path === `row`
+      ? `${path} is undefined`
+      : undefined
   }
   if (typeof value === `function` || typeof value === `symbol`) {
     return `${path} is a ${typeof value}`
   }
-  if (typeof value === `number` && !Number.isFinite(value)) {
-    return `${path} is ${value}`
+  const number = value instanceof Number ? value.valueOf() : value
+  if (typeof number === `number` && !Number.isFinite(number)) {
+    return `${path} is ${number}`
   }
   if (typeof value !== `object` || value === null) return undefined
-  if (Array.isArray(value)) {
-    for (const [index, item] of value.entries()) {
-      const itemPath = `${path}[${index}]`
-      if (item === undefined) return `${itemPath} is undefined`
-      const loss = findJsonLoss(item, itemPath, String(index))
-      if (loss) return loss
-    }
-    return undefined
-  }
   if (
-    value instanceof Map ||
-    value instanceof Set ||
-    value instanceof RegExp ||
-    value instanceof ArrayBuffer ||
-    ArrayBuffer.isView(value)
+    ArrayBuffer.isView(value) ||
+    opaqueTypes.some((type) => value instanceof type)
   ) {
     return `${path} is a ${value.constructor.name}`
   }
-  if (Object.getOwnPropertySymbols(value).length > 0) {
+  if (
+    Object.getOwnPropertySymbols(value).some((key) =>
+      Object.prototype.propertyIsEnumerable.call(value, key),
+    )
+  ) {
     return `${path} has a symbol key`
   }
-  for (const [name, item] of Object.entries(value)) {
-    if (item === undefined) continue
-    const loss = findJsonLoss(item, `${path}.${name}`, name)
-    if (loss) return loss
+  // JSON writes only an array's elements. A hole is reported as `undefined`.
+  if (Array.isArray(value) && Object.keys(value).length > value.length) {
+    return `${path} has a property other than its elements`
   }
   return undefined
 }
@@ -263,9 +268,28 @@ function validateStorableRow(
   value: unknown,
   operation: string,
 ): void {
-  validateJsonSerializable(parser, value, operation)
-  if (parser !== JSON) return
-  const loss = findJsonLoss(value, `row`)
+  if (parser !== JSON) {
+    validateJsonSerializable(parser, value, operation)
+    return
+  }
+  const paths = new Map<object, string>()
+  let loss: string | undefined
+  const stringify = (row: unknown) =>
+    JSON.stringify(row, function (this: object, key: string, item: unknown) {
+      // After the first loss, stop descending; the result is discarded.
+      if (loss) return undefined
+      const parent = paths.get(this)
+      const path =
+        parent === undefined
+          ? `row`
+          : Array.isArray(this)
+            ? `${parent}[${key}]`
+            : `${parent}.${key}`
+      loss = describeJsonLoss(this, item, path)
+      if (typeof item === `object` && item !== null) paths.set(item, path)
+      return item
+    })
+  validateJsonSerializable({ parse: JSON.parse, stringify }, value, operation)
   if (loss) throw new SerializationError(operation, loss)
 }
 

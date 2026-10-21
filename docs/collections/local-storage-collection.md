@@ -104,13 +104,16 @@ writer can still hold a `Date`, while a peer and a freshly restored Collection
 see its JSON string. With a custom parser, an authored row is read back after a
 successful write so the writer also sees any value that parser normalized.
 
-With the default JSON parser, an insert or update must contain only values that
-a restore can return. The Collection rejects a row that contains any of these:
+With the default parser (the built-in `JSON` object), an insert or update must
+contain only values that a restore can return. The Collection rejects a row
+that contains any of these:
 
-- a function or symbol, or a property with a symbol key
-- `NaN`, `Infinity`, or `-Infinity`
-- `undefined` as an array entry
-- a `Map`, `Set`, `RegExp`, `ArrayBuffer`, or typed array
+- a function or symbol, or an enumerable property with a symbol key
+- `NaN`, `Infinity`, or `-Infinity`, including as a `Number` object
+- `undefined` or a hole as an array entry, or an array with properties other
+  than its elements
+- a `Map`, `Set`, `WeakMap`, `WeakSet`, `RegExp`, `Promise`, `ArrayBuffer`,
+  `SharedArrayBuffer`, or typed array
 
 The rejected mutation's `isPersisted` promise rejects with
 `SerializationError`. Nothing is written to storage and the optimistic row
@@ -118,12 +121,14 @@ rolls back. An automatic write's `onInsert` or `onUpdate` handler does not run;
 a manual `acceptMutations` call rejects with the same error.
 
 Some values are accepted and normalized. A value with a `toJSON` method, such
-as `Date`, is stored as that method's result. A property whose value is
-`undefined` is stored as an absent property, and `-0` is stored as `0`. A class
-instance is stored as its own enumerable properties, so a restored row is a
-plain object without the class's methods. A custom `parser`, such as one that
-supports `Map`, defines its own value rules; only its `stringify` errors reject
-a write.
+as `Date`, is stored as that method's result, and the checks above apply to
+that result. A property whose value (or `toJSON` result) is `undefined` is
+stored as an absent property, and `-0` is stored as `0`. Non-enumerable
+properties are not row data and are not stored. A class instance is stored as
+its own enumerable properties, so a restored row is a plain object without the
+class's methods. A custom `parser`, such as one that supports `Map`, defines
+its own value rules; only its `stringify` errors reject a write. This includes
+a parser object that wraps `JSON.stringify`.
 
 Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write
