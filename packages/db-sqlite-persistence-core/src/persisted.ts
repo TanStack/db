@@ -5625,11 +5625,13 @@ function createWrappedSyncConfig<
       }
       // Committed source transactions not yet handed to the Collection. Core
       // holds settled optimistic rows on their keys until they apply.
-      params.collection._state.setDeferredSyncKeys(function* () {
-        for (const transaction of pendingPublicationTransactions) {
-          if (!transaction.handedToCollection) yield* transaction.operationKeys
-        }
-      })
+      params.collection._state.setDeferredSyncKeys((key) =>
+        pendingPublicationTransactions.some(
+          (transaction) =>
+            !transaction.handedToCollection &&
+            transaction.operationKeys.has(key),
+        ),
+      )
       // A source receipt is accepted once its rows are durable, and resolves
       // when core makes them visible.
       const visibleAfterDurable = (
