@@ -51,7 +51,7 @@ import type { SQLiteDriver } from '../src/index.js'
  * the upstream load and the clock.
  *
  * Limits: no Electric or Query DB source (they need receiving witnesses), no
- * cache-claim rotation, truncate, must-refetch, or schema reset, no ordered
+ * cache-claim rotation, must-refetch, or schema reset, no ordered
  * window or cursor page in session 2, no failure that arrives before the
  * persisted subset restore publishes, no framework rendering, and no native
  * host. Every block is a bounded enumeration or fixed history, not a
@@ -87,6 +87,9 @@ type Row = { id: string; group: string; rank: number; value: string }
 //   rows nor coverage may become durable, so D has no coverage.
 // - `settled-empty`: D settles with no rows. The empty answer is complete.
 // - `settled`: D settles with `a1` and `a2`.
+// - `truncated`: D settles with `a1` and `a2`, then the source truncates.
+//   Coverage ends with the rows it described, so D has no coverage and
+//   SQLite holds no rows. The truncate replays D; that load never answers.
 //
 // Session 2 asks for D again with a configured wait of 0 ms or 1000 ms. Its
 // upstream load follows one schedule:
@@ -107,8 +110,8 @@ type Row = { id: string; group: string; rank: number; value: string }
 // count"; `other-window` rejects "coverage keyed by filter only";
 // `other-order` rejects "coverage ignores order";
 // `durable-write-failed` rejects "coverage written before the rows commit";
-// `settled-empty` rejects "nonempty rows count"; `settled` carries every
-// positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
+// `settled-empty` rejects "nonempty rows count"; `truncated` rejects
+// "coverage survives truncate"; `settled` carries every positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
 // `fails-early` rejects "failure errors a covered demand"; `answers-late`
 // rejects "upstream aborted after SQLite"; `fails-late` rejects "late
 // failure undoes a settlement"; `answers-empty-late` checks that an empty
@@ -127,6 +130,7 @@ const COVERAGE_HISTORIES = [
   `durable-write-failed`,
   `settled-empty`,
   `settled`,
+  `truncated`,
 ] as const
 type CoverageHistory = (typeof COVERAGE_HISTORIES)[number]
 
@@ -162,6 +166,7 @@ const SESSION_1_ROWS: Record<CoverageHistory, ReadonlyArray<Row>> = {
   'durable-write-failed': [],
   'settled-empty': [],
   settled: [A1, A2],
+  truncated: [],
 }
 
 // Session 2's upstream answer updates a1 and adds a3. It omits a2; an
@@ -519,6 +524,7 @@ type Upstream = {
   pendingCount: () => number
   answer: (rows: ReadonlyArray<Row>) => Promise<void>
   fail: (error: unknown) => void
+  truncate: () => Promise<void>
 }
 
 // A generic on-demand source. Each load waits until the test answers or
@@ -533,6 +539,7 @@ function onDemandSource(
     reject: (error: unknown) => void
   }> = []
   let write: ((rows: ReadonlyArray<Row>) => unknown) | undefined
+  let truncate: (() => unknown) | undefined
   const upstream: Upstream = {
     calls: [],
     pendingCount: () => pending.length,
@@ -542,6 +549,9 @@ function onDemandSource(
     },
     fail: (error) => {
       for (const load of pending.splice(0)) load.reject(error)
+    },
+    truncate: async () => {
+      await truncate?.()
     },
   }
   const collection = createCollection(
@@ -556,6 +566,11 @@ function onDemandSource(
           write = (rows) => {
             params.begin()
             for (const value of rows) params.write({ type: `insert`, value })
+            return params.commit()
+          }
+          truncate = () => {
+            params.begin()
+            params.truncate()
             return params.commit()
           }
           return {
@@ -675,8 +690,25 @@ async function settleSession1(
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
-    if (history === `settled-empty` || history === `settled`) await preload
-    else await preload.catch(() => undefined)
+    if (
+      history === `settled-empty` ||
+      history === `settled` ||
+      history === `truncated`
+    ) {
+      await preload
+    } else {
+      await preload.catch(() => undefined)
+    }
+    if (history === `truncated`) {
+      const loadsBefore = upstream.calls.length
+      await upstream.truncate()
+      // Positive witness: the truncate replayed D, and that load stays
+      // pending, so it cannot record coverage again.
+      await vi.waitFor(() =>
+        expect(upstream.calls.length).toBeGreaterThan(loadsBefore),
+      )
+      expect(upstream.pendingCount()).toBeGreaterThan(0)
+    }
     return upstream.calls.map(getLoadSubsetDemandKey)
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
@@ -739,6 +771,7 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
     expect(session1Keys.includes(keyD)).toBe(
       cell.history === `settled` ||
         cell.history === `settled-empty` ||
+        cell.history === `truncated` ||
         cell.history === `failed` ||
         cell.history === `durable-write-failed`,
     )
@@ -1239,6 +1272,15 @@ describe(`persisted demand coverage oracle`, () => {
         waitMs: 0,
         upstream: `pending`,
       },
+    },
+    {
+      design: {
+        ...LAW,
+        name: `coverage survives truncate`,
+        isCovered: (history) =>
+          LAW.isCovered(history) || history === `truncated`,
+      },
+      witness: { history: `truncated`, waitMs: 0, upstream: `pending` },
     },
     {
       design: { ...LAW, name: `wait ignored`, honorsWait: false },
