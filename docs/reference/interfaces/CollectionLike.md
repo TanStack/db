@@ -30,7 +30,7 @@ for the change events system to work
 compareOptions: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:913](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L913)
+Defined in: [packages/db/src/collection/index.ts:918](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L918)
 
 #### Inherited from
 
@@ -58,7 +58,7 @@ Defined in: [packages/db/src/collection/index.ts:401](https://github.com/TanStac
 indexes: Map<number, BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:898](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L898)
+Defined in: [packages/db/src/collection/index.ts:903](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L903)
 
 #### Inherited from
 
@@ -74,7 +74,7 @@ Pick.indexes
 entries(): IterableIterator<[TKey, WithVirtualProps<T, TKey>]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:789](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L789)
+Defined in: [packages/db/src/collection/index.ts:794](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L794)
 
 Get all entries (virtual derived state)
 
