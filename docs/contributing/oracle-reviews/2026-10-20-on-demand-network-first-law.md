@@ -163,6 +163,13 @@ readiness, with each eager source's persisted restore standing in for that
 source's Collection readiness. An opt-in alone never permits fallback; that
 would release a join before the on-demand side's covered rows are visible.
 
+The live query does not expose that signal today. `preloadForInitialRender`
+combines the network `preload()` with per-Collection persisted snapshots; it
+cannot ask whether the query's own demands have settled independently of
+eager Collection readiness. The implementation must add that query-level
+signal: initial readiness with each eager source's persisted restore in place
+of its Collection readiness.
+
 ### The wait
 
 The wait reuses the network-first option and its default. #1955 set that
@@ -260,7 +267,7 @@ follow this combining rule (edited in this worktree).
 8. Leaving a covered next page unpublished after the wait.
 9. An on-demand opt-in that permits fallback on its own. The gate then releases
    a join before the on-demand side's covered rows are visible.
-10. Coverage keyed by filter only, ignoring order and limit.
+10. Coverage keyed by filter only, or ignoring order while honoring limit.
 11. A wait measured from the sync run instead of the load, or coverage cleared
     on release.
 12. A late upstream failure that undoes a settlement from SQLite.

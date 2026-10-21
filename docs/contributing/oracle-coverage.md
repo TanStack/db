@@ -2477,9 +2477,9 @@ The persisted demand coverage oracle in
 owns the proposed on-demand law: an opted-in wrapper may settle a demand's
 load from SQLite only when that exact demand has persisted demand coverage,
 after the configured wait or an upstream failure. Its bounded enumeration
-crosses seven session-1 histories (not requested, failed, overlapping filter,
-same filter with another window, rejected durable row write, settled empty,
-settled), two waits, and six
+crosses eight session-1 histories (not requested, failed, overlapping filter,
+same filter with another window, same filter with another order, rejected
+durable row write, settled empty, settled), two waits, and six
 session-2 upstream schedules (pending, early and late failure, early and late
 answer, late empty answer), over the real wrapper and
 `SQLiteCorePersistenceAdapter` on `node:sqlite`. Session 1 creates coverage
@@ -2489,7 +2489,7 @@ and exact rows at five checkpoints. A fixed lifecycle history checks that each
 load measures its own wait and settles on its own restored rows, that
 release aborts the upstream load, and that coverage survives release. A joined history checks that the network-first
 wait releases an eager and an on-demand source only when the on-demand demand
-is covered. Model-level calibration shows that thirteen wrong designs each
+is covered. Model-level calibration shows that fourteen wrong designs each
 differ from the law at a named case. The law is not implemented: on main every
 production case fails at setup because `initialRender` rejects
 `syncMode: 'on-demand'`. Without the opt-in, main matches every uncovered cell

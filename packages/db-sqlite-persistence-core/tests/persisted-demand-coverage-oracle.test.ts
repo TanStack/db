@@ -28,7 +28,7 @@ import type { SQLiteDriver } from '../src/index.js'
  *    the current sync run, possibly none;
  * 2. the exact demand has persisted demand coverage in the current persisted
  *    cache generation, because an earlier load of the same demand key reached
- *    applied settlement;
+ *    applied settlement with its rows durably committed;
  * 3. the configured wait has passed since that load started, or the load's
  *    upstream load has failed.
  *
@@ -78,6 +78,10 @@ type Row = { id: string; group: string; rank: number; value: string }
 // - `other-window`: the same filter with `orderBy rank, limit 1` settles,
 //   along with its tie-boundary load. SQLite holds `a1`. Neither demand key
 //   is D's key, so D has no coverage.
+// - `other-order`: the same filter with `orderBy rank` and no limit settles.
+//   SQLite holds every row that matches D, but the ordered demand key is not
+//   D's key, so D has no coverage. Exact keys are deliberately stricter than
+//   row completeness.
 // - `durable-write-failed`: D's upstream load answers with `a1` and `a2`,
 //   but SQLite rejects the transaction that writes those rows. Neither the
 //   rows nor coverage may become durable, so D has no coverage.
@@ -101,6 +105,7 @@ type Row = { id: string; group: string; rank: number; value: string }
 // `not-requested` and `failed` reject "any local read counts";
 // `overlapping-demand` rejects "coverage per Collection" and "matching rows
 // count"; `other-window` rejects "coverage keyed by filter only";
+// `other-order` rejects "coverage ignores order";
 // `durable-write-failed` rejects "coverage written before the rows commit";
 // `settled-empty` rejects "nonempty rows count"; `settled` carries every
 // positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
@@ -118,6 +123,7 @@ const COVERAGE_HISTORIES = [
   `failed`,
   `overlapping-demand`,
   `other-window`,
+  `other-order`,
   `durable-write-failed`,
   `settled-empty`,
   `settled`,
@@ -151,6 +157,7 @@ const SESSION_1_ROWS: Record<CoverageHistory, ReadonlyArray<Row>> = {
   failed: [],
   'overlapping-demand': [A1],
   'other-window': [A1],
+  'other-order': [A1, A2],
   // The upstream answer was A1 and A2, but no row became durable.
   'durable-write-failed': [],
   'settled-empty': [],
@@ -590,6 +597,14 @@ function session1Query(
         .where(({ row }) => eq(row.group, `a`))
         .orderBy(({ row }) => row.rank)
         .limit(1),
+    )
+  }
+  if (history === `other-order`) {
+    return createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.group, `a`))
+        .orderBy(({ row }) => row.rank),
     )
   }
   return filterQuery(source, `a`)
@@ -1187,9 +1202,21 @@ describe(`persisted demand coverage oracle`, () => {
         ...LAW,
         name: `coverage keyed by filter only`,
         isCovered: (history) =>
-          LAW.isCovered(history) || history === `other-window`,
+          LAW.isCovered(history) ||
+          history === `other-window` ||
+          history === `other-order`,
       },
       witness: { history: `other-window`, waitMs: 0, upstream: `pending` },
+    },
+    {
+      // Honors limit but drops `orderBy` from the key.
+      design: {
+        ...LAW,
+        name: `coverage ignores order`,
+        isCovered: (history) =>
+          LAW.isCovered(history) || history === `other-order`,
+      },
+      witness: { history: `other-order`, waitMs: 0, upstream: `pending` },
     },
     {
       design: {
