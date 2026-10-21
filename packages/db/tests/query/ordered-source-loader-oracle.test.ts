@@ -477,15 +477,16 @@ describe(`OrderedSourceLoader`, () => {
       const stagedContinuation = (
         loader as unknown as {
           stagedContinuation?: {
-            isAuthoritativeRequest: boolean
+            role: `finite` | `repair` | `full-source`
             windowOperationGeneration?: number
           }
         }
       ).stagedContinuation
       // The first request's own delivery invalidated ordering, so it proves
-      // no current coverage: no ordinary continuation may survive it. (It
-      // stages none, or only authoritative work.)
-      expect(stagedContinuation?.isAuthoritativeRequest ?? true).toBe(true)
+      // no current coverage: no ordinary continuation may survive it. It
+      // stages none, or only authoritative work; a stamp taken after the
+      // request returns would stage a finite one.
+      expect(stagedContinuation?.role).not.toBe(`finite`)
       expect(
         (loader as unknown as { needsOrderingRepair: boolean })
           .needsOrderingRepair,

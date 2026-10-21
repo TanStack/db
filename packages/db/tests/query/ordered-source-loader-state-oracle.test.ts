@@ -1724,6 +1724,8 @@ describe(`Successful finite demand retirement`, () => {
  * - **Invariant:** the loader's transition table never rejects a move. The
  *   oracle records any `OrderedLoaderInvariantError` the loader throws, so
  *   the generated histories also fuzz that table.
+ * - **No stale step:** a repair chain whose ordering epoch moved is replaced
+ *   before it issues another tie or refill.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -2177,6 +2179,16 @@ async function checkAuthorityCase(
     ledger.push(request)
     if (disposed) {
       disposeViolation ??= `request ${request.index} was issued after dispose`
+    }
+    // A chain whose epoch moved is replaced before it issues another tie or
+    // refill (ARCHITECTURE.md, ordered repair).
+    if (
+      authoritative &&
+      !fullSource &&
+      !startsAuthority(request) &&
+      epochMoves !== epochMovesAtLastStart
+    ) {
+      concurrencyViolation ??= `request ${request.index}, a step of a repair chain whose epoch moved, was issued before its replacement`
     }
     if (startsAuthority(request)) epochMovesAtLastStart = epochMoves
     // An issued request consumes an owed continuation. An ordinary page also
