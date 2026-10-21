@@ -5910,6 +5910,781 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * ## A reacquired observer lease owns the current Query result
+   *
+   * Law: reacquiring a released demand creates a new observer lease. Its
+   * current result is the Query's latest successful data, so it owns that
+   * data's rows from reacquisition until its own release. An older acquisition
+   * release that publishes later retires only the older lease. If the new
+   * lease starts a refetch, a successful refetch replaces the lease's result.
+   * A failed refetch keeps the last successful data, so it keeps those rows.
+   * `staleTime` decides whether a refetch starts. It cannot decide whether the
+   * cached result is owned.
+   *
+   * Authority: the reacquisition law in the history above, and the TanStack
+   * Query rules that a stale Query refetches when an observer mounts and that
+   * a failed refetch keeps the previous `data`.
+   *
+   * Limits: one reacquired on-demand subset whose result has one or two
+   * rows, zero to two peer subsets that own the first row, no persisted
+   * metadata, and one unrelated optimistic transaction that holds
+   * publication. A release commit that
+   * rejects and the direct-write path have their own histories below. Eager
+   * mode cannot reach the premise: it has no subset release, and ending an
+   * eager sync run removes its Query from the cache, so a restart fetches
+   * instead of replaying cached data.
+   */
+  const solo: Item = { id: `solo`, category: `detail`, name: `Solo` }
+
+  type ReacquisitionHistory = {
+    /** `Infinity`: reacquisition starts no fetch. `0`: it starts a refetch. */
+    staleTime: number
+    /** The refetch outcome. It has no effect when no refetch starts. */
+    refetch: `rejects` | `same-rows` | `empty`
+    /** The refetch settles before or after the older release publishes. */
+    settles: `while-held` | `after-publication`
+    /** Peer leases that also own `shared` until after the refetch. */
+    peers: 0 | 1 | 2
+    /** Rows in the reacquired lease's result; the second is owned only here. */
+    rows: 1 | 2
+  }
+
+  type ReacquisitionObservation = {
+    /** Public rows after reacquisition, while publication is still held. */
+    held: Array<string>
+    /** Public rows after the held transactions publish. */
+    published: Array<string>
+    /** Public rows after the refetch, if any, has settled. */
+    settled: Array<string>
+    /** Public rows after every peer is released. */
+    peerReleased: Array<string>
+    /** Public rows after the reacquired demand is released. */
+    released: Array<string>
+    /** Query function calls. Query staleness decides this count. */
+    queryCalls: number
+  }
+
+  /**
+   * The model keeps each active lease's latest successful result. Public
+   * synced rows are the union of those results at the last publication. Each
+   * peer's result is always `shared`; peers are active until `peerReleased`.
+   * A peer hides a lost `shared` until the peers leave, which is why that
+   * checkpoint exists; the lease-only `solo` row shows a loss at once. While the optimistic blocker
+   * holds publication, the public view is the blocker plus the rows published
+   * before the release, which the first lease owned. The model does not
+   * represent tombstones, ownership maps, or sync transactions.
+   */
+  const modelReacquisition = (
+    history: ReacquisitionHistory,
+  ): ReacquisitionObservation => {
+    const cached = history.rows === 2 ? [shared.id, solo.id] : [shared.id]
+    const refetchStarts = history.staleTime === 0
+    const refetched = !refetchStarts
+      ? cached
+      : history.refetch === `empty`
+        ? []
+        : // Both a same-rows result and a failed refetch leave the rows owned.
+          cached
+    const union = (...results: Array<Array<string>>) =>
+      [...new Set(results.flat())].sort()
+    const peerRows = history.peers > 0 ? [shared.id] : []
+    return {
+      held: union([`blocker`], cached, peerRows),
+      published: union(
+        history.settles === `while-held` ? refetched : cached,
+        peerRows,
+      ),
+      settled: union(refetched, peerRows),
+      peerReleased: union(refetched),
+      released: [],
+      queryCalls: 1 + history.peers + (refetchStarts ? 1 : 0),
+    }
+  }
+
+  /**
+   * The grammar crosses the refetch's start, outcome, and placement relative to
+   * the older release's publication. A fresh reacquisition starts no refetch,
+   * so it has one history. The `empty` histories reject a design that keeps the
+   * row for any reacquired demand. The `rejects` and `same-rows` histories
+   * that settle after publication reject a design that skips the cached
+   * result because the older lease left an ownership entry behind. Removing
+   * the already-applied guard altogether also passes this table; the
+   * persisted direct-write histories that keep an accepted write through a
+   * refetch start reject that repair. A repair that treats every empty
+   * ownership entry as unapplied also passes this table; the sibling history
+   * that keeps a direct insert through a refetch start of an empty result
+   * rejects it. Each history runs with zero, one, or two peers and with a
+   * one- or two-row result. With a peer, the older release keeps `shared`,
+   * so only the `peerReleased` checkpoint shows whether the reacquired lease
+   * owns it. On the original defect `shared` survives while a peer owns it
+   * and disappears when the peers leave, while `solo` disappears at
+   * publication. Two peers check that releasing every other owner, not just
+   * one, leaves the reacquired lease as the row's owner.
+   */
+  const reacquisitionHistories: Array<ReacquisitionHistory> = (
+    [0, 1, 2] as const
+  ).flatMap((peers) =>
+    ([1, 2] as const).flatMap((resultRows) => [
+      {
+        staleTime: Number.POSITIVE_INFINITY,
+        refetch: `rejects` as const,
+        settles: `after-publication` as const,
+        peers,
+        rows: resultRows,
+      },
+      ...([`rejects`, `same-rows`, `empty`] as const).flatMap((refetch) =>
+        ([`while-held`, `after-publication`] as const).map((settles) => ({
+          staleTime: 0,
+          refetch,
+          settles,
+          peers,
+          rows: resultRows,
+        })),
+      ),
+    ]),
+  )
+
+  /**
+   * The driver uses the public `loadSubset` and `unloadSubset` entry points, a
+   * real QueryClient, and a held query function for the refetch. The blocker's
+   * mutation function holds publication. Each checkpoint follows a settled
+   * macrotask turn, so the comparison reads rows only after the step's sync
+   * work has run. `loadSubset` settlement is not compared: this law does not
+   * say whether the caller waits for the refetch.
+   */
+  it.each(reacquisitionHistories)(
+    `keeps a reacquired lease's result (staleTime $staleTime, refetch $refetch, settles $settles, peers $peers, rows $rows)`,
+    async (history) => {
+      const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
+      const detail = categorySubset(`detail`)
+      const peerSubsets = [
+        categorySubset(`list`),
+        {
+          where: new IR.Func(`in`, [
+            new IR.PropRef([`category`]),
+            new IR.Value([`peer`, `shared`]),
+          ]),
+        },
+      ].slice(0, history.peers)
+      const leaseResult = history.rows === 2 ? [shared, solo] : [shared]
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const refetch = createDeferred<Array<Item>>()
+      void refetch.promise.catch(() => undefined)
+      const { collection, queryFn } = createOwnershipFixture({
+        id,
+        results: [leaseResult, ...peerSubsets.map(() => [shared])],
+        staleTime: history.staleTime,
+      })
+      queryFn.mockImplementationOnce(() => refetch.promise)
+      const settleRefetch = () => {
+        if (history.refetch === `rejects`)
+          refetch.reject(new Error(`refetch failed`))
+        else
+          refetch.resolve(
+            history.refetch === `empty`
+              ? []
+              : leaseResult.map((item) => ({ ...item })),
+          )
+      }
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      await collection._sync.loadSubset(detail)
+      for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
+      mutation.mutate(() => collection.insert(blocker))
+      cleanups.push(async () => {
+        persistence.resolve()
+        refetch.reject(new Error(`cleanup`))
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+
+      // The release's sync transaction is accepted but held behind the blocker.
+      const pendingBefore = collection._state.pendingSyncedTransactions.length
+      collection._sync.unloadSubset(detail)
+      await vi.waitFor(() =>
+        expect(
+          collection._state.pendingSyncedTransactions.length,
+        ).toBeGreaterThan(pendingBefore),
+      )
+      const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+      void reacquired.catch(() => undefined)
+      await settleTurn()
+      const held = rows(collection)
+
+      if (history.settles === `while-held`) {
+        settleRefetch()
+        await settleTurn()
+      }
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await settleTurn()
+      const published = rows(collection)
+
+      if (history.settles === `after-publication`) {
+        settleRefetch()
+        await settleTurn()
+      }
+      await reacquired.catch(() => undefined)
+      const settled = rows(collection)
+
+      for (const peer of peerSubsets) {
+        collection._sync.unloadSubset(peer)
+        await settleTurn()
+      }
+      const peerReleased = rows(collection)
+
+      collection._sync.unloadSubset(detail)
+      await settleTurn()
+
+      expect({
+        held,
+        published,
+        settled,
+        peerReleased,
+        released: rows(collection),
+        queryCalls: queryFn.mock.calls.length,
+      }).toEqual(modelReacquisition(history))
+    },
+  )
+
+  /**
+   * ## Published owners never name a released observer lease
+   *
+   * Law: each publication records, for each row, the observer leases that own
+   * it. A released lease is not an owner, even while its release waits behind
+   * held publication. A later lease that claims the row during that wait
+   * must not copy the released lease back into the row's owners from metadata
+   * that has not yet published the release. A hydrated client trusts those
+   * owners: a row stays public there while any recorded owner may still need
+   * it, so a stale owner keeps the row alive after its last real owner is
+   * released.
+   *
+   * Authority: the file's opening law (a row remains public while any committed
+   * owner needs it), and the hydration history above, which releases a
+   * hydrated demand and expects its rows to leave. The reacquisition table
+   * above changes how a released lease's ownership entry is read; this table
+   * keeps a repair from simply deleting that entry at release.
+   *
+   * Limits: one row, one released lease `a`, one claiming lease `b`, and an
+   * optional peer lease `c` that is never released. `a` may be reacquired
+   * without cached data before `b` claims the row; its fetch then fails, so
+   * the reacquired lease never applies a result. Hydration uses the public
+   * `DbClient.dehydrate` and `hydrate` paths with a fresh QueryClient. Native
+   * persistence and cold persisted scans are owned by the persisted histories.
+   */
+  type PublishedOwnerHistory = {
+    /** `b` claims the row while `a`'s release is held, or after it publishes. */
+    claims: `while-held` | `after-publication`
+    /** Whether peer `c` also owns the row and stays acquired. */
+    peer: boolean
+    /** Whether `a` is reacquired without cached data and its fetch fails. */
+    reacquired: boolean
+  }
+
+  type PublishedOwnerObservation = {
+    /** Owner edges for the row in the dehydrated state. Keys are opaque. */
+    dehydratedOwners: number
+    /** Public rows in the hydrated client after it acquires `b`. */
+    hydratedLoaded: Array<string>
+    /** Public rows in the hydrated client after it releases `b`. */
+    hydratedReleased: Array<string>
+  }
+
+  /**
+   * The model records the set of active leases whose result holds the row. A
+   * release removes its lease at once, regardless of publication. Hydration
+   * copies that set; after the hydrated client releases `b`, the row stays
+   * exactly when another recorded owner remains. Publication timing is absent
+   * from the model, because the law says it cannot change the owner set.
+   */
+  const modelPublishedOwners = (
+    history: PublishedOwnerHistory,
+  ): PublishedOwnerObservation => {
+    const activeOwners = new Set([`a`, ...(history.peer ? [`c`] : [])])
+    activeOwners.delete(`a`)
+    activeOwners.add(`b`)
+    const afterHydratedRelease = new Set(activeOwners)
+    afterHydratedRelease.delete(`b`)
+    return {
+      dehydratedOwners: activeOwners.size,
+      hydratedLoaded: [shared.id],
+      hydratedReleased: afterHydratedRelease.size > 0 ? [shared.id] : [],
+    }
+  }
+
+  /**
+   * `while-held` reaches the premise: `b`'s sync transaction reads row
+   * metadata that still names `a`. `after-publication` is the nearby boundary
+   * where the release has published first. The peer histories require `c` to
+   * remain an owner, so a repair that drops every metadata owner at release,
+   * or one that ignores recorded owners on hydration, fails them. A repair that
+   * deletes the released lease's ownership entry at release instead of keeping
+   * it until publication fails the `while-held` histories. Without a peer, it
+   * fails at both the owner count and the leaked hydrated row; with a peer,
+   * `c` keeps the row public, so only the owner count distinguishes it.
+   *
+   * The `reacquired` histories reject a repair that deletes the released
+   * entry when the Query is reacquired. The reacquired lease has no result
+   * yet, so `b` reads metadata naming `a` while `a` looks unresolved and
+   * copies it back. A later result for `a` would correct the edge, so `a`'s
+   * fetch fails and it never applies one. The model is unchanged: a lease
+   * without a successful result owns nothing.
+   */
+  const publishedOwnerHistories: Array<PublishedOwnerHistory> = (
+    [`while-held`, `after-publication`] as const
+  ).flatMap((claims) =>
+    [false, true].flatMap((peer) =>
+      [false, true].map((reacquired) => ({ claims, peer, reacquired })),
+    ),
+  )
+
+  /**
+   * The driver runs a server DbClient and a hydrated browser DbClient over the
+   * same Collection descriptor. On the server, an optimistic blocker holds
+   * publication while `a` is released and, in `while-held` histories, while
+   * `b` is acquired. In `reacquired` histories, `a`'s Query is removed with
+   * the public `QueryClient.removeQueries` after its release, then `a` is
+   * reacquired and its held fetch rejects after `b` claims the row. The
+   * checkpoints are the dehydrated state after every held
+   * transaction publishes, and the hydrated client's public rows after it
+   * acquires and then releases `b`.
+   */
+  it.each(publishedOwnerHistories)(
+    `publishes only active owners when a lease claims a released row (claims $claims, peer $peer, reacquired $reacquired)`,
+    async (history) => {
+      const id = `published-owners-${history.claims}-${history.peer}-${history.reacquired}`
+      const subset = (category: string): LoadSubsetOptions => ({
+        where: new IR.Func(`in`, [
+          new IR.PropRef([`category`]),
+          new IR.Value([category, `shared`]),
+        ]),
+      })
+      const [a, b, c] = [subset(`a`), subset(`b`), subset(`c`)]
+      // Query keys embed the subset as JSON, so `a`'s key holds `\"a\"`.
+      const isQueryForA = (queryKey: unknown) =>
+        JSON.stringify(queryKey).includes(`\\"a\\"`)
+      const reacquiredFetch = createDeferred<Array<Item>>()
+      void reacquiredFetch.promise.catch(() => undefined)
+      const createClient = (
+        queryFn: (context: QueryFunctionContext) => Promise<Array<Item>> = () =>
+          Promise.resolve([shared]),
+      ) => {
+        const queryClient = createQueryClient()
+        const descriptor = collectionOptions(
+          queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+        const client = new DbClient({ queryClient })
+        cleanups.push(async () => {
+          await client.cleanup()
+          queryClient.clear()
+        })
+        return {
+          client,
+          queryClient,
+          collection: client.collection(descriptor),
+        }
+      }
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      let fetchesForA = 0
+      const server = createClient(({ queryKey }) => {
+        if (isQueryForA(queryKey) && fetchesForA++ > 0)
+          return reacquiredFetch.promise
+        return Promise.resolve([shared])
+      })
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        reacquiredFetch.reject(new Error(`cleanup`))
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+
+      await server.collection._sync.loadSubset(a)
+      if (history.peer) await server.collection._sync.loadSubset(c)
+      mutation.mutate(() => server.collection.insert(blocker))
+      server.collection._sync.unloadSubset(a)
+      let reacquired: Promise<unknown> | undefined
+      if (history.reacquired) {
+        await settleTurn()
+        server.queryClient.removeQueries({
+          predicate: (query) => isQueryForA(query.queryKey),
+        })
+        reacquired = Promise.resolve(server.collection._sync.loadSubset(a))
+        void reacquired.catch(() => undefined)
+        await settleTurn()
+      }
+      const failReacquiredFetch = async () => {
+        const pending = reacquired
+        if (!pending) return
+        reacquiredFetch.reject(new Error(`reacquired fetch failed`))
+        await pending.catch(() => undefined)
+        await settleTurn()
+      }
+      if (history.claims === `while-held`) {
+        const claimed = Promise.resolve(server.collection._sync.loadSubset(b))
+        await settleTurn()
+        await failReacquiredFetch()
+        persistence.resolve()
+        await mutation.isPersisted.promise
+        await claimed
+      } else {
+        persistence.resolve()
+        await mutation.isPersisted.promise
+        await settleTurn()
+        await server.collection._sync.loadSubset(b)
+        await failReacquiredFetch()
+      }
+      await settleTurn()
+      const state = server.client.dehydrate({
+        shouldDehydrateCollection: () => true,
+      })
+      const sharedRow = state.collections
+        .flatMap((chunk) => chunk.rows)
+        .find((row) => row.key === shared.id)
+      const owners = (
+        sharedRow?.metadata as
+          { queryCollection?: { owners?: Record<string, true> } } | undefined
+      )?.queryCollection?.owners
+
+      const browser = createClient()
+      browser.client.hydrate(state)
+      await browser.collection._sync.loadSubset(b)
+      const hydratedLoaded = rows(browser.collection)
+      browser.collection._sync.unloadSubset(b)
+      await settleTurn()
+
+      expect({
+        dehydratedOwners: Object.keys(owners ?? {}).length,
+        hydratedLoaded,
+        hydratedReleased: rows(browser.collection),
+      }).toEqual(modelPublishedOwners(history))
+    },
+  )
+
+  /**
+   * ## A reacquired lease's cached rows receive accepted direct writes
+   *
+   * Law: in on-demand mode, an accepted direct write patches the cached rows
+   * of each active Query in its Collection that may still apply them. A Query
+   * whose lease has not yet applied a result may hold the written key, so it
+   * is patched; only a resolved scope that does not own the key may be
+   * skipped. The patched cache keeps a later replay of that cached result
+   * from presenting the pre-write value as a server result.
+   *
+   * Authority: the opening direct-write law of this file. A released lease's
+   * empty ownership entry, kept while its release is held, does not resolve a
+   * later lease of the same Query.
+   *
+   * Reference: one row whose server value is Shared, then an accepted Manual
+   * upsert. The model expects the public row and the reacquired Query's cache
+   * to show Manual.
+   *
+   * History: hold publication behind an optimistic blocker, release the
+   * demand, raise a refresh barrier (`deferDataRefresh`, as offline
+   * transactions do while they replay), and reacquire. The barrier keeps the
+   * cached result unapplied. The acquisition's own fetch fails, so Query
+   * keeps its cached data and is idle when the upsert arrives. The checkpoint
+   * is after publication and the barrier both end. Public rows alone cannot
+   * distinguish the skip: the upsert keeps the row either way. The Query
+   * cache, read through `QueryClient.getQueriesData`, does.
+   */
+  it(`patches a reacquired lease's cached rows while its result waits`, async () => {
+    const id = `reacquired-lease-direct-patch`
+    const detail = categorySubset(`detail`)
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const barrier = createDeferred<void>()
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [[shared]],
+    })
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+    cleanups.push(async () => {
+      collection.deferDataRefresh = null
+      barrier.resolve()
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+    })
+
+    await collection._sync.loadSubset(detail)
+    mutation.mutate(() => collection.insert(blocker))
+    collection._sync.unloadSubset(detail)
+    await settleTurn()
+    collection.deferDataRefresh = barrier.promise
+    const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+    void reacquired.catch(() => undefined)
+    await settleTurn()
+    const write = Promise.resolve(
+      collection.utils.writeUpsert({ ...shared, name: `Manual` }),
+    )
+    void write.catch(() => undefined)
+    await settleTurn()
+
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    collection.deferDataRefresh = null
+    barrier.resolve()
+    await reacquired.catch(() => undefined)
+    await write
+    await settleTurn()
+
+    expect({
+      row: collection.get(shared.id)?.name,
+      cache: queryClient
+        .getQueriesData<Array<Item>>({ queryKey: [id] })
+        .flatMap(([, data]) => data ?? [])
+        .map((item) => item.name),
+      queryCalls: queryFn.mock.calls.length,
+    }).toEqual({ row: `Manual`, cache: [`Manual`], queryCalls: 2 })
+  })
+
+  /**
+   * ## A release whose durable commit fails is terminal for its sync run
+   *
+   * Law: a release is complete only when its commit is durable. If that
+   * commit fails, the Collection reports the failure and enters `error`; the
+   * released row stays public and stored, because the deletion never became
+   * durable. A later acquisition in that run rejects with the same failure
+   * instead of reading ownership the failed release left behind. Cleanup ends
+   * the run; a restarted run starts with no ownership from the old run, so
+   * its acquisition and release behave as in a fresh Collection.
+   *
+   * Authority: the Code Weight and Fail-Fast rules in AGENTS.md (a
+   * contradictory collaborator signal rejects at the boundary instead of
+   * recovering), the persisted direct-write receipt law in this file's opening
+   * prose, and the glossary's cleanup definition (it ends the sync run and its
+   * resources).
+   *
+   * Reference: the model owns one row through one demand. A failed release
+   * leaves `{ rows: [shared], stored: [shared], status: error }`; a restarted
+   * load and release give `[shared]` and then `{ rows: [], stored: [] }`. The
+   * `durable` history is the control: the release succeeds and the restarted
+   * run never refetches, because no demand remains.
+   *
+   * Limits: one on-demand row, no persisted retention (`persistedGcTime: 0`,
+   * since retention intentionally keeps released rows), a controlled adapter
+   * whose next commit throws, and a public `cleanup()` then `preload()`
+   * restart. A failed commit that a host retries is outside this witness.
+   */
+  it.each([`durable`, `failed`, `failed-then-reacquired`] as const)(
+    `keeps a released row and fails loudly when its release commit fails (%s)`,
+    async (history) => {
+      const id = `release-commit-${history}`
+      const storage = createOwnershipStorage()
+      const queryClient = createQueryClient()
+      const queryFn = vi.fn(() => Promise.resolve([shared]))
+      let failNextCommit = false
+      const applyCommittedTx = storage.adapter.applyCommittedTx
+      storage.adapter.applyCommittedTx = (...args) => {
+        if (!failNextCommit) return applyCommittedTx(...args)
+        failNextCommit = false
+        return Promise.reject(new Error(`storage failed`))
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          QueryCollectionUtils<Item, string | number, Item, unknown>
+        >({
+          ...queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            persistedGcTime: 0,
+            startSync: true,
+          }),
+          persistence: { adapter: storage.adapter },
+        }),
+      )
+      cleanups.push(async () => {
+        await collection.cleanup().catch(() => undefined)
+        queryClient.clear()
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      const observe = () => ({
+        rows: rows(collection),
+        stored: storedItems(storage).map((item) => item.id),
+        status: collection.status,
+      })
+      const detail = categorySubset(`detail`)
+
+      await collection._sync.loadSubset(detail)
+      failNextCommit = history !== `durable`
+      collection._sync.unloadSubset(detail)
+      await settleTurn()
+      const afterRelease = observe()
+
+      let reacquisition: string | undefined
+      if (history === `failed-then-reacquired`) {
+        reacquisition = await Promise.resolve(
+          collection._sync.loadSubset(detail),
+        ).then(
+          () => `fulfilled`,
+          (error: unknown) =>
+            error instanceof Error ? error.message : String(error),
+        )
+      }
+
+      await collection.cleanup()
+      await collection.preload()
+      await collection._sync.loadSubset(detail)
+      const restartedLoad = rows(collection)
+      collection._sync.unloadSubset(detail)
+      await settleTurn()
+
+      const failed = history !== `durable`
+      expect({
+        afterRelease,
+        reacquisition,
+        restartedLoad,
+        restartedRelease: observe(),
+        queryCalls: queryFn.mock.calls.length,
+      }).toEqual({
+        afterRelease: failed
+          ? { rows: [shared.id], stored: [shared.id], status: `error` }
+          : { rows: [], stored: [], status: `ready` },
+        reacquisition:
+          history === `failed-then-reacquired`
+            ? `Failed to durably persist collection "${id}": storage failed`
+            : undefined,
+        restartedLoad: [shared.id],
+        restartedRelease: { rows: [], stored: [], status: `ready` },
+        queryCalls: failed ? 2 : 1,
+      })
+    },
+  )
+
+  /**
+   * The same fail-loud law covers a reacquired lease whose own durable commit
+   * fails. The release's commit is held at the persistence boundary while the
+   * Query is reacquired; the reacquired application's commit then fails. The
+   * release is durable, so the row leaves; the reacquired result never became
+   * durable, so it cannot keep the row. The Collection enters `error`, the
+   * acquisition rejects with the persistence failure, and a restart serves and
+   * releases the row normally. A history that keeps the row public after the
+   * failure would report a result that storage never accepted.
+   */
+  it(`fails loudly when a reacquired lease's commit fails after a held release`, async () => {
+    const id = `reacquired-commit-fails`
+    const storage = createOwnershipStorage(undefined, 2)
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([shared]))
+    let commits = 0
+    const applyCommittedTx = storage.adapter.applyCommittedTx
+    storage.adapter.applyCommittedTx = (...args) => {
+      // Commit 1 loads the row, 2 is the held release, 3 is the reacquisition.
+      if (++commits === 3) return Promise.reject(new Error(`storage failed`))
+      return applyCommittedTx(...args)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<
+        Item,
+        string | number,
+        never,
+        QueryCollectionUtils<Item, string | number, Item, unknown>
+      >({
+        ...queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          persistedGcTime: 0,
+          startSync: true,
+        }),
+        persistence: { adapter: storage.adapter },
+      }),
+    )
+    cleanups.push(async () => {
+      storage.release()
+      await collection.cleanup().catch(() => undefined)
+      queryClient.clear()
+    })
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+    const detail = categorySubset(`detail`)
+
+    await collection._sync.loadSubset(detail)
+    collection._sync.unloadSubset(detail)
+    await storage.entered
+    const reacquisition = Promise.resolve(
+      collection._sync.loadSubset(detail),
+    ).then(
+      () => `fulfilled`,
+      (error: unknown) =>
+        error instanceof Error ? error.message : String(error),
+    )
+    await settleTurn()
+    const held = { rows: rows(collection), status: collection.status }
+
+    storage.release()
+    const reacquired = await reacquisition
+    await settleTurn()
+    const failed = { rows: rows(collection), status: collection.status }
+
+    await collection.cleanup()
+    await collection.preload()
+    await collection._sync.loadSubset(detail)
+    const restartedLoad = rows(collection)
+    collection._sync.unloadSubset(detail)
+    await settleTurn()
+
+    expect({
+      held,
+      reacquired,
+      failed,
+      restartedLoad,
+      restartedRelease: {
+        rows: rows(collection),
+        stored: storedItems(storage).map((item) => item.id),
+      },
+    }).toEqual({
+      held: { rows: [shared.id], status: `ready` },
+      reacquired: `Failed to durably persist collection "${id}": storage failed`,
+      failed: { rows: [], status: `error` },
+      restartedLoad: [shared.id],
+      restartedRelease: { rows: [], stored: [] },
+    })
+  })
+
+  /**
    * Accepted Query results update ownership in acceptance order even while
    * publication is held. The independent model stores each active Query's
    * latest complete result and exposes their union: after the detail and list
@@ -6427,6 +7202,92 @@ describe(`query collection ownership lifecycle`, () => {
         public: collection.get(shared.id)?.name,
         durable: storedItems(storage)[0]?.name,
       }).toEqual({ public: newer.name, durable: newer.name })
+    },
+  )
+
+  /**
+   * The same law holds when the Query's current result is empty. An empty
+   * result is a resolved scope that owns no rows; it is not an unapplied
+   * result. The reference sequence is the first fetched result (no rows), the
+   * accepted Manual insert, and the later fetched Newer row. Starting the
+   * refetch repeats the empty cached success; it cannot remove the direct row
+   * or claim it.
+   *
+   * This sibling exists because the reacquisition table above makes a
+   * released lease's empty ownership entry distinguishable from an applied
+   * one. A repair that instead treats every empty ownership entry as
+   * unapplied passes that table and the non-empty history above. Here it
+   * replays the empty cached result at refetch start: in on-demand mode the
+   * insert disappears at its own receipt, and in eager mode the later Newer
+   * result does not replace Manual. The checkpoints and holds match the
+   * history above.
+   */
+  it.each([`eager`, `on-demand`] as const)(
+    `keeps an accepted persisted %s insert through a refetch start of an empty result`,
+    async (syncMode) => {
+      const id = `persisted-direct-insert-empty-refetch-start-${syncMode}`
+      const storage = createOwnershipStorage(undefined, 2)
+      const queryClient = createQueryClient()
+      const newer = { ...shared, name: `Newer` }
+      const manual = { ...shared, name: `Manual` }
+      const heldResult = createDeferred<Array<Item>>()
+      const requestStarted = createDeferred<void>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockImplementationOnce(() => {
+          requestStarted.resolve()
+          return heldResult.promise
+        })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          QueryCollectionUtils<Item, string | number, Item, unknown>
+        >({
+          ...queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode,
+            persistedGcTime: Number.POSITIVE_INFINITY,
+            startSync: true,
+          }),
+          persistence: { adapter: storage.adapter },
+        }),
+      )
+      cleanups.push(async () => {
+        storage.release()
+        heldResult.resolve([newer])
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      const observe = () => ({
+        public: collection.get(shared.id)?.name ?? null,
+        durable: storedItems(storage)[0]?.name ?? null,
+      })
+
+      if (syncMode === `eager`) await collection.stateWhenReady()
+      else await collection._sync.loadSubset({})
+      expect(observe()).toEqual({ public: null, durable: null })
+
+      const write = collection.utils.writeInsert(manual)
+      await storage.entered
+      const refetch = queryClient.refetchQueries({ queryKey: [id] })
+      void refetch.catch(() => undefined)
+      await requestStarted.promise
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      storage.release()
+      await write
+      expect(observe()).toEqual({ public: manual.name, durable: manual.name })
+
+      heldResult.resolve([newer])
+      await refetch
+      expect(observe()).toEqual({ public: newer.name, durable: newer.name })
     },
   )
 

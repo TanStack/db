@@ -980,6 +980,14 @@ export function queryCollectionOptions(
   // queryKey → Set<RowKey>. Entry presence means ownership is resolved;
   // an empty set represents a resolved query that currently owns no rows.
   const queryToRows = new Map<string, Set<string | number>>()
+  // A released query keeps an empty entry until its release publishes, so
+  // unpublished metadata cannot restore it as an owner. That entry is not a
+  // result applied by a later acquisition of the same query.
+  const releasedOwnership = new WeakSet<Set<string | number>>()
+  const hasAppliedOwnership = (hashedQueryKey: string) => {
+    const ownedRows = queryToRows.get(hashedQueryKey)
+    return ownedRows !== undefined && !releasedOwnership.has(ownedRows)
+  }
 
   // RowKey → Set<queryKey>
   const rowToQueries = new Map<string | number, Set<string>>()
@@ -1118,7 +1126,9 @@ export function queryCollectionOptions(
       else rowToQueries.set(rowKey, nextOwners)
     })
 
-    queryToRows.set(hashedQueryKey, new Set())
+    const released = new Set<string | number>()
+    releasedOwnership.add(released)
+    queryToRows.set(hashedQueryKey, released)
     return nextOwnersByRow
   }
 
@@ -2569,9 +2579,8 @@ export function queryCollectionOptions(
       const settledDirectPositions = new Map<string | number, number>()
       const removedRows = new Set<string | number>()
 
-      const previousOwnedRows = queryToRows.has(hashedQueryKey)
-        ? new Set(queryToRows.get(hashedQueryKey))
-        : undefined
+      // Application replaces this entry rather than mutating it.
+      const previousOwnedRows = queryToRows.get(hashedQueryKey)
       const affectedRowKeys = new Set([
         ...previouslyOwnedRows,
         ...newItemsMap.keys(),
@@ -3003,7 +3012,7 @@ export function queryCollectionOptions(
             if (
               result.isFetching &&
               !collection.deferDataRefresh &&
-              queryToRows.has(hashedQueryKey) &&
+              hasAppliedOwnership(hashedQueryKey) &&
               queryCollectionSuccessfulFetchData.get(observedQuery) ===
                 observedQuery.state.data
             ) {
@@ -4271,7 +4280,7 @@ export function queryCollectionOptions(
         // cached rows, so inspect those entries before their owner is known.
         if (
           !affectedOwners.has(hashedQueryKey) &&
-          queryToRows.has(hashedQueryKey) &&
+          hasAppliedOwnership(hashedQueryKey) &&
           query.state.fetchStatus !== `fetching` &&
           !pendingResultApplications.has(hashedQueryKey)
         )
