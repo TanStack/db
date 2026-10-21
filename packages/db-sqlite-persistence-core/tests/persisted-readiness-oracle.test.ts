@@ -446,20 +446,24 @@ describe(`persisted-readiness oracle`, () => {
     ])
   })
 
-  it(`rejects network-first initial rendering for on-demand persistence`, () => {
-    const fixture = recordingAdapter([])
-    expect(() =>
+  // On-demand opt-in behavior (per-demand coverage, waits, and the joined
+  // gate) belongs to `persisted-demand-coverage-oracle.test.ts`.
+  it(`accepts network-first initial rendering for on-demand persistence as an on-demand source`, () => {
+    const options = (syncMode: `eager` | `on-demand`) =>
       persistedCollectionOptions<Row, string>({
-        id: `local-on-demand`,
+        id: `local-${syncMode}`,
         getKey: (row) => row.id,
-        syncMode: `on-demand`,
+        syncMode,
         initialRender: {
           strategy: `network-first`,
           networkTimeoutMs: 100,
         },
-        persistence: { adapter: fixture.adapter },
-      }),
-    ).toThrow(/network-first.*eager/i)
+        persistence: { adapter: recordingAdapter([]).adapter },
+      })
+    expect(getPersistedReadinessSource(options(`on-demand`))?.onDemand).toBe(
+      true,
+    )
+    expect(getPersistedReadinessSource(options(`eager`))?.onDemand).toBe(false)
   })
 
   it(`defaults the network-first fallback deadline to three seconds`, () => {

@@ -165,6 +165,7 @@ export class CollectionConfigBuilder<
   lazySourcesCallbacks = createSourceRecord<LazyCollectionCallbacks>()
   // Set of opaque source IDs that are lazy (don't load initial state)
   readonly lazySources = new Set<string>()
+  private readonly demandsSettledListeners = new Set<() => void>()
   private readonly activeDemands = new Map<
     string,
     {
@@ -1189,27 +1190,34 @@ export class CollectionConfigBuilder<
   private updateLiveQueryStatus(config: SyncMethods<TResult>) {
     const { markReady } = config
 
-    // Don't update status if already in error
-    if (this.isInErrorState) {
-      return
-    }
+    // Mark ready when the initial demands have settled and every eager
+    // source Collection is ready. This prevents marking the live query ready
+    // before its data is processed (fixes issue where useLiveQuery returns
+    // isReady=true with empty data)
+    if (!this.initialDemandsSettled()) return
+    for (const listener of this.demandsSettledListeners) listener()
+    if (this.allRequiredSourcesReady()) markReady()
+  }
 
-    const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
-    const allReady = this.allRequiredSourcesReady()
-    const allDemandsSettled = [...this.activeDemands.values()].every(
-      (demand) => demand.settled,
+  /** Called whenever a status check finds the initial demands settled. */
+  subscribeInitialDemandsSettled(listener: () => void): () => void {
+    this.demandsSettledListeners.add(listener)
+    return () => this.demandsSettledListeners.delete(listener)
+  }
+
+  /**
+   * Initial readiness without source Collection readiness: subscriptions are
+   * set up, every active route demand has settled, and the live query
+   * Collection is not loading subset data. Network-first initial rendering
+   * reads it for on-demand persisted sources.
+   */
+  initialDemandsSettled(): boolean {
+    return (
+      !this.isInErrorState &&
+      this.currentSyncState?.subscribedToAllCollections === true &&
+      [...this.activeDemands.values()].every((demand) => demand.settled) &&
+      !this.liveQueryCollection?.isLoadingSubset
     )
-    const isLoading = this.liveQueryCollection?.isLoadingSubset
-    // Mark ready when:
-    // 1. All subscriptions are set up (subscribedToAllCollections)
-    // 2. All source collections are ready
-    // 3. Every active route demand has settled
-    // 4. The live query collection is not loading subset data
-    // This prevents marking the live query ready before its data is processed
-    // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (subscribedToAll && allReady && allDemandsSettled && !isLoading) {
-      markReady()
-    }
   }
 
   /**

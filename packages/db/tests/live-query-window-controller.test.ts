@@ -95,6 +95,7 @@ describe(`createLiveQueryWindowController`, () => {
       {
         value: {
           networkTimeoutMs: 0,
+          onDemand: false,
           getOrStartNetworkDeadline: () => Date.now(),
           getSnapshot: () => ({ status: persistedStatus }),
           subscribe: (listener: () => void) => {

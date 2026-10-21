@@ -2521,7 +2521,7 @@ or an error already present before a hook mounts.
 
 The persisted demand coverage oracle in
 `packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`
-owns the proposed on-demand law: an opted-in wrapper may settle a demand's
+owns the on-demand law: an opted-in wrapper may settle a demand's
 load from SQLite only when that exact demand has persisted demand coverage,
 after the configured wait or an upstream failure. Its bounded enumeration
 crosses eight session-1 histories (not requested, failed, overlapping filter,
@@ -2537,16 +2537,28 @@ load measures its own wait and settles on its own restored rows, that
 release aborts the upstream load, and that coverage survives release. A joined history checks that the network-first
 wait releases an eager and an on-demand source only when the on-demand demand
 is covered. Model-level calibration shows that fourteen wrong designs each
-differ from the law at a named case. The law is not implemented: on main every
-production case fails at setup because `initialRender` rejects
-`syncMode: 'on-demand'`. Without the opt-in, main matches every uncovered cell
-and diverges at the first checkpoint where the law applies for every covered
-cell except an early network answer. Production mutants, Electric and Query DB
-receiving witnesses, ordered windows, cursor pages, and later demand in
-session 2 (including a demand key that ignores offset or cursor but honors
-limit, which no history distinguishes), optimistic writes on a covered
-demand, a failure before the restore publishes, cache-claim rotation,
-truncate, must-refetch, schema reset, and framework Suspense remain open.
+differ from the law at a named case. Before the implementation, every
+production case failed at setup because `initialRender` rejected
+`syncMode: 'on-demand'`; without the opt-in, that code matched every
+uncovered cell and diverged at the first checkpoint where the law applies for
+every covered cell except an early network answer. With the implementation,
+all 117 cases pass. Production mutants that ignore coverage, ignore or halve
+the wait, error a covered demand on upstream failure, write coverage before
+the load settles, measure the wait from the sync run, or let an on-demand
+opt-in permit fallback alone each fail named cases; a gate that ignores the
+eager deadline fails the persisted-readiness oracle instead. The Electric
+progressive witness in
+`packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
+receives the law: with the opt-in, a subset-only session 1 settles offline on
+its restored rows, and a never-loaded subset still waits. Coverage is cleared
+in the truncate transaction, but no history exercises it; a mutant that skips
+the clearing survives. Query DB receiving witnesses, ordered windows, cursor
+pages, and later demand in session 2 (including a demand key that ignores
+offset or cursor but honors limit, which no history distinguishes),
+optimistic writes on a covered demand, a failure before the restore
+publishes, cache-claim rotation, truncate, must-refetch, schema reset,
+nested live queries over an on-demand source, and framework Suspense remain
+open.
 
 ## Deferred contracts and evidence
 

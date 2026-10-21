@@ -788,7 +788,10 @@ class PersistedReadinessTracker implements PersistedReadinessSource {
   private networkDeadlineAt: number | undefined
   private readonly listeners = new Set<() => void>()
 
-  constructor(readonly networkTimeoutMs: number) {}
+  constructor(
+    readonly networkTimeoutMs: number,
+    readonly onDemand: boolean,
+  ) {}
 
   getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
 
@@ -826,6 +829,11 @@ export type PersistedInitialRenderOptions = {
 }
 
 const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
+// Persisted demand coverage: a load of this exact demand key reached applied
+// settlement with its rows durably committed in this cache generation.
+const DEMAND_COVERAGE_PREFIX = `persisted:coverage:`
+const demandCoverageKey = (options: LoadSubsetOptions): string =>
+  `${DEMAND_COVERAGE_PREFIX}${getLoadSubsetDemandKey(options)}`
 const CACHE_CLAIM_RENEW_WINDOW_MS = 60_000
 const MAX_TIMER_TIMEOUT_MS = 2_147_483_647
 
@@ -2700,6 +2708,7 @@ class PersistedCollectionRuntime<
     onHydrationStarted?: () => void,
     isDemandRetained?: () => boolean,
   ): Promise<void> {
+    const startedAt = Date.now()
     this.throwIfTerminal()
     await this.ensureCacheClaimActive()
     // The caller can retire demand while claim renewal or rotation is awaited.
@@ -2835,13 +2844,45 @@ class PersistedCollectionRuntime<
     }
 
     if (upstreamLoadSubset) {
-      try {
-        await upstreamLoadSubset(options)
-      } catch (error) {
-        this.noteUpstreamLoadFailure(options, error)
-        throw error
-      }
+      const upstream = (async () => {
+        try {
+          await upstreamLoadSubset(options)
+        } catch (error) {
+          this.noteUpstreamLoadFailure(options, error)
+          throw error
+        }
+      })()
+      await this.settleCoveredDemand(options, upstream, startedAt)
     }
+  }
+
+  // The persisted subset restore of this demand is visible. A covered demand
+  // of an opted-in on-demand Collection settles once the wait since the load
+  // started has passed or its upstream load has failed. The upstream load
+  // keeps running; its rows are ordinary source writes, and a later failure
+  // is reported but leaves the demand settled.
+  private settleCoveredDemand(
+    options: LoadSubsetOptions,
+    upstream: Promise<void>,
+    startedAt: number,
+  ): Promise<void> {
+    if (
+      !this.persistedReadiness?.onDemand ||
+      this.syncControls.metadata?.collection.get(demandCoverageKey(options)) ===
+        undefined
+    ) {
+      return upstream
+    }
+    const deadlineAt = startedAt + this.persistedReadiness.networkTimeoutMs
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, Math.max(0, deadlineAt - Date.now()))
+      void upstream
+        .catch(() => undefined)
+        .then(() => {
+          clearTimeout(timer)
+          resolve()
+        })
+    })
   }
 
   loadHydratedSubset(
@@ -2873,14 +2914,18 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    return result.then(
-      () => {
-        this.queueRemoteSubsetEnsure(options)
-      },
-      (error: unknown) => {
-        this.noteUpstreamLoadFailure(options, error)
-        throw error
-      },
+    return this.settleCoveredDemand(
+      options,
+      result.then(
+        () => {
+          this.queueRemoteSubsetEnsure(options)
+        },
+        (error: unknown) => {
+          this.noteUpstreamLoadFailure(options, error)
+          throw error
+        },
+      ),
+      Date.now(),
     )
   }
 
@@ -6178,6 +6223,14 @@ function createWrappedSyncConfig<
           // Callers (for example electric resume/reset handling) may stage
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
+          // Persisted demand coverage ends with the rows it described.
+          for (const { key } of wrappedParams.metadata?.collection.list(
+            DEMAND_COVERAGE_PREFIX,
+          ) ?? []) {
+            openTransaction.collectionMetadataWrites.set(key, {
+              type: `delete`,
+            })
+          }
           openTransaction.truncate = true
         },
         commit: (signal?: AbortSignal) => {
@@ -6405,6 +6458,19 @@ function createWrappedSyncConfig<
         }
       }
 
+      // The load's rows committed first; this metadata-only source
+      // transaction persists after them, so coverage never outlives a failed
+      // row write.
+      const recordCoverage = async (
+        demand: LoadSubsetOptions,
+      ): Promise<void> => {
+        wrappedParams.begin()
+        wrappedParams.metadata?.collection.set(demandCoverageKey(demand), {
+          settledAt: Date.now(),
+        })
+        await wrappedParams.commit()
+      }
+
       let sourceResult: SyncConfigRes = {}
       let sourceResultSettled = false
       let activeSourceSyncEntry: Promise<void> | undefined
@@ -6589,7 +6655,10 @@ function createWrappedSyncConfig<
             try {
               // Returning a promise transfers its lease even if it rejects.
               // Only a synchronous throw leaves no upstream lease to release.
-              return currentSource.loadSubset(loadOptions)
+              const loaded = currentSource.loadSubset(loadOptions)
+              return persistedReadiness?.onDemand
+                ? Promise.resolve(loaded).then(() => recordCoverage(options))
+                : loaded
             } catch (error) {
               acquisition.forwarded = false
               acquisition.source = undefined
@@ -6830,14 +6899,12 @@ export function persistedCollectionOptions<
   }
 
   const networkTimeoutMs = getNetworkTimeoutMs(options.initialRender)
-  if (networkTimeoutMs !== undefined && options.syncMode === `on-demand`) {
-    throw new InvalidPersistedCollectionConfigError(
-      `network-first initial rendering requires eager persistence syncMode`,
-    )
-  }
   const persistedReadinessTracker =
     networkTimeoutMs !== undefined
-      ? new PersistedReadinessTracker(networkTimeoutMs)
+      ? new PersistedReadinessTracker(
+          networkTimeoutMs,
+          options.syncMode === `on-demand`,
+        )
       : undefined
 
   let claimed = false

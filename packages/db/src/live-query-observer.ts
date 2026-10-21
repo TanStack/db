@@ -29,6 +29,8 @@ const noop = () => {}
 interface PersistedSourceEntry {
   collection: Collection<any, any, any>
   readiness: PersistedReadinessSource
+  /** The live query whose demands an on-demand source serves. */
+  demandOwner: Collection<any, any, any> | undefined
 }
 
 function collectPersistedReadinessSources(
@@ -38,7 +40,10 @@ function collectPersistedReadinessSources(
   if (!(root as { config?: unknown }).config) return undefined
   const seen = new Set<Collection<any, any, any>>()
   const sources: Array<PersistedSourceEntry> = []
-  const visit = (collection: Collection<any, any, any>): boolean => {
+  const visit = (
+    collection: Collection<any, any, any>,
+    owner?: Collection<any, any, any>,
+  ): boolean => {
     if (seen.has(collection)) return true
     seen.add(collection)
     // A few integrations provide Collection-compatible objects without config.
@@ -46,14 +51,30 @@ function collectPersistedReadinessSources(
     if (!config) return false
     const builder = getBuilderFromConfig(config)
     if (builder) {
-      return builder.getSourceCollections().every(visit)
+      return builder
+        .getSourceCollections()
+        .every((source) => visit(source, collection))
     }
     const source = getPersistedReadinessSource(config)
     if (!source) return false
-    sources.push({ collection, readiness: source })
+    sources.push({
+      collection,
+      readiness: source,
+      demandOwner: source.onDemand ? (owner ?? collection) : undefined,
+    })
     return true
   }
   return visit(root) && sources.length > 0 ? sources : undefined
+}
+
+// An eager source permits local rendering once its wait has passed; an
+// on-demand source waits inside each load, so it permits it once the query's
+// demands on it have settled.
+function permitsLocalRender(source: PersistedSourceEntry): boolean {
+  const owner = source.demandOwner
+  if (!owner) return Date.now() >= source.readiness.getOrStartNetworkDeadline()
+  const builder = getBuilderFromConfig(owner.config)
+  return builder ? builder.initialDemandsSettled() : !owner.isLoadingSubset
 }
 
 /**
@@ -1036,9 +1057,7 @@ class LiveQueryObserverImpl<
         ? this.client._getLiveQuery(this.queryHash)
         : undefined
     if (clientQuery?.status === `error`) return true
-    return sources.every(
-      (source) => Date.now() >= source.readiness.getOrStartNetworkDeadline(),
-    )
+    return sources.every(permitsLocalRender)
   }
 
   preloadForInitialRender(): Promise<void> {
@@ -1093,11 +1112,15 @@ class LiveQueryObserverImpl<
         const persisted = this.readPersistedReadiness()
         const networkDeadlineAt = Math.max(
           ...sources.map((source) =>
-            source.readiness.getOrStartNetworkDeadline(),
+            source.demandOwner
+              ? -Infinity
+              : source.readiness.getOrStartNetworkDeadline(),
           ),
         )
         const remainingNetworkMs = Math.max(0, networkDeadlineAt - Date.now())
-        const deadlinePassed = remainingNetworkMs === 0
+        // A pending on-demand demand rechecks when its demands settle.
+        const localRenderPermitted =
+          remainingNetworkMs === 0 && sources.every(permitsLocalRender)
         const sourceFailed = sources.some(
           (source) => source.collection.status === `error`,
         )
@@ -1113,18 +1136,27 @@ class LiveQueryObserverImpl<
         ) {
           finish({ error: networkError })
         } else if (
-          (deadlinePassed || networkFailed) &&
+          (localRenderPermitted || networkFailed) &&
           persisted.status === `ready`
         ) {
           finish()
         } else if (networkFailed && persisted.status === `error`) {
           finish({ error: networkError ?? persisted.error })
-        } else if (!deadlinePassed && !networkFailed) {
+        } else if (remainingNetworkMs > 0 && !networkFailed) {
           timer = setTimeout(check, remainingNetworkMs)
         }
       }
       for (const source of sources) {
         unsubscribers.push(source.readiness.subscribe(check))
+        const owner = source.demandOwner
+        if (owner) {
+          const builder = getBuilderFromConfig(owner.config)
+          unsubscribers.push(
+            builder
+              ? builder.subscribeInitialDemandsSettled(check)
+              : owner.on(`loadingSubset:change`, check),
+          )
+        }
       }
       void network.then(
         () => {

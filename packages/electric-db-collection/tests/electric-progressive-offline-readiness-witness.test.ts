@@ -15,7 +15,9 @@ import type { ElectricCollectionUtils } from '../src/electric'
 /**
  * # What does a persisted progressive Electric query show while offline?
  *
- * This file records current behavior; it does not state a contract. It is the
+ * The first block records current behavior without network-first; it does
+ * not state a contract. The second block is a receiving witness for persisted
+ * demand coverage with network-first opted in. The file is the
  * Electric companion to the generic on-demand witness in
  * `db-sqlite-persistence-core/tests/on-demand-offline-readiness-witness.test.ts`.
  *
@@ -109,7 +111,7 @@ function insert(value: Item): Message<Item> {
   }
 }
 
-function progressive(driver: SQLiteDriver) {
+function progressive(driver: SQLiteDriver, networkFirst: boolean) {
   return createCollection(
     persistedCollectionOptions<
       Item,
@@ -123,6 +125,9 @@ function progressive(driver: SQLiteDriver) {
         syncMode: `progressive`,
         getKey: (item: Item) => item.id,
       }),
+      ...(networkFirst
+        ? { initialRender: { strategy: `network-first`, networkTimeoutMs: 0 } }
+        : {}),
       persistence: { adapter: new SQLiteCorePersistenceAdapter({ driver }) },
     }),
   )
@@ -140,7 +145,7 @@ async function settle(ms = 50) {
 
 type Session1 = `full-sync` | `subset-only` | `nothing`
 
-async function runHistory(session1: Session1) {
+async function runHistory(session1: Session1, networkFirst: boolean) {
   const driver = createDriver(new DatabaseSync(`:memory:`))
 
   if (session1 !== `nothing`) {
@@ -150,7 +155,7 @@ async function runHistory(session1: Session1) {
         metadata: {},
         data: rows.filter((row) => row.group === `a`).map(insert),
       })
-    const first = progressive(driver)
+    const first = progressive(driver, networkFirst)
     const firstQuery = groupA(first)
     await firstQuery.preload()
     if (session1 === `full-sync`) {
@@ -171,7 +176,7 @@ async function runHistory(session1: Session1) {
   subscribers = []
   fetchSnapshot = () => new Promise(() => {})
   vi.mocked(ShapeStream).mockClear()
-  const second = progressive(driver)
+  const second = progressive(driver, networkFirst)
   const query = groupA(second)
   let preloaded = false
   void query.preload().then(
@@ -200,40 +205,37 @@ afterEach(() => {
 })
 
 describe(`persisted progressive Electric query while offline (current behavior)`, () => {
-  it(`rejects network-first initial rendering`, () => {
-    expect(() =>
-      persistedCollectionOptions<
-        Item,
-        string | number,
-        never,
-        ElectricCollectionUtils<Item>
-      >({
-        ...electricCollectionOptions({
-          id: `progressive-network-first`,
-          shapeOptions: { url: `http://test-url`, params: { table: `items` } },
-          syncMode: `progressive`,
-          getKey: (item: Item) => item.id,
-        }),
-        initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
-        persistence: {
-          adapter: new SQLiteCorePersistenceAdapter({
-            driver: createDriver(new DatabaseSync(`:memory:`)),
-          }),
-        },
-      }),
-    ).toThrow(/network-first.*eager/i)
-  })
-
   // Observed on main at 31dad2dd3; these pin current behavior, not a law.
   it.each([
     [`full-sync`, { resumed: true, ready: true, rows: [1, 2] }],
     [`subset-only`, { resumed: false, ready: false, rows: [1, 2] }],
     [`nothing`, { resumed: false, ready: false, rows: [] }],
   ] as const)(`session 1: %s`, async (session1, expected) => {
-    const observation = await runHistory(session1)
+    const observation = await runHistory(session1, false)
     expect(observation.sourceStatus).toBe(`loading`)
     expect({
       resumed: observation.resumedFrom?.offset !== undefined,
+      ready: observation.queryReady,
+      rows: observation.queryRows,
+    }).toEqual(expected)
+    expect(observation.preloaded).toBe(expected.ready)
+  })
+})
+
+// Receiving witness for persisted demand coverage
+// (`db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`)
+// through Electric's progressive mode. With network-first opted in, the
+// subset that session 1 loaded is covered, so session 2 settles it offline on
+// its restored rows after the wait. A never-loaded subset still waits.
+describe(`persisted progressive Electric query while offline with network-first`, () => {
+  it.each([
+    [`full-sync`, { ready: true, rows: [1, 2] }],
+    [`subset-only`, { ready: true, rows: [1, 2] }],
+    [`nothing`, { ready: false, rows: [] }],
+  ] as const)(`session 1: %s`, async (session1, expected) => {
+    const observation = await runHistory(session1, true)
+    expect(observation.sourceStatus).toBe(`loading`)
+    expect({
       ready: observation.queryReady,
       rows: observation.queryRows,
     }).toEqual(expected)

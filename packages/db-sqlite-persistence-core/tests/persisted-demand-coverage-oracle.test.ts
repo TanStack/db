@@ -17,7 +17,7 @@ import type { SQLiteDriver } from '../src/index.js'
 /**
  * # When may an on-demand query settle on rows from SQLite?
  *
- * Law (proposed; issue #2102 item 1,
+ * Law (issue #2102 item 1,
  * `docs/contributing/oracle-reviews/2026-10-20-on-demand-network-first-law.md`,
  * and the persisted-wrapper paragraph in
  * `packages/db/src/query/live/ARCHITECTURE.md`): an opted-in persisted
@@ -648,6 +648,8 @@ async function settleSession1(
     const preloadState = { settled: false }
     const isSettled = () => preloadState.settled
     const preload = query.preload().finally(() => (preloadState.settled = true))
+    // A failing history rejects before the loop below inspects the promise.
+    void preload.catch(() => undefined)
     // Answer each upstream load in turn until preload settles; a window
     // sends its limited load and then its tie-boundary load.
     for (;;) {
@@ -1096,7 +1098,14 @@ async function runJoined(history: ChildHistory): Promise<JoinedObservation> {
     return {
       initialRenderReleased: initialRender.released,
       collectionReady: observer.getSnapshot().isReady,
-      rows: initialRender.released ? observer.getSnapshot().data : undefined,
+      // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
+      rows: initialRender.released
+        ? (observer.getSnapshot().data as Array<object>).map((row) =>
+            Object.fromEntries(
+              Object.entries(row).filter(([key]) => !key.startsWith(`$`)),
+            ),
+          )
+        : undefined,
     }
   }, [
     () => vi.useRealTimers(),

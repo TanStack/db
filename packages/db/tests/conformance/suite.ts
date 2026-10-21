@@ -148,6 +148,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       {
         value: {
           networkTimeoutMs: 0,
+          onDemand: false,
           getOrStartNetworkDeadline: () => Date.now(),
           getSnapshot: () => snapshot,
           subscribe: (listener: () => void) => {

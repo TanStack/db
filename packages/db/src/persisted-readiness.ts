@@ -8,6 +8,11 @@ export type PersistedReadinessSnapshot =
 export interface PersistedReadinessSource {
   /** Time to prefer network before a completed persisted restore may render. */
   networkTimeoutMs: number
+  /**
+   * An on-demand source restores per demand and waits inside each load, so
+   * it permits local rendering once the query's demands on it have settled.
+   */
+  onDemand: boolean
   /** Anchor the deadline to this Collection's current sync run. */
   getOrStartNetworkDeadline: () => number
   getSnapshot: () => PersistedReadinessSnapshot
