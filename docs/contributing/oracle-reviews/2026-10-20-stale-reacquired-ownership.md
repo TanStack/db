@@ -141,13 +141,15 @@ Review 5600814169 had one inline finding and a summary. Ledger:
   boundary witness (empty-result direct insert) that rejects the non-empty
   rule.
 - ORC-014: The controlled storage adapter supplies the commit failure. A
-  receiving probe on the managed Node SQLite path aborted the release's delete
-  with a SQLite trigger. The Collection entered `error` and storage kept the
-  row, but the public Collection dropped it, while a peer's row stayed. The
-  controlled, non-managed path keeps the row public. The controlled premise
-  does not hold on the managed host, so the cross-boundary claim is
-  contradicted, not established. The divergence belongs to the SQLite
-  persistence owner; see Open cells.
+  receiving probe on Node SQLite aborted the release's delete with a SQLite
+  trigger. The Collection entered `error` and storage kept the row, but the
+  public Collection dropped it, while a peer's row stayed. The controlled
+  adapter keeps the row public, whether it rejects at once or after a delay.
+  The real SQLite adapter drops it on every sync-present configuration tried:
+  managed, resolved for `sync-present`, and adapter-only without a
+  coordinator. The controlled premise does not hold on the real host, so the
+  cross-boundary claim is contradicted, not established. The divergence
+  belongs to the SQLite persistence owner; see Open cells.
 
 ## Bug-class boundary
 
@@ -165,9 +167,9 @@ Open cells:
   so the restore guard returns. The remaining route is a duplicate-key replay
   inside the reacquired application's own open transaction, which no
   history here constructs.
-- Managed SQLite durability failure. On the managed Node SQLite path, a
-  release whose durable step fails still removes the row from the public
+- SQLite durability failure. On the Node SQLite adapter, a sync
+  transaction (here, a release) whose durable step fails still removes the row from the public
   Collection, while storage keeps it. This contradicts the glossary's
   accepted-sync-transaction rule, which accepts a wrapping sync's
   transaction only after its durable step. It belongs to the SQLite
-  persistence owner and is outside this Query DB change.
+  persistence owner and is outside this Query DB change; tracked in [#2210](https://github.com/TanStack/db/issues/2210).

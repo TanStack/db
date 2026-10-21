@@ -1103,11 +1103,11 @@ restart serves and releases the row. Eager mode cannot reach
 the reacquisition premise: it has no subset release, and ending an eager sync
 run removes its Query from the cache. A cleanup that skips entries without an
 observer passes this owner but fails the explicit-cleanup retention test in
-`tests/query.test.ts`. A receiving probe on the managed Node SQLite path does
-not match the controlled failed-release premise: when a SQLite trigger aborts
+`tests/query.test.ts`. A receiving probe on the Node SQLite adapter does not
+match the controlled failed-release premise: when a SQLite trigger aborts
 the release's delete, the Collection enters `error` and storage keeps the row,
 but the public Collection drops it. The SQLite persistence owner has no
-witness for that divergence. Persisted retention (`persistedGcTime`) is
+witness for that divergence ([#2210](https://github.com/TanStack/db/issues/2210)). Persisted retention (`persistedGcTime`) is
 outside these histories. The
 [review record](oracle-reviews/2026-10-20-stale-reacquired-ownership.md)
 lists the mutant outcomes and open cells. Larger overlap schedules, window ownership outside the ordered
