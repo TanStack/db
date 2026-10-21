@@ -1362,7 +1362,6 @@ describe(`reload invariant`, () => {
     },
   )
 
-
   // A ready callback that throws reaches the adapter's markReady(), on a
   // start and on a reload alike. The reload itself succeeded once the status
   // is ready, so it resolves, as a start's preload does.
@@ -1674,7 +1673,14 @@ describe(`request errors`, () => {
   // its publication, so it shows once the replay settles.
   it(`a source reload's replay keeps a request error that failed after it started`, () =>
     withHistory(
-      async ({ query, children, outcomes, held, writeParent, markParentsReady }) => {
+      async ({
+        query,
+        children,
+        outcomes,
+        held,
+        writeParent,
+        markParentsReady,
+      }) => {
         const preload = query.preload()
         writeParent(`insert`, 1)
         markParentsReady()

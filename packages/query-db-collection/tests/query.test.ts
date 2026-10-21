@@ -11923,9 +11923,7 @@ describe(`failureReason follows the still-failing Queries`, () => {
         onInsert: () => persisting.promise,
       }),
     )
-    const consoleError = vi
-      .spyOn(console, `error`)
-      .mockImplementation(() => {})
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
     const refetch = async (limit: number) => {
       const query = client
         .getQueryCache()
