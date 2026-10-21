@@ -1067,14 +1067,15 @@ release cannot erase the new claim by releasing it and observing an empty
 public row set. That history uses infinite `staleTime`, so reacquisition starts
 no fetch. A sibling table crosses a stale reacquisition whose refetch fails,
 returns the same rows, or returns no rows; the refetch settles while publication
-is held or after the older release publishes; and an optional peer lease owns
-the same row until after the refetch. Its independent model keeps each active
-observer lease's latest successful result and compares public rows while held,
-after publication, after the refetch, after the peer's release, and after the
-reacquired release. On `main` at `31dad2dd3` six stale cells fail: the older
-release's empty ownership entry made the cached result look already applied, so
-the reacquired lease owned nothing and the row disappeared at publication, or,
-with a peer, when the peer left. The repair marks a released lease's entry and
+is held or after the older release publishes; zero to two peer leases own the
+first row until after the refetch; and the reacquired result has one or two
+rows. Its independent model keeps each active observer lease's latest
+successful result and compares public rows while held, after publication,
+after the refetch, after every peer's release, and after the reacquired
+release. On `main` at `31dad2dd3` 20 of its 42 cells fail: the older release's
+empty ownership entry made the cached result look already applied, so the
+reacquired lease owned nothing. A row only it owned disappeared at
+publication; a row a peer also owned disappeared when the last peer left. The repair marks a released lease's entry and
 lets only an applied entry satisfy the already-applied guard and the on-demand
 direct-write skip. The empty-result cells reject keeping the row for every
 reacquired demand. Removing the guard fails the persisted direct-write
@@ -1101,9 +1102,13 @@ row leaves with the durable release, the Collection enters `error`, and a
 restart serves and releases the row. Eager mode cannot reach
 the reacquisition premise: it has no subset release, and ending an eager sync
 run removes its Query from the cache. A cleanup that skips entries without an
-observer passes the failed-commit witness, because the restarted run fetches
-before any cached replay; no history reaching a carried entry is known.
-Persisted retention (`persistedGcTime`) is outside these histories. The
+observer passes this owner but fails the explicit-cleanup retention test in
+`tests/query.test.ts`. A receiving probe on the managed Node SQLite path does
+not match the controlled failed-release premise: when a SQLite trigger aborts
+the release's delete, the Collection enters `error` and storage keeps the row,
+but the public Collection drops it. The SQLite persistence owner has no
+witness for that divergence. Persisted retention (`persistedGcTime`) is
+outside these histories. The
 [review record](oracle-reviews/2026-10-20-stale-reacquired-ownership.md)
 lists the mutant outcomes and open cells. Larger overlap schedules, window ownership outside the ordered
 replay, and durable-adapter ordering remain open under the owners named above.

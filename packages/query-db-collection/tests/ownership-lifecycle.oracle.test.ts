@@ -5925,14 +5925,17 @@ describe(`query collection ownership lifecycle`, () => {
    * Query rules that a stale Query refetches when an observer mounts and that
    * a failed refetch keeps the previous `data`.
    *
-   * Limits: one reacquired on-demand subset, an optional peer subset that
-   * owns the same row, one row, no persisted metadata, and one unrelated
-   * optimistic transaction that holds publication. A release commit that
+   * Limits: one reacquired on-demand subset whose result has one or two
+   * rows, zero to two peer subsets that own the first row, no persisted
+   * metadata, and one unrelated optimistic transaction that holds
+   * publication. A release commit that
    * rejects and the direct-write path have their own histories below. Eager
    * mode cannot reach the premise: it has no subset release, and ending an
    * eager sync run removes its Query from the cache, so a restart fetches
    * instead of replaying cached data.
    */
+  const solo: Item = { id: `solo`, category: `detail`, name: `Solo` }
+
   type ReacquisitionHistory = {
     /** `Infinity`: reacquisition starts no fetch. `0`: it starts a refetch. */
     staleTime: number
@@ -5940,8 +5943,10 @@ describe(`query collection ownership lifecycle`, () => {
     refetch: `rejects` | `same-rows` | `empty`
     /** The refetch settles before or after the older release publishes. */
     settles: `while-held` | `after-publication`
-    /** Whether a peer lease also owns the row until after the refetch. */
-    peer: boolean
+    /** Peer leases that also own `shared` until after the refetch. */
+    peers: 0 | 1 | 2
+    /** Rows in the reacquired lease's result; the second is owned only here. */
+    rows: 1 | 2
   }
 
   type ReacquisitionObservation = {
@@ -5951,7 +5956,7 @@ describe(`query collection ownership lifecycle`, () => {
     published: Array<string>
     /** Public rows after the refetch, if any, has settled. */
     settled: Array<string>
-    /** Public rows after the peer, if any, is released. */
+    /** Public rows after every peer is released. */
     peerReleased: Array<string>
     /** Public rows after the reacquired demand is released. */
     released: Array<string>
@@ -5961,10 +5966,10 @@ describe(`query collection ownership lifecycle`, () => {
 
   /**
    * The model keeps each active lease's latest successful result. Public
-   * synced rows are the union of those results at the last publication. The
-   * peer's result is always the row; it is active until `peerReleased`. A
-   * peer hides a lost reacquired result until the peer leaves, which is why
-   * that checkpoint exists. While the optimistic blocker
+   * synced rows are the union of those results at the last publication. Each
+   * peer's result is always `shared`; peers are active until `peerReleased`.
+   * A peer hides a lost `shared` until the peers leave, which is why that
+   * checkpoint exists; the lease-only `solo` row shows a loss at once. While the optimistic blocker
    * holds publication, the public view is the blocker plus the rows published
    * before the release, which the first lease owned. The model does not
    * represent tombstones, ownership maps, or sync transactions.
@@ -5972,23 +5977,27 @@ describe(`query collection ownership lifecycle`, () => {
   const modelReacquisition = (
     history: ReacquisitionHistory,
   ): ReacquisitionObservation => {
-    const cached = [shared.id]
+    const cached = history.rows === 2 ? [shared.id, solo.id] : [shared.id]
     const refetchStarts = history.staleTime === 0
     const refetched = !refetchStarts
       ? cached
       : history.refetch === `empty`
         ? []
-        : // Both a same-rows result and a failed refetch leave the row owned.
+        : // Both a same-rows result and a failed refetch leave the rows owned.
           cached
-    const union = (leaseRows: Array<string>) =>
-      history.peer ? [...new Set([...leaseRows, shared.id])].sort() : leaseRows
+    const union = (...results: Array<Array<string>>) =>
+      [...new Set(results.flat())].sort()
+    const peerRows = history.peers > 0 ? [shared.id] : []
     return {
-      held: [`blocker`, shared.id],
-      published: union(history.settles === `while-held` ? refetched : cached),
-      settled: union(refetched),
-      peerReleased: refetched,
+      held: union([`blocker`], cached, peerRows),
+      published: union(
+        history.settles === `while-held` ? refetched : cached,
+        peerRows,
+      ),
+      settled: union(refetched, peerRows),
+      peerReleased: union(refetched),
       released: [],
-      queryCalls: 1 + (history.peer ? 1 : 0) + (refetchStarts ? 1 : 0),
+      queryCalls: 1 + history.peers + (refetchStarts ? 1 : 0),
     }
   }
 
@@ -6004,31 +6013,36 @@ describe(`query collection ownership lifecycle`, () => {
    * refetch start reject that repair. A repair that treats every empty
    * ownership entry as unapplied also passes this table; the sibling history
    * that keeps a direct insert through a refetch start of an empty result
-   * rejects it. Each history runs with and without a peer. With a peer, the
-   * older release deletes nothing, so only the `peerReleased` checkpoint
-   * shows whether the reacquired lease owns its result. On the original
-   * defect the row survives while the peer owns it and disappears when the
-   * peer leaves.
+   * rejects it. Each history runs with zero, one, or two peers and with a
+   * one- or two-row result. With a peer, the older release keeps `shared`,
+   * so only the `peerReleased` checkpoint shows whether the reacquired lease
+   * owns it. On the original defect `shared` survives while a peer owns it
+   * and disappears when the peers leave, while `solo` disappears at
+   * publication. Two peers check that releasing every other owner, not just
+   * one, leaves the reacquired lease as the row's owner.
    */
-  const reacquisitionHistories: Array<ReacquisitionHistory> = [
-    false,
-    true,
-  ].flatMap((peer) => [
-    {
-      staleTime: Number.POSITIVE_INFINITY,
-      refetch: `rejects` as const,
-      settles: `after-publication` as const,
-      peer,
-    },
-    ...([`rejects`, `same-rows`, `empty`] as const).flatMap((refetch) =>
-      ([`while-held`, `after-publication`] as const).map((settles) => ({
-        staleTime: 0,
-        refetch,
-        settles,
-        peer,
-      })),
-    ),
-  ])
+  const reacquisitionHistories: Array<ReacquisitionHistory> = (
+    [0, 1, 2] as const
+  ).flatMap((peers) =>
+    ([1, 2] as const).flatMap((resultRows) => [
+      {
+        staleTime: Number.POSITIVE_INFINITY,
+        refetch: `rejects` as const,
+        settles: `after-publication` as const,
+        peers,
+        rows: resultRows,
+      },
+      ...([`rejects`, `same-rows`, `empty`] as const).flatMap((refetch) =>
+        ([`while-held`, `after-publication`] as const).map((settles) => ({
+          staleTime: 0,
+          refetch,
+          settles,
+          peers,
+          rows: resultRows,
+        })),
+      ),
+    ]),
+  )
 
   /**
    * The driver uses the public `loadSubset` and `unloadSubset` entry points, a
@@ -6039,25 +6053,39 @@ describe(`query collection ownership lifecycle`, () => {
    * say whether the caller waits for the refetch.
    */
   it.each(reacquisitionHistories)(
-    `keeps a reacquired lease's result (staleTime $staleTime, refetch $refetch, settles $settles, peer $peer)`,
+    `keeps a reacquired lease's result (staleTime $staleTime, refetch $refetch, settles $settles, peers $peers, rows $rows)`,
     async (history) => {
-      const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peer}`
+      const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
       const detail = categorySubset(`detail`)
-      const list = categorySubset(`list`)
+      const peerSubsets = [
+        categorySubset(`list`),
+        {
+          where: new IR.Func(`in`, [
+            new IR.PropRef([`category`]),
+            new IR.Value([`peer`, `shared`]),
+          ]),
+        },
+      ].slice(0, history.peers)
+      const leaseResult = history.rows === 2 ? [shared, solo] : [shared]
       const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
       const persistence = createDeferred<void>()
       const refetch = createDeferred<Array<Item>>()
       void refetch.promise.catch(() => undefined)
       const { collection, queryFn } = createOwnershipFixture({
         id,
-        results: history.peer ? [[shared], [shared]] : [[shared]],
+        results: [leaseResult, ...peerSubsets.map(() => [shared])],
         staleTime: history.staleTime,
       })
       queryFn.mockImplementationOnce(() => refetch.promise)
       const settleRefetch = () => {
         if (history.refetch === `rejects`)
           refetch.reject(new Error(`refetch failed`))
-        else refetch.resolve(history.refetch === `empty` ? [] : [{ ...shared }])
+        else
+          refetch.resolve(
+            history.refetch === `empty`
+              ? []
+              : leaseResult.map((item) => ({ ...item })),
+          )
       }
       const settleTurn = async () => {
         for (let turn = 0; turn < 3; turn++)
@@ -6068,7 +6096,7 @@ describe(`query collection ownership lifecycle`, () => {
       })
 
       await collection._sync.loadSubset(detail)
-      if (history.peer) await collection._sync.loadSubset(list)
+      for (const peer of peerSubsets) await collection._sync.loadSubset(peer)
       mutation.mutate(() => collection.insert(blocker))
       cleanups.push(async () => {
         persistence.resolve()
@@ -6105,8 +6133,8 @@ describe(`query collection ownership lifecycle`, () => {
       await reacquired.catch(() => undefined)
       const settled = rows(collection)
 
-      if (history.peer) {
-        collection._sync.unloadSubset(list)
+      for (const peer of peerSubsets) {
+        collection._sync.unloadSubset(peer)
         await settleTurn()
       }
       const peerReleased = rows(collection)
