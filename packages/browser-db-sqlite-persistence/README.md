@@ -181,6 +181,11 @@ duplicates inside that horizon remain idempotent.
   restored through
   `pageshow` with `event.persisted` must create fresh database connections and
   persistence/collection instances (or reload the application).
+- `database.close()` stops accepting requests when it starts; later calls to
+  `execute` reject. Concurrent `close()` calls share one outcome. Queries that
+  the worker answers before close completes keep their results; queries still
+  pending when close completes reject with `AbortError`, even if the worker
+  already applied them. Await pending writes before closing.
 - Flush application writes and await `database.close()` before navigating when
   possible. The `pagehide` cleanup releases resources; it cannot await pending
   writes or serve as a durability guarantee.

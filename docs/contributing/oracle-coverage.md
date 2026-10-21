@@ -1533,6 +1533,20 @@ reproduce a frozen tab or establish behavior in other browsers.
 The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
 preserves the exact-head unit and Chromium evidence and the queued-lock mutant.
 
+The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
+also generates explicit close histories: zero to three pending executes, how
+many answer while close is in flight and in which order, a successful close and
+every worker error classification, a concurrent close, and an execute submitted
+during close. At close settlement, answered executes keep their rows and the
+rest reject with `AbortError`. Every close call shares the first close's
+outcome. The worker receives exactly one close request, and work submitted
+after close starts never reaches it. Rejecting at close start, posting a second
+close, admitting work during close, deferring rejection past close settlement,
+and the pre-fix hang each fail this lane. Controlled messages do not prove that
+the real worker's concurrent request handling matches this ordering, or whether
+an aborted write was applied; no Chromium OPFS witness closes with a pending
+execute yet.
+
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
 counter rejects an extra joined-filter graph schedule on root readiness while
@@ -3686,14 +3700,3 @@ do not depend on its resolution. Real server ordering, framework unmount
 scheduling, and published npm behavior require receiving integration witnesses;
 the present evidence is controlled DB source execution. The revision-bound
 review record is `docs/contributing/oracle-reviews/issue-2058-paced-serialization.md`.
-
-## Explicit OPFS connection close
-
-The browser OPFS lifecycle owner also enumerates explicit close with one or
-three pending execute responses, another execute submitted while close is in
-flight, successful close and all three worker error classifications, and FIFO
-or reverse late-response delivery. At close settlement every pending execute
-must reject with `AbortError`, while close preserves its own outcome. Later
-responses cannot resettle requests, later execute rejects, and repeated close
-and pagehide release resources only once. Controlled worker messages establish
-the connection promise contract, not native OPFS locking or bfcache admission.
