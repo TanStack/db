@@ -224,24 +224,20 @@ export class OrderedSourceLoader {
       if (change.type === `delete` && this.retiringSupersededAcquisitions) {
         continue
       }
+      // A sent row that leaves or moves. An optimistic overlay may still
+      // revert, so it only checks the local supply; a source move invalidates
+      // the order.
       if (
-        hasOptimisticOverlay(change.key) &&
         change.type !== `insert` &&
         previous !== undefined &&
         (change.type === `delete` ||
           this.info.comparator(previous, change.value) !== 0)
       ) {
-        hasOptimisticDeparture = true
-      }
-      if (
-        !hasOptimisticOverlay(change.key) &&
-        change.type !== `insert` &&
-        previous !== undefined &&
-        (change.type === `delete` ||
-          this.info.comparator(previous, change.value) !== 0)
-      ) {
-        this.invalidateSourceOrdering()
-        return
+        if (hasOptimisticOverlay(change.key)) hasOptimisticDeparture = true
+        else {
+          this.invalidateSourceOrdering()
+          return
+        }
       }
       if (change.type !== `delete` && previous === undefined) hasNewRows = true
     }
@@ -527,20 +523,22 @@ export class OrderedSourceLoader {
         if (kind === `full-source`) this.failedAcquisitions.delete(release)
       }
     }
+    // The replay is the full-source read's success: it pays the debt.
     if (this.work.kind !== `idle`) {
-      // The replay is the full-source read's success: it pays the debt. The
-      // truncate's cursor reset already cancelled any backoff retry.
-      this.moveWork(
-        { kind: `full-source`, status: `complete` },
-        [`held`, `failed`, `complete`],
-        `none`,
-      )
-      // Like a full-source success, full coverage retires both kinds of lease.
-      runAllCallbacks([
-        () => this.retireSettledFiniteAcquisitions(),
-        () => this.retireSupersededFailures(),
-      ])
+      this.coverSource([`held`, `failed`, `complete`])
     }
+  }
+
+  // Full coverage pays every debt, ends the backoff retry, and retires both
+  // kinds of lease; a throwing release in one pass must not skip the other.
+  private coverSource(from: ReadonlyArray<WorkState>): void {
+    this.cancelRepairRetry()
+    this.repairRetries = 0
+    this.moveWork({ kind: `full-source`, status: `complete` }, from, `none`)
+    runAllCallbacks([
+      () => this.retireSettledFiniteAcquisitions(),
+      () => this.retireSupersededFailures(),
+    ])
   }
 
   private retireSettledFiniteAcquisitions(
@@ -981,43 +979,6 @@ export class OrderedSourceLoader {
     )
   }
 
-  private failRequest(
-    observed:
-      | {
-          result: LoadSubsetRequestResult
-          options: LoadSubsetOptions
-          release: ReleaseLoadSubset
-        }
-      | undefined,
-    error: Error,
-    isAuthoritativeRequest: boolean,
-    windowOperationGeneration?: number,
-    cancelObservedSettlement = false,
-  ): Error {
-    if (cancelObservedSettlement) {
-      this.orderedLoadGeneration++
-      this.pending = undefined
-    }
-    this.requireFullSourceRepair()
-    this.recordRequestFailure(windowOperationGeneration)
-    if (isAuthoritativeRequest) {
-      this.moveWork({ kind: `idle` }, [`held`, `repair`])
-    }
-    try {
-      observed?.release({ error })
-    } catch (releaseError) {
-      reportUncaught(releaseError)
-    }
-    if (
-      isAuthoritativeRequest &&
-      this.hasSettledSourceRequest &&
-      windowOperationGeneration === undefined
-    ) {
-      this.scheduleRepairRetry()
-    }
-    return error
-  }
-
   /** A failed request blocks ordinary refinement until a new operation. */
   private recordRequestFailure(windowOperationGeneration?: number): void {
     this.failedRequest = { windowOperationGeneration }
@@ -1242,20 +1203,7 @@ export class OrderedSourceLoader {
               this.finishOrderedPrefixRepair(windowOperationGeneration)
               return
             }
-            if (isFullSource) {
-              this.cancelRepairRetry()
-              this.repairRetries = 0
-              this.moveWork(
-                { kind: `full-source`, status: `complete` },
-                [`held`, `complete`],
-                `none`,
-              )
-              // A throwing release in one pass must not skip the other.
-              runAllCallbacks([
-                () => this.retireSettledFiniteAcquisitions(),
-                () => this.retireSupersededFailures(),
-              ])
-            }
+            if (isFullSource) this.coverSource([`held`, `complete`])
             if (isOrderedRepair || kind === `ordered`) {
               continueOrStage(continuation(`boundary`), deferContinuation)
               return
@@ -1386,23 +1334,34 @@ export class OrderedSourceLoader {
       // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true
       try {
-        const failure = this.failRequest(
-          observed,
-          normalizeError(error),
-          isAuthoritativeRequest,
-          windowOperationGeneration,
-          observing,
-        )
-        if (
-          !observing &&
-          isAuthoritativeRequest &&
-          this.hasSettledSourceRequest
-        ) {
-          // A synchronous repair failure has no transport promise, but must
-          // still close publication before the triggering graph turn returns.
-          const rejected = Promise.reject(failure)
-          void rejected.catch(() => {})
-          this.onResult(rejected, true, true)
+        const failure = normalizeError(error)
+        // A settlement that failed synchronously is not observed again.
+        if (observing) {
+          this.orderedLoadGeneration++
+          this.pending = undefined
+        }
+        this.requireFullSourceRepair()
+        this.recordRequestFailure(windowOperationGeneration)
+        if (isAuthoritativeRequest) {
+          this.moveWork({ kind: `idle` }, [`held`, `repair`])
+        }
+        try {
+          observed?.release({ error: failure })
+        } catch (releaseError) {
+          reportUncaught(releaseError)
+        }
+        if (isAuthoritativeRequest && this.hasSettledSourceRequest) {
+          if (windowOperationGeneration === undefined) {
+            this.scheduleRepairRetry()
+          }
+          if (!observing) {
+            // A synchronous repair failure has no transport promise, but must
+            // still close publication before the triggering graph turn
+            // returns.
+            const rejected = Promise.reject(failure)
+            void rejected.catch(() => {})
+            this.onResult(rejected, true, true)
+          }
         }
         throw failure
       } finally {

@@ -334,7 +334,6 @@
   "loadPage": "fK",
   "runGraph": "fL",
   "applyChange": "fM",
-  "failRequest": "fN",
   "retireEntry": "fO",
   "syncFn": "fP",
   "collectionConfigBuilder": "fQ",
@@ -411,8 +410,8 @@
   "checkCoherence": "gQ",
   "supersedes": "gR",
   "oweDebt": "gS",
-  "windowRequestGeneration": "av",
   "isDeferredSyncKey": "bf",
   "overlayHeldAndActive": "c7",
-  "cancelRepairRetry": "cG"
+  "cancelRepairRetry": "cG",
+  "coverSource": "fN"
 }
