@@ -1049,6 +1049,38 @@ finite or repair request that settles later is retired at once. Every lease
 release pass, including the explicit and backoff retries' release of failed
 acquisitions, stops when a release resets the cursor or disposes the loader.
 The replay that follows owns the leases the pass did not reach.
+
+The loader's authoritative work is a small state machine. Its work slot is
+idle, a repair chain, or a full-source read that is held, complete, or failed;
+its repair debt is none, bounded, or full. Every move names the states it may
+leave, and the loader throws `OrderedLoaderInvariantError` for any other move:
+
+| Move                                           | From                   | To                   |
+| ---------------------------------------------- | ---------------------- | -------------------- |
+| Start a bounded repair or a full-source read   | idle                   | repair, held         |
+| A chain finishes, is replaced, or is abandoned | repair                 | idle                 |
+| A chain request fails as the loader's own      | repair                 | idle                 |
+| A full-source read succeeds                    | held, complete         | complete (debt none) |
+| A truncate replay settles                      | held, failed, complete | complete (debt none) |
+| A full-source read fails as the loader's own   | held                   | failed               |
+| A cursor reset                                 | complete               | held                 |
+| An explicit or backoff retry                   | failed (or idle)       | idle                 |
+
+Three work and debt pairs are coherent only one way: complete coverage owes no
+debt, a repair runs only to pay a debt, and a failed full-source read owes a
+full-source read. So full coverage absorbs what would otherwise raise debt: a
+failure or an invalidation under complete coverage owes nothing, and a
+full-source transport that fails after a replay reacquired its demand leaves
+the coverage and its lease in place. A replay that settles is the full-source
+read's success and pays the debt. A chain request owns authority only while its
+chain runs: when a replay finished the chain first, the request's later failure
+is superseded by that replay.
+
+Each request carries one stamp from issue: the ordered-load generation, the
+authority generation, the ordering generation, and its role (finite, repair,
+or full-source). A request is dead after a cursor reset. A repair-chain request
+is stale once a newer authoritative start supersedes it; a finite request is
+stale once the ordering epoch moves; a full-source read stays current.
 A request issued before a cursor reset that later fails still raises the repair
 debt, but it cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has

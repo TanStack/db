@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
-import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
+import {
+  OrderedLoaderInvariantError,
+  OrderedSourceLoader,
+} from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
@@ -1715,6 +1718,12 @@ describe(`Successful finite demand retirement`, () => {
  *   superseded request that failed is retired once a full-source read issued
  *   after it succeeds, or a replay that covers the source settles after it;
  *   it needs no explicit retry.
+ * - **Covering lease:** a full-source lease whose read succeeded, or whose
+ *   demand a successful replay reacquired, is never released. A late failure
+ *   of its own transport does not undo that coverage.
+ * - **Invariant:** the loader's transition table never rejects a move. The
+ *   oracle records any `OrderedLoaderInvariantError` the loader throws, so
+ *   the generated histories also fuzz that table.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -1973,7 +1982,8 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
       react: fc.boolean(),
     }),
   },
-  { weight: 1, arbitrary: fc.constant({ type: `timer` as const }) },
+  // The backoff retry needs a failed repair first, so it runs more often.
+  { weight: 4, arbitrary: fc.constant({ type: `timer` as const }) },
   { weight: 1, arbitrary: fc.constant({ type: `hang` as const }) },
 )
 
@@ -2063,6 +2073,14 @@ async function checkAuthorityCase(
   let epochMoves = 0
   let epochMovesAtLastStart = -1
   let concurrencyViolation: string | undefined
+  // A request may fail, but the loader's own transition table must never
+  // reject a move: that is a broken rule, wherever it surfaces.
+  let invariantViolation: string | undefined
+  function observe(error: unknown) {
+    if (error instanceof OrderedLoaderInvariantError) {
+      invariantViolation ??= error.message
+    }
+  }
   let releaseViolation: string | undefined
   let explicitRetrying = false
   let reentrantTruncates = 0
@@ -2144,6 +2162,16 @@ async function checkAuthorityCase(
       }
     }
     const release = () => {
+      // A full-source lease that covers the source stays held: its read
+      // succeeded, or a successful replay reacquired its demand. Its own
+      // transport failing later does not undo that coverage.
+      if (
+        request.fullSource &&
+        !request.released &&
+        (request.outcome === `ok` || request.replayed)
+      ) {
+        releaseViolation ??= `request ${request.index}, a full-source lease that covers the source, was released`
+      }
       // Every acquisition is released at most once.
       if (request.released) {
         releaseViolation ??= `request ${request.index} was released twice`
@@ -2227,9 +2255,7 @@ async function checkAuthorityCase(
     subscription,
     `row`,
     (result) => {
-      if (result instanceof Promise) {
-        participants.push(result.catch(() => undefined))
-      }
+      if (result instanceof Promise) participants.push(result.catch(observe))
     },
     () => testCase.retryTimer,
     () => revision,
@@ -2281,9 +2307,10 @@ async function checkAuthorityCase(
     const before = ledger.length
     try {
       const result = work()
-      if (result instanceof Promise) participants.push(result.catch(() => {}))
-    } catch {
+      if (result instanceof Promise) participants.push(result.catch(observe))
+    } catch (error) {
       // A rejected request surfaces through its participant.
+      observe(error)
     }
     // A pass that issues nothing consumed or finished an owed continuation,
     // unless joined work deferred it.
@@ -2346,6 +2373,9 @@ async function checkAuthorityCase(
   const lastAuthoritativeSuccess = () =>
     Math.max(lastAuthoritativeRead(), replayAuthority)
   const checkHeld = (checkpoint: string) => {
+    if (invariantViolation) {
+      throw new Error(`invariant ${checkpoint}: ${invariantViolation}`)
+    }
     if (releaseViolation) {
       throw new Error(`release ${checkpoint}: ${releaseViolation}`)
     }
@@ -2640,6 +2670,7 @@ async function checkAuthorityCase(
         if (ledger.length > before) break
       }
       await drain()
+      checkHeld(`after the explicit retry`)
     }
     const authority = lastAuthoritativeSuccess()
     const leaked = ledger.filter(
@@ -2800,6 +2831,11 @@ describe(`Ordered source request authority`, () => {
   //   replacement's prefix).
   // - a repair prefix that settles after full-source coverage completed (a
   //   chain request skipped the full-coverage retirement, so it stayed held).
+  // - a full-source transport that fails after a replay covered the source
+  //   (complete coverage became an own failure, so a window move released
+  //   the covering lease and read the source again);
+  // - a repair prefix that fails after a replay finished its chain (the
+  //   failure counted as the loader's own; the transition table rejected it);
   // - a backoff retry whose first release starts a truncate (the release pass
   //   kept going and released the failed demand the replay owned).
   // A superseded page that fails before a covering replay settles reaches
@@ -2999,6 +3035,45 @@ describe(`Ordered source request authority`, () => {
           { type: `invalidateThenFailOldest` },
           { type: `timer` },
           { type: `replaySucceeds` },
+        ],
+      },
+    },
+    {
+      name: `a full-source transport that fails after a replay covered the source`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        history: [
+          { type: `truncate` },
+          { type: `move`, delta: 0 },
+          { type: `settleNewest` },
+          { type: `settleNewest` },
+          { type: `replaySucceeds` },
+          { type: `settle`, pick: 1, ok: false },
+        ],
+      },
+    },
+    {
+      name: `a repair prefix that fails after a replay finished its chain`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        needsMore: false,
+        history: [
+          { type: `report`, react: false },
+          { type: `settleNewest` },
+          { type: `truncate` },
+          { type: `move`, delta: -1 },
+          { type: `replaySucceeds` },
+          { type: `failOldest` },
         ],
       },
     },

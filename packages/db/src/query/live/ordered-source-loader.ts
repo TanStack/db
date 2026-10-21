@@ -19,13 +19,15 @@ import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 type OrderedRequestKind =
   `ordered` | `ordered-repair` | `boundary` | `full-source`
 
-// The generations a request or its continuation carries from issue.
+// What a request or its continuation carries from issue: the ordered-load
+// generation (cursor resets), the authority generation (authoritative
+// starts), the ordering generation (invalidations), and the request's role.
+// `standing()` and `supersedes()` are the only comparisons.
 type RequestStamp = {
   orderedLoadGeneration: number
+  authorityGeneration: number
   orderingInvalidationGeneration: number
-  isAuthoritativeRequest: boolean
-  // The authority generation a repair-chain request is issued in.
-  repairAuthority: number | undefined
+  role: `finite` | `repair` | `full-source`
 }
 
 type OrderedContinuation = RequestStamp & {
@@ -47,6 +49,14 @@ type AuthoritativeWork =
 // owes a bounded repair; partial writes or an unexpressible boundary owe a
 // full-source read.
 type RepairDebt = `none` | `bounded` | `full`
+
+type WorkState = `idle` | `repair` | `held` | `complete` | `failed`
+
+const workState = (work: AuthoritativeWork): WorkState =>
+  work.kind === `full-source` ? work.status : work.kind
+
+/** The loader's work slot or debt reached a state its rules forbid. */
+export class OrderedLoaderInvariantError extends Error {}
 
 class OrderedPostSettlementError {
   constructor(readonly cause: unknown) {}
@@ -146,6 +156,43 @@ export class OrderedSourceLoader {
 
   private get needsOrderingRepair(): boolean {
     return this.debt !== `none`
+  }
+
+  // Every move of the work slot names the states it may leave. Any other
+  // move, or a work and debt pair the rules forbid, is an invariant violation.
+  private moveWork(
+    next: AuthoritativeWork,
+    from: ReadonlyArray<WorkState>,
+    debt = this.debt,
+  ): void {
+    if (!from.includes(workState(this.work))) {
+      throw new OrderedLoaderInvariantError(
+        `Ordered loader work cannot move from ${workState(this.work)} to ${workState(next)}`,
+      )
+    }
+    this.work = next
+    this.debt = debt
+    this.checkCoherence()
+  }
+
+  private oweDebt(next: RepairDebt): void {
+    this.debt = next
+    this.checkCoherence()
+  }
+
+  // Complete coverage owes nothing, a repair runs only to pay a debt, and a
+  // failed full-source read owes its replacement.
+  private checkCoherence(): void {
+    const state = workState(this.work)
+    if (
+      (state === `complete` && this.debt !== `none`) ||
+      (state === `repair` && this.debt === `none`) ||
+      (state === `failed` && this.debt !== `full`)
+    ) {
+      throw new OrderedLoaderInvariantError(
+        `Ordered loader work ${state} cannot owe ${this.debt} debt`,
+      )
+    }
   }
 
   private coversSource(): boolean {
@@ -261,7 +308,7 @@ export class OrderedSourceLoader {
       // so authoritative repair must supersede the stale finite chain.
       if (
         this.needsOrderingRepair &&
-        !this.stagedContinuation.isAuthoritativeRequest
+        this.stagedContinuation.role === `finite`
       ) {
         this.stagedContinuation = undefined
       } else {
@@ -280,7 +327,7 @@ export class OrderedSourceLoader {
     // A failed full-source read stops owning the source before its lease is
     // released, so a replay during or after a throwing release cannot count it.
     if (this.work.kind === `full-source` && this.work.status === `failed`) {
-      this.work = { kind: `idle` }
+      this.moveWork({ kind: `idle` }, [`failed`])
     }
     if (
       (this.failedRequest || this.failedAcquisitions.size > 0) &&
@@ -390,7 +437,7 @@ export class OrderedSourceLoader {
   loadFullSource(windowOperationGeneration?: number): void {
     if (!this.active || this.work.kind !== `idle`) return
     this.releaseSupersededPending()
-    this.work = { kind: `full-source`, status: `held` }
+    this.moveWork({ kind: `full-source`, status: `held` }, [`idle`])
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestSnapshot({
@@ -417,7 +464,10 @@ export class OrderedSourceLoader {
     this.releaseSupersededPending()
     // Any older finite request may still settle, but it cannot refine from a
     // boundary that predates this authoritative prefix.
-    this.work = { kind: `repair`, epoch: this.orderingInvalidationGeneration }
+    this.moveWork(
+      { kind: `repair`, epoch: this.orderingInvalidationGeneration },
+      [`idle`],
+    )
     this.ownPrefixCount = this.info.offset + this.info.limit
     this.requestAndObserve(
       (onLoadSubsetResult) => {
@@ -476,8 +526,8 @@ export class OrderedSourceLoader {
     this.cancelRepairRetry()
     this.repairRetries = 0
     this.orderedLoadGeneration++
-    if (this.work.kind === `full-source` && this.work.status === `complete`)
-      this.work = { kind: `full-source`, status: `held` }
+    if (this.coversSource())
+      this.moveWork({ kind: `full-source`, status: `held` }, [`complete`])
     this.pending = undefined
     this.blockedLoadMore = undefined
     this.lastBoundary = undefined
@@ -500,7 +550,14 @@ export class OrderedSourceLoader {
       }
     }
     if (this.work.kind !== `idle`) {
-      this.work = { kind: `full-source`, status: `complete` }
+      // The replay is the full-source read's success: it pays the debt.
+      this.cancelRepairRetry()
+      this.repairRetries = 0
+      this.moveWork(
+        { kind: `full-source`, status: `complete` },
+        [`held`, `failed`, `complete`],
+        `none`,
+      )
       this.retireSettledFiniteAcquisitions()
     }
   }
@@ -564,7 +621,7 @@ export class OrderedSourceLoader {
   }
 
   invalidateCursor(): void {
-    if (!this.stagedContinuation?.isAuthoritativeRequest) {
+    if ((this.stagedContinuation?.role ?? `finite`) === `finite`) {
       this.stagedContinuation = undefined
     }
     this.lastPage = undefined
@@ -578,11 +635,12 @@ export class OrderedSourceLoader {
     // In-flight page or tie work does not force a full-source read. The
     // bounded repair starts at once, and that work's later result is ignored
     // for its boundary. Full-source reads can be very expensive.
-    if (this.debt === `none`) {
-      this.debt =
+    if (this.debt === `none` && !this.coversSource()) {
+      this.oweDebt(
         this.hasSettledSourceRequest && this.work.kind === `idle`
           ? `bounded`
-          : `full`
+          : `full`,
+      )
     }
     this.settledSourceBoundary = undefined
   }
@@ -642,7 +700,7 @@ export class OrderedSourceLoader {
       // A later mutation invalidated the source order while this chain was
       // running. Start its replacement before the current participant settles
       // so Collection and Effect publication remain behind one continuous gate.
-      this.work = { kind: `idle` }
+      this.moveWork({ kind: `idle` }, [`repair`])
       if (!this.active) return
       // A failure during the chain raised the debt to a full-source read.
       if (this.debt === `full`) {
@@ -666,16 +724,14 @@ export class OrderedSourceLoader {
       if (!this.active || !hasSupersededAcquisition) {
         this.cancelRepairRetry()
         this.repairRetries = 0
-        this.debt = `none`
-        this.work = { kind: `idle` }
+        this.moveWork({ kind: `idle` }, [`repair`], `none`)
       }
     }
   }
 
   private abandonOrderedPrefixRepair(): void {
     if (this.work.kind !== `repair`) return
-    this.debt = `full`
-    this.work = { kind: `idle` }
+    this.moveWork({ kind: `idle` }, [`repair`], `full`)
   }
 
   dispose(): void {
@@ -783,12 +839,14 @@ export class OrderedSourceLoader {
         : undefined
     const stamp: RequestStamp = {
       orderedLoadGeneration: this.orderedLoadGeneration,
+      authorityGeneration: this.authorityGeneration,
       orderingInvalidationGeneration: issuedOrderingGeneration,
-      isAuthoritativeRequest,
-      repairAuthority:
-        chain === undefined ? undefined : this.authorityGeneration,
+      role: isFullSource
+        ? `full-source`
+        : isAuthoritativeRequest
+          ? `repair`
+          : `finite`,
     }
-    const authorityGeneration = this.authorityGeneration
     const settlesAsync = result instanceof Promise
     const canSettleSynchronously =
       !settlesAsync &&
@@ -922,8 +980,11 @@ export class OrderedSourceLoader {
           if (isFullSource) {
             this.cancelRepairRetry()
             this.repairRetries = 0
-            this.debt = `none`
-            this.work = { kind: `full-source`, status: `complete` }
+            this.moveWork(
+              { kind: `full-source`, status: `complete` },
+              [`held`, `complete`],
+              `none`,
+            )
             // A throwing release in one pass must not skip the other.
             runAllCallbacks([
               () => this.retireSettledFiniteAcquisitions(),
@@ -946,16 +1007,26 @@ export class OrderedSourceLoader {
         this.pending = undefined
       }
       if (!this.active) return
+      // A replay already reacquired this full-source read's demand. Its late
+      // transport failure leaves that coverage, and its lease, in place.
+      if (isFullSource && this.coversSource()) return
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRepair()
       // Work staged after a cursor reset belongs to the new generation.
       if (this.standing(stamp) === `dead`) return
       // Only the running authoritative work owns its staged step; a replaced
-      // chain's request is stale and drops nothing.
+      // chain's request is stale and drops nothing. A chain request owns
+      // authority only while its chain runs: one whose chain a replay
+      // finished is superseded by that replay.
       const ownsAuthority =
-        isAuthoritativeRequest && this.standing(stamp) === `current`
-      if (ownsAuthority || !this.stagedContinuation?.isAuthoritativeRequest) {
+        isAuthoritativeRequest &&
+        this.standing(stamp) === `current` &&
+        (isFullSource || this.work.kind === `repair`)
+      if (
+        ownsAuthority ||
+        (this.stagedContinuation?.role ?? `finite`) === `finite`
+      ) {
         this.stagedContinuation = undefined
       }
       // Authoritative work started after this request supersedes it. Its
@@ -963,11 +1034,7 @@ export class OrderedSourceLoader {
       // debt to the full-source read that the overlap replaced. A running
       // repair restarts as that read; otherwise it starts now, unless the
       // loader's own failure is waiting for an explicit retry.
-      if (
-        isAuthoritativeRequest
-          ? !ownsAuthority
-          : authorityGeneration !== this.authorityGeneration
-      ) {
+      if (isAuthoritativeRequest ? !ownsAuthority : this.supersedes(stamp)) {
         this.failedAcquisitions.set(releaseAcquisition, {
           kind,
           superseded: true,
@@ -987,10 +1054,10 @@ export class OrderedSourceLoader {
       // A failed request proves no full-source coverage. An explicit window
       // move or later replay may retry it, but an ordinary graph pass must
       // not start an eager retry loop.
-      if (isAuthoritativeRequest) {
-        this.work = isFullSource
-          ? { kind: `full-source`, status: `failed` }
-          : { kind: `idle` }
+      if (isFullSource) {
+        this.moveWork({ kind: `full-source`, status: `failed` }, [`held`])
+      } else if (isAuthoritativeRequest) {
+        this.moveWork({ kind: `idle` }, [`repair`])
       }
       this.recordRequestFailure(windowOperationGeneration)
       this.failedAcquisitions.set(releaseAcquisition, {
@@ -1050,17 +1117,21 @@ export class OrderedSourceLoader {
     if (stamp.orderedLoadGeneration !== this.orderedLoadGeneration)
       return `dead`
     // A replacement repair or a full-source read started after a repair
-    // chain supersedes it; a chain that finished still owns its requests.
-    if (
-      stamp.repairAuthority !== undefined &&
-      stamp.repairAuthority !== this.authorityGeneration
-    )
-      return `stale`
-    return !stamp.isAuthoritativeRequest &&
-      stamp.orderingInvalidationGeneration !==
-        this.orderingInvalidationGeneration
-      ? `stale`
-      : `current`
+    // chain supersedes it; a chain that finished still owns its requests. A
+    // finite request is stale once the ordering epoch moves. A full-source
+    // read stays current.
+    const stale =
+      stamp.role === `repair`
+        ? this.supersedes(stamp)
+        : stamp.role === `finite` &&
+          stamp.orderingInvalidationGeneration !==
+            this.orderingInvalidationGeneration
+    return stale ? `stale` : `current`
+  }
+
+  // Authoritative work started after the request was issued.
+  private supersedes(stamp: RequestStamp): boolean {
+    return stamp.authorityGeneration !== this.authorityGeneration
   }
 
   private runContinuation(
@@ -1170,8 +1241,9 @@ export class OrderedSourceLoader {
 
   private requireFullSourceRepair(): void {
     this.settledSourceBoundary = undefined
-    // A running repair sees the full debt and is replaced by that read.
-    this.debt = `full`
+    // A running repair sees the full debt and is replaced by that read. Full
+    // coverage owes nothing.
+    if (!this.coversSource()) this.oweDebt(`full`)
   }
 
   private cancelRepairRetry(): void {
@@ -1210,7 +1282,7 @@ export class OrderedSourceLoader {
             this.failedRequest?.windowOperationGeneration !== undefined
           )
             return
-          this.work = { kind: `idle` }
+          this.moveWork({ kind: `idle` }, [`idle`, `failed`])
           this.releaseFailedAcquisitions()
           // Release may dispose or start a new replay; neither belongs to this retry.
           if (
@@ -1249,7 +1321,9 @@ export class OrderedSourceLoader {
     }
     this.requireFullSourceRepair()
     this.recordRequestFailure(windowOperationGeneration)
-    if (isAuthoritativeRequest) this.work = { kind: `idle` }
+    if (isAuthoritativeRequest) {
+      this.moveWork({ kind: `idle` }, [`held`, `repair`])
+    }
     try {
       observed?.release({ error })
     } catch {
@@ -1334,6 +1408,7 @@ export class OrderedSourceLoader {
       )
     } catch (error) {
       if (error instanceof OrderedPostSettlementError) throw error.cause
+      if (error instanceof OrderedLoaderInvariantError) throw error
       // Both request and settlement callbacks may reenter through cleanup.
       // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true

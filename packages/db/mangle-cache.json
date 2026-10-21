@@ -402,7 +402,6 @@
   "retiringSupersededAcquisitions": "l",
   "needsOptimisticRefill": "F",
   "graphCheckedDuringRequest": "W",
-  "authorityGeneration": "ae",
   "releaseSupersededPending": "av",
   "retireSupersededFailures": "gH",
   "ownPrefixCount": "gI",
@@ -412,5 +411,9 @@
   "standing": "gM",
   "windowIsInsideOwnPrefix": "gN",
   "debt": "gO",
-  "releaseOwned": "gP"
+  "releaseOwned": "gP",
+  "moveWork": "ae",
+  "checkCoherence": "gQ",
+  "supersedes": "gR",
+  "oweDebt": "gS"
 }
