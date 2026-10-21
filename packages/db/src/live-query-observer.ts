@@ -679,8 +679,9 @@ class LiveQueryObserverImpl<
       notify(undefined, status)
     })
     const errorsUnsub = collection.on(`errors:change`, () => {
-      if (errorsOf() === publishedErrors) return
-      publishedErrors = errorsOf()
+      const errors = errorsOf()
+      if (errors === publishedErrors) return
+      publishedErrors = errors
       // No rows or status changed, so only this marks the snapshot stale.
       this.snapshotDirty = true
       notify(undefined, collection.status)

@@ -15,6 +15,7 @@ import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import { collectSourceRefs } from '../ir.js'
+import { findProblems } from '../../collection/error-tree.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -124,6 +125,8 @@ export class CollectionConfigBuilder<
   // Error state tracking
   private isInErrorState = false
   private fatalQueryError = false
+  // A source's failed first load, not this query's own, ended the first load.
+  private failedBySource = false
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -131,19 +134,22 @@ export class CollectionConfigBuilder<
   private dependentEntry: CollectionDependent | undefined
 
   /**
-   * Reload each source with an error, then this query if its own first load
-   * failed. A source's reload keeps this query's status until it commits.
+   * Reload each source with an error anywhere in its tree, then this query if
+   * its own first load failed. A nested live query passes the reload down the
+   * same way. A source's reload keeps this query's status until it commits.
    */
   async reload(): Promise<void> {
+    const query = this.liveQueryCollection
+    // A crashed query rejects without touching its sources.
+    if (query?.status === `crashed`) return query._sync.reload()
     const failed = this.collectionSources
       .map(({ collection }) => collection)
       .filter(
         (collection, index, all) =>
           all.indexOf(collection) === index &&
-          (collection.status === `error` || collection.errors.error !== null),
+          findProblems(collection.errors).some((node) => node.error !== null),
       )
     await Promise.all(failed.map((collection) => collection.reload()))
-    const query = this.liveQueryCollection
     if (query?.status === `error`) await query._sync.reload()
   }
 
@@ -835,6 +841,7 @@ export class CollectionConfigBuilder<
     // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.isInErrorState = false
     this.fatalQueryError = false
+    this.failedBySource = false
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -917,6 +924,7 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.isInErrorState = false
     this.fatalQueryError = false
+    this.failedBySource = false
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -1238,6 +1246,7 @@ export class CollectionConfigBuilder<
     // node: the query keeps its status and rows.
     if (status === `error`) {
       if (this.liveQueryCollection?.status === `ready`) return
+      this.failedBySource = true
       this.failQuery(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Source collection '${collectionId}' failed its first load`
@@ -1259,12 +1268,14 @@ export class CollectionConfigBuilder<
     // source reloaded. It shows `loading` until that run is ready.
     if (
       status === `ready` &&
+      this.failedBySource &&
       this.liveQueryCollection?.status === `error` &&
       this.collectionSources.every(
         ({ collection }) =>
           collection.status !== `error` && collection.status !== `crashed`,
       )
     ) {
+      this.failedBySource = false
       void this.liveQueryCollection._sync
         .reload({ showLoading: true })
         .catch(() => undefined)

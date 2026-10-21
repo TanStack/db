@@ -222,8 +222,9 @@ export class CollectionSyncManager<
     }
     const reload = this.lifecycle.beginReload()
     const syncCallbackEpoch = ++this.syncCallbackEpoch
+    // A retired run whose cleanup fails broke the adapter contract.
     const retired = this.retireSyncRun()
-    void retired.catch((error: unknown) => this.lifecycle.abandonReload(error))
+    void retired.catch((error: unknown) => this.lifecycle.crash(error))
     // Subscriptions detach demand from the retired run; the reload's
     // truncate replays it through the new run's loader.
     this.lifecycle.retireSubscriptionDemand()
@@ -1109,6 +1110,7 @@ export class CollectionSyncManager<
    */
   private retireSyncRun(): Promise<void> {
     this.syncRunGeneration++
+    this.state.discardOpenSyncTransactions()
     const cleanup = this.syncCleanupFn
     this.syncCleanupFn = null
     this.syncLoadSubsetFn = null

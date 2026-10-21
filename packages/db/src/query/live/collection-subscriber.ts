@@ -1,4 +1,5 @@
 import { normalizeExpressionPaths } from '../compiler/expressions.js'
+import { LoadOrder } from '../../collection/lifecycle.js'
 import { OrderedSourceLoader } from './ordered-source-loader.js'
 import {
   computeSubscriptionOrderByHints,
@@ -30,6 +31,7 @@ export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
+  private readonly loadOrder = new LoadOrder()
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
@@ -81,9 +83,8 @@ export class CollectionSubscriber<
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
     const trackLoadResult = (result: LoadSubsetRequestResult) => {
       // A later successful load clears this source's request error.
-      void Promise.resolve(result).then(
-        () => this.collectionConfigBuilder.settleRootLoad(this.sourceId),
-        () => {},
+      this.loadOrder.track(result, () =>
+        this.collectionConfigBuilder.settleRootLoad(this.sourceId),
       )
       if (result instanceof Promise) {
         // Defer the tracked rejection by one microtask so the subscription's

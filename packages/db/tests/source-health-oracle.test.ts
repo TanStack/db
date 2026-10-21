@@ -65,9 +65,14 @@
  * A reload keeps the rows, status, and shown problem, and marks the node
  * `reloading`, until the new run's first commit (the next `ready`) replaces
  * the rows and clears the node, or its `fail` shows the new error. A
- * reload of a crashed Collection rejects. A query whose first load failed
+ * reload of a crashed Collection rejects. `reload-cleanup-fails` reloads while
+ * the retired run's cleanup rejects: that breaks the adapter contract, so the
+ * Collection crashes and the reload ends with it, unless a reload is already in
+ * flight and nothing is retired. A query whose first load failed
  * starts again once no source has a failure, `loading` with `reloading`
- * until it is ready. `restart` cleans up the
+ * until it is ready. `reload-query` calls the observed query's `reload()`,
+ * which reloads every Collection below it that shows an error, through a
+ * nested live query. `restart` cleans up the
  * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
  * for `markReady()` after `fail()`, for any report after `fail()`, and for a
@@ -116,6 +121,7 @@ import { eq } from '../src/query/builder/functions.js'
 import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
+import { createDeferred } from '../src/deferred.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
@@ -133,10 +139,18 @@ type Shape =
   `direct` | `join` | `self-join` | `nested` | `include` | `pooled-nested`
 type Step =
   | {
-      kind: `ready` | `fail` | `report` | `healthy` | `crash` | `reload`
+      kind:
+        | `ready`
+        | `fail`
+        | `report`
+        | `healthy`
+        | `crash`
+        | `reload`
+        | `reload-cleanup-fails`
       source: SourceName
     }
   | { kind: `restart` }
+  | { kind: `reload-query` }
 
 // ---------------------------------------------------------------------------
 // Independent model
@@ -153,7 +167,13 @@ type GateModel = { gate: Gate; cause: string | null; reloading: boolean }
 // The node shows `stopped` (from fail() after readiness) over `failure`
 // (from reportError()); a reload's new run can report while the previous
 // run's error still shows.
-type SourceModel = GateModel & { failure: Problem; stopped: Problem }
+// `failureFromReload`: the new run reported `failure` itself, so its first
+// commit keeps it.
+type SourceModel = GateModel & {
+  failure: Problem
+  stopped: Problem
+  failureFromReload: boolean
+}
 type Model = {
   sources: Record<SourceName, SourceModel>
   query: GateModel
@@ -179,6 +199,7 @@ function freshModel(): Model {
     reloading: false,
     failure: null,
     stopped: null,
+    failureFromReload: false,
   })
   return {
     sources: { A: source(), B: source() },
@@ -253,6 +274,20 @@ function applyModel(
     Object.assign(model, freshModel())
     return `ok`
   }
+  if (step.kind === `reload-query`) {
+    // A pooled view has no reload of its own.
+    if (shape === `pooled-nested`) return `ok`
+    if (model.query.gate === `crashed`) return `throws`
+    // The query reloads every Collection below it that shows an error,
+    // through any nested live query; a reload in flight keeps its run.
+    for (const name of shapeSources[shape]) {
+      const source = model.sources[name]
+      if (source.gate === `error` || source.stopped !== null)
+        source.reloading = true
+    }
+    deriveQueries(shape, model)
+    return `ok`
+  }
   // A step on a source this shape does not read has no effect.
   if (!shapeSources[shape].includes(step.source)) return `ok`
   const source = model.sources[step.source]
@@ -263,16 +298,20 @@ function applyModel(
     !source.reloading && (source.gate === `error` || source.stopped !== null)
   if (step.kind !== `crash` && source.gate === `crashed`) {
     deriveQueries(shape, model)
-    return step.kind === `reload` ? `throws` : outcome
+    return step.kind === `reload` || step.kind === `reload-cleanup-fails`
+      ? `throws`
+      : outcome
   }
   switch (step.kind) {
     case `ready`:
       if (source.reloading) {
-        // The new run's first commit replaces the rows and clears the node.
+        // The new run's first commit replaces the rows and clears the
+        // retired run's problems from the node.
         source.reloading = false
         source.gate = `ready`
         source.cause = null
-        source.failure = null
+        if (!source.failureFromReload) source.failure = null
+        source.failureFromReload = false
         source.stopped = null
       } else if (source.gate === `error`) outcome = `bad-transition`
       else if (stopped) outcome = `throws`
@@ -281,6 +320,17 @@ function applyModel(
     case `reload`:
       // Everything visible stays until the new run commits or fails.
       source.reloading = true
+      break
+    case `reload-cleanup-fails`:
+      // A reload in flight returns its promise and retires nothing.
+      if (source.reloading) break
+      // The retired run's cleanup rejecting breaks the adapter contract:
+      // the Collection crashes and the reload ends with it.
+      source.gate = `crashed`
+      source.cause = `${step.source} cleanup failed`
+      source.failure = null
+      source.stopped = null
+      source.reloading = false
       break
     case `fail`:
       // Before Collection readiness the first load fails; after it, the
@@ -301,15 +351,20 @@ function applyModel(
       break
     case `report`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
-      else
+      else {
         source.failure = {
           message: `${step.source} problem`,
           serial: ++model.serial,
         }
+        source.failureFromReload = source.reloading
+      }
       break
     case `healthy`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
-      else source.failure = null
+      else {
+        source.failure = null
+        source.failureFromReload = false
+      }
       break
     case `crash`:
       // From any active status, for good.
@@ -407,7 +462,8 @@ function expectedProblems(node: ExpectedNode): Array<ProblemSummary> {
 function problemOf(node: ErrorTreeNode): ProblemSummary {
   return [
     node.alias,
-    (node.error ?? node.failureReason)?.message ?? `instances`,
+    (node.error ?? node.failureReason)?.message.replace(cleanupPrefix, ``) ??
+      `instances`,
   ]
 }
 
@@ -461,6 +517,7 @@ function expectedTree(
 
 function createSource(name: SourceName) {
   let params: SyncParams | undefined
+  let failNextCleanup = false
   const collection = createCollection<Row, number>({
     id: `health-oracle-${name}-${Math.random().toString(36).slice(2)}`,
     getKey: (row) => row.id,
@@ -469,11 +526,19 @@ function createSource(name: SourceName) {
     sync: {
       sync: (next) => {
         params = next
+        return () => {
+          if (!failNextCleanup) return
+          failNextCleanup = false
+          return Promise.reject(new Error(`${name} cleanup failed`))
+        }
       },
     },
   })
   return {
     collection,
+    failNextCleanup: (armed = true) => {
+      failNextCleanup = armed
+    },
     get params(): SyncParams {
       if (!params) throw new Error(`source ${name} has not started`)
       return params
@@ -574,9 +639,13 @@ type PooledView = Subject[`query`] & {
 }
 
 // The public tree, projected onto the fields the model owns.
+// A failed adapter cleanup reaches the node as a SyncCleanupError, whose
+// message names the Collection; the model knows only the adapter's message.
+const cleanupPrefix = /^Collection ".*" sync cleanup function threw an error: /
+
 function project(node: ErrorTreeNode): ExpectedNode {
   const problem = (info: ErrorTreeNode[`error`]): ExpectedProblem =>
-    info ? { message: info.message } : null
+    info ? { message: info.message.replace(cleanupPrefix, ``) } : null
   return {
     alias: node.alias,
     kind: node.kind,
@@ -679,7 +748,13 @@ async function runHistory(
       events = []
       let thrown: unknown
       try {
-        if (step.kind === `restart`) {
+        if (step.kind === `reload-query`) {
+          const reload = (query as { reload?: () => Promise<void> }).reload?.()
+          if (query.status === `crashed`)
+            thrown = await reload?.catch((e: unknown) => e)
+          else void reload?.catch(() => undefined)
+          await flushPromises()
+        } else if (step.kind === `restart`) {
           await query.cleanup()
           await inner?.cleanup({ dependents: true })
           await Promise.all([
@@ -696,6 +771,16 @@ async function runHistory(
             if (params.collection.status === `crashed`)
               thrown = await reload.catch((e: unknown) => e)
             else void reload.catch(() => undefined)
+          } else if (step.kind === `reload-cleanup-fails`) {
+            sources[step.source].failNextCleanup()
+            const reload = params.collection.reload()
+            if (params.collection.status === `crashed`)
+              thrown = await reload.catch((e: unknown) => e)
+            else {
+              void reload.catch(() => undefined)
+              await flushPromises()
+            }
+            sources[step.source].failNextCleanup(false)
           } else if (step.kind === `ready`) {
             // A reload's new run commits its row, as a first load does.
             if (
@@ -836,6 +921,27 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`ready`, `A`),
     on(`ready`, `B`),
   ],
+  'a query reload reaches every Collection below it that stopped': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`fail`, `A`),
+    { kind: `reload-query` },
+    on(`ready`, `A`),
+  ],
+  'a query reload restarts a first load that failed below it': [
+    on(`fail`, `A`),
+    { kind: `reload-query` },
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+  ],
+  "a reload's first commit keeps a failure reason its new run reported": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`report`, `A`),
+    on(`reload`, `A`),
+    on(`report`, `A`),
+    on(`ready`, `A`),
+  ],
   'an initial error is final for its sync run': [
     on(`fail`, `A`),
     on(`ready`, `A`),
@@ -905,6 +1011,7 @@ describe(`source failure and health oracle`, () => {
 
   const stepArb: fc.Arbitrary<Step> = fc.oneof(
     { weight: 1, arbitrary: fc.constant(restart) },
+    { weight: 1, arbitrary: fc.constant({ kind: `reload-query` } as const) },
     {
       weight: 6,
       arbitrary: fc
@@ -916,6 +1023,7 @@ describe(`source failure and health oracle`, () => {
             `healthy` as const,
             `crash` as const,
             `reload` as const,
+            `reload-cleanup-fails` as const,
           ),
           fc.constantFrom(`A` as const, `B` as const),
         )
@@ -943,6 +1051,43 @@ describe(`source failure and health oracle`, () => {
  * needing it; a root source's error clears when a later load of that source
  * settles. Before initial-query readiness, the same failure fails the query's sync run.
  */
+// ---------------------------------------------------------------------------
+// Reload invariant witness
+// ---------------------------------------------------------------------------
+
+// A reload retires its sync run, and the retired run's `commit()` can no
+// longer reach a transaction it left open. That transaction has no public
+// observation (its writes never apply), so this witness checks the
+// invariant directly: after the reload no transaction stays open, and the
+// new run's own commit decides the row.
+describe(`reload invariant`, () => {
+  it(`drops the retired run's open sync transaction`, async () => {
+    const source = createSource(`A`)
+    source.collection.startSyncImmediate()
+    const first = source.params
+    first.begin()
+    first.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+    first.commit()
+    first.markReady()
+    first.begin()
+    first.write({ type: `insert`, value: { id: 2, parentId: 0 } })
+    const reload = source.collection.reload()
+    const next = source.params
+    next.begin()
+    next.write({ type: `insert`, value: { id: 2, parentId: 2 } })
+    next.commit()
+    next.markReady()
+    await reload
+    expect(
+      source.collection._state.pendingSyncedTransactions.filter(
+        (transaction) => !transaction.committed,
+      ),
+    ).toEqual([])
+    expect(source.collection.get(2)).toMatchObject({ id: 2, parentId: 2 })
+    await source.collection.cleanup()
+  })
+})
+
 describe(`request errors`, () => {
   function createRequestHistory() {
     let parentParams!: SyncParams
@@ -1072,6 +1217,66 @@ describe(`request errors`, () => {
     }))
 })
 
+// A query restarts by itself only when the source whose failure ended its
+// first load becomes ready. A query whose own load failed waits for
+// `reload()`: another source becoming ready does not restart it, and its
+// failed load is not retried. The main grammar fails only sources, so this
+// lane supplies the query's own failure.
+describe(`a query's own failed first load`, () => {
+  it(`does not restart when an unrelated source becomes ready`, async () => {
+    let loads = 0
+    const children = createCollection<Row, number>({
+      id: `health-own-children-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () => {
+              loads++
+              return new Promise<void>((_, reject) =>
+                setTimeout(() => reject(new Error(`child load failed`)), 0),
+              )
+            },
+          }
+        },
+      },
+    })
+    const parents = createSource(`B`)
+    parents.collection.startSyncImmediate()
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ child: children })
+        .where(({ child }) => eq(child.parentId, 1))
+        .join({ parent: parents.collection }, ({ child, parent }) =>
+          eq(child.parentId, parent.id),
+        ),
+    )
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      void query.preload().catch(() => undefined)
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(query.status).toBe(`error`)
+      expect(query.errors.error).toMatchObject({ message: `child load failed` })
+      const loadsAtFailure = loads
+      parents.params.markReady()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(query.status).toBe(`error`)
+      expect(loads).toBe(loadsAtFailure)
+    } finally {
+      console.error = consoleError
+      await query.cleanup()
+      await parents.collection.cleanup()
+      await children.cleanup()
+    }
+  })
+})
+
 describe(`root request errors`, () => {
   it(`a failed root load after initial-query readiness is a request error that clears when a later load settles`, async () => {
     const outcomes: Array<`ok` | `fail`> = []
@@ -1123,6 +1328,112 @@ describe(`root request errors`, () => {
       await source.cleanup()
     }
   })
+})
+
+// Two root loads of one source can overlap: a window move, then a refill
+// after a visible row is deleted. A success clears only the request errors of
+// loads started before it. The model: a failure stays shown until a load that
+// started after it succeeds after it failed. It shows the latest failure.
+type OverlapHistory = {
+  outcomes: readonly [`ok` | `fail`, `ok` | `fail`]
+  // Which load settles first: the window move (0) or the refill (1).
+  first: 0 | 1
+}
+function expectedOverlap({ outcomes, first }: OverlapHistory) {
+  const order = first === 0 ? ([0, 1] as const) : ([1, 0] as const)
+  const failed = new Set<number>()
+  let shown: string | null = null
+  return order.map((load) => {
+    if (outcomes[load] === `fail`) {
+      failed.add(load)
+      shown = `load ${load} failed`
+    } else {
+      for (const earlier of [...failed])
+        if (earlier < load) failed.delete(earlier)
+      if (failed.size === 0) shown = null
+    }
+    return shown
+  })
+}
+
+describe(`overlapping root loads`, () => {
+  const histories: Array<OverlapHistory> = []
+  for (const a of [`ok`, `fail`] as const)
+    for (const b of [`ok`, `fail`] as const)
+      for (const first of [0, 1] as const)
+        histories.push({ outcomes: [a, b], first })
+
+  it.each(histories)(
+    `outcomes $outcomes, load $first settles first`,
+    async (history) => {
+      const loads: Array<ReturnType<typeof createDeferred<void>>> = []
+      let deferLoads = false
+      let params!: SyncParams
+      const source = createCollection<Row, number>({
+        id: `health-overlap-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        gcTime: 0,
+        sync: {
+          sync: (next) => {
+            params = next
+            next.markReady()
+            return {
+              loadSubset: () => {
+                if (!deferLoads) return Promise.resolve()
+                const load = createDeferred<void>()
+                loads.push(load)
+                return load.promise
+              },
+            }
+          },
+        },
+      })
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.id)
+          .limit(2),
+      )
+      const consoleError = console.error
+      console.error = () => {}
+      try {
+        await query.preload()
+        params.begin()
+        for (const id of [1, 2, 3, 4])
+          params.write({ type: `insert`, value: { id, parentId: id } })
+        params.commit()
+        await flushPromises()
+        deferLoads = true
+        void Promise.resolve(
+          query.utils.setWindow({ offset: 2, limit: 2 }),
+        ).catch(() => undefined)
+        await flushPromises()
+        params.begin()
+        params.write({ type: `delete`, value: { id: 3, parentId: 3 } })
+        params.commit()
+        await flushPromises()
+        // Premise: both loads are in flight at once.
+        expect(loads).toHaveLength(2)
+        const model = expectedOverlap(history)
+        const order = history.first === 0 ? [0, 1] : [1, 0]
+        for (const [step, load] of order.entries()) {
+          if (history.outcomes[load] === `ok`) loads[load]!.resolve()
+          else loads[load]!.reject(new Error(`load ${load} failed`))
+          await flushPromises()
+          expect(
+            query.errors.error?.message ?? null,
+            `after load ${load} settles`,
+          ).toBe(model[step])
+          expect(query.status).toBe(`ready`)
+        }
+      } finally {
+        console.error = consoleError
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 })
 
 // ---------------------------------------------------------------------------

@@ -429,5 +429,11 @@
   "graphCheckedDuringRequest": "bw",
   "ownPrefixCount": "ce",
   "graphHasProcessedInput": "dk",
-  "windowIsInsideOwnPrefix": "gE"
+  "windowIsInsideOwnPrefix": "gE",
+  "failureReasonFromReload": "g5",
+  "failedBySource": "g6",
+  "latestFailed": "g7",
+  "loadOrders": "g8",
+  "endReload": "g9",
+  "loadOrder": "ha"
 }

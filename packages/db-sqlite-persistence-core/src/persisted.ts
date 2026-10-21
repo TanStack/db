@@ -5906,11 +5906,15 @@ function createWrappedSyncConfig<
 
       let sourceSession = 0
       // Upstream reports wait for persisted startup, as markReady does.
-      const afterStartup = (report: () => void) => {
+      // Readiness and reports reach core in the order the adapter made them,
+      // after startup and after the sync function returned its result.
+      let adapterCalls = Promise.resolve()
+      const afterStartup = (call: () => void | Promise<void>) => {
         if (startupState.cleanedUp || getTerminalFailure()) return
-        void (fullStartPromise ?? runtime.ensureStarted())
+        adapterCalls = adapterCalls
+          .then(() => fullStartPromise ?? runtime.ensureStarted())
           .then(() => {
-            if (!isCleanedUp() && !getTerminalFailure()) report()
+            if (!isCleanedUp() && !getTerminalFailure()) return call()
           })
           .catch(() => undefined)
       }
@@ -5920,23 +5924,18 @@ function createWrappedSyncConfig<
         reportError: (error: unknown) =>
           afterStartup(() => params.reportError(error)),
         reportHealthy: () => afterStartup(params.reportHealthy),
-        markReady: () => {
-          if (startupState.cleanedUp || getTerminalFailure()) return
-          void (fullStartPromise ?? runtime.ensureStarted())
-            .then(async () => {
-              if (isCleanedUp() || getTerminalFailure()) return
-              await sourceResultAssigned
-              try {
-                await sourceResultPromise
-              } catch (error) {
-                reportUpstreamError(error)
-                return
-              }
-              if (isCleanedUp() || getTerminalFailure()) return
-              params.markReady()
-            })
-            .catch(() => undefined)
-        },
+        markReady: () =>
+          afterStartup(async () => {
+            await sourceResultAssigned
+            try {
+              await sourceResultPromise
+            } catch (error) {
+              reportUpstreamError(error)
+              return
+            }
+            if (isCleanedUp() || getTerminalFailure()) return
+            params.markReady()
+          }),
         begin: () => {
           if (startupState.cleanedUp) return undefined
           const terminalFailure = getTerminalFailure()

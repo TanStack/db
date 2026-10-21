@@ -879,6 +879,16 @@ export class CollectionStateManager<
     this.commitPendingTransactions()
   }
 
+  /** A retired sync run's open transaction can never commit. */
+  discardOpenSyncTransactions(): void {
+    const committed = this.pendingSyncedTransactions.filter(
+      (transaction) => transaction.committed,
+    )
+    if (committed.length === this.pendingSyncedTransactions.length) return
+    this.pendingSyncedTransactions = committed
+    this.refreshPendingSyncedProjection()
+  }
+
   /** Whether the newest sync transaction is still open for writes. */
   hasOpenSyncTransaction(): boolean {
     return this.pendingSyncedTransactions.at(-1)?.committed === false

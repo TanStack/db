@@ -6,7 +6,7 @@ import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
-import { RequestErrors } from '../collection/lifecycle.js'
+import { LoadOrder, RequestErrors } from '../collection/lifecycle.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -482,6 +482,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // a sync problem does not dispose the Effect.
   private reachedReady = false
   private readonly requests = new RequestErrors()
+  private readonly loadOrders = new Map<string, LoadOrder>()
   private reportedTree: ErrorTreeNode | undefined
   private readonly onErrorsChange: ((errors: ErrorTreeNode) => void) | undefined
   // This Effect as its sources' `subscribers` list it.
@@ -1117,10 +1118,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** A load that later succeeds clears the source's request error. */
   private settleWhenLoaded(sourceId: string, result: unknown): void {
-    void Promise.resolve(result).then(
-      () => this.settleLoad(sourceId),
-      () => {},
-    )
+    let order = this.loadOrders.get(sourceId)
+    if (!order) this.loadOrders.set(sourceId, (order = new LoadOrder()))
+    order.track(result, () => this.settleLoad(sourceId))
   }
 
   private settleLoad(sourceId: string): void {

@@ -57,7 +57,7 @@ import type { SyncConfig } from '@tanstack/db'
 
 type Row = { id: string; value: string }
 type Restore = `rows` | `empty` | `failed`
-type Remote = `ready` | `fail`
+type Remote = `ready` | `ready-report` | `fail`
 type Event =
   | { kind: `restore`; outcome: Restore }
   | { kind: `remote`; outcome: Remote }
@@ -68,6 +68,7 @@ const DISK_ROW: Row = { id: `disk`, value: `restored` }
 const REMOTE_ROW: Row = { id: `remote`, value: `synced` }
 const RESTORE_FAILURE = `restore failed`
 const REMOTE_FAILURE = `remote gave up`
+const REMOTE_REPORT = `remote retrying`
 
 // ---------------------------------------------------------------------------
 // Independent model
@@ -76,6 +77,7 @@ const REMOTE_FAILURE = `remote gave up`
 type Expected = {
   status: `loading` | `ready` | `error` | `crashed`
   error: string | null
+  failureReason: string | null
   rows: Array<string>
 }
 
@@ -86,6 +88,7 @@ function expected(events: ReadonlyArray<Event>): Array<Expected> {
   let remoteFailed = false
   let waitingRemote: Remote | undefined
   let error: string | null = null
+  let failureReason: string | null = null
   const rows = new Set<string>()
 
   // Restored rows may open the Collection once the network had its chance.
@@ -97,9 +100,12 @@ function expected(events: ReadonlyArray<Event>): Array<Expected> {
     )
       status = `ready`
   }
-  const applyRemoteReady = () => {
+  // The remote's calls apply in the order it made them: a report right after
+  // `markReady()` lands on the ready Collection.
+  const applyRemoteReady = (report: boolean) => {
     rows.add(REMOTE_ROW.id)
     if (status === `loading`) status = `ready`
+    if (report) failureReason = REMOTE_REPORT
   }
   const applyRemoteFailure = () => {
     openFromDisk()
@@ -119,7 +125,8 @@ function expected(events: ReadonlyArray<Event>): Array<Expected> {
           error = RESTORE_FAILURE
         } else {
           if (event.outcome === `rows`) rows.add(DISK_ROW.id)
-          if (waitingRemote === `ready`) applyRemoteReady()
+          if (waitingRemote === `ready`) applyRemoteReady(false)
+          else if (waitingRemote === `ready-report`) applyRemoteReady(true)
           else if (waitingRemote === `fail`) applyRemoteFailure()
           else openFromDisk()
         }
@@ -129,13 +136,14 @@ function expected(events: ReadonlyArray<Event>): Array<Expected> {
       } else {
         if (event.outcome === `fail`) remoteFailed = true
         if (restore === `pending`) waitingRemote = event.outcome
-        else if (event.outcome === `ready`) applyRemoteReady()
-        else applyRemoteFailure()
+        else if (event.outcome === `fail`) applyRemoteFailure()
+        else applyRemoteReady(event.outcome === `ready-report`)
       }
     }
     return {
       status,
       error,
+      failureReason: status === `crashed` ? null : failureReason,
       rows: status === `ready` ? [...rows].sort() : [],
     }
   })
@@ -156,7 +164,7 @@ function permutations<T>(items: ReadonlyArray<T>): Array<Array<T>> {
 
 const histories: Array<Array<Event>> = []
 for (const restore of [`rows`, `empty`, `failed`] as const) {
-  for (const remote of [`ready`, `fail`, undefined] as const) {
+  for (const remote of [`ready`, `ready-report`, `fail`, undefined] as const) {
     for (const deadline of [true, false]) {
       const events: Array<Event> = [{ kind: `restore`, outcome: restore }]
       if (remote) events.push({ kind: `remote`, outcome: remote })
@@ -234,11 +242,12 @@ function networkFirst(id: string, initialRender = true) {
       outcome === `failed`
         ? fixture.load.reject(new Error(RESTORE_FAILURE))
         : fixture.load.resolve(outcome === `rows` ? [DISK_ROW] : []),
-    remoteReady: () => {
+    remoteReady: (report: boolean) => {
       remote!.begin()
       remote!.write({ type: `insert`, value: REMOTE_ROW })
       remote!.commit()
       remote!.markReady()
+      if (report) remote!.reportError(new Error(REMOTE_REPORT))
     },
     remoteFail: () => remote!.fail(new Error(REMOTE_FAILURE)),
   }
@@ -248,6 +257,7 @@ function observe(collection: ReturnType<typeof networkFirst>[`collection`]) {
   return {
     status: collection.status,
     error: collection.errors.error?.message ?? null,
+    failureReason: collection.errors.failureReason?.message ?? null,
     rows:
       collection.status === `ready`
         ? collection.toArray.map((row) => row.id).sort()
@@ -282,8 +292,8 @@ describe(`persisted readiness oracle`, () => {
           if (event.kind === `restore`) source.restore(event.outcome)
           else if (event.kind === `deadline`)
             await vi.advanceTimersByTimeAsync(TIMEOUT)
-          else if (event.outcome === `ready`) source.remoteReady()
-          else source.remoteFail()
+          else if (event.outcome === `fail`) source.remoteFail()
+          else source.remoteReady(event.outcome === `ready-report`)
           await vi.advanceTimersByTimeAsync(0)
           const label = `after ${describe_(events.slice(0, index + 1))}`
           expect(observe(source.collection), label).toEqual(model[index])
@@ -309,7 +319,7 @@ describe(`persisted readiness oracle`, () => {
       source.restore(`rows`)
       await vi.advanceTimersByTimeAsync(TIMEOUT * 10)
       expect(source.collection.status).toBe(`loading`)
-      source.remoteReady()
+      source.remoteReady(false)
       await vi.advanceTimersByTimeAsync(0)
       expect(source.collection.status).toBe(`ready`)
     } finally {

@@ -62,6 +62,8 @@ export class CollectionLifecycleManager<
   // A live query's request failures are kept apart, so settling a request
   // cannot clear the sync adapter's problem.
   private failureReason: CollectionErrorInfo | null = null
+  // A reload's new run reported the failure reason, so its first commit keeps it.
+  private failureReasonFromReload = false
   private stoppedError: CollectionErrorInfo | null = null
   // The cause of status `error` or `crashed`, kept so readers see the same
   // object until the sync run ends.
@@ -327,6 +329,7 @@ export class CollectionLifecycleManager<
     const run = createDeferred<void>()
     void run.promise.catch(() => undefined)
     this.reloadRun = run
+    this.failureReasonFromReload = false
     this.adapterStopped = false
     this.events.emitErrorsChange()
     return run.promise
@@ -340,7 +343,7 @@ export class CollectionLifecycleManager<
     const run = this.reloadRun
     if (!run) return
     this.reloadRun = undefined
-    this.failureReason = null
+    if (!this.failureReasonFromReload) this.failureReason = null
     this.stoppedError = null
     this.requestErrors = new RequestErrors()
     if (this.status === `ready`) this.events.emitErrorsChange()
@@ -378,9 +381,16 @@ export class CollectionLifecycleManager<
 
   /** The reload ended without a commit, for example by cleanup. */
   public abandonReload(error: unknown): void {
+    if (!this.endReload(error)) return
+    if (this.status !== `cleaned-up`) this.events.emitErrorsChange()
+  }
+
+  private endReload(error: unknown): boolean {
     const run = this.reloadRun
+    if (!run) return false
     this.reloadRun = undefined
-    run?.reject(error)
+    run.reject(error)
+    return true
   }
 
   /**
@@ -391,8 +401,9 @@ export class CollectionLifecycleManager<
   public crash(error?: unknown): void {
     if (this.status === `crashed`) return
     this.validateStatusTransition(this.status, `crashed`)
-    // A crash ends a reload in flight with it.
-    this.abandonReload(error)
+    // A crash ends a reload in flight with it; its status change announces
+    // the tree.
+    this.endReload(error)
     this.statusError = describeProblem(error)
     this.setStatus(`crashed`)
   }
@@ -423,6 +434,7 @@ export class CollectionLifecycleManager<
     this.assertAdapterActive(`reportError`)
     this.assertReady(`reportError`)
     this.failureReason = describeProblem(error)
+    this.failureReasonFromReload = this.reloading
     this.events.emitErrorsChange()
   }
 
@@ -773,6 +785,27 @@ export class RequestErrors {
     const changed = shown !== this.problem
     this.problem = shown
     return changed
+  }
+}
+
+/**
+ * @internal Orders one source's loads: a success clears only the request
+ * errors of loads started before it, never a later load's failure.
+ */
+export class LoadOrder {
+  private started = 0
+  private latestFailed = 0
+
+  track(result: unknown, settle: () => void): void {
+    const order = ++this.started
+    void Promise.resolve(result).then(
+      () => {
+        if (order > this.latestFailed) settle()
+      },
+      () => {
+        this.latestFailed = Math.max(this.latestFailed, order)
+      },
+    )
   }
 }
 
