@@ -24,6 +24,7 @@ import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import {
   fixedReloadHistories,
+  inProcessSeams,
   observeReload,
   reloadHistoryArb,
   reloadViolations,
@@ -150,6 +151,7 @@ function electronHost(): ReloadHost {
 
   return {
     controlsLatency: true,
+    seams: inProcessSeams,
     adapterPerTab: false,
     record: (next) => {
       recorder = next

@@ -43,7 +43,9 @@
  * which tabs open, and which actions run. It reads no scheduler, coordinator,
  * or adapter state.
  *
- * History grammar: 1 to 4 Collections, each eager (local rows) or managed
+ * History grammar: a database whose setup is complete, lacks a column an
+ * older release did not add, or lacks a database index; 1 to 4 Collections,
+ * each eager (local rows) or managed
  * (an on-demand source with a cache generation claim), each with complete
  * setup or any subset of its seven derived setup facts removed, and an eager
  * one optionally reopened with a new schema version. A lock grant 1, 2, or 5
@@ -54,11 +56,12 @@
  * the second term follows it), or a follower tab's write. At most one
  * lifecycle event: a follower tab takes over after the leader tab closes
  * (optionally while one of its reads is held, so every takeover grant meets
- * a queued read), the first Collection restarts, or the tab closes while its
- * terms still wait.
+ * a queued read), a managed source starts a scoped recovery that rotates its
+ * cache generation, the first Collection restarts, or the tab closes while
+ * its terms still wait. A managed schema change resets its generation in
+ * place; it does not rotate it.
  * A second tab opens after the first is ready, so the first tab's reload is
- * observed alone. Excluded: managed schema changes (they rotate the cache
- * generation, owned by the resume-snapshot oracle), and dropped row tables.
+ * observed alone. Excluded: dropped row tables.
  *
  * Production drivers: each host supplies a real persistence, coordinator,
  * and database, a statement recorder, and latency control. The Node Browser
@@ -66,6 +69,12 @@
  * this loop and this comparison. The recorder keeps every statement in order
  * with its parameters, so a missing, repeated, or reordered statement stays
  * visible.
+ *
+ * Not owned here: whether the barrier waits for regular work that is queued
+ * but not yet running. Regular work that is running is already ordered
+ * before a term by the driver's transaction order and the writer lock, so no
+ * reload history separates that case deterministically; the shared logical
+ * scheduling oracle owns it at the scheduler.
  *
  * Timing helpers are premises. `delayLeaderGrants` records, at each leader
  * grant, whether every preload had already been called; the comparison
@@ -108,8 +117,12 @@ export type CollectionHistory = {
   schemaChange: boolean
 }
 
+/** Database setup an older release or an outside tool left incomplete. */
+export type DatabaseDamage = `none` | `migrated-column` | `database-index`
+
 export type ReloadHistory = {
   collections: ReadonlyArray<CollectionHistory>
+  databaseDamage: DatabaseDamage
   grantTasks: 1 | 2 | 5
   statementLatency: 0 | 1
   need: `none` | `local-write` | `write-queued-at-grant` | `follower-write`
@@ -117,6 +130,7 @@ export type ReloadHistory = {
     | `none`
     | `takeover`
     | `takeover-while-read-held`
+    | `rotate`
     | `restart`
     | `dispose-while-waiting`
 }
@@ -136,8 +150,26 @@ export type ReloadTab = {
   close: () => Promise<void>
 }
 
+/** A held adapter call: held at its first call, before any SQL. */
+export type HeldCall = {
+  isHeld: () => boolean
+  release: () => void
+  restore: () => void
+}
+
+/**
+ * Hold seams at the adapter boundary. They must patch the adapter in the
+ * process that runs it: in process for Browser tabs, in the main process for
+ * a real Electron app.
+ */
+export type ReloadSeams = {
+  holdFirstRowSnapshot: (storageId: string) => HeldCall
+  holdFirstWrite: (storageId: string) => HeldCall
+}
+
 /** What a production driver supplies. Everything else is shared. */
 export type ReloadHost = {
+  seams: ReloadSeams
   /** Whether `statementLatency` reaches the database. */
   controlsLatency: boolean
   /**
@@ -175,29 +207,52 @@ export type ReloadObservation = {
   /** Takeover grants, and follower terms, while the follower's read waits. */
   grantsWhileFollowerReadHeld: number
   termsWhileFollowerReadHeld: number
+  /** The rotated Collection's new physical ID. */
+  rotatedStorageId: string | undefined
   /** Whether the gated grant arrived while the queued write was held. */
   grantedWhileWriteHeld: boolean | undefined
   factsPresent: Record<string, boolean>
   storedRow: Record<string, boolean>
+  databaseFactsPresent: boolean
 }
 
 type Row = { id: string; title: string }
 
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
+// Premise helper with a 15 s bound. Its condition is the premise.
 async function waitFor(condition: () => boolean, label: string) {
-  for (let attempt = 0; attempt < 2_000; attempt++) {
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
     if (condition()) return
     await nextTask()
   }
   throw new Error(`timed out waiting for ${label}`)
 }
 
+/**
+ * Keeps a hold for as long as a wrong term would need to appear: until one
+ * does, or 500 ms pass. A correct barrier writes none during the hold, so it
+ * always waits the full bound; the term-ahead mutants are rejected on both
+ * drivers within it.
+ */
+async function holdUntilTermOrElapsed(
+  termAppeared: () => boolean,
+  boundMs = 500,
+) {
+  const deadline = Date.now() + boundMs
+  while (Date.now() < deadline && !termAppeared()) await nextTask()
+}
+
+type RecoveryCapability = { startScopedRecovery?: () => Promise<void> }
+
 function openCollections(
   persistence: PersistedCollectionPersistence,
   history: ReloadHistory,
   ids: ReadonlyArray<string>,
   schemaVersionFor: (index: number) => number,
+  // A managed source's persistence capability, as Electric's source uses it.
+  capabilities: Map<number, RecoveryCapability> = new Map(),
 ): Array<Collection<Row, string>> {
   return history.collections.map((collection, index) => {
     if (collection.kind === `eager`) {
@@ -211,8 +266,13 @@ function openCollections(
       )
     }
     const source: SyncConfig<Row, string> = {
-      sync: ({ markReady }) => {
-        markReady()
+      sync: (params) => {
+        const metadata = params.metadata as
+          { persistence?: RecoveryCapability } | undefined
+        if (metadata?.persistence) {
+          capabilities.set(index, metadata.persistence)
+        }
+        params.markReady()
         return { loadSubset: () => Promise.resolve() }
       },
     }
@@ -223,7 +283,7 @@ function openCollections(
         syncMode: `on-demand`,
         sync: source,
         persistence,
-        schemaVersion: 1,
+        schemaVersion: schemaVersionFor(index),
       }),
     )
   })
@@ -282,7 +342,7 @@ type HeldReadSeam = {
  * any SQL. It holds that tab's shared scheduler, as a long queued read does,
  * but not the database, so an unscheduled term write can still run.
  */
-function holdFirstRowSnapshot(storageId: string) {
+function holdFirstRowSnapshot(storageId: string): HeldCall {
   const seam = SQLiteCorePersistenceAdapter.prototype as unknown as HeldReadSeam
   const original = seam.loadResumeSnapshotUnscheduled
   let release!: () => void
@@ -329,7 +389,7 @@ type HeldWriteSeam = {
  * Holds one Collection's first committed write at its first adapter call,
  * inside its scheduler turn and writer lock, before any SQL.
  */
-function holdFirstWrite(storageId: string) {
+function holdFirstWrite(storageId: string): HeldCall {
   const seam =
     SQLiteCorePersistenceAdapter.prototype as unknown as HeldWriteSeam
   const original = seam.applyCommittedTxUnscheduled
@@ -362,6 +422,12 @@ function holdFirstWrite(storageId: string) {
       seam.applyCommittedTxUnscheduled = original
     },
   }
+}
+
+/** Seams for a host whose adapter runs in this JavaScript context. */
+export const inProcessSeams: ReloadSeams = {
+  holdFirstRowSnapshot,
+  holdFirstWrite,
 }
 
 function removeFactSql(storageId: string, fact: Fact): string {
@@ -459,12 +525,21 @@ export async function observeReload(
         await host.rawExec(removeFactSql(storageIds[ids[index]!]!, fact))
       }
     }
+    if (history.databaseDamage === `migrated-column`) {
+      await host.rawExec(
+        `ALTER TABLE applied_tx DROP COLUMN replay_requires_full_reload`,
+      )
+    }
+    if (history.databaseDamage === `database-index`) {
+      await host.rawExec(`DROP INDEX cache_generation_head`)
+    }
 
     // Reload: the first tab alone, with a recorder and the history's seams.
     const log: Array<Logged> = []
     let termDuringHold: boolean | undefined
     let needSettled: boolean | undefined
     let followerLeadsAll: boolean | undefined
+    let rotatedStorageId: string | undefined
     host.record((sql, params) =>
       log.push({ sql: sql.replace(/\s+/g, ` `).trim(), params }),
     )
@@ -473,7 +548,7 @@ export async function observeReload(
     cleanups.push(() => host.setStatementLatency(0))
     let preloadsCalled = false
     let preloadsCalledAtEveryGrant = true
-    let followerHold: ReturnType<typeof holdFirstRowSnapshot> | undefined
+    let followerHold: HeldCall | undefined
     let grantsWhileFollowerReadHeld = 0
     let termsWhileFollowerReadHeld = 0
     // A write queued at a grant: the second eager Collection's grant waits
@@ -488,7 +563,7 @@ export async function observeReload(
                   (c, index) => index > 0 && c.kind === `eager`,
                 )
               ]!,
-            hold: holdFirstWrite(ids[0]!),
+            hold: host.seams.holdFirstWrite(ids[0]!),
           }
         : undefined
     if (queuedWrite) cleanups.push(queuedWrite.hold.restore)
@@ -516,15 +591,19 @@ export async function observeReload(
     )
     const heldId = heldCollection(history)
     const hold =
-      heldId === undefined ? undefined : holdFirstRowSnapshot(ids[heldId]!)
+      heldId === undefined
+        ? undefined
+        : host.seams.holdFirstRowSnapshot(ids[heldId]!)
     if (hold) cleanups.push(hold.restore)
 
     const leader = await host.openTab(dbName)
+    const leaderCapabilities = new Map<number, RecoveryCapability>()
     const leaderCollections = openCollections(
       leader.persistence,
       history,
       ids,
       (index) => (history.collections[index]!.schemaChange ? 2 : 1),
+      leaderCapabilities,
     )
     let leaderOpen = true
     cleanups.push(async () => {
@@ -540,10 +619,10 @@ export async function observeReload(
       const write = leaderCollections[0]!.insert({ id: `local`, title: `l` })
         .isPersisted.promise
       const writer = storageIds[ids[0]!]!
-      await waitFor(
+      await holdUntilTermOrElapsed(
         () => log.some((entry) => isTermFor(entry, writer)),
-        `writer term during the held read`,
-      ).catch(() => undefined)
+        2_000,
+      )
       termDuringHold =
         hold.isHeld() && log.some((entry) => isTermFor(entry, writer))
       hold.release()
@@ -564,7 +643,9 @@ export async function observeReload(
         () => grantedWhileWriteHeld !== undefined,
         `gated grant during the held write`,
       )
-      for (let task = 0; task < 20; task++) await nextTask()
+      await holdUntilTermOrElapsed(() =>
+        log.some((entry) => isTermFor(entry, queuedWrite.gated)),
+      )
       queuedWrite.hold.release()
       await write
       needSettled = true
@@ -598,6 +679,27 @@ export async function observeReload(
         () => leader.isLeader(storageIds[ids[0]!]!),
         `restarted leader`,
       )
+    }
+    // A managed source starts a scoped recovery, which rotates its cache
+    // generation and subscribes again under the new physical ID.
+    const rotated = rotatedCollection(history)
+    if (rotated !== undefined) {
+      await waitFor(
+        () => leaderCapabilities.has(rotated),
+        `managed persistence capability`,
+      )
+      await leaderCapabilities.get(rotated)!.startScopedRecovery?.()
+      const heads = await host.rawQuery(
+        `SELECT physical_id FROM cache_generation
+         WHERE logical_id = ? AND retired = 0`,
+        [ids[rotated]!],
+      )
+      rotatedStorageId = heads[0]?.physical_id as string | undefined
+      await waitFor(
+        () =>
+          rotatedStorageId !== undefined && leader.isLeader(rotatedStorageId),
+        `rotated generation leader`,
+      ).catch(() => undefined) // the comparison reports a missing term
     }
     const reloadLog = [...log]
 
@@ -639,7 +741,9 @@ export async function observeReload(
         const restarted = history.collections.findIndex(
           (c) => c.kind === `eager`,
         )
-        followerHold = holdFirstRowSnapshot(storageIds[ids[restarted]!]!)
+        followerHold = host.seams.holdFirstRowSnapshot(
+          storageIds[ids[restarted]!]!,
+        )
         cleanups.push(followerHold.restore)
         await followerCollections[restarted]!.cleanup()
         const restart = followerCollections[restarted]!.preload()
@@ -651,7 +755,13 @@ export async function observeReload(
           () => grantsWhileFollowerReadHeld >= ids.length,
           `takeover grants while the follower read is held`,
         ).catch(() => undefined)
-        for (let task = 0; task < 20; task++) await nextTask()
+        await holdUntilTermOrElapsed(() =>
+          log
+            .slice(termsBefore)
+            .some((entry) =>
+              ids.some((id) => isTermFor(entry, storageIds[id]!)),
+            ),
+        )
         termsWhileFollowerReadHeld = log
           .slice(termsBefore)
           .filter((entry) =>
@@ -674,7 +784,13 @@ export async function observeReload(
       const storedRow: Record<string, boolean> = {}
       for (const [index, id] of ids.entries()) {
         const storageId = storageIds[id]!
-        factsPresent[id] = await setupFactsPresent(host, storageId)
+        // A rotated Collection's setup facts belong to its new generation.
+        factsPresent[id] = await setupFactsPresent(
+          host,
+          index === rotatedCollection(history) && rotatedStorageId
+            ? rotatedStorageId
+            : storageId,
+        )
         if (history.collections[index]!.kind === `eager`) {
           const rows = await host.rawQuery(
             `SELECT 1 AS found FROM "${createPersistedTableName(storageId, `c`)}" WHERE key = ?`,
@@ -683,7 +799,15 @@ export async function observeReload(
           storedRow[id] = rows.length > 0
         }
       }
+      const migrated = await host.rawQuery(
+        `SELECT 1 AS found FROM sqlite_master
+         WHERE name = 'applied_tx' AND sql LIKE '%replay_requires_full_reload%'`,
+      )
+      const headIndex = await host.rawQuery(
+        `SELECT 1 AS found FROM sqlite_master WHERE name = 'cache_generation_head'`,
+      )
       return {
+        databaseFactsPresent: migrated.length > 0 && headIndex.length > 0,
         adapterPerTab: host.adapterPerTab,
         ids,
         storageIds,
@@ -696,6 +820,7 @@ export async function observeReload(
         grantsWhileFollowerReadHeld,
         termsWhileFollowerReadHeld,
         grantedWhileWriteHeld,
+        rotatedStorageId,
         factsPresent,
         storedRow,
       }
@@ -703,6 +828,13 @@ export async function observeReload(
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
   }
+}
+
+/** The rotated Collection: the first managed one, when the history rotates. */
+function rotatedCollection(history: ReloadHistory): number | undefined {
+  if (history.lifecycle !== `rotate`) return undefined
+  const index = history.collections.findIndex((c) => c.kind === `managed`)
+  return index === -1 ? undefined : index
 }
 
 /** The held read: the last eager Collection, when the history holds one. */
@@ -840,6 +972,8 @@ export function expectedReload(
       // closed during the held read may never reach the reads queued behind
       // it: the held one, later eager ones, and every managed one, whose
       // read follows its claim.
+      const tabsOnThisGeneration =
+        index === rotatedCollection(history) ? 1 : tabs
       const neverRead =
         disposed &&
         (index >= (held ?? Infinity) || collection.kind === `managed`)
@@ -849,17 +983,19 @@ export function expectedReload(
         // Each tab's adapter reads the registry once; a restart reuses it.
         // A held first snapshot reads it after the hold, so a tab closed
         // during the hold may never read it.
+        // A rotated generation's old ID is read only by the first tab; a
+        // later tab opens on the new generation.
         registryReads: neverRead
           ? undefined
           : topology.adapterPerTab
-            ? tabs
+            ? tabsOnThisGeneration
             : 1,
         // Each tab reads an eager Collection's rows once; a restart rereads.
         rowScans: eager && !disposed ? tabs + (restarted ? 1 : 0) : undefined,
         // A held snapshot may or may not run after its tab closes.
         snapshots: disposed
           ? undefined
-          : (eager ? 2 : 1) * (tabs + (restarted ? 1 : 0)),
+          : (eager ? 2 : 1) * (tabsOnThisGeneration + (restarted ? 1 : 0)),
         terms: disposed
           ? 0
           : 1 +
@@ -984,6 +1120,35 @@ export function reloadViolations(
       )
     }
   }
+  // A rotated generation is registered fresh and elected once, after it
+  // exists; the retired generation is not elected again.
+  const rotated = rotatedCollection(history)
+  if (rotated !== undefined) {
+    const id = ids[rotated]!
+    const next = observed.rotatedStorageId
+    if (next === undefined || next === storageIds[id]) {
+      violations.push(`${id}: no rotated generation`)
+    } else {
+      const created = log.findIndex(
+        (e) =>
+          e.sql.startsWith(`INSERT INTO cache_generation (`) &&
+          e.params.includes(next),
+      )
+      const terms = log.flatMap((e, at) => (isTermFor(e, next) ? [at] : []))
+      if (terms.length !== 1) {
+        violations.push(
+          `${id}: ${terms.length} terms for the rotated generation`,
+        )
+      }
+      if (created === -1 || terms.some((at) => at < created)) {
+        violations.push(`${id}: rotated term before its generation existed`)
+      }
+      const registry = count(log, (e) => isRegistryReadFor(e, next))
+      if (registry < 1 || registry > 2 * expected.tabs) {
+        violations.push(`${id}: ${registry} rotated registry reads`)
+      }
+    }
+  }
   // (c) need
   if (history.need === `local-write` && observed.termDuringHold !== true) {
     violations.push(`${ids[0]}: no term while another startup read was held`)
@@ -1011,10 +1176,16 @@ export function reloadViolations(
       )
     }
   }
-  // (e) database setup is complete after the fill
+  // (a, e) database setup repairs damage and is otherwise skipped
   const databaseSetup = count(log, isDatabaseSetupStatement)
-  if (databaseSetup !== 0) {
+  if (history.databaseDamage === `none` && databaseSetup !== 0) {
     violations.push(`${databaseSetup} database setup statements`)
+  }
+  if (history.databaseDamage !== `none` && databaseSetup === 0) {
+    violations.push(`damaged database setup was not repaired`)
+  }
+  if (!observed.databaseFactsPresent) {
+    violations.push(`database setup facts missing`)
   }
   return violations
 }
@@ -1023,16 +1194,11 @@ export function reloadViolations(
 // Histories
 // ---------------------------------------------------------------------------
 
-const collectionArb: fc.Arbitrary<CollectionHistory> = fc
-  .record({
-    kind: fc.constantFrom(`eager` as const, `managed` as const),
-    missing: fc.subarray([...derivedFacts]),
-    schemaChange: fc.boolean(),
-  })
-  .map((collection) => ({
-    ...collection,
-    schemaChange: collection.kind === `eager` && collection.schemaChange,
-  }))
+const collectionArb: fc.Arbitrary<CollectionHistory> = fc.record({
+  kind: fc.constantFrom(`eager` as const, `managed` as const),
+  missing: fc.subarray([...derivedFacts]),
+  schemaChange: fc.boolean(),
+})
 
 /** Repairs a generated history so its need and lifecycle have a target. */
 function legal(history: ReloadHistory): ReloadHistory {
@@ -1054,12 +1220,20 @@ function legal(history: ReloadHistory): ReloadHistory {
     lifecycle = `none`
   if (lifecycle === `takeover-while-read-held` && eager === 0)
     lifecycle = `none`
+  const managed = history.collections.length - eager
+  if (lifecycle === `rotate` && managed === 0) lifecycle = `none`
   return { ...history, need, lifecycle }
 }
 
 export const reloadHistoryArb: fc.Arbitrary<ReloadHistory> = fc
   .record({
     collections: fc.array(collectionArb, { minLength: 1, maxLength: 4 }),
+    databaseDamage: fc.constantFrom(
+      `none` as const,
+      `none` as const,
+      `migrated-column` as const,
+      `database-index` as const,
+    ),
     grantTasks: fc.constantFrom(1 as const, 2 as const, 5 as const),
     statementLatency: fc.constantFrom(0 as const, 1 as const),
     need: fc.constantFrom(
@@ -1072,6 +1246,7 @@ export const reloadHistoryArb: fc.Arbitrary<ReloadHistory> = fc
       `none` as const,
       `takeover` as const,
       `takeover-while-read-held` as const,
+      `rotate` as const,
       `restart` as const,
       `dispose-while-waiting` as const,
     ),
@@ -1089,6 +1264,7 @@ const managed: CollectionHistory = {
   schemaChange: false,
 }
 const base = {
+  databaseDamage: `none`,
   grantTasks: 1,
   statementLatency: 1,
   need: `none`,
@@ -1128,6 +1304,18 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
       ...base,
       statementLatency: 0,
       collections: [{ ...eager, missing: [`versionRow`, `epochRow`] }],
+    },
+  ],
+  [
+    `database from an older release`,
+    { ...base, databaseDamage: `migrated-column`, collections: [eager] },
+  ],
+  [
+    `database index missing`,
+    {
+      ...base,
+      databaseDamage: `database-index`,
+      collections: [managed, eager],
     },
   ],
   [
@@ -1183,6 +1371,14 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
       lifecycle: `takeover-while-read-held`,
       collections: [eager, managed, eager],
     },
+  ],
+  [
+    `managed schema change`,
+    { ...base, collections: [{ ...managed, schemaChange: true }, eager] },
+  ],
+  [
+    `generation rotation`,
+    { ...base, lifecycle: `rotate`, collections: [eager, managed] },
   ],
   [`restart`, { ...base, lifecycle: `restart`, collections: [eager, eager] }],
   [

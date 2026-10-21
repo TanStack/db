@@ -23,6 +23,7 @@ import { describe, expect, onTestFinished } from 'vitest'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import {
   fixedReloadHistories,
+  inProcessSeams,
   observeReload,
   reloadHistoryArb,
   reloadViolations,
@@ -54,6 +55,7 @@ function nodeBrowserHost(): ReloadHost {
   }
   return {
     controlsLatency: true,
+    seams: inProcessSeams,
     adapterPerTab: true,
     record: (next) => {
       recorder = next
