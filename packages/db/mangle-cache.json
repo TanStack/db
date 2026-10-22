@@ -403,7 +403,6 @@
   "repairNeedsReplacement": "gK",
   "coversSource": "gL",
   "standing": "gM",
-  "windowIsInsideOwnPrefix": "gN",
   "debt": "gO",
   "releaseOwned": "gP",
   "moveWork": "ae",
@@ -415,5 +414,7 @@
   "cancelRepairRetry": "cG",
   "coverSource": "fN",
   "windowRequestGeneration": "av",
-  "latestWindowRequest": "gE"
+  "latestWindowRequest": "gE",
+  "loadMovedEndTie": "gN",
+  "ownPrefixEnd": "gT"
 }
