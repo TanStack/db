@@ -1698,7 +1698,12 @@ every row before the top-K (a recorded limit).
     load or a root Collection's load that fails after initial-query readiness
     is an `error` on the query's own node. A lazy demand's error clears when
     that demand settles or is released; a root Collection's error clears when
-    a later load of that Collection settles. Query failures and contract
+    a later load of that Collection settles. A source reload's replay loads
+    the query's demand again as one unit: the query's first load waits for
+    the whole replay, the replay fails only for a demand the query still
+    holds when it settles, and its success clears only the errors of demands
+    it loaded again. A load that threw holds no demand, so a replay does not
+    load it again and its error stays. Query failures and contract
     violations, such as a graph failure or a Collection cleaned up under the
     query, crash the query. An Effect follows the same rules, with its
     initial-query readiness at its settled initial loads: a crashed source,

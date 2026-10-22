@@ -425,13 +425,13 @@
   "failureReasonFromReload": "g5",
   "endReload": "g9",
   "loadOrder": "ha",
-  "reloadTruncateTransaction": "gY",
   "cancelSyncTransaction": "g7",
   "startedBeforeFailure": "hb",
   "publishedErrors": "hc",
   "views": "he",
   "isDeferredSyncKey": "b6",
   "overlayHeldAndActive": "e8",
-  "adapterTruncates": "dp",
-  "recordOutcome": "gP"
+  "recordOutcome": "gP",
+  "reloadRetiredAcquisitions": "dp",
+  "resultAcrossReload": "gR"
 }

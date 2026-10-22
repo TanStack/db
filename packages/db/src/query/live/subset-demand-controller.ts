@@ -17,6 +17,9 @@ type DemandSegment = {
   abortController: AbortController
   ready: LoadSubsetRequestResult
   state: `starting` | `pending` | `settled` | `failed`
+  // The load threw, so the subscription does not hold it, and a source
+  // reload's replay does not load it again.
+  thrown?: true
   replaces?: Array<DemandSegment>
 }
 
@@ -44,9 +47,19 @@ export class SubsetDemandController {
   private readonly warnedPlans = new Set<string>()
   private valueIdentity = createValueIdentity()
 
-  /** The plans this controller holds demand for. */
-  planIds(): IterableIterator<string> {
-    return this.states.keys()
+  /**
+   * A source reload's replay loaded every segment the subscription holds
+   * again. Returns the plans that no longer miss a key.
+   */
+  settleReplay(): Array<string> {
+    const loaded: Array<string> = []
+    for (const [planId, state] of this.states) {
+      for (const segment of state.segments)
+        if (segment.state === `failed` && !segment.thrown)
+          for (const key of segment.keys.keys()) state.failedKeys.delete(key)
+      if (state.failedKeys.size === 0) loaded.push(planId)
+    }
+    return loaded
   }
 
   /** Whether the plan still needs a key whose latest load failed. */
@@ -119,16 +132,31 @@ export class SubsetDemandController {
     const replace =
       retryReplacement || (removed && (added.size > 0 || segments.length > 1))
     const requestedKeys = replace ? nextKeys : added
+    // A replacement alone decides the demand: the segments it supersedes are
+    // released, and aborted, once it settles.
+    let replacement: DemandSegment | undefined
     if (requestedKeys.size > 0) {
       const segment = createSegment(plan, requestedKeys)
-      if (replace) segment.replaces = [...segments]
+      if (replace) {
+        segment.replaces = [...segments]
+        replacement = segment
+      }
       segments.push(segment)
-      const started = startSegment(
-        subscription,
-        segment,
-        () => this.warnUnoptimized(plan),
-        (succeeded) => this.recordOutcome(plan.id, segment, succeeded),
-      )
+      let started: boolean
+      try {
+        started = startSegment(
+          subscription,
+          segment,
+          () => this.warnUnoptimized(plan),
+          (succeeded) => this.recordOutcome(plan.id, segment, succeeded),
+        )
+      } catch (error) {
+        // A load that throws failed its keys, as one that rejects does.
+        segment.state = `failed`
+        segment.thrown = true
+        this.recordOutcome(plan.id, segment, false)
+        throw error
+      }
       if (this.states.get(plan.id) !== state) {
         return { changed: false, empty: false, ready: true }
       }
@@ -150,7 +178,7 @@ export class SubsetDemandController {
       }
     }
 
-    const pending = state.segments
+    const pending = (replacement ? [replacement] : state.segments)
       .filter(
         (segment) =>
           segment.state === `pending` && intersects(segment.keys, nextKeys),
@@ -164,19 +192,19 @@ export class SubsetDemandController {
     }
   }
 
-  // A load's outcome decides its keys: a success loaded them, and a failure
-  // of a segment the plan still holds leaves the needed ones missing.
+  // The outcome of a segment the plan still holds decides its keys: a
+  // success loaded them, and a failure leaves the needed ones missing. A
+  // released segment's late outcome decides nothing.
   private recordOutcome(
     planId: string,
     segment: DemandSegment,
     succeeded: boolean,
   ): void {
     const state = this.states.get(planId)
-    if (!state) return
+    if (!state?.segments.includes(segment)) return
     for (const key of segment.keys.keys()) {
       if (succeeded) state.failedKeys.delete(key)
-      else if (state.segments.includes(segment) && state.keys.has(key))
-        state.failedKeys.add(key)
+      else if (state.keys.has(key)) state.failedKeys.add(key)
     }
   }
 

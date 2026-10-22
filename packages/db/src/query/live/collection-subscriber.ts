@@ -206,13 +206,12 @@ export class CollectionSubscriber<
       // Convert that synchronous form to the same query-local fatal demand
       // state as a rejected load, without letting it escape the source commit.
       // Preserve unrelated graph/programming errors as throws.
+      // During the query's start, the throw fails the start, which releases
+      // the sources it subscribed to.
       if (!Object.is(subscription.lastError, error)) throw error
-      const isInitialSync =
-        this.collectionConfigBuilder.liveQueryCollection?._lifecycle
-          .inFirstLoad === true
       const generation = this.collectionConfigBuilder.beginDemand(plan.id)
       this.collectionConfigBuilder.failDemand(plan.id, generation, error)
-      if (isInitialSync) throw error
+      if (this.collectionConfigBuilder.isStarting()) throw error
       return
     }
     if (!update.changed) return
@@ -439,10 +438,10 @@ export class CollectionSubscriber<
           return
         }
         this.orderedLoader?.settleFullSourceReplay()
-        // The replay loaded every demand of this subscription again.
+        // The replay loaded every demand this subscription holds again.
         this.collectionConfigBuilder.settleReplayedRequests(
           this.sourceId,
-          this.demand.planIds(),
+          this.demand.settleReplay(),
         )
         this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
           syncRunGeneration,

@@ -124,6 +124,8 @@ export class CollectionConfigBuilder<
 
   // Error state tracking
   private fatalQueryError = false
+  // The sync function is running: a failure there fails the query's start.
+  private starting = false
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -471,6 +473,11 @@ export class CollectionConfigBuilder<
       offset: window.offset ?? 0,
       limit: window.limit ?? 0,
     }
+  }
+
+  /** The query's sync function is running. */
+  isStarting(): boolean {
+    return this.starting
   }
 
   isLazySource(sourceId: string): boolean {
@@ -886,6 +893,7 @@ export class CollectionConfigBuilder<
       }
     }
 
+    this.starting = true
     try {
       // Extend the pipeline such that it applies the incoming changes to the collection
       const fullSyncState = this.extendPipelineWithChangeProcessing(
@@ -922,6 +930,8 @@ export class CollectionConfigBuilder<
         // Preserve the setup failure. It is the error the caller can act on.
       }
       throw error
+    } finally {
+      this.starting = false
     }
 
     return teardown
@@ -1321,9 +1331,16 @@ export class CollectionConfigBuilder<
     // 2. All source collections are ready
     // 3. Every active route demand has settled
     // 4. The live query collection is not loading subset data
+    // 5. No source reload's replay is still loading the demand again
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (subscribedToAll && allReady && allDemandsSettled && !isLoading) {
+    if (
+      subscribedToAll &&
+      allReady &&
+      allDemandsSettled &&
+      !isLoading &&
+      !this.hasPendingSourceRecovery()
+    ) {
       markReady()
     }
   }

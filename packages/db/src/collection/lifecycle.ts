@@ -352,7 +352,7 @@ export class CollectionLifecycleManager<
    * The reload's first commit replaced the rows: its problems clear, and a
    * failed first load becomes ready.
    */
-  public completeReload(): void {
+  public completeReload(beforeEffects?: () => void): void {
     const run = this.reloadRun
     if (!run) return
     this.reloadRun = undefined
@@ -366,7 +366,7 @@ export class CollectionLifecycleManager<
       this.statusError = null
       this.recovering = true
       try {
-        this.markReady()
+        this.markReady(beforeEffects)
       } catch (error) {
         // A ready callback that throws reaches the adapter's markReady(); the
         // reload succeeded once the status is ready.

@@ -93,15 +93,12 @@ export class CollectionSyncManager<
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
   // Fences callbacks retained across reentrant sync entry and cleanup. This
-  // changes at both boundaries; syncRunGeneration changes only at cleanup.
+  // changes at both boundaries; syncRunGeneration changes at cleanup and when
+  // a reload retires a run.
   private syncCallbackEpoch = 0
   private syncRunGeneration = 0
   private syncEntryActive = false
   // A reload's new sync run has not begun its first transaction yet.
-  // The transaction that carries the reload's truncate, until it commits.
-  private readonly adapterTruncates = new WeakSet<object>()
-  private reloadTruncateTransaction:
-    (typeof this.state.pendingSyncedTransactions)[number] | undefined
   private pendingSyncEntryCleanup:
     | {
         tasks: Array<Promise<void>>
@@ -397,7 +394,7 @@ export class CollectionSyncManager<
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
             // The adapter's own truncate stays even if a reload ends early.
-            this.adapterTruncates.add(pendingTransaction)
+            pendingTransaction.truncateOwner = `adapter`
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
@@ -551,27 +548,23 @@ export class CollectionSyncManager<
    */
   public dropReloadReplacement(): void {
     this.state.reloadTruncatePending = false
-    const open = this.reloadTruncateTransaction
-    this.reloadTruncateTransaction = undefined
-    if (
-      !open ||
-      open.committed ||
-      this.adapterTruncates.has(open) ||
-      !this.state.pendingSyncedTransactions.includes(open)
+    const open = this.state.pendingSyncedTransactions.find(
+      (transaction) =>
+        !transaction.committed && transaction.truncateOwner === `reload`,
     )
-      return
+    if (!open) return
     open.truncate = false
     // The run wrote against no rows; on the kept rows, an insert of a kept
-    // key is an update.
+    // key replaces that row.
     const kept = this.state.createSyncedKeyLookup()
-    for (const operation of open.operations)
-      if (
-        operation.originalSyncType === `insert` &&
-        kept(operation.key as TKey)
-      ) {
-        operation.type = `update`
-        operation.originalSyncType = undefined
-      }
+    open.operations = open.operations.flatMap((operation) =>
+      operation.originalSyncType === `insert` && kept(operation.key as TKey)
+        ? [
+            { ...operation, type: `delete`, originalSyncType: undefined },
+            operation,
+          ]
+        : [operation],
+    )
     this.state.refreshPendingSyncedProjection()
   }
 
@@ -579,15 +572,13 @@ export class CollectionSyncManager<
   private markReloadTruncate(applied: { promise: Promise<void> }): void {
     this.state.reloadTruncatePending = false
     const transaction = this.state.pendingSyncedTransactions.at(-1)!
-    this.reloadTruncateTransaction = transaction
+    transaction.truncateOwner = `reload`
     transaction.truncate = true
     transaction.truncateMarkReady = false
     this.state.refreshPendingSyncedProjection()
     const syncRunGeneration = this.syncRunGeneration
     void applied.promise.then(
       () => {
-        if (this.reloadTruncateTransaction === transaction)
-          this.reloadTruncateTransaction = undefined
         if (
           syncRunGeneration === this.syncRunGeneration &&
           this.lifecycle.status === `ready`
@@ -612,10 +603,7 @@ export class CollectionSyncManager<
     reason?: Error,
   ): void {
     this.state.cancelPendingSyncedTransaction(transaction, reason)
-    if (
-      transaction === this.reloadTruncateTransaction &&
-      this.lifecycle.reloading
-    )
+    if (transaction.truncateOwner === `reload` && this.lifecycle.reloading)
       this.state.reloadTruncatePending = true
   }
 

@@ -135,10 +135,13 @@ export interface EffectConfig<
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
-   * Called when a source fails its first load before the effect's
-   * initial-query readiness, crashes, or is cleaned up. The effect is
-   * automatically disposed after this callback fires. If not provided, the
-   * error is logged to console.error.
+   * Called when a source crashes, fails its first load before the effect's
+   * initial-query readiness, or is cleaned up while the effect reads it, and
+   * when a subset load the effect requests from a source, or its release,
+   * fails, before or after that readiness. A cascade cleanup that ends the
+   * effect does not call it.
+   * The effect is automatically disposed after this callback fires. If not
+   * provided, the error is logged to console.error.
    */
   onSourceError?: (error: Error) => void
 

@@ -58,6 +58,10 @@ interface PendingSyncedTransaction<
   layoutChanged: boolean
   operations: Array<PendingSyncOperation<T, TKey>>
   truncate?: boolean
+  // Who made the transaction replace every row: a reload's first
+  // transaction, or the adapter's own truncate(). A reload that ends early
+  // drops only its own.
+  truncateOwner?: `reload` | `adapter`
   truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   /** The last explicit write per key, after `position` operations. */
@@ -1492,8 +1496,13 @@ export class CollectionStateManager<
       // A truncate that makes the Collection ready publishes its batch after
       // the status reads ready and before status listeners and ready
       // callbacks run, so their writes follow the batch they describe.
+      // During a reload, that is the reload's completion.
       if (truncateMarksReady && this.lifecycle.status !== `ready`)
-        capture(() => this.lifecycle.markReady(emit))
+        capture(() =>
+          this.lifecycle.reloading
+            ? this.lifecycle.completeReload(emit)
+            : this.lifecycle.markReady(emit),
+        )
       if (!emitted) emit()
 
       if (this.syncRunGeneration === syncRunGeneration) {
