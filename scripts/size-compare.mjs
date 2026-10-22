@@ -41,7 +41,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { availableParallelism, tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { build as esbuild } from 'esbuild'
@@ -286,10 +286,16 @@ async function measureScenario(dir, scenario) {
   const bundle = Buffer.from(result.outputFiles[0].contents)
   const files = new Map([[`(bundle)`, sizes(bundle)]])
   const output = Object.values(result.metafile.outputs)[0]
+  // Name each input the same way in both trees: scenario files by their
+  // scenario path, workspace modules by their package path, and dependencies
+  // by their path inside node_modules.
   for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
-    const name = input.includes(`/packages/`)
-      ? input.slice(input.lastIndexOf(`/packages/`) + 1)
-      : input.slice(input.lastIndexOf(`node_modules/`) + 13)
+    const path = resolve(join(dir, `packages`, `db`), input)
+    const name = path.startsWith(scenarioDir)
+      ? `scenario/${relative(scenarioDir, path)}`
+      : path.includes(`/node_modules/`)
+        ? path.slice(path.lastIndexOf(`/node_modules/`) + 14)
+        : relative(dir, path)
     files.set(name, { gzip: bytesInOutput, brotli: bytesInOutput, raw: true })
   }
   return files
