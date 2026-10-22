@@ -44,6 +44,9 @@ export type DemandUpdate = {
  */
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
+
+  /** `onLoaded`: a load left the plan with no key whose latest load failed. */
+  constructor(private readonly onLoaded?: (planId: string) => void) {}
   private readonly warnedPlans = new Set<string>()
   private valueIdentity = createValueIdentity()
 
@@ -211,6 +214,7 @@ export class SubsetDemandController {
       if (succeeded) state.failedKeys.delete(key)
       else if (state.keys.has(key)) state.failedKeys.add(key)
     }
+    if (succeeded && state.failedKeys.size === 0) this.onLoaded?.(planId)
   }
 
   clear(): void {
@@ -352,9 +356,10 @@ function startSegment(
   return requested && observed
 }
 
-// A truncate's or a reload's replay replaces a load that it aborts, and a load
-// that fails while the replay is in flight fails with it: the replay decides.
-// A replaced load that fails after the replay settled decides nothing.
+// A truncate's or a reload's replay replaces a load that it aborts: the replay
+// decides it, and its own late failure decides nothing. A load that fails
+// while the replay is in flight fails with its own error once the replay
+// settles.
 function followReplay(
   subscription: CollectionSubscription,
   ready: Promise<unknown>,
@@ -362,9 +367,15 @@ function followReplay(
   const replacements = subscription.replacementCount
   return ready.then(undefined, (error: unknown) => {
     const replay = subscription.pendingTruncateReplacement
-    if (replay) return followReplay(subscription, replay)
-    if (replacements === subscription.replacementCount) throw error
-    return undefined
+    const replaced = replacements !== subscription.replacementCount
+    if (replaced) return replay && followReplay(subscription, replay)
+    if (!replay) throw error
+    // The load joined the replay: its own failure stands once the replay
+    // settles.
+    const fail = () => {
+      throw error
+    }
+    return replay.then(fail, fail)
   })
 }
 

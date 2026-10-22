@@ -796,7 +796,10 @@ export class RequestErrors {
 
   fail(key: string, error: unknown): void {
     this.failed.delete(key)
-    this.problem = describeProblem(error)
+    // Two requests that failed with one error show one problem.
+    this.problem =
+      [...this.failed.values()].find((problem) => problem.cause === error) ??
+      describeProblem(error)
     this.failed.set(key, this.problem)
   }
 

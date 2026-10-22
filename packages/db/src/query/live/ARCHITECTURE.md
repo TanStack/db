@@ -1701,7 +1701,10 @@ every row before the top-K (a recorded limit).
     a later load of that Collection settles. A source reload starts its
     replay when it retires the sync run, as a truncate does, and the replay
     decides every load it replaces: a replaced load's own outcome decides
-    nothing, even when it settles after the replay. The replay loads
+    nothing, even when it settles after the replay. A load that fails while
+    the replay is in flight fails with its own error once the replay
+    settles. A lazy demand's error clears as soon as a later load of its
+    failed key succeeds, without waiting for its other loads. The replay loads
     the query's demand again as one unit: the query's first load waits for
     the whole replay, the replay fails only for a demand the query still
     holds when it settles, and its success clears only the errors of demands

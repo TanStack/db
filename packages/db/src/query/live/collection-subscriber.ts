@@ -44,7 +44,10 @@ export class CollectionSubscriber<
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoader: OrderedSourceLoader | undefined
-  private readonly demand = new SubsetDemandController()
+  // A request error clears as soon as a later load of its failed key succeeds.
+  private readonly demand = new SubsetDemandController((planId) =>
+    this.collectionConfigBuilder.clearFailedRequest(planId),
+  )
 
   constructor(
     private sourceId: string,
@@ -224,18 +227,12 @@ export class CollectionSubscriber<
       plan.id,
       update.ready instanceof Promise,
     )
-    // The request error clears once the query needs no key whose latest
-    // load failed: when a later load of that key succeeds, or when the
-    // query stops needing it.
-    const clearIfLoaded = () => {
-      if (!this.demand.hasFailedKeys(plan.id))
-        this.collectionConfigBuilder.clearFailedRequest(plan.id)
-    }
-    clearIfLoaded()
-    const settle = () => {
+    // The request error also clears when the query stops needing the
+    // failed key.
+    if (!this.demand.hasFailedKeys(plan.id))
+      this.collectionConfigBuilder.clearFailedRequest(plan.id)
+    const settle = () =>
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
-      clearIfLoaded()
-    }
     if (update.ready instanceof Promise) {
       // Each segment follows a truncate's or a reload's replay itself.
       void update.ready.then(settle, (error) =>

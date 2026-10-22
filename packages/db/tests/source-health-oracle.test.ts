@@ -3619,6 +3619,10 @@ type DemandModel = {
   // later replay succeeds, so a window move waits for that replay too.
   replayFailed: boolean
   moveWaitsForReplay: boolean
+  // The window before the move that waits for a replay: a reload that
+  // aborts the move returns to it. A move with its own load joins the
+  // replay, so the replay loads it.
+  replayedOffset: number
   source: { failure: string | null; stopped: string | null; crashed: boolean }
   serial: number
 }
@@ -3645,9 +3649,11 @@ function applyDemandModel(model: DemandModel, step: DemandStep): void {
   switch (step) {
     case `window`:
       if (model.gate !== `ready`) return
-      model.offset += 2
-      if (model.replayPending || model.replayFailed)
+      if (model.replayPending || model.replayFailed) {
+        if (!model.moveWaitsForReplay) model.replayedOffset = model.offset
         model.moveWaitsForReplay = true
+      }
+      model.offset += 2
       return
     case `settle-ok`:
       if (model.pending === 0) return
@@ -3682,7 +3688,7 @@ function applyDemandModel(model: DemandModel, step: DemandStep): void {
       model.source.failure = null
       model.source.stopped = null
       if (model.moveWaitsForReplay) {
-        model.offset = model.shown
+        model.offset = model.replayedOffset
         model.moveWaitsForReplay = false
       }
       model.replayPending = true
@@ -3718,6 +3724,7 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
     replayPending: false,
     replayFailed: false,
     moveWaitsForReplay: false,
+    replayedOffset: 0,
     source: { failure: null, stopped: null, crashed: false },
     serial: 0,
   }
@@ -3869,6 +3876,8 @@ describe(`on-demand demand grammar`, () => {
       `reload`,
       `settle-fail`,
     ],
+    'a reload keeps a window move that joined the replay and aborts a later one':
+      [`settle-ok`, `window`, `reload`, `window`, `reload`, `settle-ok`],
     'a reload aborts a window move that waits after a failed replay': [
       `settle-ok`,
       `reload`,
@@ -4276,11 +4285,6 @@ async function runLazyHistory(
     // ones, so releasing a replay's last pending load settles the replay
     // first.
     retireAborted()
-    // A demand change that requests a failed key again releases the failed
-    // demand first, so the replay no longer fails for it.
-    if (!replayMade)
-      for (const request of requests)
-        for (const key of request.keys) model.replayFailedKeys.delete(key)
     if (!replayMade) settleReplay(model)
     // A request a new demand makes during a replay joins the replay, but one
     // that throws fails at once; one the replay makes fails with the replay.
@@ -4604,6 +4608,36 @@ describe(`lazy join demand grammar`, () => {
       ],
       { honorsAbort: false },
     ))
+  it(`a later load of the failed key clears its error while another load is pending`, () =>
+    runLazyHistory([
+      { kind: `unparent`, key: 1 },
+      { kind: `parent`, key: 1 },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-first-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `settle-last-ok` },
+    ]))
+  it(`a load that fails during a replay keeps its own error`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-fail` },
+        { kind: `unparent`, key: 3 },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a reload during the first load fails it only for a demand still held`, () =>
+    runLazyHistory([
+      { kind: `parent`, key: 3 },
+      { kind: `reload` },
+      { kind: `settle-first-fail` },
+      { kind: `parent`, key: 2 },
+      { kind: `unparent`, key: 3 },
+      { kind: `unparent`, key: 2 },
+    ]))
   it(`a first load waits for a source reload's whole replay`, () =>
     runLazyHistory(
       [
