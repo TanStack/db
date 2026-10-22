@@ -119,8 +119,6 @@ type SubsetDemand = {
   acquisition: SubsetAcquisitionRecord
   acquisitionState: `starting` | `active` | `detached`
   initialResult?: Deferred<void>
-  // The result its caller holds while it follows the current acquisition.
-  caller?: Deferred<void>
 }
 
 type TruncateReplayAttempt = {
@@ -206,6 +204,7 @@ export class CollectionSubscription
   // One replay state owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplayState: TruncateReplayState | undefined
+  private replacements = 0
   private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
     Error
@@ -268,7 +267,9 @@ export class CollectionSubscription
     // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
     // We need to re-request all previously loaded subsets to repopulate the data.
     this.truncateCleanup = this.collection.on(`truncate`, () => {
-      this.handleTruncate()
+      // A reload started its replay when it retired the run; the truncate of
+      // its first commit is part of that replay.
+      if (!this.collection._lifecycle.reloading) this.handleTruncate()
     })
     this.collectionCleanup = this.collection._onCleanupStart(() => {
       this.handleCollectionCleanup()
@@ -317,11 +318,13 @@ export class CollectionSubscription
   }
 
   /**
-   * @internal A reload retired the sync run. It keeps each retained demand's
-   * waiting caller: the new sync run re-acquires the demand and settles it.
+   * @internal A reload retired the sync run. Its demand detaches from the
+   * retired run and replays through the new run at once, as after a
+   * truncate, so a consumer of an aborted load follows that replay.
    */
   public retireSyncRun(): void {
     this.handleCollectionCleanup(true)
+    this.handleTruncate()
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */
@@ -333,18 +336,6 @@ export class CollectionSubscription
     for (const demand of [...this.subsetDemands]) {
       if (!keepWaitingCallers || demand.acquisitionState === `starting`) {
         demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
-      }
-      // A reload keeps the waiting caller: the new run's replay of this
-      // demand settles it, and the retired acquisition decides nothing.
-      const caller = demand.caller
-      if (
-        keepWaitingCallers &&
-        demand.acquisitionState !== `starting` &&
-        caller?.isPending()
-      ) {
-        this.reloadRetiredAcquisitions.add(demand.acquisition)
-        demand.initialResult ??= createDeferred<void>()
-        void demand.initialResult.promise.then(caller.resolve, caller.reject)
       }
       cancelAcquisition(demand.acquisition)
       if (demand.acquisitionState === `starting`) {
@@ -431,6 +422,7 @@ export class CollectionSubscription
    * authoritative replay succeeds.
    */
   private handleTruncate() {
+    this.replacements++
     // Eager demand is satisfied by source readiness, even when the adapter
     // happens to expose a loader. Only on-demand demand reacquires a subset.
     // A reload's truncate can apply inside the new run's `sync()`, before it
@@ -871,6 +863,11 @@ export class CollectionSubscription
     this.checkTruncateReplayComplete(replayState)
   }
 
+  /** Changes each time a truncate or a reload replaces this subscription's loads. */
+  public get replacementCount(): number {
+    return this.replacements
+  }
+
   public get hasPendingTruncateReplacement(): boolean {
     return this.truncateReplacementPending
   }
@@ -1079,33 +1076,6 @@ export class CollectionSubscription
   }
 
   /** Start and retain the first acquisition for one logical subset demand. */
-  /**
-   * A demand's result for its caller. A reload retires the sync run and
-   * aborts its acquisitions; a demand that is still active is then served by
-   * the new run's replay of it, so the abort is not this demand's outcome.
-   */
-  private readonly reloadRetiredAcquisitions = new WeakSet<object>()
-
-  private resultAcrossReload(
-    demand: SubsetDemand,
-    result: LoadSubsetRequestResult,
-  ): LoadSubsetRequestResult {
-    if (!(result instanceof Promise)) return result
-    const acquisition = demand.acquisition
-    const caller = createDeferred<void>()
-    demand.caller = caller
-    const retired = () => this.reloadRetiredAcquisitions.has(acquisition)
-    void result.then(
-      () => {
-        if (!retired()) caller.resolve()
-      },
-      (error: unknown) => {
-        if (!retired()) caller.reject(error)
-      },
-    )
-    return caller.promise
-  }
-
   private startSubsetDemand(requestOptions: LoadSubsetOptions): {
     demand: SubsetDemand
     result: LoadSubsetRequestResult
@@ -1325,13 +1295,9 @@ export class CollectionSubscription
     } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return false
 
-    // Report the result synchronously, including a wait for an unavailable
-    // loader. A caller that aborts its own request follows a reload's replay
-    // of it; the ordered loader follows replays itself.
+    // Report the result synchronously, including a wait for an unavailable loader.
     opts?.onLoadSubsetResult?.(
-      started && opts.signal
-        ? this.resultAcrossReload(demand, syncResult)
-        : syncResult,
+      syncResult,
       demand.acquisition.options,
       (primaryFailure) => this.releaseDemand(demand, primaryFailure),
     )

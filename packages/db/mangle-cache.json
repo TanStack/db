@@ -432,6 +432,5 @@
   "isDeferredSyncKey": "b6",
   "overlayHeldAndActive": "e8",
   "recordOutcome": "gP",
-  "reloadRetiredAcquisitions": "dp",
-  "resultAcrossReload": "gR"
+  "replacements": "dp"
 }

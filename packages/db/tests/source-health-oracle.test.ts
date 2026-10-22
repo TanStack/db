@@ -3967,8 +3967,9 @@ type LazyModel = {
   gate: `loading` | `ready` | `error` | `crashed`
   parents: Set<number>
   loaded: Set<number>
-  // Needed keys whose last load failed after readiness.
-  failed: Set<number>
+  // Needed keys whose last load failed after readiness, with that load's
+  // serial.
+  failed: Map<number, number>
   // A source reload's replay is in flight: every load the query starts
   // joins it, inside its publication barrier.
   replayActive: boolean
@@ -3982,6 +3983,11 @@ type LazyModel = {
   replayFailedKeys: Set<number>
   // Aborted loads the current run may still finish: their rows apply.
   obsolete: Map<number, Set<number>>
+  // Loads a reload retired that are still in flight at the adapter. As for a
+  // truncate, a load started before the replay still holds the query's first
+  // load until it settles, while the query still needs one of its keys; it
+  // decides nothing else.
+  retiredInFlight: Map<number, Set<number>>
   // Every load the query requested and did not abort, by serial: a key's
   // latest such load decides it, so an older load that settles later changes
   // nothing, and an aborted one leaves the decision to the one before it.
@@ -4002,7 +4008,8 @@ function settleLazyLoad(
   if (succeeded) {
     for (const key of load.keys) {
       model.loaded.add(key)
-      if (latestFor(key)) model.failed.delete(key)
+      // A key loaded: its failure clears, unless a newer load of it failed.
+      if ((model.failed.get(key) ?? 0) < load.serial) model.failed.delete(key)
     }
     if (load.replay) model.replayFailed = false
     settleReplay(model)
@@ -4020,7 +4027,7 @@ function settleLazyLoad(
   }
   if (load.replay) {
     for (const key of needed) model.replayFailedKeys.add(key)
-  } else for (const key of needed) model.failed.add(key)
+  } else for (const key of needed) model.failed.set(key, load.serial)
   settleReplay(model)
 }
 
@@ -4074,7 +4081,14 @@ function requestedKeys(options: LoadSubsetOptions): Set<number> {
 // source reload's replay restores the demand as one unit, so the query also
 // waits until the replay settles.
 function deriveLazyGate(model: LazyModel): void {
-  if (model.gate !== `loading` || model.replayActive) return
+  if (
+    model.gate !== `loading` ||
+    model.replayActive ||
+    [...model.retiredInFlight.values()].some((keys) =>
+      [...keys].some((key) => model.parents.has(key)),
+    )
+  )
+    return
   const blocking = model.pending.some(({ serial, keys }) =>
     [...keys].some(
       (key) => model.parents.has(key) && latestLoadFor(model, key) === serial,
@@ -4110,6 +4124,8 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       model.source.stopped = null
       // The retired run's loads no longer apply, and its truncate drops the
       // loaded children until the replay loads them again.
+      for (const { serial, keys } of model.pending)
+        model.retiredInFlight.set(serial, keys)
       model.pending = []
       model.obsolete = new Map()
       model.loaded = new Set()
@@ -4146,12 +4162,13 @@ async function runLazyHistory(
     gate: `loading`,
     parents: new Set([1]),
     loaded: new Set(),
-    failed: new Set(),
+    failed: new Map(),
     replayActive: false,
     replayFailed: false,
     pending: [],
     replayFailedKeys: new Set(),
     obsolete: new Map(),
+    retiredInFlight: new Map(),
     requested: new Map(),
     source: { failure: null, stopped: null, crashed: false },
   }
@@ -4213,6 +4230,7 @@ async function runLazyHistory(
             options.signal?.addEventListener(`abort`, () => {
               aborted.add(serial)
               if (!honorsAbort) return
+              model.retiredInFlight.delete(serial)
               const index = loads.findIndex((load) => load.serial === serial)
               if (index !== -1) loads.splice(index, 1)
               deferred.reject(new DOMException(`aborted`, `AbortError`))
@@ -4258,6 +4276,11 @@ async function runLazyHistory(
     // ones, so releasing a replay's last pending load settles the replay
     // first.
     retireAborted()
+    // A demand change that requests a failed key again releases the failed
+    // demand first, so the replay no longer fails for it.
+    if (!replayMade)
+      for (const request of requests)
+        for (const key of request.keys) model.replayFailedKeys.delete(key)
     if (!replayMade) settleReplay(model)
     // A request a new demand makes during a replay joins the replay, but one
     // that throws fails at once; one the replay makes fails with the replay.
@@ -4275,6 +4298,15 @@ async function runLazyHistory(
     })
     for (const { load, thrown } of reported)
       if (thrown) settleLazyLoad(model, load, false)
+    // A demand change that requests every needed key again replaces the
+    // older loads: readiness waits only for the replacement.
+    if (
+      !replayMade &&
+      reported.some(({ load }) =>
+        [...model.parents].every((key) => load.keys.has(key)),
+      )
+    )
+      model.retiredInFlight.clear()
     retireAborted()
     aborted.clear()
     settleReplay(model)
@@ -4294,6 +4326,7 @@ async function runLazyHistory(
       else if (succeeded && model.obsolete.has(serial))
         for (const key of model.obsolete.get(serial)!) model.loaded.add(key)
       model.obsolete.delete(serial)
+      model.retiredInFlight.delete(serial)
       if (succeeded) deferred.resolve()
       else deferred.reject(new Error(`child load ${++failures} failed`))
     }
@@ -4497,6 +4530,18 @@ describe(`lazy join demand grammar`, () => {
   }
   for (const [name, steps] of Object.entries(named))
     it(name, () => runLazyHistory(steps))
+  it(`an older load's success clears its key's failure while a newer load is pending`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 2 },
+        { kind: `settle-first-ok` },
+      ],
+      { honorsAbort: false },
+    ))
   it(`an older load's late success does not erase its key's newer failure`, () =>
     runLazyHistory(
       [
@@ -4547,6 +4592,15 @@ describe(`lazy join demand grammar`, () => {
         { kind: `parent`, key: 2 },
         { kind: `settle-last-fail` },
         { kind: `unparent`, key: 1 },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a reload's retired load that fails after the replay decides nothing`, () =>
+    runLazyHistory(
+      [
+        { kind: `reload` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-first-fail` },
       ],
       { honorsAbort: false },
     ))

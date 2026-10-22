@@ -237,16 +237,10 @@ export class CollectionSubscriber<
       clearIfLoaded()
     }
     if (update.ready instanceof Promise) {
-      const settleWith = (ready: Promise<unknown>) =>
-        void ready.then(settle, (error) => {
-          // A truncate replay aborts the acquisition it supersedes. Its
-          // replacement decides the demand; a real failure rejects it too.
-          const replacement = subscription.pendingTruncateReplacement
-          if (replacement) settleWith(replacement)
-          else
-            this.collectionConfigBuilder.failDemand(plan.id, generation, error)
-        })
-      settleWith(update.ready)
+      // Each segment follows a truncate's or a reload's replay itself.
+      void update.ready.then(settle, (error) =>
+        this.collectionConfigBuilder.failDemand(plan.id, generation, error),
+      )
     } else {
       settle()
     }

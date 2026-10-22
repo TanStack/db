@@ -110,6 +110,11 @@ export class SubsetDemandController {
     }
     this.states.set(plan.id, state)
 
+    // A failed segment is released first, so a replay judged during this
+    // change does not fail for the demand the change requests again.
+    retired.sort(
+      (a, b) => Number(b.state === `failed`) - Number(a.state === `failed`),
+    )
     for (const segment of retired) releaseSegment(subscription, segment)
     if (this.states.get(plan.id) !== state) {
       return { changed: false, empty: false, ready: true }
@@ -327,7 +332,8 @@ function startSegment(
     onUnoptimized,
     onLoadSubsetResult: (result) => {
       observed = true
-      segment.ready = result
+      segment.ready =
+        result instanceof Promise ? followReplay(subscription, result) : result
       segment.state = result instanceof Promise ? `pending` : `settled`
     },
   })
@@ -344,6 +350,22 @@ function startSegment(
     )
   }
   return requested && observed
+}
+
+// A truncate's or a reload's replay replaces a load that it aborts, and a load
+// that fails while the replay is in flight fails with it: the replay decides.
+// A replaced load that fails after the replay settled decides nothing.
+function followReplay(
+  subscription: CollectionSubscription,
+  ready: Promise<unknown>,
+): Promise<void> {
+  const replacements = subscription.replacementCount
+  return ready.then(undefined, (error: unknown) => {
+    const replay = subscription.pendingTruncateReplacement
+    if (replay) return followReplay(subscription, replay)
+    if (replacements === subscription.replacementCount) throw error
+    return undefined
+  })
 }
 
 function releaseSegment(
