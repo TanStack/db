@@ -15,7 +15,7 @@ export type RecordedEvent = {
 export function recordCollection(
   collection: Pick<
     Collection<OracleRow>,
-    'subscribeChanges' | 'on' | 'values' | 'status' | 'errors'
+    'subscribeChanges' | 'on' | 'values' | 'status' | 'health'
   >,
   id: string,
   sink: (event: RecordedEvent) => void = () => {},
@@ -42,8 +42,8 @@ export function recordCollection(
   })
   // After the first ready, a stopped sync is the Collection's `error`, not a
   // status. Record it in the status history so a status law still observes it.
-  const stopErrors = collection.on('errors:change', () => {
-    if (collection.status === 'ready' && collection.errors.error)
+  const stopErrors = collection.on('health:change', () => {
+    if (collection.status === 'ready' && collection.health.error)
       statuses.push('sync-error')
   })
   const subscription = collection.subscribeChanges(

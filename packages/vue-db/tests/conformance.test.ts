@@ -134,7 +134,7 @@ function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
         isSyncError: result.isSyncError?.value,
         // vue-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status?.value !== `disabled`,
-        errors: result.errors?.value,
+        health: result.health?.value,
       })
     },
     flush: settle,

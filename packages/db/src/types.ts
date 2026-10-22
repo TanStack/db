@@ -759,7 +759,7 @@ export type DeleteMutationFn<
  * // idle → loading → ready (when markReady() is called)
  * // loading → error when the sync adapter calls fail() before the first ready
  * // any active status → crashed when local storage or an invariant breaks
- * // After the first ready, sync problems appear in `errors`, not in `status`.
+ * // After the first ready, sync problems appear in `health`, not in `status`.
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -796,7 +796,7 @@ export interface CollectionErrorInfo {
 }
 
 /**
- * One node of an error tree. A Collection's tree is one node; a live query's
+ * One node of a health tree. A Collection's tree is one node; a live query's
  * has one node for itself and one for each source alias in query order. The
  * shape is fixed by the query, and nodes without a problem are present too.
  *
@@ -805,7 +805,7 @@ export interface CollectionErrorInfo {
  * `error`: the first load failed, the sync adapter stopped, the Collection
  * crashed, or, on a live query's own node, a request for more data failed.
  */
-export interface ErrorTreeNode {
+export interface HealthNode {
   /** The query alias, or `root` for the Collection the tree was read from. */
   readonly alias: string
   readonly collectionId: string
@@ -821,7 +821,7 @@ export interface ErrorTreeNode {
    * are the previous run's until it commits or fails.
    */
   readonly reloading: boolean
-  readonly sources: ReadonlyArray<ErrorTreeNode>
+  readonly sources: ReadonlyArray<HealthNode>
 }
 
 export interface BaseCollectionConfig<

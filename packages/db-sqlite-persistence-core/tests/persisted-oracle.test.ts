@@ -6192,7 +6192,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           giveUp!(gaveUp)
           await flushAsyncWork()
           expect(collection.status).toBe(`ready`)
-          expect(collection.errors.error?.cause).toBe(gaveUp)
+          expect(collection.health.error?.cause).toBe(gaveUp)
         }
         collection._sync.unloadSubset(failing)
         collection._sync.unloadSubset(sibling)
@@ -23808,12 +23808,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         // session's problem.
         oldSource.reportError(new Error(`retired session`))
         await flushAsyncWork()
-        expect(collection.errors.failureReason).toBeNull()
+        expect(collection.health.failureReason).toBeNull()
         sourceSessions[1]!.reportError(new Error(`live session`))
         await flushAsyncWork()
         oldSource.reportHealthy()
         await flushAsyncWork()
-        expect(collection.errors.failureReason?.message).toBe(`live session`)
+        expect(collection.health.failureReason?.message).toBe(`live session`)
       } finally {
         releaseOldCallback.resolve()
         await Promise.allSettled([lateCallback])

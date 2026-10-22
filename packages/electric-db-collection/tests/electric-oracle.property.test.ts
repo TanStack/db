@@ -1858,8 +1858,8 @@ function expectGaveUpAfterReadiness(
   collection: Collection<OracleRow, string | number>,
 ) {
   expect(collection.status).toBe(`ready`)
-  expect(collection.errors.failureReason).toBeNull()
-  expect(collection.errors.error).toBeTruthy()
+  expect(collection.health.failureReason).toBeNull()
+  expect(collection.health.error).toBeTruthy()
 }
 
 type ProcessRuntime = {

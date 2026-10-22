@@ -22,7 +22,7 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection, ErrorTreeNode } from '@tanstack/db'
+import type { Collection, HealthNode } from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -126,14 +126,14 @@ export interface ConformanceResult {
   isLoadingError: boolean
   /** Local storage or an invariant broke: `status` is `crashed`. */
   isCrashed: boolean
-  /** The data is shown and the error tree has a problem. */
+  /** The data is shown and the health tree has a problem. */
   isSyncError: boolean
   isEnabled: boolean
   /**
-   * The hook's error tree, read without normalization so scenarios can judge
+   * The hook's health tree, read without normalization so scenarios can judge
    * object identity. `undefined` only for a disabled query.
    */
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 /** A query-builder callback, e.g. `(q) => q.from({ items: source.collection })`. */

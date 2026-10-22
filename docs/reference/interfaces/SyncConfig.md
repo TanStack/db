@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L500)
+Defined in: [packages/db/src/types.ts:515](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L515)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:494](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L494)
+Defined in: [packages/db/src/types.ts:509](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L509)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:505](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L505)
+Defined in: [packages/db/src/types.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L520)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:510](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L510)
+Defined in: [packages/db/src/types.ts:525](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L525)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:519](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L519)
+Defined in: [packages/db/src/types.ts:534](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L534)
 
 The row update mode used to sync to the collection.
 
@@ -159,6 +159,16 @@ optimistic state. A signal that is already aborted abandons the
 transaction before acceptance, and the receipt rejects with an error
 named `AbortError`. Aborting after acceptance has no effect.
 
+###### fail
+
+(`error`) => `void`
+
+The sync adapter stopped. Before the first ready the status becomes
+`error` and `preload()` rejects with `error`. After it, the rows stay, the
+status stays `ready`, and the node's `error` holds the cause until a
+reload. Throws after an earlier `fail()`.
+While the sync adapter retries, call nothing or `reportError()`.
+
 ###### invalidateLoadedSubsets
 
 () => `void`
@@ -169,22 +179,31 @@ own has applied. Each ordered live query then re-establishes its window
 with a bounded repair from the start of its order. Calls in one turn are
 coalesced. Do not call it for results that answer a `loadSubset` call.
 
-###### markError
-
-(`error?`) => `void`
-
-Signal that initial sync failed before producing a usable snapshot.
-When supplied, `error` is preserved as the rejection reason from `preload()`.
-
 ###### markReady
 
 () => `void`
 
-Signal that a usable initial or recovered snapshot is available.
+Signal that a usable initial snapshot is available for this attempt.
 
 ###### metadata?
 
 [`SyncMetadataApi`](SyncMetadataApi.md)\<`TKey`\>
+
+###### reportError
+
+(`error`) => `void`
+
+Report a problem after the first ready while the sync adapter keeps
+trying. It shows as the node's `failureReason`; the status and rows do
+not change. Throws before the first ready and after `fail()`.
+
+###### reportHealthy
+
+() => `void`
+
+Sync works again: clears a `failureReason`. With nothing to clear it does
+nothing, so it can follow every commit. Throws before the first ready
+and after `fail()`.
 
 ###### truncate
 

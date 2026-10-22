@@ -2043,7 +2043,7 @@ describe(`createLiveQueryCollection`, () => {
         // After the first ready, the failed request is a request error on the
         // live query's node; the query stays ready.
         expect(live.status).toBe(`ready`)
-        expect(live.errors.error).toEqual(expect.anything())
+        expect(live.health.error).toEqual(expect.anything())
         expect(live.utils.lastSubsetError).toBe(failure)
       } finally {
         await Promise.all([live.cleanup(), users.cleanup(), issues.cleanup()])

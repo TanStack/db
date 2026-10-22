@@ -5,7 +5,7 @@ import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
-import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
+import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -42,7 +42,7 @@ import type {
   ChangeMessage,
   CollectionDependent,
   CollectionStatus,
-  ErrorTreeNode,
+  HealthNode,
   KeyedStream,
   StringCollationConfig,
 } from '../types.js'
@@ -146,11 +146,11 @@ export interface EffectConfig<
   onSourceError?: (error: Error) => void
 
   /**
-   * Called after the effect's initial-query readiness whenever its error tree
+   * Called after the effect's initial-query readiness whenever its health tree
    * changes. A sync problem after initial-query readiness does not dispose the
-   * effect; read the error tree to decide what to do.
+   * effect; read the health tree to decide what to do.
    */
-  onErrorsChange?: (errors: ErrorTreeNode) => void
+  onHealthChange?: (health: HealthNode) => void
 
   /**
    * Skip deltas during initial collection load.
@@ -337,7 +337,7 @@ export function createEffect<
     query: config.query,
     skipInitial: config.skipInitial ?? false,
     onBatchProcessed,
-    onErrorsChange: config.onErrorsChange,
+    onHealthChange: config.onHealthChange,
     onSourceError: (error: Error) => {
       if (disposed) return
 
@@ -403,7 +403,7 @@ interface EffectPipelineRunnerConfig<
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
-  onErrorsChange?: (errors: ErrorTreeNode) => void
+  onHealthChange?: (health: HealthNode) => void
   /** The Effect's handle, so its source subscriptions can name it. */
   effect: Effect
 }
@@ -493,8 +493,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // initial load has settled, with or without skipInitial. After it,
   // a sync problem does not dispose the Effect.
   private reachedReady = false
-  private reportedTree: ErrorTreeNode | undefined
-  private readonly onErrorsChange: ((errors: ErrorTreeNode) => void) | undefined
+  private reportedTree: HealthNode | undefined
+  private readonly onHealthChange: ((health: HealthNode) => void) | undefined
   // This Effect as its sources' `subscribers` list it.
   private readonly dependent: CollectionDependent
 
@@ -516,7 +516,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.skipInitial = config.skipInitial
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
-    this.onErrorsChange = config.onErrorsChange
+    this.onHealthChange = config.onHealthChange
     this.dependent = {
       kind: `effect`,
       active: true,
@@ -802,7 +802,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         ) {
           this.initialLoadComplete = true
         }
-        // errors:change follows every status change and reports the tree.
+        // health:change follows every status change and reports the tree.
         this.latchReady()
       }
       const statusUnsubscribe = collection.on(`status:change`, ({ status }) =>
@@ -810,7 +810,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       )
       this.unsubscribeCallbacks.add(statusUnsubscribe)
       this.unsubscribeCallbacks.add(
-        collection.on(`errors:change`, () => this.reportErrors()),
+        collection.on(`health:change`, () => this.reportHealth()),
       )
       const cleanupStartUnsubscribe =
         collection._onCleanupStart(handleSourceCleanup)
@@ -1115,9 +1115,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return this.reachedReady
   }
 
-  /** The error tree for this effect's sources, in query order. */
-  private errorTree(): ErrorTreeNode {
-    return errorTreeNode(this, undefined, {
+  /** The health tree for this effect's sources, in query order. */
+  private healthTree(): HealthNode {
+    return healthNode(this, undefined, {
       alias: `root`,
       collectionId: `effect`,
       kind: `live-query`,
@@ -1126,18 +1126,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       error: null,
       reloading: false,
       sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
-        buildErrorTree(collection, { alias, id: sourceId }, this),
+        buildHealthTree(collection, { alias, id: sourceId }, this),
       ),
     })
   }
 
-  private reportErrors(): void {
-    if (this.disposed || !this.reachedReady || !this.onErrorsChange) return
+  private reportHealth(): void {
+    if (this.disposed || !this.reachedReady || !this.onHealthChange) return
     // An unchanged tree keeps its identity; report each change once.
-    const tree = this.errorTree()
+    const tree = this.healthTree()
     if (tree === this.reportedTree) return
     this.reportedTree = tree
-    this.onErrorsChange(tree)
+    this.onHealthChange(tree)
   }
 
   private canCompleteInitialLoad(): boolean {

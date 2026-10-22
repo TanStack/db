@@ -1024,9 +1024,9 @@ describe(`Query Collections`, () => {
       expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
       // After Collection readiness, a final health error leaves the initial
-      // gate alone: status and rows stay, and only the error tree shows it.
+      // gate alone: status and rows stay, and only the health tree shows it.
       act(() => failSource())
-      await waitFor(() => expect(result.current.errors?.hasErrors).toBe(true))
+      await waitFor(() => expect(result.current.health?.hasErrors).toBe(true))
       expect(result.current.status).toBe(`ready`)
       expect(result.current.isLoadingError).toBe(false)
       expect(result.current.data[0]?.text).toBe(`Todo 1`)
@@ -1041,7 +1041,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).toBe(todosQuery)
       expect(result.current.data[0]?.text).toBe(`Todo 2`)
       // Only a restart clears a final health error.
-      expect(result.current.errors?.hasErrors).toBe(false)
+      expect(result.current.health?.hasErrors).toBe(false)
     } finally {
       unmount()
       reports.mockRestore()

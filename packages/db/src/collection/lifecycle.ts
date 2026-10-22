@@ -57,7 +57,7 @@ export class CollectionLifecycleManager<
   private readyFailureSink: ((failure: { error: unknown }) => void) | undefined
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
-  // After the first ready, the sync adapter's problem is error tree detail:
+  // After the first ready, the sync adapter's problem is health tree detail:
   // `failureReason` while it still tries, `stoppedError` once it called fail().
   // A live query's request failures are kept apart, so settling a request
   // cannot clear the sync adapter's problem.
@@ -127,7 +127,7 @@ export class CollectionLifecycleManager<
       idle: [`loading`, `error`, `crashed`, `cleaned-up`],
       loading: [`ready`, `error`, `crashed`, `cleaned-up`],
       // After the first ready only a crash changes the status; a sync
-      // problem is error tree detail.
+      // problem is health tree detail.
       ready: [`cleaned-up`, `crashed`],
       // A failed first load is final for its sync run. Only a reload leaves
       // it for `ready` (see `recovering`).
@@ -173,9 +173,9 @@ export class CollectionLifecycleManager<
     // Emit event
     const isCurrent = () => this.statusRevision === revision
     this.events.emitStatusChange(newStatus, previousStatus, isCurrent)
-    // The status is part of the error tree. status:change fires first, and
+    // The status is part of the health tree. status:change fires first, and
     // the tree is already current when either event fires.
-    if (isCurrent()) this.events.emitErrorsChange()
+    if (isCurrent()) this.events.emitHealthChange()
   }
 
   /**
@@ -298,12 +298,12 @@ export class CollectionLifecycleManager<
       // The rows stay; a reload that failed shows its new error instead.
       this.failureReason = null
       this.stoppedError = describeProblem(error)
-      this.events.emitErrorsChange()
+      this.events.emitHealthChange()
     } else if (reload && this.status === `error`) {
       // A reload of a failed first load keeps status `error` with the new
       // cause.
       this.statusError = describeProblem(error)
-      this.events.emitErrorsChange()
+      this.events.emitHealthChange()
     } else {
       this.validateStatusTransition(this.status, `error`)
       this.statusError = describeProblem(error)
@@ -344,7 +344,7 @@ export class CollectionLifecycleManager<
     this.reloadRun = run
     this.failureReasonFromReload = false
     this.adapterStopped = false
-    this.events.emitErrorsChange()
+    this.events.emitHealthChange()
     return run.promise
   }
 
@@ -359,7 +359,7 @@ export class CollectionLifecycleManager<
     if (!this.failureReasonFromReload) this.failureReason = null
     this.stoppedError = null
     this.requestErrors = new RequestErrors()
-    if (this.status === `ready`) this.events.emitErrorsChange()
+    if (this.status === `ready`) this.events.emitHealthChange()
     else {
       // A failed first load, or a reload during the first load, becomes
       // ready with the new run's rows.
@@ -390,7 +390,7 @@ export class CollectionLifecycleManager<
   /** The reload ended without a commit, for example by cleanup. */
   public abandonReload(error: unknown): void {
     if (!this.endReload(error)) return
-    if (this.status !== `cleaned-up`) this.events.emitErrorsChange()
+    if (this.status !== `cleaned-up`) this.events.emitHealthChange()
   }
 
   private endReload(error: unknown): boolean {
@@ -418,7 +418,7 @@ export class CollectionLifecycleManager<
     this.setStatus(`crashed`)
   }
 
-  /** The Collection's own problems, as error tree detail. */
+  /** The Collection's own problems, as health tree detail. */
   public get problems(): {
     failureReason: CollectionErrorInfo | null
     error: CollectionErrorInfo | null
@@ -429,7 +429,7 @@ export class CollectionLifecycleManager<
     return { failureReason: error ? null : this.failureReason, error }
   }
 
-  /** The cause of status `error` or `crashed`, as error tree detail. */
+  /** The cause of status `error` or `crashed`, as health tree detail. */
   public get statusProblem(): CollectionErrorInfo | null {
     return this.statusAllowsError() ? this.statusError : null
   }
@@ -445,7 +445,7 @@ export class CollectionLifecycleManager<
     this.assertReady(`reportError`)
     this.failureReason = describeProblem(error)
     this.failureReasonFromReload = this.reloading
-    this.events.emitErrorsChange()
+    this.events.emitHealthChange()
   }
 
   /** The source synced successfully again. With nothing to clear it does nothing. */
@@ -455,18 +455,18 @@ export class CollectionLifecycleManager<
     this.assertReady(`reportHealthy`)
     if (!this.failureReason) return
     this.failureReason = null
-    this.events.emitErrorsChange()
+    this.events.emitHealthChange()
   }
 
   /** @internal A live query's request failed after initial-query readiness. */
   public reportRequestError(key: string, error: unknown): void {
     this.requestErrors.fail(key, error)
-    this.events.emitErrorsChange()
+    this.events.emitHealthChange()
   }
 
   /** @internal The failed request settled or was released. */
   public clearRequestError(key: string): void {
-    if (this.requestErrors.settle(key)) this.events.emitErrorsChange()
+    if (this.requestErrors.settle(key)) this.events.emitHealthChange()
   }
 
   /** fail() ends the sync adapter's reporting for its sync run. */
@@ -745,7 +745,7 @@ export class CollectionLifecycleManager<
       (before.error !== after.error ||
         before.failureReason !== after.failureReason)
     )
-      this.events.emitErrorsChange()
+      this.events.emitHealthChange()
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
     // first-ready listeners belong to the discarded run.
     this.onFirstReadyCallbacks = []
@@ -836,7 +836,7 @@ export class LoadOrder {
   }
 }
 
-/** @internal Error tree detail for a problem value. */
+/** @internal Health tree detail for a problem value. */
 export function describeProblem(error: unknown): CollectionErrorInfo {
   const info = {
     name: error instanceof Error ? error.name : `Error`,

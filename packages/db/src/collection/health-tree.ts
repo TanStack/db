@@ -1,44 +1,44 @@
 import { getCollectionBuilder } from '../query/live/collection-registry.js'
-import type { ErrorTreeNode } from '../types'
+import type { HealthNode } from '../types'
 import type { CollectionImpl } from './index.js'
 
 /** A Collection that another Collection reads, under its query alias. */
-export interface ErrorTreeSource {
+export interface HealthSource {
   readonly alias: string
   /** Tells apart two sources under one alias, such as two includes. */
   readonly id?: string
   readonly collection: CollectionImpl<any, any, any, any, any>
-  readonly kind?: ErrorTreeNode[`kind`]
+  readonly kind?: HealthNode[`kind`]
 }
 
 // One cached node per Collection and source. A node keeps its identity until
 // its own fields or one of its children change, so a change replaces only the
 // nodes on its path and readers can compare nodes with `===`.
-const nodeCache = new WeakMap<object, Map<string, ErrorTreeNode>>()
+const nodeCache = new WeakMap<object, Map<string, HealthNode>>()
 
 /**
- * Build the error tree for a Collection. A base Collection is one node. A live
+ * Build the health tree for a Collection. A base Collection is one node. A live
  * query is a node with one child per source alias, in query order, and each
  * child that is itself a live query recurses. The tree is read from current
  * state, so every node mirrors its Collection at the moment it is read.
  */
-export function buildErrorTree(
+export function buildHealthTree(
   collection: CollectionImpl<any, any, any, any, any>,
-  { alias, id, kind }: Omit<ErrorTreeSource, `collection`> = {
+  { alias, id, kind }: Omit<HealthSource, `collection`> = {
     alias: `root`,
   },
   // The reader that caches this node, so a source's node lives only as long
   // as the query that reads it.
   owner: object = collection,
-): ErrorTreeNode {
+): HealthNode {
   // A live query's tree shape comes from its query definition.
   const builder = getCollectionBuilder(collection)
-  const sources = builder?.errorTreeSources() ?? []
+  const sources = builder?.healthSources() ?? []
   const { failureReason, error } = collection._lifecycle.problems
   const children = sources.map((source) =>
-    buildErrorTree(source.collection, source, collection),
+    buildHealthTree(source.collection, source, collection),
   )
-  return errorTreeNode(owner, id, {
+  return healthNode(owner, id, {
     alias,
     collectionId: collection.id,
     kind: kind ?? (builder ? `live-query` : `source`),
@@ -54,11 +54,11 @@ export function buildErrorTree(
  * A node from its own facts and its children. It has errors when it or
  * anything below it has a `failureReason` or an `error`.
  */
-export function errorTreeNode(
+export function healthNode(
   owner: object,
   id: string | undefined,
-  fields: Omit<ErrorTreeNode, `hasErrors`>,
-): ErrorTreeNode {
+  fields: Omit<HealthNode, `hasErrors`>,
+): HealthNode {
   const { failureReason, error, sources } = fields
   return cachedNode(owner, id ?? fields.alias, {
     ...fields,
@@ -70,22 +70,21 @@ export function errorTreeNode(
 }
 
 /**
- * Every node in an error tree that shows a problem of its own, in tree order:
+ * Every node in a health tree that shows a problem of its own, in tree order:
  * a `failureReason` or an `error`. A node whose only problems are below it is
  * not listed; its descendants are.
  */
-export function findProblems(tree: ErrorTreeNode): Array<ErrorTreeNode> {
-  if (!tree.hasErrors) return []
-  const ownProblem = tree.failureReason !== null || tree.error !== null
-  return [...(ownProblem ? [tree] : []), ...tree.sources.flatMap(findProblems)]
+export function findProblems(health: HealthNode): Array<HealthNode> {
+  if (!health.hasErrors) return []
+  const ownProblem = health.failureReason !== null || health.error !== null
+  return [
+    ...(ownProblem ? [health] : []),
+    ...health.sources.flatMap(findProblems),
+  ]
 }
 
 /** Return the cached node for this Collection and alias if nothing changed. */
-function cachedNode(
-  owner: object,
-  key: string,
-  next: ErrorTreeNode,
-): ErrorTreeNode {
+function cachedNode(owner: object, key: string, next: HealthNode): HealthNode {
   let nodes = nodeCache.get(owner)
   if (!nodes) nodeCache.set(owner, (nodes = new Map()))
   const previous = nodes.get(key)
@@ -94,7 +93,7 @@ function cachedNode(
   return next
 }
 
-function sameNode(a: ErrorTreeNode, b: ErrorTreeNode): boolean {
+function sameNode(a: HealthNode, b: HealthNode): boolean {
   return (
     a.collectionId === b.collectionId &&
     a.kind === b.kind &&

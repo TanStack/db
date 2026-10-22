@@ -7,7 +7,7 @@ title: assertLiveQueryWindowManyResult
 function assertLiveQueryWindowManyResult(collection): void;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:408](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L408)
+Defined in: [packages/db/src/live-query-window-controller.ts:401](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L401)
 
 **`Internal`**
 

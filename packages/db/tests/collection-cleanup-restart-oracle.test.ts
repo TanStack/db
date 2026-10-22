@@ -1184,22 +1184,22 @@ describe(`Collection cleanup admission oracle`, () => {
         expect(live.get(1)?.rank).toBe(1)
 
         // After the first ready a source's fail() stops its sync: the
-        // status and rows stay, and the live query's error tree reports it.
+        // status and rows stay, and the live query's health tree reports it.
         sourceSync.fail(new Error(`source sync failed`))
         expect(source.status).toBe(`ready`)
-        expect(source.errors.error).toMatchObject({
+        expect(source.health.error).toMatchObject({
           message: `source sync failed`,
         })
         expect(live.status).toBe(`ready`)
         expect(live.get(1)?.rank).toBe(1)
-        expect(live.errors.sources[0]?.error).toBeTruthy()
+        expect(live.health.sources[0]?.error).toBeTruthy()
 
         // Only a new sync run clears the error.
         await live.cleanup()
         await source.cleanup()
         await live.preload()
-        expect(source.errors.hasErrors).toBe(false)
-        expect(live.errors.hasErrors).toBe(false)
+        expect(source.health.hasErrors).toBe(false)
+        expect(live.health.hasErrors).toBe(false)
 
         expect(starts).toBe(2)
         expect(source.status).toBe(`ready`)

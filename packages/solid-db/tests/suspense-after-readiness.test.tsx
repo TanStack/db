@@ -18,7 +18,7 @@ import type { SyncConfig } from '@tanstack/db'
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 type Post = { id: string; title: string }
-type SyncParams = Parameters<SyncConfig<Post, string>[`sync`]>[0]
+type SyncParams = Parameters<SyncConfig<Post, string | number>[`sync`]>[0]
 
 describe(`useLiveQuery under Suspense after readiness`, () => {
   it(`keeps the rows shown when the source reports a problem or stops`, async () => {
@@ -36,10 +36,13 @@ describe(`useLiveQuery under Suspense after readiness`, () => {
         },
       },
     })
-    let query: ReturnType<typeof useLiveQuery> | undefined
+    let status: (() => string) | undefined
+    let cleanupQuery: (() => Promise<void>) | undefined
     function Title() {
-      query = useLiveQuery((q) => q.from({ post: source }))
-      return <div data-testid="title">{(query() as Array<Post>)[0]?.title}</div>
+      const query = useLiveQuery((q) => q.from({ post: source }))
+      status = () => query.status
+      cleanupQuery = () => query.collection.cleanup()
+      return <div data-testid="title">{query()[0]?.title}</div>
     }
     const view = render(() => (
       <Suspense fallback={<div data-testid="waiting">Waiting</div>}>
@@ -52,21 +55,21 @@ describe(`useLiveQuery under Suspense after readiness`, () => {
 
       params!.reportError(new Error(`source problem`))
       await flush()
-      expect(query!.status).toBe(`ready`)
-      expect(source.errors.failureReason?.message).toBe(`source problem`)
+      expect(status!()).toBe(`ready`)
+      expect(source.health.failureReason?.message).toBe(`source problem`)
       expect(view.queryByTestId(`waiting`)).toBeNull()
       expect(view.getByTestId(`title`).textContent).toBe(`one`)
 
       params!.fail(new Error(`source gave up`))
       await flush()
-      expect(query!.status).toBe(`ready`)
-      expect(source.errors.error?.message).toBe(`source gave up`)
+      expect(status!()).toBe(`ready`)
+      expect(source.health.error?.message).toBe(`source gave up`)
       expect(view.queryByTestId(`waiting`)).toBeNull()
       expect(view.getByTestId(`title`).textContent).toBe(`one`)
     } finally {
       view.unmount()
       await waitFor(() => expect(true).toBe(true))
-      await query?.collection.cleanup()
+      await cleanupQuery?.()
       await source.cleanup()
     }
   })

@@ -115,7 +115,7 @@ follow it.
 - An empty restore keeps the Collection `loading` until the network answers.
 - A sync adapter answer that arrives before the restore completes waits for
   it. A remote failure then opens the Collection from restored rows and shows
-  as a sync error on `collection.errors`; without rows, the first load fails.
+  as a sync error on `collection.health`; without rows, the first load fails.
 - A failed restore crashes the Collection.
 - The deadline never cancels network sync.
 

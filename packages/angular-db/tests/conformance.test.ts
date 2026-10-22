@@ -145,7 +145,7 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
         isSyncError: result.isSyncError(),
         // angular-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status() !== `disabled`,
-        errors: result.errors(),
+        health: result.health(),
       })
     },
     flush: settle,
@@ -380,7 +380,7 @@ it(`preserves raw result types through the actual driver reader`, () => {
     isCrashed: false,
     isSyncError: false,
     isEnabled: false,
-    errors: undefined,
+    health: undefined,
   }
   const result = Object.fromEntries(
     Object.keys(raw).map((key) => [key, () => raw[key]]),

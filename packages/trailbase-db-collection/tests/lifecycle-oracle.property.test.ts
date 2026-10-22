@@ -355,7 +355,7 @@ async function checkLifecycle(
             plan.ending === `read-error` || plan.ending === `parse-error`
           if (!plan.immediate && plan.ending !== `cleanup`) {
             expect(
-              collection.errors,
+              collection.health,
               `${epoch}:${plan.ending} error`,
             ).toMatchObject({
               hasErrors: true,
@@ -1232,7 +1232,7 @@ it.each([`close`, `read-error`] as const)(
         failureReason: null,
         error: expect.anything(),
       }
-      expect(collection.errors, `${ending} error after the end`).toMatchObject(
+      expect(collection.health, `${ending} error after the end`).toMatchObject(
         stopped,
       )
 
@@ -1250,7 +1250,7 @@ it.each([`close`, `read-error`] as const)(
       expect(rows(), `${ending} a later load lists current rows`).toEqual(
         sortedRows(service.values()),
       )
-      expect(collection.errors, `${ending} error after the load`).toMatchObject(
+      expect(collection.health, `${ending} error after the load`).toMatchObject(
         stopped,
       )
     } finally {

@@ -7,7 +7,7 @@ title: shouldPreserveLiveQueryWindowPageCount
 function shouldPreserveLiveQueryWindowPageCount(options): boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:487](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L487)
+Defined in: [packages/db/src/live-query-window-controller.ts:480](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L480)
 
 **`Internal`**
 

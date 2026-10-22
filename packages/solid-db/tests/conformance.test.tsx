@@ -138,7 +138,7 @@ function makeHandle(
         isSyncError: result?.isSyncError,
         // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,
-        errors: result?.errors,
+        health: result?.health,
       })
     },
     flush: settle,

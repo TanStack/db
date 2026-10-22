@@ -19,7 +19,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
-import { buildErrorTree } from './error-tree.js'
+import { buildHealthTree } from './health-tree.js'
 import type { SortedMap } from '../SortedMap.js'
 import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
@@ -36,7 +36,7 @@ import type {
   CollectionDependent,
   CollectionStatus,
   CurrentStateAsChangesOptions,
-  ErrorTreeNode,
+  HealthNode,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -55,7 +55,7 @@ import type { WithVirtualProps } from '../virtual-props.js'
 import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
-export { findProblems } from './error-tree.js'
+export { findProblems } from './health-tree.js'
 
 export type CollectionBase<TKey extends string | number, TOutput> = Pick<
   SortedMap<TKey, TOutput>,
@@ -561,18 +561,18 @@ export class CollectionImpl<
   }
 
   /**
-   * The error tree for this Collection and every Collection it depends on.
+   * The health tree for this Collection and every Collection it depends on.
    * A base Collection's tree is one node. It always has the same shape for a
    * given query, so apps can parse it. After the first ready, sync problems
    * appear here and the rows stay.
    */
-  public get errors(): ErrorTreeNode {
-    return buildErrorTree(this)
+  public get health(): HealthNode {
+    return buildHealthTree(this)
   }
 
-  /** @internal A Collection this one depends on changed its error tree. */
-  public _emitErrorsChange(): void {
-    this._events.emitErrorsChange()
+  /** @internal A Collection this one depends on changed its health tree. */
+  public _emitHealthChange(): void {
+    this._events.emitHealthChange()
   }
 
   /**
@@ -1299,7 +1299,7 @@ export class CollectionImpl<
   /**
    * Start a new sync run while everything visible stays: the rows, the
    * status, and the current error, with `reloading` on this Collection's
-   * error tree node. The new run's first commit replaces the rows at once and
+   * health node. The new run's first commit replaces the rows at once and
    * clears the node's problem; a `status` of `error` becomes `ready`. If the
    * new run fails first, the rows and status stay and the node shows the new
    * error. On a live query, it reloads each of its sources that has an

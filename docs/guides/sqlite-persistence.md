@@ -266,7 +266,7 @@ function TodosView() {
 These rules keep `ready` meaningful:
 
 - **An empty restore waits for the network.** The Collection stays `loading` until the sync adapter answers, so an empty list always means "no rows". A Collection that last synced to zero rows also waits, because the restore cannot tell the two cases apart.
-- **The restore comes first.** If the sync adapter answers before the restore completes, the answer waits for the restore. A remote failure then opens the Collection from restored rows and shows the failure as a sync error (`isSyncError`, `collection.errors.error`). Without restored rows, the first load fails (`status: 'error'`).
+- **The restore comes first.** If the sync adapter answers before the restore completes, the answer waits for the restore. A remote failure then opens the Collection from restored rows and shows the failure as a sync error (`isSyncError`, `collection.health.error`). Without restored rows, the first load fails (`status: 'error'`).
 - **A failed restore is a crash.** The Collection becomes `crashed`, because local storage cannot serve reads.
 - **The deadline does not stop network sync.** Network changes apply over the restored rows when they arrive.
 
@@ -352,7 +352,7 @@ The Node package prunes its applied transaction log by default. Its [README](htt
 
 An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and crashes the Collection: it moves to its error state even after it was ready, and every live query and Effect over it fails too. Restart it with `cleanup()` and `preload()`.
 
-Failures from the wrapped sync adapter keep their usual meaning. Before the Collection is ready, the adapter's `fail` fails the first load (see [Render after SQLite restore](#render-after-sqlite-restore) for `initialRender`). After it, the adapter's `reportError`, `reportHealthy`, and `fail` appear in `collection.errors` and in each live query's `errors` tree, and the persisted rows stay. A failure of persistence itself crashes the Collection. In a follower tab, a failed request routed to the leader appears as a request error on the query that asked for the data.
+Failures from the wrapped sync adapter keep their usual meaning. Before the Collection is ready, the adapter's `fail` fails the first load (see [Render after SQLite restore](#render-after-sqlite-restore) for `initialRender`). After it, the adapter's `reportError`, `reportHealthy`, and `fail` appear in `collection.health` and in each live query's `health` tree, and the persisted rows stay. A failure of persistence itself crashes the Collection. In a follower tab, a failed request routed to the leader appears as a request error on the query that asked for the data.
 
 If a coordinated write loses its response, the result can be uncertain. `IndeterminateCommitError` means the application must check the durable state before it retries that write.
 

@@ -360,8 +360,8 @@ After the first `markReady()`, the rows stay. Report a sync problem with
 when nothing is wrong. When you stop trying, call `fail(error)`: after
 readiness the node shows an `error`, and only `reload()` clears it.
 `reportError()` and `reportHealthy()` throw before the first `markReady()`.
-Apps read these reports from `collection.errors` and from each live query's
-`errors` tree. While a retry is in progress before readiness, report nothing.
+Apps read these reports from `collection.health` and from each live query's
+`health` tree. While a retry is in progress before readiness, report nothing.
 
 A throwing `sync` function crashes the Collection (`status: 'crashed'`).
 Reserve that for broken local state, not for network failures.

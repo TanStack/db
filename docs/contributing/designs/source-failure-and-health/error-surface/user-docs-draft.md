@@ -8,9 +8,9 @@ DRAFT (2026-10-16) of the loading and sync sections of docs/guides/error-handlin
 design grammar v4. It replaces "Query Collection Error Tracking", "Incremental Subset Load
 Errors", "Collection Status and Error States", and "Collection Cleanup and Restart". The
 mutation, transaction, and error-class sections stay as they are.
-Decisions applied: tree helper, query-level reload, `collection.errors` on every
+Decisions applied: tree helper, query-level reload, `collection.health` on every
 Collection, `subscribers` and `cleanup({ dependents: true })`, adapter calls that throw
-outside the state machine, and no remaining "health" names.
+outside the state machine, and no remaining "errors" names for the tree.
 -->
 
 ## Loading and sync errors
@@ -18,10 +18,10 @@ outside the state machine, and no remaining "health" names.
 An app that shows synced data asks two questions:
 
 1. **Can I show the data?** Read `status`.
-2. **Is the data on screen still being kept up to date?** Read `isSyncError` and `errors`.
+2. **Is the data on screen still being kept up to date?** Read `isSyncError` and `health`.
 
 TanStack DB answers them separately. Once a query has shown data, a network or backend
-failure never takes the data off the screen. It shows up in `errors`, and the rows stay.
+failure never takes the data off the screen. It shows up in `health`, and the rows stay.
 
 ```tsx
 function TaskList() {
@@ -31,7 +31,7 @@ function TaskList() {
     isLoadingError,
     isCrashed,
     isSyncError,
-    errors,
+    health,
     collection,
   } = useLiveQuery((q) =>
     q
@@ -46,7 +46,7 @@ function TaskList() {
   return (
     <>
       {isSyncError && (
-        <SyncBanner errors={errors} onReload={() => collection.reload()} />
+        <SyncBanner health={health} onReload={() => collection.reload()} />
       )}
       {data.map((row) => (
         <TaskRow key={row.task.id} {...row} />
@@ -70,7 +70,7 @@ function TaskList() {
 Two rules make `status` predictable:
 
 - **After a query has shown data, only a crash changes its status.** A dropped connection,
-  a failed refetch, or a backend that stops answering appears in `errors`. `isLoadingError`
+  a failed refetch, or a backend that stops answering appears in `health`. `isLoadingError`
   therefore always means "nothing to show yet".
 - **A query takes the worst status of its sources until it is ready.** If any source fails
   its first load, the query's status is `error`.
@@ -78,9 +78,9 @@ Two rules make `status` predictable:
 `isError` is deprecated. It is `true` for `error` and `crashed`. Use `isLoadingError` and
 `isCrashed`, which need different handling.
 
-### Sync errors: the `errors` tree
+### Sync errors: the `health` tree
 
-`errors` has one node for the query itself and one for each source in the query, in query
+`health` has one node for the query itself and one for each source in the query, in query
 order. The tree's shape is fixed by the query, so you can render, log, or send it to
 monitoring.
 
@@ -119,17 +119,17 @@ token gives a `failureReason` on every refetch until the user signs in. Use `cod
 `cause` for cases like this:
 
 ```ts
-function SyncBanner({ errors, onReload }: { errors: ErrorTreeNode; onReload: () => void }) {
-  const [first] = findProblems(errors) // nodes with a problem, in query order
+function SyncBanner({ health, onReload }: { health: HealthNode; onReload: () => void }) {
+  const [first] = findProblems(health) // nodes with a problem, in query order
   if (first?.failureReason?.code === '401') return <SignInAgain />
   if (first?.error) return <UpdatesStopped onReload={onReload} />
   return <Reconnecting />
 }
 ```
 
-`findProblems(errors)` walks the tree and returns every node with a `failureReason` or an
+`findProblems(health)` walks the tree and returns every node with a `failureReason` or an
 `error`, in query order, each with its `alias` path. Use it for the message on a failure
-screen too: when `isLoadingError` is true, `findProblems(errors)[0].error` is the first
+screen too: when `isLoadingError` is true, `findProblems(health)[0].error` is the first
 load failure that stopped the query.
 
 `onReload` here calls the query's `reload()`, which reloads every source that has an
@@ -142,12 +142,12 @@ need a live query:
 
 ```ts
 todos.status // 'loading' | 'ready' | 'error' | 'crashed' | ...
-todos.errors // one node: { status, failureReason, error, reloading, ... }
-todos.on('errors:change', ({ errors }) => report(errors))
+todos.health // one node: { status, failureReason, error, reloading, ... }
+todos.on('health:change', ({ health }) => report(health))
 await todos.reload()
 ```
 
-A live query is a Collection too; its `errors` is the whole tree.
+A live query is a Collection too; its `health` is the whole tree.
 
 ### Failed requests for more data
 
@@ -158,10 +158,10 @@ the data loads, or when the query no longer needs it, for example after the user
 back.
 
 ```tsx
-const { data, errors, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
+const { data, health, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
 
 {
-  errors?.error && (
+  health?.error && (
     <button onClick={() => fetchNextPage()}>Retry loading more</button>
   )
 }
@@ -234,7 +234,7 @@ A persisted Collection restores its rows from local storage before the remote sy
 
 - **Restored rows open the Collection.** If local storage holds rows from an earlier sync,
   the Collection becomes `ready` with them, even if the remote has not connected yet. Remote
-  problems after that appear in `errors` like any other sync problem.
+  problems after that appear in `health` like any other sync problem.
 - **A failed remote waits for the restore.** If the remote fails before the restore
   finishes, the Collection waits: restored rows make it `ready` with an `error` on its node;
   no stored rows make it `error`.
@@ -249,14 +249,14 @@ A persisted Collection restores its rows from local storage before the remote sy
 
 An Effect ends when a source it reads fails its first load or crashes; it calls
 `onSourceError(error)`. After its initial load, any other problem calls
-`onErrorsChange(errors)` with the same tree a live query returns, and the Effect keeps
+`onHealthChange(health)` with the same tree a live query returns, and the Effect keeps
 running.
 
 ### Suspense and error boundaries (React)
 
 `useLiveSuspenseQuery` suspends while `loading` and throws to the nearest error boundary for
 `error` and `crashed`. Sync problems after the first data never reach the boundary; read
-`errors` from the hook.
+`health` from the hook.
 
 ## For adapter authors
 
@@ -317,7 +317,5 @@ sync: ({
 | node `phase`, `final`, `isError`                                    | node `failureReason` or `error`                                     |
 | `cleanup()` then `preload()` to recover                             | `reload()`                                                          |
 | `cleanup()` with live queries mounted                               | throws; unmount first or `cleanup({ dependents: true })`            |
-| `persistedStatus`, `isPersistedReady`, `persistedError`             | `status` and `errors`                                               |
-| query-db `utils.lastError`, `isError`, `errorCount`, `clearError()` | `errors`, `reload()`                                                |
-| `collection.health`, `health:change`                                | `collection.errors`, `errors:change`                                |
-| Effect `onHealthChange`                                             | `onErrorsChange`                                                    |
+| `persistedStatus`, `isPersistedReady`, `persistedError`             | `status` and `health`                                               |
+| query-db `utils.lastError`, `isError`, `errorCount`, `clearError()` | `health`, `reload()`                                                |

@@ -322,8 +322,8 @@ export interface QueryCollectionUtils<
   /** Execute direct writes as one atomic batch. Resolves when the sync commit applies. */
   writeBatch: (callback: () => void) => Promise<void>
 
-  // Query Observer State (getters). Failures appear in `collection.errors`
-  // and each live query's `errors` tree.
+  // Query Observer State (getters). Failures appear in `collection.health`
+  // and each live query's `health` tree.
   /** Check if query is currently fetching (initial or background) */
   isFetching: boolean
   /** Check if query is refetching in background (not initial fetch) */

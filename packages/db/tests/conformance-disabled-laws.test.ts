@@ -15,7 +15,7 @@ function disabled(
     isCrashed: false,
     isSyncError: false,
     isEnabled: false,
-    errors: undefined,
+    health: undefined,
   }
 }
 
@@ -52,9 +52,9 @@ const faults: Array<[string, (value: ConformanceResult) => void]> = [
     },
   ],
   [
-    `stale error tree`,
+    `stale health tree`,
     (value) => {
-      value.errors = {
+      value.health = {
         alias: `root`,
         collectionId: `stale`,
         kind: `live-query`,

@@ -2,7 +2,7 @@
 
 > **Superseded (2026-10-16).** The error surface was redesigned: status
 > `crashed`, node `failureReason`/`error`, `fail()`, `reload()`, and
-> `collection.errors`. Read `error-surface/README.md` and `error-surface/RULES.md`,
+> `collection.health`. Read `error-surface/README.md` and `error-surface/RULES.md`,
 > the shipped `docs/guides/error-handling.md`, and
 > `packages/db/src/query/live/ARCHITECTURE.md` laws 14, 16, and 17.
 
@@ -31,7 +31,7 @@ Branch: `feat/source-health-channel` (worktree
 5. **`status` is only the initial gate.** After the first ready, a sync
    failure is metadata on the Collection. The data stays, even if it grows
    stale.
-6. **`useLiveQuery` returns an `errors` tree** for every collection the query
+6. **`useLiveQuery` returns an `health` tree** for every collection the query
    depends on. It always has the same shape, shows whether each node is in
    error, and carries detailed error info, so apps can parse it.
 7. A buggy source or an app with endless retries can still look stuck. That is
@@ -59,7 +59,7 @@ names and shapes.
 - **Collection surface.** `collection.health` and a `health:change` event.
 - **Error info.** `{ phase: 'initial' | 'sync' | 'request', final, name,
   message, code?, at, cause }`. Everything except `cause` is JSON-safe.
-- **Error tree.** `ErrorTreeNode = { alias, collectionId, kind: 'source' |
+- **Health tree.** `HealthNode = { alias, collectionId, kind: 'source' |
   'live-query' | 'include', status, isError, hasErrors, error, instances?,
   sources }`.
   - One node per query alias, in query order, fixed by the query definition
@@ -74,11 +74,11 @@ names and shapes.
   Collection readiness sets `phase: 'request'` on the live-query node that issued it. The
   Collection stays healthy. It clears when that demand later settles or is
   released.
-- **Hooks.** Return `errors` beside `data`. `isError` keeps meaning "the
-  initial gate is `error`". Docs lead with `errors.hasErrors` for stale data.
-- **Effects.** `onHealthChange(errors)` after Collection readiness; no disposal.
+- **Hooks.** Return `health` beside `data`. `isError` keeps meaning "the
+  initial gate is `error`". Docs lead with `health.hasErrors` for stale data.
+- **Effects.** `onHealthChange(health)` after Collection readiness; no disposal.
   Initial gate errors still dispose through `onSourceError`.
-- **SSR.** `errors` is not dehydrated; the client builds its own tree.
+- **SSR.** `health` is not dehydrated; the client builds its own tree.
 
 ## 3. Work breakdown
 
@@ -96,7 +96,7 @@ names and shapes.
       after `status:change` when both change (the ordering is still to be
       checked).
 - [ ] `types.ts`: `SyncConfig` params, `CollectionErrorInfo`,
-      `ErrorTreeNode`, and the `Collection.health` and `errors` types.
+      `HealthNode`, and the `Collection.health` and `health` types.
 - [ ] `markError` after the first ready: forward to
       `reportError(error, { final: true })` and warn in development.
 - [ ] `query/live/collection-config-builder.ts`:
@@ -106,7 +106,7 @@ names and shapes.
         status-based healing;
   - [ ] post-readiness Collection health does not change the live query's status or
         rows;
-  - [ ] build and maintain the `errors` tree: per-alias nodes, include
+  - [ ] build and maintain the `health` tree: per-alias nodes, include
         roll-ups, nested live-query relay, and request errors;
   - [ ] `failDemand` and `recordSubsetError`: before ready, terminal (gate);
         after ready, a request error on the live-query node, cleared on
@@ -115,7 +115,7 @@ names and shapes.
       for every rejected load (#2129 review C8). Do not detach demand for
       recovery.
 - [ ] `query/effect.ts`: `onHealthChange`; no disposal after Collection readiness.
-- [ ] `live-query-adapter.ts` and `live-query-observer.ts`: add `errors` to
+- [ ] `live-query-adapter.ts` and `live-query-observer.ts`: add `health` to
       the snapshot and status flags, so every framework adapter gets it from
       one place. Keep `isError` as the gate.
 - [ ] `query/live/pooled-live-query*`: decide and implement health for
@@ -146,7 +146,7 @@ names and shapes.
 - [ ] **TrailBase** (`trailbase-db-collection/src/trailbase.ts`, 4 sites):
       post-readiness stream failures call `reportError`. Check them against the
       #2126 fix.
-  - [ ] A stream that ends, whether it closes or errors, reports
+  - [ ] A stream that ends, whether it closes or health, reports
         `reportError(error, { final: true })` after Collection readiness. The
         adapter does not resubscribe. The `trailbase` SDK (0.10.0) has no
         reconnect or resume: `subscribe` is one `fetch` stream, and
@@ -177,19 +177,19 @@ names and shapes.
 
 ### 3.3 Framework hooks
 
-- [ ] React, Vue, Solid, Svelte, and Angular return `errors` from every
+- [ ] React, Vue, Solid, Svelte, and Angular return `health` from every
       live-query hook, including infinite-query hooks and
       `useLiveSuspenseQuery`.
 - [ ] Suspense: throws only for the initial gate, never for post-ready
       health.
-- [ ] Decide whether `errors` keeps stable node identity for memoization
+- [ ] Decide whether `health` keeps stable node identity for memoization
       (open question).
 
 ### 3.4 Tests and oracles
 
 - [ ] Flip the #1751 healing tests on purpose: each one that asserts
       `error` → `ready` becomes "stays `error`; recovery needs a restart".
-      Search `collection-errors.test.ts`, live-query recovery tests, and
+      Search `collection-health.test.ts`, live-query recovery tests, and
       query-db and PowerSync recovery tests.
 - [ ] A new oracle owner for the health channel, from `SourceHealth.tla`'s
       properties: stable shape, mirroring through nested live queries, only
@@ -205,7 +205,7 @@ names and shapes.
       `source-ready` after `source-error` in one sync run is illegal, so those
       histories become "restart, then recover".
 - [ ] Shared framework conformance suite (`packages/db/tests/conformance/`):
-      a health scenario, so all five drivers check `errors` the same way.
+      a health scenario, so all five drivers check `health` the same way.
 - [ ] Adapter witnesses: each adapter reports post-ready failures through
       health and keeps its rows. Electric adds SDK give-up cases through the
       real SDK (missing headers, retry exhaustion).
@@ -226,11 +226,11 @@ names and shapes.
       `USER-DOCS-DRAFT.md` (stay silent while retrying; `markError` only when
       giving up before Collection readiness; `reportError` and `reportHealthy` after readiness;
       never drop rows).
-- [ ] `docs/guides/live-queries.md`: the `errors` tree and the
-      `isError` / `errors.hasErrors` callout.
+- [ ] `docs/guides/live-queries.md`: the `health` tree and the
+      `isError` / `health.hasErrors` callout.
 - [ ] `docs/guides/sqlite-persistence.md`, `docs/guides/offline-transactions.md`:
       upstream Collection health against `persistedError`.
-- [ ] `docs/errors.md`: the `markReady`-after-`markError` contract error,
+- [ ] `docs/health.md`: the `markReady`-after-`markError` contract error,
       and any new error code.
 - [ ] `docs/collections/electric-collection.md`: `onError` retries are
       silent; a give-up is final; post-readiness health.
@@ -258,7 +258,7 @@ names and shapes.
   - an initial error no longer heals; recover with `cleanup()` and
     `preload()`;
   - after Collection readiness, failures no longer move a Collection or a live
-    query to `error`; read `errors`;
+    query to `error`; read `health`;
   - adapter authors: `reportError` and `reportHealthy`;
   - `markReady()` after `markError()` now throws.
 - [ ] PR body: the decisions above, the design, the evidence, and the
@@ -271,7 +271,7 @@ names and shapes.
    update here.
 3. Core lifecycle and the health channel, with the health oracle first (RED,
    then GREEN).
-4. Live queries: the gate for every shape, then the error tree, then
+4. Live queries: the gate for every shape, then the health tree, then
    request errors.
 5. Effects, then the observer and status flags, then the hooks and the
    conformance suite.
@@ -284,7 +284,7 @@ names and shapes.
   tick, after it). Model-check it before relying on it.
 - How follower tabs learn the leader's upstream health.
 - Health for pooled live queries that share sources.
-- Stable node identity in `errors` for memoization.
+- Stable node identity in `health` for memoization.
 - Which semver bump the packages get, given the 0.x line.
 - Whether the shipped package skills are in scope for edits.
 

@@ -683,12 +683,12 @@ The collection provides these utility methods via `collection.utils`:
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
   - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
 
-Failures appear in the error tree. Before the first successful result, a
+Failures appear in the health tree. Before the first successful result, a
 failed fetch fails the first load (`status: 'error'`). After the Collection is
 ready, a failed fetch or result application for any Query it observes sets the
 node's `failureReason`, because TanStack Query fetches again, and the next
-successful application clears it. Read it from `collection.errors` or a live
-query's `errors` tree. To retry a failed first load, call
+successful application clears it. Read it from `collection.health` or a live
+query's `health` tree. To retry a failed first load, call
 `collection.reload()`.
 
 ## Direct Writes

@@ -7,7 +7,7 @@ title: liveQueryWindowMatches
 function liveQueryWindowMatches(collection, requiredLimit): boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L107)
+Defined in: [packages/db/src/live-query-window-controller.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L100)
 
 **`Internal`**
 

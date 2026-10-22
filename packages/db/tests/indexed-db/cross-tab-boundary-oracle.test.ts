@@ -228,8 +228,8 @@ it('reports an active receiver abort as the Collection error while its callback 
     // After the first ready a receiver failure stops sync but keeps status.
     expect(record.statuses).toContain('sync-error')
     expect(receiver.status).toBe('ready')
-    expect(receiver.errors.error).toBeTruthy()
-    expect(receiver.errors.failureReason).toBeNull()
+    expect(receiver.health.error).toBeTruthy()
+    expect(receiver.health.failureReason).toBeNull()
     assertSnapshot(
       receiver.values(),
       [],

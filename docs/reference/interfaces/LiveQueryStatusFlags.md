@@ -15,17 +15,19 @@ The derived boolean status flags every adapter exposes for a query.
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:63](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L63)
+Defined in: [packages/db/src/live-query-adapter.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L66)
 
 ***
 
-### isError
+### isCrashed
 
 ```ts
-isError: boolean;
+isCrashed: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L62)
+Defined in: [packages/db/src/live-query-adapter.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L65)
+
+Local storage or an invariant broke. `status` is `crashed`.
 
 ***
 
@@ -46,6 +48,18 @@ isLoading: boolean;
 ```
 
 Defined in: [packages/db/src/live-query-adapter.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L59)
+
+***
+
+### isLoadingError
+
+```ts
+isLoadingError: boolean;
+```
+
+Defined in: [packages/db/src/live-query-adapter.ts:63](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L63)
+
+The first load failed: there is nothing to show. `status` is `error`.
 
 ***
 

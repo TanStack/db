@@ -18,8 +18,8 @@ import type {
   Collection,
   CollectionStatus,
   Context,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -54,10 +54,10 @@ export interface InjectLiveQueryFlags {
   isCrashed: Signal<boolean>
   /** A signal indicating whether the collection has been cleaned up */
   isCleanedUp: Signal<boolean>
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: Signal<boolean>
-  /** A signal containing the error tree for the query and its dependencies */
-  errors: Signal<ErrorTreeNode | undefined>
+  /** A signal containing the health tree for the query and its dependencies */
+  health: Signal<HealthNode | undefined>
 }
 
 export interface InjectLiveQueryResult<
@@ -217,7 +217,7 @@ export function injectLiveQuery(opts: any) {
     const value = statusValue()
     return value === `idle` && !collection() ? `disabled` : value
   })
-  const errors = signal<ErrorTreeNode | undefined>(undefined)
+  const health = signal<HealthNode | undefined>(undefined)
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -241,7 +241,7 @@ export function injectLiveQuery(opts: any) {
     internalData.set(newData)
     const snapshot = observer.getSnapshot()
     statusValue.set(snapshot.status)
-    errors.set(snapshot.errors)
+    health.set(snapshot.health)
   }
 
   let unsub: (() => void) | null = null
@@ -256,7 +256,7 @@ export function injectLiveQuery(opts: any) {
     // Handle null collection (disabled query)
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
-      errors.set(undefined)
+      health.set(undefined)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -306,8 +306,8 @@ export function injectLiveQuery(opts: any) {
     isCrashed: computed(() => status() === `crashed`),
     isCleanedUp: computed(() => status() === `cleaned-up`),
     isSyncError: computed(
-      () => status() === `ready` && errors()?.hasErrors === true,
+      () => status() === `ready` && health()?.hasErrors === true,
     ),
-    errors,
+    health,
   }
 }

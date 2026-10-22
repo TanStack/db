@@ -3252,8 +3252,8 @@ describe(`On-Demand Sync Mode`, () => {
         // After the first ready, failures don't change status. Instead, they're
         // reported as a failure reason. Status stays ready; data stays available.
         expect(collection.status).toBe(`ready`)
-        expect(collection.errors.hasErrors).toBe(true)
-        expect(collection.errors.failureReason?.message).toMatch(
+        expect(collection.health.hasErrors).toBe(true)
+        expect(collection.health.failureReason?.message).toMatch(
           `trigger installation failed`,
         )
       } finally {
@@ -3288,7 +3288,7 @@ describe(`On-Demand Sync Mode`, () => {
           // The outage keeps the rows and the ready status. The adapter retries
           // the rebuild, so it reports a failure reason.
           await vi.waitFor(() =>
-            expect(collection.errors.failureReason).toMatchObject({
+            expect(collection.health.failureReason).toMatchObject({
               message: `release rebuild failed`,
             }),
           )
@@ -3308,7 +3308,7 @@ describe(`On-Demand Sync Mode`, () => {
             )
           // A rebuild whose baseline applied reports healthy again.
           await vi.waitFor(() =>
-            expect(collection.errors.hasErrors).toBe(false),
+            expect(collection.health.hasErrors).toBe(false),
           )
           expect(collection.status).toBe(`ready`)
           expect([...collection.keys()]).toEqual(

@@ -7,7 +7,7 @@ title: getLiveQueryWindowCollectionWarning
 function getLiveQueryWindowCollectionWarning(collection, expectedLimit): string | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:436](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L436)
+Defined in: [packages/db/src/live-query-window-controller.ts:429](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L429)
 
 **`Internal`**
 

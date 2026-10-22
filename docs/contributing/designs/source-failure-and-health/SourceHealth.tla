@@ -19,13 +19,13 @@ CONSTANTS
   FailureClearsRows    \* a post-ready failure discards visible rows
 
 Sources == {"A", "B"}
-Nodes == {"A", "B", "L1"}           \* the nodes in Top's error tree
+Nodes == {"A", "B", "L1"}           \* the nodes in Top's health tree
 
 VARIABLES
   status,     \* gate per source: "loading" | "ready" | "error"
   health,     \* per source, after ready: "healthy" | "failed"
   rows,       \* per source: visible rows exist
-  tree,       \* Top's error tree: node -> "ok" | "error"; DOMAIN is the shape
+  tree,       \* Top's health tree: node -> "ok" | "error"; DOMAIN is the shape
   topStatus,  \* Top's gate: "loading" | "ready" | "error"
   topRows,    \* Top's visible rows
   reported    \* per source: the source's latest report was a failure

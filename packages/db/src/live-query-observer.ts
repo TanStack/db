@@ -8,7 +8,7 @@ import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
-import type { ChangeMessage, CollectionStatus, ErrorTreeNode } from './types.js'
+import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
 
 const noop = () => {}
 
@@ -53,15 +53,15 @@ export interface LiveQuerySnapshot<
   isEnabled: boolean
   /**
    * The data is shown, and something keeps it from staying current: a sync
-   * problem or a failed request somewhere in `errors`.
+   * problem or a failed request somewhere in `health`.
    */
   isSyncError: boolean
   /**
-   * The error tree for the query and every Collection it depends on, or
+   * The health tree for the query and every Collection it depends on, or
    * `undefined` for a disabled query. After the first ready, a source
    * problem shows here and the data stays.
    */
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 /**
@@ -146,7 +146,7 @@ const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   isCleanedUp: false,
   isEnabled: false,
   isSyncError: false,
-  errors: undefined,
+  health: undefined,
 }
 
 class LiveQueryObserverImpl<
@@ -163,9 +163,9 @@ class LiveQueryObserverImpl<
   private cachedCollectionRevision: number | undefined
   private cachedCollectionLayoutRevision: number | undefined
   private snapshotDirty = true
-  // While attached, the tree from the last status or errors change. Every
+  // While attached, the tree from the last status or health change. Every
   // tree change is announced, so a snapshot reuses it instead of rebuilding.
-  private publishedErrors: { tree: ErrorTreeNode | undefined } | undefined
+  private publishedHealth: { tree: HealthNode | undefined } | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
   private lastLayoutKeys: Array<TKey> | undefined
@@ -254,9 +254,9 @@ class LiveQueryObserverImpl<
         this.layoutRevision++
       }
 
-      const errors = this.publishedErrors
-        ? this.publishedErrors.tree
-        : (collection as { errors?: ErrorTreeNode }).errors
+      const health = this.publishedHealth
+        ? this.publishedHealth.tree
+        : (collection as { health?: HealthNode }).health
       // Most consumers read only `data`; build the keyed view on first read.
       let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
@@ -269,8 +269,8 @@ class LiveQueryObserverImpl<
         status,
         ...getLiveQueryStatusFlags(status),
         isEnabled: true,
-        isSyncError: status === `ready` && errors?.hasErrors === true,
-        errors,
+        isSyncError: status === `ready` && health?.hasErrors === true,
+        health,
       }
       this.snapshotDirty = false
     }
@@ -674,19 +674,19 @@ class LiveQueryObserverImpl<
     // any status change publishes a synthetic notify so consumers re-read the
     // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
     // detached attachment leaves nothing behind.
-    // An errors change below the query changes its error tree, not its rows.
-    // Each status change is followed by an errors change; tree identity
-    // tells whether the errors change has anything left to publish.
-    const errorsOf = () => (collection as { errors?: ErrorTreeNode }).errors
-    this.publishedErrors = { tree: errorsOf() }
+    // A health change below the query changes its health tree, not its rows.
+    // Each status change is followed by a health change; tree identity
+    // tells whether the health change has anything left to publish.
+    const healthOf = () => (collection as { health?: HealthNode }).health
+    this.publishedHealth = { tree: healthOf() }
     const statusUnsub = collection.on(`status:change`, ({ status }) => {
-      this.publishedErrors = { tree: errorsOf() }
+      this.publishedHealth = { tree: healthOf() }
       notify(undefined, status)
     })
-    const errorsUnsub = collection.on(`errors:change`, () => {
-      const errors = errorsOf()
-      if (errors === this.publishedErrors?.tree) return
-      this.publishedErrors = { tree: errors }
+    const healthUnsub = collection.on(`health:change`, () => {
+      const health = healthOf()
+      if (health === this.publishedHealth?.tree) return
+      this.publishedHealth = { tree: health }
       // No rows or status changed, so only this marks the snapshot stale.
       this.snapshotDirty = true
       notify(undefined, collection.status)
@@ -730,10 +730,10 @@ class LiveQueryObserverImpl<
           })
         : noop
     const release = () => {
-      this.publishedErrors = undefined
+      this.publishedHealth = undefined
       clientUnsub()
       statusUnsub()
-      errorsUnsub()
+      healthUnsub()
       layoutUnsub()
       subscription?.unsubscribe()
     }

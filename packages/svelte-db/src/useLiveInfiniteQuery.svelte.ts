@@ -277,8 +277,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     get isFetchingNextPage() {
       return snapshot.isFetchingNextPage
     },
-    get errors() {
-      return snapshot.errors
+    get health() {
+      return snapshot.health
     },
     fetchNextPage,
   }

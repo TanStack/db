@@ -671,7 +671,7 @@ describe(`createLiveQueryWindowController`, () => {
     // The failed load is a request error; the window keeps its status.
     expect(controller.getSnapshot().isLoadingError).toBe(false)
     expect(controller.getSnapshot().isSyncError).toBe(true)
-    expect(controller.getSnapshot().errors?.error).toMatchObject({
+    expect(controller.getSnapshot().health?.error).toMatchObject({
       message: failure.message,
     })
     expect(lq.utils.lastSubsetError).toBe(failure)

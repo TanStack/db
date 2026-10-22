@@ -14,8 +14,8 @@ import type {
   Collection,
   CollectionStatus,
   Context,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   NonSingleResult,
@@ -62,14 +62,14 @@ export interface UseLiveInfiniteQueryReturn<
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<InferResultType<TContext>[number]>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  errors: ComputedRef<ErrorTreeNode | undefined>
+  health: ComputedRef<HealthNode | undefined>
 }
 
 export interface UseLiveInfiniteQueryReturnWithCollection<
@@ -89,14 +89,14 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<TResult>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  errors: ComputedRef<ErrorTreeNode | undefined>
+  health: ComputedRef<HealthNode | undefined>
 }
 
 /**
@@ -271,6 +271,6 @@ export function useLiveInfiniteQuery<
     fetchNextPage: () => fetchNextLiveQueryWindowPage(controller.value),
     hasNextPage: computed(() => snapshot.value.hasNextPage),
     isFetchingNextPage: computed(() => snapshot.value.isFetchingNextPage),
-    errors: computed(() => snapshot.value.errors),
+    health: computed(() => snapshot.value.health),
   }
 }

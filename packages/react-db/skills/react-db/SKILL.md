@@ -72,7 +72,7 @@ const {
   isError,
   isIdle,
   isCleanedUp,
-  errors, // error tree: errors.hasErrors means data may be stale
+  health, // health tree: health.hasErrors means data may be stale
 } = useLiveQuery({
   query: (q) =>
     q
@@ -101,7 +101,7 @@ const { data, status } = useLiveQuery({
 // When disabled: status='disabled', data=undefined
 ```
 
-`isError` means the query must restart (its initial load failed or a source crashed). After the query is ready, sync problems never set it: read `errors?.hasErrors` from the error tree to show stale-data warnings.
+`isError` means the query must restart (its initial load failed or a source crashed). After the query is ready, sync problems never set it: read `health?.hasErrors` from the health tree to show stale-data warnings.
 
 ### useLiveSuspenseQuery
 

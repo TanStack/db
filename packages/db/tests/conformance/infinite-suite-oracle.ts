@@ -34,7 +34,7 @@ interface InfiniteRow {
 /**
  * A fulfilled page fetch advances the committed prefix. A failed request leaves
  * that prefix and the `ready` status alone; its rejection reaches the caller,
- * and a failed source load behind it is a request error in the error tree.
+ * and a failed source load behind it is a request error in the health tree.
  * Source length decides whether the committed prefix has a continuation,
  * including after later source writes.
  */

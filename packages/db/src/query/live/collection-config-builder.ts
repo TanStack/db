@@ -15,7 +15,7 @@ import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import { collectSourceRefs } from '../ir.js'
-import { findProblems } from '../../collection/error-tree.js'
+import { findProblems } from '../../collection/health-tree.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -37,7 +37,7 @@ import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
-import type { ErrorTreeSource } from '../../collection/error-tree.js'
+import type { HealthSource } from '../../collection/health-tree.js'
 import type {
   CollectionConfigSingleRowOption,
   CollectionDependent,
@@ -150,7 +150,7 @@ export class CollectionConfigBuilder<
       .filter(
         (collection, index, all) =>
           all.indexOf(collection) === index &&
-          findProblems(collection.errors).some((node) => node.error !== null),
+          findProblems(collection.health).some((node) => node.error !== null),
       )
     await Promise.all(failed.map((collection) => collection.reload()))
     // Its preload is what lets a live query start its sources.
@@ -501,8 +501,8 @@ export class CollectionConfigBuilder<
     return generation
   }
 
-  /** The source aliases of this query, in query order, for its error tree. */
-  errorTreeSources(): ReadonlyArray<ErrorTreeSource> {
+  /** The source aliases of this query, in query order, for its health tree. */
+  healthSources(): ReadonlyArray<HealthSource> {
     return this.collectionSources.map(({ sourceId, alias, collection }) => ({
       id: sourceId,
       alias,
@@ -1420,10 +1420,10 @@ export class CollectionConfigBuilder<
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
-      // Relay error tree changes so this query's tree stays current.
+      // Relay health tree changes so this query's tree stays current.
       syncState.unsubscribeCallbacks.add(
-        collection.on(`errors:change`, () =>
-          this.liveQueryCollection?._emitErrorsChange(),
+        collection.on(`health:change`, () =>
+          this.liveQueryCollection?._emitHealthChange(),
         ),
       )
       let cleanupStartError: Error | undefined

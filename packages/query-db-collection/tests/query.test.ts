@@ -49,7 +49,7 @@ import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
  */
 function reportedError(collection: {
   status: string
-  errors: {
+  health: {
     failureReason: { cause: unknown } | null
     error: { cause: unknown } | null
   }
@@ -57,7 +57,7 @@ function reportedError(collection: {
 }): unknown {
   return collection.status === `error`
     ? collection._lifecycle.getSyncError()
-    : (collection.errors.failureReason ?? collection.errors.error)?.cause
+    : (collection.health.failureReason ?? collection.health.error)?.cause
 }
 
 interface TestItem {
@@ -11767,8 +11767,8 @@ describe(`reload settles on the new run's first result`, () => {
         ])
         expect(settled).toBe(outcome === `ok` ? `resolved` : `rejected`)
         expect(collection.status).toBe(outcome === `ok` ? `ready` : before)
-        expect(collection.errors.reloading).toBe(false)
-        expect(collection.errors.error?.message ?? null).toBe(
+        expect(collection.health.reloading).toBe(false)
+        expect(collection.health.error?.message ?? null).toBe(
           outcome === `ok` ? null : `backend down`,
         )
         if (outcome === `ok`) expect(collection.size).toBe(1)
@@ -11805,7 +11805,7 @@ describe(`reload settles on the new run's first result`, () => {
       await collection.preload()
       await collection.reload().catch(() => undefined)
       expect(collection.status).toBe(`ready`)
-      expect(collection.errors.error?.message).toBe(`backend down`)
+      expect(collection.health.error?.message).toBe(`backend down`)
       collection.utils.writeInsert({ id: 3 })
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(collection.toArray.map((row) => row.id).sort()).toEqual([1, 3])
@@ -11869,7 +11869,7 @@ describe(`failureReason follows the still-failing Queries`, () => {
         await query.fetch().catch(() => undefined)
         await flushPromises()
       }
-      const shown = () => collection.errors.failureReason?.message ?? null
+      const shown = () => collection.health.failureReason?.message ?? null
       try {
         await collection._sync.loadSubset({ limit: 1 })
         await collection._sync.loadSubset({ limit: 2 })
@@ -11936,7 +11936,7 @@ describe(`failureReason follows the still-failing Queries`, () => {
       await query.fetch().catch(() => undefined)
       await flushPromises()
     }
-    const shown = () => collection.errors.failureReason?.message ?? null
+    const shown = () => collection.health.failureReason?.message ?? null
     try {
       await collection._sync.loadSubset({ limit: 1 })
       await collection._sync.loadSubset({ limit: 2 })

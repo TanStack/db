@@ -1403,7 +1403,7 @@ delivered, so with it the gate also ends initial suppression. An obsolete or
 aborted initial load releases its hold, and a truncate replacement takes the
 hold over. Neither can keep the gate open or close it for good. A real load
 failure before the gate disposes the Effect; after the gate, a source problem
-is error tree detail, delivered through `onErrorsChange`.
+is health tree detail, delivered through `onHealthChange`.
 
 Two limits remain. Before an on-demand source completes a full sync, a ready
 query can hold rows that the source does not yet update. The source contract,
@@ -1678,8 +1678,8 @@ every row before the top-K (a recorded limit).
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
-16. **Status and the error tree:** status says whether the data can be
-    shown; the error tree says whether it is still kept current. A sync run's
+16. **Status and the health tree:** status says whether the data can be
+    shown; the health tree says whether it is still kept current. A sync run's
     failed first load (`fail()` before Collection readiness) is status
     `error` and is final for that sync run. A crash (IndexedDB closure, a
     terminal local persistence failure, a throwing sync function, or an
@@ -1716,9 +1716,9 @@ every row before the top-K (a recorded limit).
     a source whose first load fails before that readiness, or a failed load
     it needs ends it through `onSourceError`, because its incremental result
     can no longer be complete. An Effect has no request errors; after that
-    readiness, a source's sync problem is error tree detail delivered through
-    `onErrorsChange`, while the Effect keeps running.
-17. **Error tree:** a Collection's `errors` is one node; a live query's has
+    readiness, a source's sync problem is health tree detail delivered through
+    `onHealthChange`, while the Effect keeps running.
+17. **Health tree:** a Collection's `health` is one node; a live query's has
     one node for itself and one per source alias in query order, recursing
     through nested live queries. A node shows at most one problem:
     `failureReason` (the sync adapter still tries) or `error` (the first load
@@ -1726,12 +1726,12 @@ every row before the top-K (a recorded limit).
     query's own node, a request for more data failed). An include's source
     has `kind: 'include'`; its per-row child Collections are not in the tree,
     so adding a child changes nothing. Every change to the tree is announced
-    by `errors:change`, so readers can keep a tree until the next event. A pooled live query's tree is the tree a live-query Collection
+    by `health:change`, so readers can keep a tree until the next event. A pooled live query's tree is the tree a live-query Collection
     over its source would have, so it also reaches deeper levels. The shape
     is fixed by the query. Each node mirrors its Collection when read, and
-    the query emits `errors:change` whenever a node below it changes. When a
+    the query emits `health:change` whenever a node below it changes. When a
     Collection's status changes, its `status:change` fires first and its
-    `errors:change` follows at once; the tree is current when either fires.
+    `health:change` follows at once; the tree is current when either fires.
     A node keeps its object identity until something in its subtree changes,
     and a change replaces only the nodes on its path.
 

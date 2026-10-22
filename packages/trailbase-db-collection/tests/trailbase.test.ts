@@ -272,7 +272,7 @@ describe(`TrailBase Integration`, () => {
       // `error`, not a log line; the rows and status stay.
       expect(reported).not.toHaveBeenCalled()
       expect(collection.status).toBe(`ready`)
-      expect(collection.errors.error).toMatchObject({ cause: failure })
+      expect(collection.health.error).toMatchObject({ cause: failure })
       expect(cancel).toHaveBeenCalledOnce()
       expect(stream.locked).toBe(false)
       await collection.cleanup()
@@ -331,7 +331,7 @@ describe(`TrailBase Integration`, () => {
         // The adapter does not resubscribe, so every end of the stream is a
         // stop: the Collection's `error`; a stream failure is its cause.
         expect(reported).not.toHaveBeenCalled()
-        expect(collection.errors.error).toMatchObject(
+        expect(collection.health.error).toMatchObject(
           ending === `error` ? { cause: failure } : {},
         )
 

@@ -21,8 +21,8 @@ import type {
   Collection,
   CollectionStatus,
   Context,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -64,9 +64,9 @@ export interface UseLiveQueryFlags {
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: ComputedRef<boolean>
-  errors: ComputedRef<ErrorTreeNode | undefined>
+  health: ComputedRef<HealthNode | undefined>
 }
 
 export interface UseLiveQueryReturn<
@@ -364,7 +364,7 @@ export function useLiveQuery(
   const status = ref(
     collection.value ? collection.value.status : (`disabled` as const),
   )
-  const errors = shallowRef<ErrorTreeNode | undefined>(undefined)
+  const health = shallowRef<HealthNode | undefined>(undefined)
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -373,7 +373,7 @@ export function useLiveQuery(
   const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
-    errors.value = snapshot.errors
+    health.value = snapshot.health
     internalData.value = snapshotRows(snapshot.data)
   }
 
@@ -388,7 +388,7 @@ export function useLiveQuery(
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
-      errors.value = undefined
+      health.value = undefined
       state.clear()
       internalData.value = []
       return
@@ -456,8 +456,8 @@ export function useLiveQuery(
     isCrashed: computed(() => status.value === `crashed`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
     isSyncError: computed(
-      () => status.value === `ready` && errors.value?.hasErrors === true,
+      () => status.value === `ready` && health.value?.hasErrors === true,
     ),
-    errors: computed(() => errors.value),
+    health: computed(() => health.value),
   }
 }

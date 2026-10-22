@@ -20,7 +20,7 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  */
 function reportedError(collection: {
   status: string
-  errors: {
+  health: {
     failureReason: { cause: unknown } | null
     error: { cause: unknown } | null
   }
@@ -28,7 +28,7 @@ function reportedError(collection: {
 }): unknown {
   return collection.status === `error`
     ? collection._lifecycle.getSyncError()
-    : (collection.errors.failureReason ?? collection.errors.error)?.cause
+    : (collection.health.failureReason ?? collection.health.error)?.cause
 }
 
 /**
@@ -1203,8 +1203,8 @@ async function expectRefetchFailureIsHealth(): Promise<void> {
   )
   const observe = () => ({
     status: collection.status,
-    failureReason: collection.errors.failureReason?.cause ?? null,
-    error: collection.errors.error?.cause ?? null,
+    failureReason: collection.health.failureReason?.cause ?? null,
+    error: collection.health.error?.cause ?? null,
     rows: collection.toArray.map((row) => row.id),
   })
   try {
@@ -1217,7 +1217,7 @@ async function expectRefetchFailureIsHealth(): Promise<void> {
     })
 
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(true))
+    await vi.waitFor(() => expect(collection.health.hasErrors).toBe(true))
     expect(observe()).toEqual({
       status: `ready`,
       failureReason: error,
@@ -1226,7 +1226,7 @@ async function expectRefetchFailureIsHealth(): Promise<void> {
     })
 
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(false))
+    await vi.waitFor(() => expect(collection.health.hasErrors).toBe(false))
     expect(observe()).toEqual({
       status: `ready`,
       failureReason: null,
@@ -1273,22 +1273,22 @@ async function expectHealthWaitsForEveryFailingQuery(): Promise<void> {
     await collection._sync.loadSubset({ limit: 1 })
     await collection._sync.loadSubset({ limit: 2 })
     expect(collection.status).toBe(`ready`)
-    expect(collection.errors.hasErrors).toBe(false)
+    expect(collection.health.hasErrors).toBe(false)
 
     failing.add(1)
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(true))
-    expect(collection.errors.failureReason?.message).toBe(`subset 1 failed`)
+    await vi.waitFor(() => expect(collection.health.hasErrors).toBe(true))
+    expect(collection.health.failureReason?.message).toBe(`subset 1 failed`)
 
     // A subset that starts after the failure and succeeds does not make the
     // failing subset healthy.
     await collection._sync.loadSubset({ limit: 3 })
     await vi.waitFor(() => expect(collection.has(`row-3`)).toBe(true))
-    expect(collection.errors.failureReason?.message).toBe(`subset 1 failed`)
+    expect(collection.health.failureReason?.message).toBe(`subset 1 failed`)
 
     failing.clear()
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(false))
+    await vi.waitFor(() => expect(collection.health.hasErrors).toBe(false))
     expect(collection.status).toBe(`ready`)
   } finally {
     loggedError.mockRestore()

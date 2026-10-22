@@ -10,7 +10,7 @@ restore rows from local disk storage and also sync with a remote backend.
 - One boolean per status: isIdle, isLoading, isReady, isLoadingError (status 'error'),
   isCrashed, isCleanedUp. `isError` is deprecated.
 - `isSyncError`: status is 'ready' and the tree holds any `failureReason` or `error`.
-- `errors`: a tree, one node per query alias plus a root node for the query. Each node:
+- `health`: a tree, one node per query alias plus a root node for the query. Each node:
   { alias, kind: 'source'|'live-query'|'include', status, hasErrors, error | null, sources }.
   A source node carries at most one of:
   - `failureReason`: the latest problem while the adapter keeps trying (like TanStack Query's

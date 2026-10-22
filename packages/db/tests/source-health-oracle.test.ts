@@ -1,5 +1,5 @@
 /**
- * # Source failure and the error tree
+ * # Source failure and the health tree
  *
  * A Collection answers two questions on two separate axes:
  *
@@ -10,7 +10,7 @@
  *   same sync run is a contract violation that throws. When local storage or
  *   an invariant breaks, the status is `crashed`, from any active status and
  *   for good. Only a new sync run leaves `error`.
- * - **The error tree** says whether the data on screen is still kept current.
+ * - **The health tree** says whether the data on screen is still kept current.
  *   After Collection readiness, `reportError(error)` sets the Collection's
  *   `failureReason` while the sync adapter keeps trying, `reportHealthy()`
  *   clears it, and `fail()` sets its `error`: the sync adapter stopped. The
@@ -22,12 +22,12 @@
  *   sync obligations.
  *
  * A live query exposes both axes for everything it depends on through
- * `collection.errors`: one node for itself and one per source alias in query
+ * `collection.health`: one node for itself and one per source alias in query
  * order, recursing through nested live queries. The tree always has the same
  * shape for a given query. Each node mirrors its Collection at the moment it
- * is read, and the live query emits `errors:change` when a node below it
+ * is read, and the live query emits `health:change` when a node below it
  * changes, so a reader knows to read the tree again. When a status changes,
- * `status:change` fires first and `errors:change` follows at once, and the
+ * `status:change` fires first and `health:change` follows at once, and the
  * tree is current when either fires. A reader can compare trees with `===`:
  * a node keeps its identity until something in its subtree changes, and a
  * change replaces only the nodes on its path.
@@ -119,14 +119,14 @@
  * After every step the driver compares, with the model: the query's status,
  * each Collection's rows and tags, the baseline a diffing adapter reads, the
  * query's row count while ready, whether the Effect ended and how often it
- * reported a source error, the full projected error tree, and the thrown
+ * reported a source error, the full projected health tree, and the thrown
  * error class. An Effect that ends as it is created leaves A's listener count
  * where it was. It also checks identity: reading twice gives the same tree,
  * and between steps a node is the same object exactly when its expected
  * facts, including problem serials, did not change. At every event it checks
- * that no `errors:change` shows a status that `status:change` has not
+ * that no `health:change` shows a status that `status:change` has not
  * announced, and that each `status:change` is followed at once by
- * `errors:change`. When the expected tree changed, the last event must show
+ * `health:change`. When the expected tree changed, the last event must show
  * the current tree. `findProblems` must list, in tree order, exactly the
  * expected nodes with a problem of their own. Request lanes check that a lazy load or a root Collection's
  * load that fails after initial-query readiness is a request error on the query's
@@ -167,7 +167,7 @@ import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
 import type {
   CollectionStatus,
-  ErrorTreeNode,
+  HealthNode,
   LoadSubsetOptions,
   SyncConfig,
 } from '../src/types.js'
@@ -287,7 +287,7 @@ type Model = {
 // An Effect over A. It reaches its gate when A is ready. A crash of A ends
 // it at any time, and a failed first load of A ends it before its gate,
 // including one that A already showed when the Effect was created. After
-// its gate, every other problem of A is error tree detail. A cascade cleanup
+// its gate, every other problem of A is health tree detail. A cascade cleanup
 // of A ends it without a source error: the app asked for it. `live`: it has
 // not ended; `errors`: how often it reported a source error.
 type EffectModel = { live: boolean; gate: boolean; errors: number }
@@ -1042,7 +1042,7 @@ function expectedProblems(node: ExpectedNode): Array<ProblemSummary> {
     ...node.sources.flatMap(expectedProblems),
   ]
 }
-function problemOf(node: ErrorTreeNode): ProblemSummary {
+function problemOf(node: HealthNode): ProblemSummary {
   return [
     node.alias,
     (node.error ?? node.failureReason)!.message
@@ -1155,7 +1155,7 @@ function createSource(name: SourceName) {
 // Collection starts with a preload; a pooled view starts when it has a
 // subscriber, as an observer would subscribe.
 type Subject = {
-  query: Pick<Collection<any, any>, `status` | `errors` | `on` | `cleanup`>
+  query: Pick<Collection<any, any>, `status` | `health` | `on` | `cleanup`>
   inner?: Collection<any, any>
   start: () => void
   size: () => number
@@ -1251,8 +1251,8 @@ const cleanupPrefix = /^Collection ".*" sync cleanup function threw an error: /
 const cleanedUnderQueryMessage =
   /^Source collection '.*' was manually cleaned up while live query '.*' depends on it\..*$/s
 
-function project(node: ErrorTreeNode): ExpectedNode {
-  const problem = (info: ErrorTreeNode[`error`]): ExpectedProblem =>
+function project(node: HealthNode): ExpectedNode {
+  const problem = (info: HealthNode[`error`]): ExpectedProblem =>
     info
       ? {
           message: info.message
@@ -1275,8 +1275,8 @@ function project(node: ErrorTreeNode): ExpectedNode {
 // A node whose expected facts did not change is the same object; a node whose
 // facts changed is a new object, and so is every node above it.
 function expectIdentity(
-  previous: ErrorTreeNode,
-  next: ErrorTreeNode,
+  previous: HealthNode,
+  next: HealthNode,
   before: ExpectedNode,
   after: ExpectedNode,
   label: string,
@@ -1452,7 +1452,7 @@ async function runHistory(
     announced = query.status
     const record = (kind: Event[`kind`]) => {
       if (kind === `status`) announced = query.status
-      const tree = query.errors
+      const tree = query.health
       events.push({
         kind,
         announced,
@@ -1461,7 +1461,7 @@ async function runHistory(
       })
     }
     const stopStatus = query.on(`status:change`, () => record(`status`))
-    const stopHealth = query.on(`errors:change`, () => record(`health`))
+    const stopHealth = query.on(`health:change`, () => record(`health`))
     stop = () => {
       stopStatus()
       stopHealth()
@@ -1476,12 +1476,12 @@ async function runHistory(
   console.error = () => {}
   try {
     expect(
-      query.errors,
-      `${shape}: the query exposes an error tree`,
+      query.health,
+      `${shape}: the query exposes a health tree`,
     ).toBeDefined()
     begin()
     await flushPromises()
-    let previous = query.errors
+    let previous = query.health
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${JSON.stringify(step)} on ${shape}`
       const before = expectedTree(shape, model, true)
@@ -1683,8 +1683,8 @@ async function runHistory(
         ).toBe(listenersBeforeEffect)
       }
       const tree = expectedTree(shape, model)
-      const next = query.errors
-      expect(project(next), `${label}: error tree`).toEqual(tree)
+      const next = query.health
+      expect(project(next), `${label}: health tree`).toEqual(tree)
       expect(
         findProblems(next).map(problemOf),
         `${label}: findProblems`,
@@ -1693,15 +1693,15 @@ async function runHistory(
       // Identity: a reader can compare trees with `===`. Reading twice gives
       // the same tree, and a step replaces exactly the nodes on the path to
       // what changed.
-      expect(query.errors === next, `${label}: stable read`).toBe(true)
+      expect(query.health === next, `${label}: stable read`).toBe(true)
       const after = expectedTree(shape, model, true)
       if (step.kind !== `restart`) {
         expectIdentity(previous, next, before, after, label)
       }
       previous = next
 
-      // Order: `status:change` comes first and `errors:change` follows it at
-      // once, so no `errors:change` shows a status that `status:change` has
+      // Order: `status:change` comes first and `health:change` follows it at
+      // once, so no `health:change` shows a status that `status:change` has
       // not announced. The last event leaves a reader with the current tree.
       if (step.kind !== `restart`) {
         for (const [at, event] of events.entries()) {
@@ -2240,7 +2240,7 @@ describe(`reload invariant`, () => {
       // The query's own reload waits for its join load: it keeps `error` and
       // shows `reloading`, and the reload waits too.
       expect(query.status).toBe(`error`)
-      expect(query.errors.reloading).toBe(true)
+      expect(query.health.reloading).toBe(true)
       expect(settled, `reload settled before the query's run was ready`).toBe(
         false,
       )
@@ -2279,7 +2279,7 @@ describe(`reload invariant`, () => {
       expect(collection.status).toBe(`error`)
       await expect(collection.reload()).rejects.toThrow(`sync threw`)
       expect(collection.status).toBe(`crashed`)
-      expect(collection.errors.reloading).toBe(false)
+      expect(collection.health.reloading).toBe(false)
     } finally {
       console.error = consoleError
       await collection.cleanup()
@@ -2340,7 +2340,7 @@ describe(`reload invariant`, () => {
 
   // Cleanup start drops the discarded run's problems while the status waits
   // for adapter cleanup. Every change to the tree is announced, so the drop
-  // is too: the last errors:change before the status change shows no
+  // is too: the last health:change before the status change shows no
   // problem. The cause of a `crashed` or `error` status stays while that
   // status shows.
   it.each([`report`, `fail`, `crash`, `first-load-error`] as const)(
@@ -2367,8 +2367,8 @@ describe(`reload invariant`, () => {
       else if (problem === `fail`) params.fail(new Error(`stopped`))
       else if (problem === `crash`)
         collection._lifecycle.crash(new Error(`crashed`))
-      const announced: Array<ErrorTreeNode> = []
-      collection.on(`errors:change`, () => announced.push(collection.errors))
+      const announced: Array<HealthNode> = []
+      collection.on(`health:change`, () => announced.push(collection.health))
       const cleaned = collection.cleanup()
       // A status's own cause stays while that status shows.
       const keepsCause = problem === `crash` || problem === `first-load-error`
@@ -2380,18 +2380,18 @@ describe(`reload invariant`, () => {
             : `ready`,
       )
       if (keepsCause) {
-        expect(collection.errors.error?.message).toBe(
+        expect(collection.health.error?.message).toBe(
           problem === `crash` ? `crashed` : `first load failed`,
         )
         expect(announced).toEqual([])
       } else {
-        expect(collection.errors.hasErrors).toBe(false)
+        expect(collection.health.hasErrors).toBe(false)
         expect(announced.at(-1)?.hasErrors).toBe(false)
       }
       adapterCleanup.resolve()
       await cleaned
       expect(collection.status).toBe(`cleaned-up`)
-      expect(collection.errors.hasErrors).toBe(false)
+      expect(collection.health.hasErrors).toBe(false)
     },
   )
 
@@ -2433,7 +2433,7 @@ describe(`reload invariant`, () => {
       ])
       expect(settled).toBe(`resolved`)
       expect(collection.status).toBe(`ready`)
-      expect(collection.errors.reloading).toBe(false)
+      expect(collection.health.reloading).toBe(false)
       await collection.cleanup()
     },
   )
@@ -2513,7 +2513,7 @@ describe(`reload invariant`, () => {
         expect([...source.collection.keys()].sort()).toEqual([1, 2])
       }
       expect(source.collection.status).toBe(`ready`)
-      expect(source.collection.errors.error?.message).toBe(`reload failed`)
+      expect(source.collection.health.error?.message).toBe(`reload failed`)
       await source.collection.cleanup()
     },
   )
@@ -2545,7 +2545,7 @@ describe(`reload invariant`, () => {
     next.commit()
     next.markReady()
     await reload
-    expect(source.collection.errors.reloading).toBe(false)
+    expect(source.collection.health.reloading).toBe(false)
     expect([...source.collection.keys()]).toEqual([2])
     await source.collection.cleanup()
   })
@@ -2645,8 +2645,8 @@ describe(`request errors`, () => {
   ) {
     const history = createRequestHistory()
     expect(
-      history.query.errors,
-      `the query exposes an error tree`,
+      history.query.health,
+      `the query exposes a health tree`,
     ).toBeDefined()
     const consoleError = console.error
     console.error = () => {}
@@ -2667,23 +2667,23 @@ describe(`request errors`, () => {
         writeParent(`insert`, 1)
         markParentsReady()
         await preload
-        expect(query.errors.hasErrors).toBe(false)
+        expect(query.health.hasErrors).toBe(false)
 
         outcomes.push(`fail`)
         writeParent(`insert`, 2)
         await flushPromises()
         expect(query.status).toBe(`ready`)
-        expect(query.errors.error).toMatchObject({
+        expect(query.health.error).toMatchObject({
           message: `child load failed`,
         })
-        expect(query.errors.failureReason).toBeNull()
-        expect(children.errors.hasErrors).toBe(false)
+        expect(query.health.failureReason).toBeNull()
+        expect(children.health.hasErrors).toBe(false)
 
         // The demand changes again and its new load settles.
         outcomes.push(`ok`)
         writeParent(`insert`, 3)
         await flushPromises()
-        expect(query.errors.hasErrors).toBe(false)
+        expect(query.health.hasErrors).toBe(false)
       },
     ))
 
@@ -2697,12 +2697,12 @@ describe(`request errors`, () => {
       outcomes.push(`fail`)
       writeParent(`insert`, 2)
       await flushPromises()
-      expect(query.errors.error).toMatchObject({ message: `child load failed` })
+      expect(query.health.error).toMatchObject({ message: `child load failed` })
 
       writeParent(`delete`, 1)
       writeParent(`delete`, 2)
       await flushPromises()
-      expect(query.errors.hasErrors).toBe(false)
+      expect(query.health.hasErrors).toBe(false)
       expect(query.status).toBe(`ready`)
     }))
 
@@ -2730,13 +2730,13 @@ describe(`request errors`, () => {
           outcomes.push(`fail`)
           writeParent(`insert`, 2)
           await flushPromises()
-          expect(query.errors.error).toMatchObject({
+          expect(query.health.error).toMatchObject({
             message: `child load failed`,
           })
 
           await (reloaded === `source` ? children : query).reload()
           await flushPromises()
-          expect(query.errors.hasErrors).toBe(false)
+          expect(query.health.hasErrors).toBe(false)
           expect(query.status).toBe(`ready`)
           expect(query.size).toBe(2)
         },
@@ -2774,7 +2774,7 @@ describe(`request errors`, () => {
         held[0]!.resolve()
         await reload
         await flushPromises()
-        expect(query.errors.error, `the later failure stays`).toMatchObject({
+        expect(query.health.error, `the later failure stays`).toMatchObject({
           message: `child load failed`,
         })
       },
@@ -2789,7 +2789,7 @@ describe(`request errors`, () => {
       markParentsReady()
       await flushPromises()
       expect(query.status).toBe(`error`)
-      expect(query.errors.error).toMatchObject({ message: `child load failed` })
+      expect(query.health.error).toMatchObject({ message: `child load failed` })
       await expect(preload).rejects.toBeDefined()
     }))
 })
@@ -2835,13 +2835,13 @@ describe(`crash recovery`, () => {
       expect(runs).toBe(2)
       expect(collection.status).toBe(`ready`)
       expect(collection.toArray.map((row) => row.id)).toEqual([2])
-      expect(collection.errors.hasErrors).toBe(false)
+      expect(collection.health.hasErrors).toBe(false)
 
       query = createLiveQueryCollection((q) => q.from({ row: collection }))
       await query.preload()
       expect(query.status).toBe(`ready`)
       expect(query.toArray.map((row) => row.id)).toEqual([2])
-      expect(query.errors.hasErrors).toBe(false)
+      expect(query.health.hasErrors).toBe(false)
     } finally {
       console.error = consoleError
       await query.cleanup()
@@ -2893,7 +2893,7 @@ describe(`a query's own failed first load`, () => {
       await flushPromises()
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(query.status).toBe(`error`)
-      expect(query.errors.error).toMatchObject({ message: `child load failed` })
+      expect(query.health.error).toMatchObject({ message: `child load failed` })
       const loadsAtFailure = loads
       parents.params.markReady()
       await flushPromises()
@@ -2975,10 +2975,10 @@ describe(`a query's own failed first load`, () => {
               ? `error`
               : `crashed`,
         )
-        expect(query.errors.reloading).toBe(false)
+        expect(query.health.reloading).toBe(false)
         if (outcome === `ok`) expect(query.size).toBe(1)
         if (outcome === `load-fails`)
-          expect(query.errors.error?.message).toContain(`load 2 failed`)
+          expect(query.health.error?.message).toContain(`load 2 failed`)
       } finally {
         console.error = consoleError
         await query.cleanup()
@@ -3068,7 +3068,7 @@ describe(`a failed join load under an ordered filtered window`, () => {
           Promise.resolve(query.utils.setWindow({ offset: 4, limit: 2 })),
         ).rejects.toThrow(`marker load failed`)
         expect(query.status).toBe(`ready`)
-        expect(query.errors.error).toMatchObject({
+        expect(query.health.error).toMatchObject({
           message: `marker load failed`,
         })
 
@@ -3076,7 +3076,7 @@ describe(`a failed join load under an ordered filtered window`, () => {
         await query.utils.setWindow({ offset: 6, limit: 2 })
         await flushPromises()
         expect(ids(), `the window moves after the failure`).toEqual([7, 8])
-        expect(query.errors.error, `the later load clears it`).toBeNull()
+        expect(query.health.error, `the later load clears it`).toBeNull()
         expect(query.status).toBe(`ready`)
       } finally {
         console.error = consoleError
@@ -3089,7 +3089,7 @@ describe(`a failed join load under an ordered filtered window`, () => {
   )
 })
 
-describe(`root request errors`, () => {
+describe(`root request health`, () => {
   it(`a failed root load after initial-query readiness is a request error that clears when a later load settles`, async () => {
     const outcomes: Array<`ok` | `fail`> = []
     const source = createCollection<Row, number>({
@@ -3115,12 +3115,12 @@ describe(`root request errors`, () => {
         .orderBy(({ row }) => row.id)
         .limit(2),
     )
-    expect(query.errors, `the query exposes an error tree`).toBeDefined()
+    expect(query.health, `the query exposes a health tree`).toBeDefined()
     const consoleError = console.error
     console.error = () => {}
     try {
       await query.preload()
-      expect(query.errors.hasErrors).toBe(false)
+      expect(query.health.hasErrors).toBe(false)
 
       outcomes.push(`fail`)
       await Promise.resolve(
@@ -3128,12 +3128,12 @@ describe(`root request errors`, () => {
       ).catch(() => undefined)
       await flushPromises()
       expect(query.status).toBe(`ready`)
-      expect(query.errors.error).toMatchObject({ message: `root load failed` })
-      expect(source.errors.hasErrors).toBe(false)
+      expect(query.health.error).toMatchObject({ message: `root load failed` })
+      expect(source.health.hasErrors).toBe(false)
 
       await query.utils.setWindow({ offset: 8, limit: 2 })
       await flushPromises()
-      expect(query.errors.hasErrors).toBe(false)
+      expect(query.health.hasErrors).toBe(false)
     } finally {
       console.error = consoleError
       await query.cleanup()
@@ -3228,7 +3228,7 @@ describe(`overlapping root loads`, () => {
           else loads[load]!.reject(new Error(`load ${load} failed`))
           await flushPromises()
           expect(
-            query.errors.error?.message ?? null,
+            query.health.error?.message ?? null,
             `after load ${load} settles`,
           ).toBe(model[step])
           expect(query.status).toBe(`ready`)
@@ -3253,7 +3253,7 @@ describe(`overlapping root loads`, () => {
           ).toBeGreaterThan(2)
           expect(started).toBeGreaterThan(2)
           expect(
-            query.errors.error?.message ?? null,
+            query.health.error?.message ?? null,
             `after a later load succeeds`,
           ).toBeNull()
         }
@@ -3421,7 +3421,7 @@ describe(`on-demand reload`, () => {
           expectedOnDemandReload(history, 2),
         )
         expect(query.status).toBe(`ready`)
-        expect(source.errors.hasErrors).toBe(false)
+        expect(source.health.hasErrors).toBe(false)
       } finally {
         await query.cleanup()
         await source.cleanup()
@@ -3546,7 +3546,7 @@ describe(`on-demand first load after query readiness`, () => {
             .join({ lazy }, ({ eager, lazy }) => eq(eager.id, lazy.id)),
     )
     const lazyNode = () =>
-      query.errors.sources.find((node) => node.alias === `lazy`)!
+      query.health.sources.find((node) => node.alias === `lazy`)!
     const cut = (): LateFirstLoadCut => ({
       queryStatus: query.status,
       rows: query.status === `ready` ? query.size : null,
@@ -3574,7 +3574,7 @@ describe(`on-demand first load after query readiness`, () => {
       await flushPromises()
       expect(cut(), `after the step`).toEqual(model.afterStep)
       expect(
-        findProblems(query.errors).some((node) => node.alias === `lazy`),
+        findProblems(query.health).some((node) => node.alias === `lazy`),
       ).toBe(true)
 
       if (model.afterReload === `rejects`) {
@@ -3584,7 +3584,7 @@ describe(`on-demand first load after query readiness`, () => {
         await query.reload()
         await flushPromises()
         expect(cut(), `after the query's reload`).toEqual(model.afterReload)
-        expect(findProblems(query.errors)).toEqual([])
+        expect(findProblems(query.health)).toEqual([])
       }
     } finally {
       console.error = consoleError
@@ -3607,7 +3607,7 @@ describe(`on-demand first load after query readiness`, () => {
  * stays healthy. A request error clears only when a load that started after
  * the failure succeeds; a source's reload loads the window again and clears
  * it when that replay succeeds. The source's own problems after readiness
- * are error tree detail and never change the query's status; its crash
+ * are health tree detail and never change the query's status; its crash
  * crashes the query.
  *
  * The provider has rows 1 to 99. It answers a request without a limit with
@@ -3852,11 +3852,11 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
       expect(query.status, `${label}: query status`).toBe(model.gate)
       if (model.gate === `ready`) {
         expect(
-          query.errors.error?.message ?? null,
+          query.health.error?.message ?? null,
           `${label}: request error`,
         ).toBe(model.requestError)
       }
-      const sourceNode = query.errors.sources[0]!
+      const sourceNode = query.health.sources[0]!
       if (!model.source.crashed) {
         expect(
           sourceNode.failureReason?.message ?? null,
@@ -4386,12 +4386,12 @@ async function runLazyHistory(
     await flushPromises()
     report()
     let announcements = 0
-    query.on(`errors:change`, () => announcements++)
+    query.on(`health:change`, () => announcements++)
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${JSON.stringify(step)}`
       // A demand change that leaves the projected tree as it was keeps the
       // tree's identity and announces nothing.
-      const treeBefore = query.errors
+      const treeBefore = query.health
       const factsBefore = JSON.stringify(project(treeBefore))
       const announcedBefore = announcements
       // Only a demand change can leave every fact as it was; a reload, a
@@ -4442,13 +4442,13 @@ async function runLazyHistory(
       deriveLazyGate(model)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
-      expect(query.errors, `${label}: stable read`).toBe(query.errors)
+      expect(query.health, `${label}: stable read`).toBe(query.health)
       if (
         demandOnly &&
         !replayBefore &&
-        JSON.stringify(project(query.errors)) === factsBefore
+        JSON.stringify(project(query.health)) === factsBefore
       ) {
-        expect(query.errors, `${label}: unchanged tree keeps identity`).toBe(
+        expect(query.health, `${label}: unchanged tree keeps identity`).toBe(
           treeBefore,
         )
         expect(
@@ -4464,7 +4464,7 @@ async function runLazyHistory(
         (model.replayActive || model.replayFailed) &&
         step.kind !== `settle-fail`
       if (model.gate === `ready` && !replayOpen) {
-        expect(query.errors.error !== null, `${label}: request error`).toBe(
+        expect(query.health.error !== null, `${label}: request error`).toBe(
           model.failed.size > 0 || model.replayFailed,
         )
       }
@@ -4749,7 +4749,7 @@ describe(`lazy join demand grammar`, () => {
  * load after that readiness, because the readiness follows the Effect's
  * settled loads; like every other source problem after it, that is a sync
  * problem on the source's node: it does not dispose the Effect, and
- * `onErrorsChange` receives the error tree, with one node per source alias.
+ * `onHealthChange` receives the health tree, with one node per source alias.
  *
  * The lane crosses `skipInitial`, the source mode, and when the source fails.
  * Before initial-query readiness, an eager source has not called `markReady()`, and an
@@ -4758,7 +4758,7 @@ describe(`lazy join demand grammar`, () => {
  * still in its initial sync and sets the `error` of an eager source after
  * Collection readiness, or it crashes, or it reaches Collection readiness
  * (on-demand only) and then reports a `failureReason`. Every history also checks that one change reaches
- * `onErrorsChange` once: no two reported trees are the same object.
+ * `onHealthChange` once: no two reported trees are the same object.
  */
 describe(`effect errors`, () => {
   type EffectHistory = {
@@ -4813,7 +4813,7 @@ describe(`effect errors`, () => {
       },
     })
     const sourceErrors: Array<Error> = []
-    const trees: Array<ErrorTreeNode> = []
+    const trees: Array<HealthNode> = []
     const delivered: Array<unknown> = []
     const effect = createEffect({
       query: (q) => q.from({ row: source }),
@@ -4822,7 +4822,7 @@ describe(`effect errors`, () => {
         delivered.push(...events.map((event) => event.key))
       },
       onSourceError: (error) => sourceErrors.push(error),
-      onErrorsChange: (errors) => trees.push(errors),
+      onHealthChange: (health) => trees.push(health),
     })
     const consoleError = console.error
     console.error = () => {}
@@ -4852,7 +4852,7 @@ describe(`effect errors`, () => {
 
       if (failure === `report after gate`) {
         // An on-demand source reaches its own Collection readiness after the
-        // Effect's: a status change that must reach onErrorsChange once.
+        // Effect's: a status change that must reach onHealthChange once.
         if (syncMode === `on-demand`) params.markReady()
         await flushPromises()
         params.reportError(new Error(`stalled`))
@@ -4950,7 +4950,7 @@ describe(`effect over a source that already stopped`, () => {
       ].reduce((sum, set) => sum + set.size, 0)
     const listenersBefore = listeners()
     const sourceErrors: Array<Error> = []
-    const trees: Array<ErrorTreeNode> = []
+    const trees: Array<HealthNode> = []
     const consoleError = console.error
     console.error = () => {}
     const effect = createEffect({
@@ -4958,7 +4958,7 @@ describe(`effect over a source that already stopped`, () => {
       skipInitial,
       onBatch: () => {},
       onSourceError: (error) => sourceErrors.push(error),
-      onErrorsChange: (errors) => trees.push(errors),
+      onHealthChange: (health) => trees.push(health),
     })
     try {
       await flushPromises()
@@ -5040,7 +5040,7 @@ describe(`effect load failures`, () => {
       parentParams.commit()
     }
     const sourceErrors: Array<Error> = []
-    const trees: Array<ErrorTreeNode> = []
+    const trees: Array<HealthNode> = []
     const effect = createEffect({
       query: (q) =>
         q
@@ -5051,7 +5051,7 @@ describe(`effect load failures`, () => {
       skipInitial,
       onBatch: () => {},
       onSourceError: (error) => sourceErrors.push(error),
-      onErrorsChange: (errors) => trees.push(errors),
+      onHealthChange: (health) => trees.push(health),
     })
     const consoleError = console.error
     console.error = () => {}
@@ -5083,7 +5083,7 @@ describe(`effect load failures`, () => {
  * Two includes that read one Collection under the same alias are two include
  * nodes, and the query fixes that shape, so a cleaned-up query keeps them. A
  * per-row child Collection that starts changes nothing in the tree, so it
- * emits no `errors:change`; otherwise every new parent row would rebuild it.
+ * emits no `health:change`; otherwise every new parent row would rebuild it.
  */
 // A pooled view's tree keeps node identity, as every tree does, whatever
 // alias its query gives the source, including the alias `root` that the
@@ -5118,13 +5118,13 @@ describe(`pooled view node identity`, () => {
     const subscription = view.subscribeChanges(() => {})
     try {
       await source.preload()
-      const first = view.errors
+      const first = view.health
       expect(first.sources.map((node) => node.alias)).toEqual([alias])
-      expect(view.errors, `a second read gives the same tree`).toBe(first)
+      expect(view.health, `a second read gives the same tree`).toBe(first)
       params.reportError(new Error(`stalled`))
-      const reported = view.errors
+      const reported = view.health
       expect(reported).not.toBe(first)
-      expect(view.errors, `the changed tree is stable too`).toBe(reported)
+      expect(view.health, `the changed tree is stable too`).toBe(reported)
       expect(reported.sources[0]!.failureReason?.message).toBe(`stalled`)
     } finally {
       subscription.unsubscribe()
@@ -5175,25 +5175,25 @@ describe(`include nodes`, () => {
       A.write({ id: 1, parentId: 1 })
       A.ready()
       await preload
-      const includes = () => query.errors.sources.slice(1)
+      const includes = () => query.health.sources.slice(1)
       expect(includes().map((node) => [node.alias, node.kind])).toEqual([
         [`a`, `include`],
         [`a`, `include`],
       ])
 
       let events = 0
-      const stop = query.on(`errors:change`, () => {
+      const stop = query.on(`health:change`, () => {
         events++
       })
       // New parent rows start healthy child Collections. Every tree change is
       // announced, so with no event the tree is the same object.
-      const treeBefore = query.errors
+      const treeBefore = query.health
       B.write({ id: 3, parentId: 3 })
       B.write({ id: 4, parentId: 4 })
       await flushPromises()
       stop()
-      expect(events, `healthy children emit no errors:change`).toBe(0)
-      expect(query.errors, `no tree change without an event`).toBe(treeBefore)
+      expect(events, `healthy children emit no health:change`).toBe(0)
+      expect(query.health, `no tree change without an event`).toBe(treeBefore)
 
       // The tree's shape comes from the query, so a cleaned-up query keeps
       // its include nodes.

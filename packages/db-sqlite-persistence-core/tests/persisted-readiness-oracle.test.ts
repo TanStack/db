@@ -256,8 +256,8 @@ function networkFirst(id: string, initialRender = true) {
 function observe(collection: ReturnType<typeof networkFirst>[`collection`]) {
   return {
     status: collection.status,
-    error: collection.errors.error?.message ?? null,
-    failureReason: collection.errors.failureReason?.message ?? null,
+    error: collection.health.error?.message ?? null,
+    failureReason: collection.health.failureReason?.message ?? null,
     rows:
       collection.status === `ready`
         ? collection.toArray.map((row) => row.id).sort()
@@ -335,7 +335,7 @@ describe(`persisted readiness oracle`, () => {
       fixture.load.resolve([])
       await vi.advanceTimersByTimeAsync(0)
       expect(collection.status).toBe(`crashed`)
-      expect(collection.errors.error?.message).toMatch(/reportError/)
+      expect(collection.health.error?.message).toMatch(/reportError/)
     } finally {
       consoleError.mockRestore()
       await collection.cleanup({ dependents: true })

@@ -5,7 +5,7 @@ import {
   UNSUBSCRIBED_GC_FLOOR_MS,
   describeProblem,
 } from '../collection/lifecycle.js'
-import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
+import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { makeComparator } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getWhereExpression } from './ir.js'
@@ -22,7 +22,7 @@ import type {
   CollectionDependent,
   CollectionErrorInfo,
   CollectionStatus,
-  ErrorTreeNode,
+  HealthNode,
 } from '../types.js'
 import type {
   CollectionEventHandler,
@@ -554,10 +554,10 @@ class PooledLiveQuery {
 
   private endedProblem: CollectionErrorInfo | undefined
 
-  /** The same error tree a live-query Collection over this source exposes. */
-  get errors(): ErrorTreeNode {
+  /** The same health tree a live-query Collection over this source exposes. */
+  get health(): HealthNode {
     // Cache keys apart from the alias, which a query may name `root`.
-    const source = buildErrorTree(
+    const source = buildHealthTree(
       this.source,
       { alias: this.alias, id: `source` },
       this,
@@ -575,7 +575,7 @@ class PooledLiveQuery {
             ),
           ))
         : null)
-    return errorTreeNode(this, `view`, {
+    return healthNode(this, `view`, {
       alias: `root`,
       collectionId: this.source.id,
       kind: `live-query`,

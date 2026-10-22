@@ -176,7 +176,7 @@ describe(`RxDB Integration`, () => {
           expect(collection.status).toBe(outcome === `ok` ? `ready` : `error`)
           if (outcome === `ok`) expect(collection.size).toBe(1)
           else
-            expect(collection.errors.error?.message).toBe(`reload query failed`)
+            expect(collection.health.error?.message).toBe(`reload query failed`)
         } finally {
           query.mockRestore()
           await collection.cleanup()
@@ -229,8 +229,8 @@ describe(`RxDB Integration`, () => {
             changes.error(streamError)
             expect(collection.status).toBe(`ready`)
             expect(collection.size).toBe(1)
-            expect(collection.errors.error?.message).toBe(streamError.message)
-            expect(collection.errors.failureReason).toBeNull()
+            expect(collection.health.error?.message).toBe(streamError.message)
+            expect(collection.health.failureReason).toBeNull()
           }
           expect(OPEN_RXDB_SUBSCRIPTIONS.get(rxCollection)?.size ?? 0).toBe(0)
         } finally {

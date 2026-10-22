@@ -882,7 +882,7 @@ it('reports connection closure immediately and supports fresh Collections', asyn
     // above it, even one that was already ready. Both trees explain why.
     expect(old.status).toBe('crashed')
     expect(live.status).toBe('crashed')
-    expect(live.errors.sources[0]).toMatchObject({
+    expect(live.health.sources[0]).toMatchObject({
       status: 'crashed',
       error: expect.anything(),
     })
@@ -891,7 +891,7 @@ it('reports connection closure immediately and supports fresh Collections', asyn
     await Channel.deliver()
     expect(old.status).toBe('crashed')
     expect(live.status).toBe('crashed')
-    expect(live.errors.hasErrors).toBe(true)
+    expect(live.health.hasErrors).toBe(true)
     expect(fresh.status).toBe('ready')
     assertRows(
       fresh.values(),

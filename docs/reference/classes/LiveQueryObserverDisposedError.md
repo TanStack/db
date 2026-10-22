@@ -3,7 +3,7 @@ id: LiveQueryObserverDisposedError
 title: LiveQueryObserverDisposedError
 ---
 
-Defined in: [packages/db/src/errors.ts:182](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L182)
+Defined in: [packages/db/src/errors.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L212)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:182](https://github.com/TanStack/db/blob/
 new LiveQueryObserverDisposedError(): LiveQueryObserverDisposedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L183)
+Defined in: [packages/db/src/errors.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L213)
 
 #### Returns
 

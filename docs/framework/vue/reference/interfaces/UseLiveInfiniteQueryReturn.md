@@ -33,23 +33,13 @@ Defined in: [useLiveInfiniteQuery.ts:52](https://github.com/TanStack/db/blob/mai
 
 ***
 
-### error
-
-```ts
-error: ComputedRef<unknown>;
-```
-
-Defined in: [useLiveInfiniteQuery.ts:70](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L70)
-
-***
-
 ### fetchNextPage()
 
 ```ts
 fetchNextPage: () => Promise<void>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:67](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L67)
+Defined in: [useLiveInfiniteQuery.ts:69](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L69)
 
 #### Returns
 
@@ -63,7 +53,17 @@ Defined in: [useLiveInfiniteQuery.ts:67](https://github.com/TanStack/db/blob/mai
 hasNextPage: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:68](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L68)
+Defined in: [useLiveInfiniteQuery.ts:70](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L70)
+
+***
+
+### health
+
+```ts
+health: ComputedRef<HealthNode | undefined>;
+```
+
+Defined in: [useLiveInfiniteQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L72)
 
 ***
 
@@ -77,13 +77,15 @@ Defined in: [useLiveInfiniteQuery.ts:64](https://github.com/TanStack/db/blob/mai
 
 ***
 
-### isError
+### isCrashed
 
 ```ts
-isError: ComputedRef<boolean>;
+isCrashed: ComputedRef<boolean>;
 ```
 
 Defined in: [useLiveInfiniteQuery.ts:63](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L63)
+
+Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover.
 
 ***
 
@@ -93,7 +95,7 @@ Defined in: [useLiveInfiniteQuery.ts:63](https://github.com/TanStack/db/blob/mai
 isFetchingNextPage: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:69](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L69)
+Defined in: [useLiveInfiniteQuery.ts:71](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L71)
 
 ***
 
@@ -103,7 +105,7 @@ Defined in: [useLiveInfiniteQuery.ts:69](https://github.com/TanStack/db/blob/mai
 isIdle: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:62](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L62)
+Defined in: [useLiveInfiniteQuery.ts:59](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L59)
 
 ***
 
@@ -117,13 +119,15 @@ Defined in: [useLiveInfiniteQuery.ts:57](https://github.com/TanStack/db/blob/mai
 
 ***
 
-### isPersistedReady
+### isLoadingError
 
 ```ts
-isPersistedReady: ComputedRef<boolean>;
+isLoadingError: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:60](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L60)
+Defined in: [useLiveInfiniteQuery.ts:61](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L61)
+
+The first load failed: there is nothing to show.
 
 ***
 
@@ -137,13 +141,25 @@ Defined in: [useLiveInfiniteQuery.ts:58](https://github.com/TanStack/db/blob/mai
 
 ***
 
+### isSyncError
+
+```ts
+isSyncError: ComputedRef<boolean>;
+```
+
+Defined in: [useLiveInfiniteQuery.ts:66](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L66)
+
+The data is shown, and a sync problem or failed request is in `health`.
+
+***
+
 ### pageParams
 
 ```ts
 pageParams: ComputedRef<number[]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:66](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L66)
+Defined in: [useLiveInfiniteQuery.ts:68](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L68)
 
 ***
 
@@ -153,27 +169,7 @@ Defined in: [useLiveInfiniteQuery.ts:66](https://github.com/TanStack/db/blob/mai
 pages: ComputedRef<InferResultType<TContext>[number][][]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:65](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L65)
-
-***
-
-### persistedError
-
-```ts
-persistedError: ComputedRef<unknown>;
-```
-
-Defined in: [useLiveInfiniteQuery.ts:61](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L61)
-
-***
-
-### persistedStatus
-
-```ts
-persistedStatus: ComputedRef<LiveQueryPersistedStatus>;
-```
-
-Defined in: [useLiveInfiniteQuery.ts:59](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L59)
+Defined in: [useLiveInfiniteQuery.ts:67](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L67)
 
 ***
 

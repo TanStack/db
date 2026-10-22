@@ -27,8 +27,8 @@ import type {
   CollectionStatus,
   Context,
   DbClient,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -324,9 +324,9 @@ type UseLiveQueryFlags = {
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: boolean
   isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: boolean
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 /**

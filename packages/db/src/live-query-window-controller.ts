@@ -9,7 +9,7 @@ import { deepEquals } from './utils.js'
 import { codedMessage, devBuild } from './error-message.js'
 import type { LiveQueryObserver } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
-import type { CollectionStatus, ErrorTreeNode } from './types.js'
+import type { CollectionStatus, HealthNode } from './types.js'
 import type {
   Context,
   InitialQueryBuilder,
@@ -526,10 +526,10 @@ export interface LiveQueryWindowSnapshot<
   isCrashed: boolean
   isCleanedUp: boolean
   isEnabled: boolean
-  /** The data is shown, and a sync problem or failed page load is in `errors`. */
+  /** The data is shown, and a sync problem or failed page load is in `health`. */
   isSyncError: boolean
-  /** The error tree for the collection and its dependencies, or `undefined` when disabled. */
-  errors: ErrorTreeNode | undefined
+  /** The health tree for the collection and its dependencies, or `undefined` when disabled. */
+  health: HealthNode | undefined
 }
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
@@ -689,7 +689,7 @@ class LiveQueryWindowControllerImpl<
       isCleanedUp: observerSnapshot.isCleanedUp,
       isEnabled: observerSnapshot.isEnabled,
       isSyncError: observerSnapshot.isSyncError,
-      errors: observerSnapshot.errors,
+      health: observerSnapshot.health,
     }
     this.cachedFrom = {
       observerSnapshot,
@@ -714,7 +714,7 @@ class LiveQueryWindowControllerImpl<
         const windowResult = this.ensureLeaseActive(this.committedPageCount)
         observerUnsub = this.observer.subscribe(() => this.notify())
         this.observerUnsub = observerUnsub
-        // A failed load is a request error in the error tree.
+        // A failed load is a request error in the health tree.
         if (windowResult !== true) void windowResult.catch(() => undefined)
       } catch (error) {
         observerUnsub?.()

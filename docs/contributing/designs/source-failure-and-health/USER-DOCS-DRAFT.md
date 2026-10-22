@@ -2,7 +2,7 @@
 
 > **Superseded (2026-10-16).** The error surface was redesigned: status
 > `crashed`, node `failureReason`/`error`, `fail()`, `reload()`, and
-> `collection.errors`. Read `error-surface/README.md` and `error-surface/RULES.md`,
+> `collection.health`. Read `error-surface/README.md` and `error-surface/RULES.md`,
 > the shipped `docs/guides/error-handling.md`, and
 > `packages/db/src/query/live/ARCHITECTURE.md` laws 14, 16, and 17.
 
@@ -14,14 +14,14 @@ guides.
 
 ---
 
-## Guide: errors, readiness, and stale data
+## Guide: health, readiness, and stale data
 
 A Collection answers two separate questions:
 
 | Question | Where to look | Changes when |
 | --- | --- | --- |
 | Can I show this data yet? | `status`, `isReady`, `isError` | Only during the initial load of a sync run |
-| Is this data still being kept up to date? | `errors` (the error tree) | Any time a source reports a problem or recovers |
+| Is this data still being kept up to date? | `health` (the health tree) | Any time a source reports a problem or recovers |
 
 ### The initial load
 
@@ -42,25 +42,25 @@ await todosQuery.preload()
 
 Once the data has loaded, it stays. If the source later loses its connection or
 a refresh fails, `status` stays `ready` and your rows stay on screen, even as
-they get older. The problem appears in `errors` instead.
+they get older. The problem appears in `health` instead.
 
 > **Important:** `isError` only describes the initial load. To show a
-> "data may be out of date" banner, check `errors.hasErrors`.
+> "data may be out of date" banner, check `health.hasErrors`.
 
 ```tsx
 function TaskList() {
-  const { data, isLoading, isError, errors } = useLiveQuery((q) =>
+  const { data, isLoading, isError, health } = useLiveQuery((q) =>
     q
       .from({ task: tasks })
       .join({ user: users }, ({ task, user }) => eq(task.assigneeId, user.id)),
   )
 
   if (isLoading) return <Spinner />
-  if (isError) return <LoadFailed error={errors.error ?? errors.sources[0]?.error} />
+  if (isError) return <LoadFailed error={health.error ?? health.sources[0]?.error} />
 
   return (
     <>
-      {errors.hasErrors && <StaleBanner errors={errors} />}
+      {health.hasErrors && <StaleBanner health={health} />}
       {data.map((row) => (
         <TaskRow key={row.task.id} {...row} />
       ))}
@@ -69,14 +69,14 @@ function TaskList() {
 }
 ```
 
-### The error tree
+### The health tree
 
-Every live query result includes `errors`. It always has the same shape for a
+Every live query result includes `health`. It always has the same shape for a
 given query: one node for the live query, and one node for each source in the
 query, in query order. Healthy nodes are present too, with `isError: false`.
 
 ```ts
-type ErrorTreeNode = {
+type HealthNode = {
   alias: string                 // the query alias, or "root"
   collectionId: string
   kind: 'source' | 'live-query' | 'include'
@@ -85,7 +85,7 @@ type ErrorTreeNode = {
   hasErrors: boolean            // this node or any node below it
   error: CollectionErrorInfo | null
   instances?: { total: number; inError: number } // include nodes only
-  sources: Array<ErrorTreeNode>
+  sources: Array<HealthNode>
 }
 
 type CollectionErrorInfo = {
@@ -153,15 +153,15 @@ A collection used twice in one query, for example a self-join, appears once per
 alias. An include has one node for all of its per-row child collections, with
 `instances` counting how many are in error.
 
-`errors` is plain data apart from `cause`, so you can log or send it:
+`health` is plain data apart from `cause`, so you can log or send it:
 
 ```ts
 useEffect(() => {
-  if (errors.hasErrors) reportToMonitoring(JSON.parse(JSON.stringify(errors)))
-}, [errors])
+  if (health.hasErrors) reportToMonitoring(JSON.parse(JSON.stringify(health)))
+}, [health])
 ```
 
-Server-side rendering does not transfer `errors`. The client builds its own
+Server-side rendering does not transfer `health`. The client builds its own
 tree from its own sync.
 
 ### Effects
@@ -175,8 +175,8 @@ createEffect({
   onBatch: (events) => {
     /* ... */
   },
-  onHealthChange: (errors) => {
-    if (errors.hasErrors) pauseAutomations()
+  onHealthChange: (health) => {
+    if (health.hasErrors) pauseAutomations()
     else resumeAutomations()
   },
 })
@@ -253,5 +253,5 @@ warning.
   when both change. This is proposed, not checked.
 - Follower tabs: how a follower learns that the leader's upstream failed.
 - Pooled live queries that share sources.
-- Whether `errors` should be a new object on every change or keep stable
+- Whether `health` should be a new object on every change or keep stable
   node identities for memoization.

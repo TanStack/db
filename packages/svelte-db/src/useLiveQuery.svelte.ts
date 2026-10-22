@@ -23,8 +23,8 @@ import type {
   Context,
   DbClient,
   DeferredLiveQueryCollections,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -54,7 +54,7 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isIdle - True when query hasn't started yet
  * @property isLoadingError - True when the first load failed
  * @property isCrashed - True when local storage or an invariant broke
- * @property isSyncError - True when data is shown and `errors` has a problem
+ * @property isSyncError - True when data is shown and `health` has a problem
  * @property isCleanedUp - True when query has been cleaned up
  */
 export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
@@ -70,9 +70,9 @@ export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: boolean
   isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: boolean
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -106,9 +106,9 @@ export interface UseLiveQueryReturnWithCollection<
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: boolean
   isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: boolean
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 type MaybeGetter<T> = T | (() => T)
@@ -470,7 +470,7 @@ export function useLiveQuery(
 
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
-  let errors = $state.raw<ErrorTreeNode | undefined>(initialSnapshot.errors)
+  let health = $state.raw<HealthNode | undefined>(initialSnapshot.health)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,
@@ -478,7 +478,7 @@ export function useLiveQuery(
   ) => {
     const snapshot = observer.getSnapshot()
     status = snapshot.status as CollectionStatus
-    errors = snapshot.errors
+    health = snapshot.health
     untrack(() => {
       if (changes && changes.length > 0) {
         for (const change of changes) {
@@ -576,10 +576,10 @@ export function useLiveQuery(
       return status === `cleaned-up`
     },
     get isSyncError() {
-      return status === `ready` && errors?.hasErrors === true
+      return status === `ready` && health?.hasErrors === true
     },
-    get errors() {
-      return errors
+    get health() {
+      return health
     },
   }
 }

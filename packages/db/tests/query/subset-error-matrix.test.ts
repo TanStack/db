@@ -361,7 +361,7 @@ describe(`loadSubset failure matrix`, () => {
             // on the live query's node; the query keeps its status and rows.
             expect(live.status).toBe(`ready`)
             if (path === `lazy`) {
-              expect(live.errors).toMatchObject({
+              expect(live.health).toMatchObject({
                 hasErrors: true,
                 failureReason: null,
                 error: expect.anything(),

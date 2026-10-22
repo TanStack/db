@@ -1,8 +1,8 @@
-# Candidate: the source health channel and live-query error tree
+# Candidate: the source health channel and live-query health tree
 
 > **Superseded (2026-10-16).** The error surface was redesigned: status
 > `crashed`, node `failureReason`/`error`, `fail()`, `reload()`, and
-> `collection.errors`. Read `error-surface/README.md` and `error-surface/RULES.md`,
+> `collection.health`. Read `error-surface/README.md` and `error-surface/RULES.md`,
 > the shipped `docs/guides/error-handling.md`, and
 > `packages/db/src/query/live/ARCHITECTURE.md` laws 14, 16, and 17.
 
@@ -31,7 +31,7 @@ guides, and `packages/db/src/query/live/ARCHITECTURE.md` laws 16 and 17.
   disposed.
 - H10 A persisted collection keeps serving local rows when upstream sync fails
   after ready; health says upstream is degraded.
-- H11 `useLiveQuery` returns an `errors` structure describing the tree of
+- H11 `useLiveQuery` returns an `health` structure describing the tree of
   collections it depends on. It always has the same shape, shows whether each
   node is in error, and carries detailed error info when in error, so apps
   can parse it.
@@ -101,20 +101,20 @@ type CollectionErrorInfo = {
 `phase: 'initial'` mirrors a gate `error`; `phase: 'sync'` is a post-ready
 health report; `phase: 'request'` is a subset load failure (H6).
 
-### The error tree
+### The health tree
 
-Every live-query Collection exposes `errors`, and every framework hook returns
+Every live-query Collection exposes `health`, and every framework hook returns
 it beside `data`:
 
 ```ts
-type ErrorTreeNode = {
+type HealthNode = {
   collectionId: string
   kind: 'source' | 'live-query'
   status: CollectionStatus          // the node's gate
   isError: boolean                  // this node: gate error, health error, or request error
   hasErrors: boolean                // this node or any descendant
   error: CollectionErrorInfo | null // detail when isError
-  sources: Array<ErrorTreeNode>     // dependencies; [] for a base source
+  sources: Array<HealthNode>     // dependencies; [] for a base source
 }
 ```
 
@@ -127,11 +127,11 @@ type ErrorTreeNode = {
 - A post-ready request failure (H6) sets `error` with `phase: 'request'` on
   the live-query node that issued the request. The source stays healthy.
 - `isError` on the hook result keeps its current meaning: the gate is
-  `error`. `errors.hasErrors` reports anything anywhere in the tree.
+  `error`. `health.hasErrors` reports anything anywhere in the tree.
 
 ### Effects
 
-`createEffect({ onSourceHealth?: (errors: ErrorTreeNode) => void })`. After
+`createEffect({ onSourceHealth?: (health: HealthNode) => void })`. After
 the first ready a health change calls it; the Effect is not disposed. Before
 the first ready, a gate error still disposes the Effect through
 `onSourceError`.

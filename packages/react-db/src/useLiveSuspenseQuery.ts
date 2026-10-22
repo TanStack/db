@@ -8,8 +8,8 @@ import type {
   Collection,
   Context,
   DbClient,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -156,7 +156,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 // Overload 2: Accept config object
@@ -166,7 +166,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 // Overload 3: Accept legacy config object
@@ -177,7 +177,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 // Overload 4: Accept pre-created live query collection
@@ -191,7 +191,7 @@ export function useLiveSuspenseQuery<
   state: Map<TKey, TResult>
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 // Overload 5: Accept pre-created live query collection with singleResult: true
@@ -205,7 +205,7 @@ export function useLiveSuspenseQuery<
   state: Map<TKey, TResult>
   data: TResult | undefined
   collection: Collection<TResult, TKey, TUtils> & SingleResult
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 // Implementation - uses useLiveQuery internally and adds Suspense logic
@@ -285,7 +285,7 @@ export function useLiveSuspenseQuery(
   }
 
   // A failed first load throws only before the first ready; later sync
-  // problems surface in `errors` with the data kept (as in TanStack Query).
+  // problems surface in `health` with the data kept (as in TanStack Query).
   // A crash throws at any time: the Collection can no longer serve reads.
   if (
     collectionStatus === `crashed` ||
@@ -293,7 +293,7 @@ export function useLiveSuspenseQuery(
   ) {
     promiseRef.current = null
     throw (
-      result.collection.errors.error?.cause ??
+      result.collection.health.error?.cause ??
       new Error(`Collection "${result.collection.id}" failed to load`)
     )
   }
@@ -356,6 +356,6 @@ export function useLiveSuspenseQuery(
     state: result.state,
     data: result.data,
     collection: result.collection,
-    errors: result.errors,
+    health: result.health,
   }
 }

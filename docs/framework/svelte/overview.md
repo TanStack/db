@@ -103,7 +103,7 @@ For ordered, paginated data with live updates, use `useLiveInfiniteQuery`:
 {/if}
 ```
 
-`fetchNextPage()` returns a promise that resolves after the page request settles. A failed page load does not reject the promise or change `status`; it appears as a request error in `query.errors`.
+`fetchNextPage()` returns a promise that resolves after the page request settles. A failed page load does not reject the promise or change `status`; it appears as a request error in `query.health`.
 
 The query must include `orderBy`. The dependency array is available only with
 the query-function form. You can also pass an ordered, pre-created live query

@@ -22,8 +22,8 @@ import type {
   Collection,
   CollectionStatus,
   Context,
-  ErrorTreeNode,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -50,9 +50,9 @@ type UseLiveQueryFlags = {
   /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
   isCrashed: boolean
   isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: boolean
-  errors: ErrorTreeNode | undefined
+  health: HealthNode | undefined
 }
 
 /**
@@ -345,7 +345,7 @@ export function useLiveQuery(
       name: `TanstackDBStatus`,
     },
   )
-  const [errors, setErrors] = createSignal<ErrorTreeNode | undefined>(undefined)
+  const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -409,7 +409,7 @@ export function useLiveQuery(
         return []
       }
       setStatus(currentCollection.status)
-      setErrors(currentCollection.errors)
+      setHealth(currentCollection.health)
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWait = {
@@ -457,7 +457,7 @@ export function useLiveQuery(
         }
         syncDataFromCollection(currentCollection)
         setStatus(currentCollection.status)
-        setErrors(currentCollection.errors)
+        setHealth(currentCollection.health)
       })
       return data
     },
@@ -472,7 +472,7 @@ export function useLiveQuery(
     const currentCollection = collection()
     if (!currentCollection) {
       setStatus(`disabled` as const)
-      setErrors(undefined)
+      setHealth(undefined)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -519,7 +519,7 @@ export function useLiveQuery(
           syncDataFromCollection(currentCollection)
           const snapshot = observer.getSnapshot()
           setStatus(snapshot.status)
-          setErrors(snapshot.errors)
+          setHealth(snapshot.health)
         })
       },
     )
@@ -534,7 +534,7 @@ export function useLiveQuery(
       syncDataFromCollection(currentCollection)
       const snapshot = observer.getSnapshot()
       setStatus(snapshot.status)
-      setErrors(snapshot.errors)
+      setHealth(snapshot.health)
     })
 
     onCleanup(() => {
@@ -612,12 +612,12 @@ export function useLiveQuery(
     },
     isSyncError: {
       get() {
-        return status() === `ready` && errors()?.hasErrors === true
+        return status() === `ready` && health()?.hasErrors === true
       },
     },
-    errors: {
+    health: {
       get() {
-        return errors()
+        return health()
       },
     },
   })

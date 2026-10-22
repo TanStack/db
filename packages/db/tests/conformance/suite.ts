@@ -1123,13 +1123,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             expect(result.isLoadingError).toBe(kind === `fail`)
             expect(result.isCrashed).toBe(kind === `crash`)
             expect(result.isSyncError).toBe(false)
-            expect(result.errors?.hasErrors).toBe(true)
-            expect(result.errors?.failureReason).toBeNull()
-            expect(result.errors?.error).toMatchObject({
+            expect(result.health?.hasErrors).toBe(true)
+            expect(result.health?.failureReason).toBeNull()
+            expect(result.health?.error).toMatchObject({
               message: source.expectedError.message,
             })
             // The binding exposes the exact value the source failed with.
-            expect(result.errors?.error?.cause).toBe(source.expectedError)
+            expect(result.health?.error?.cause).toBe(source.expectedError)
           }
           h.unmount()
         },
@@ -1138,7 +1138,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
     // ---- sync problems after readiness -------------------------------
     // After readiness a sync problem never changes status, rows, or the
-    // load flags. It appears only in the error tree, on the source alias's
+    // load flags. It appears only in the health tree, on the source alias's
     // node, and sets `isSyncError`. `reportError()` sets the node's
     // `failureReason` and `reportHealthy()` clears it; `fail()` sets its
     // `error`, which only a new sync run clears, and after it every report
@@ -1153,7 +1153,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     // the model. Each step is observed after the driver's `flush` cut.
     scenario(
       `sync-errors-after-readiness`,
-      `sync problems after readiness appear only in the error tree`,
+      `sync problems after readiness appear only in the health tree`,
       async () => {
         type Problem = {
           field: `failureReason` | `error`
@@ -1176,7 +1176,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
         const observe = (step: string) => {
           const result = h.current()
-          const tree = result.errors
+          const tree = result.health
           expect(result.status, step).toBe(`ready`)
           expect(
             result.isLoadingError,

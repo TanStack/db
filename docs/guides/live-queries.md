@@ -426,14 +426,14 @@ function UserList() {
 
 ### Stale Data and the Error Tree
 
-Every live query hook also returns `errors`, an error tree with one node for
+Every live query hook also returns `health`, a health tree with one node for
 the query and one for each source alias. After the query is ready, a source
 that loses its sync connection keeps its rows, and `status` stays `ready`. The
-problem appears only in `errors`:
+problem appears only in `health`:
 
 ```tsx
 function UserList() {
-  const { data, isLoading, isError, errors } = useLiveQuery((q) =>
+  const { data, isLoading, isError, health } = useLiveQuery((q) =>
     q.from({ user: usersCollection }),
   )
 
@@ -442,7 +442,7 @@ function UserList() {
 
   return (
     <>
-      {errors?.hasErrors && <div>Users may be out of date</div>}
+      {health?.hasErrors && <div>Users may be out of date</div>}
       <ul>
         {data.map((user) => (
           <li key={user.id}>{user.name}</li>
@@ -455,7 +455,7 @@ function UserList() {
 
 > **Important:** `isError` means the query must restart: its initial load
 > failed, or a source crashed. To show a "data may be out of date" banner,
-> check `errors.hasErrors`. `useLiveSuspenseQuery` also returns `errors`, and
+> check `health.hasErrors`. `useLiveSuspenseQuery` also returns `health`, and
 > after its first render it never throws for these problems.
 
 See [Collection Status and Error States](./error-handling.md#collection-status-and-error-states)
@@ -508,7 +508,7 @@ const { data, isEnabled, status } = useLiveQuery({
 
 The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
-- `data`, `state`, `collection`, and `errors` are `undefined`
+- `data`, `state`, `collection`, and `health` are `undefined`
 - `isEnabled` is `false`
 - `isReady` is `true`
 - `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
@@ -2357,7 +2357,7 @@ const effect = createEffect({
 | `onExit` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row exiting the query result. |
 | `onBatch` | `(events, ctx) => void \| Promise<void>` (optional) | Called once per graph run with the full unfiltered batch of delta events. |
 | `onError` | `(error, event) => void` (optional) | Called when `onEnter`, `onUpdate`, `onExit`, or `onBatch` throws or rejects. |
-| `onErrorsChange` | `(errors) => void` (optional) | Called with the Effect's error tree when a source's sync errors or a request error change after the Effect's initial load. |
+| `onHealthChange` | `(health) => void` (optional) | Called with the Effect's health tree when a source's sync errors or a request error change after the Effect's initial load. |
 | `onSourceError` | `(error) => void` (optional) | Called when a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
 | `skipInitial` | `boolean` (optional) | When `true`, deltas from the initial data load are suppressed. Only subsequent changes fire handlers. Defaults to `false`. |
 
@@ -2479,7 +2479,7 @@ createEffect({
 })
 ```
 
-If a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`, the effect automatically disposes itself. Use `onSourceError` to handle this. Other problems after the effect's initial load do not dispose it; they reach `onErrorsChange`:
+If a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`, the effect automatically disposes itself. Use `onSourceError` to handle this. Other problems after the effect's initial load do not dispose it; they reach `onHealthChange`:
 
 ```ts
 createEffect({

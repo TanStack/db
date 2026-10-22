@@ -3,7 +3,7 @@ id: NonAggregateExpressionNotInGroupByError
 title: NonAggregateExpressionNotInGroupByError
 ---
 
-Defined in: [packages/db/src/errors.ts:947](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L947)
+Defined in: [packages/db/src/errors.ts:977](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L977)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:947](https://github.com/TanStack/db/blob/
 new NonAggregateExpressionNotInGroupByError(alias): NonAggregateExpressionNotInGroupByError;
 ```
 
-Defined in: [packages/db/src/errors.ts:948](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L948)
+Defined in: [packages/db/src/errors.ts:978](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L978)
 
 #### Parameters
 

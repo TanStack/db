@@ -240,7 +240,7 @@ same exact key.
 Exact-key and prefix invalidation refetch active eager and on-demand queries,
 then rematerialize their results. Overlapping subsets keep rows that another
 active subset still owns. A failed refetch retains current rows and records the
-error as the source node's `failureReason` in `collection.errors`. Cleaned-up or otherwise inactive queries
+error as the source node's `failureReason` in `collection.health`. Cleaned-up or otherwise inactive queries
 do not rematerialize.
 
 ## Predicate Push-Down (syncMode: "on-demand")

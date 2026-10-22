@@ -51,7 +51,7 @@ import type { QueryCollectionUtils } from '../src/query.js'
  */
 function reportedError(collection: {
   status: string
-  errors: {
+  health: {
     failureReason: { cause: unknown } | null
     error: { cause: unknown } | null
   }
@@ -59,7 +59,7 @@ function reportedError(collection: {
 }): unknown {
   return collection.status === `error`
     ? collection._lifecycle.getSyncError()
-    : (collection.errors.failureReason ?? collection.errors.error)?.cause
+    : (collection.health.failureReason ?? collection.health.error)?.cause
 }
 
 /**

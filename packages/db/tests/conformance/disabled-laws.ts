@@ -11,7 +11,7 @@ export function expectDisabledResult(
   expect(result.isReady).toBe(true)
   expect(result.isLoadingError).toBe(false)
   // A disabled query has no query definition, so it has no aliases to report.
-  expect(result.errors).toBeUndefined()
+  expect(result.health).toBeUndefined()
   if (representation === `absent`) {
     expect(result.data).toBeUndefined()
     expect(result.state).toBeUndefined()

@@ -7,7 +7,7 @@ title: hasLiveQueryWindowLeases
 function hasLiveQueryWindowLeases(target): boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:403](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L403)
+Defined in: [packages/db/src/live-query-window-controller.ts:396](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L396)
 
 **`Internal`**
 
