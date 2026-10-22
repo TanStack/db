@@ -18,6 +18,8 @@ type DemandSegment = {
   ready: LoadSubsetRequestResult
   state: `starting` | `pending` | `settled` | `failed`
   replaces?: Array<DemandSegment>
+  // Keys whose earlier load failed and that this segment loads again.
+  retries?: Map<string, unknown>
 }
 
 type DemandState = {
@@ -29,6 +31,8 @@ export type DemandUpdate = {
   changed: boolean
   empty: boolean
   ready: Promise<Array<unknown>> | true
+  // The demand no longer needs any key whose load failed.
+  failureRetired?: boolean
 }
 
 /**
@@ -57,6 +61,20 @@ export class SubsetDemandController {
       (segment) =>
         segment.state === `failed` && intersects(segment.keys, nextKeys),
     )
+    // Keys whose load failed: in a failed segment, or retried by one still
+    // loading.
+    const failedKeys = new Map(
+      (previous?.segments ?? []).flatMap((segment) =>
+        segment.state === `failed`
+          ? [...segment.keys]
+          : segment.state === `settled`
+            ? []
+            : [...(segment.retries ?? [])],
+      ),
+    )
+    const failureRetired =
+      failedKeys.size > 0 &&
+      [...failedKeys.keys()].every((key) => !nextKeys.has(key))
     if (
       previous &&
       equalKeySets(previous.keys, nextKeys) &&
@@ -108,6 +126,8 @@ export class SubsetDemandController {
     if (requestedKeys.size > 0) {
       const segment = createSegment(plan, requestedKeys)
       if (replace) segment.replaces = [...segments]
+      const retried = [...failedKeys].filter(([key]) => nextKeys.has(key))
+      if (retried.length > 0) segment.retries = new Map(retried)
       segments.push(segment)
       const started = startSegment(subscription, segment, () =>
         this.warnUnoptimized(plan),
@@ -144,6 +164,7 @@ export class SubsetDemandController {
       changed: true,
       empty: false,
       ready: pending.length > 0 ? Promise.all(pending) : true,
+      failureRetired,
     }
   }
 

@@ -31,6 +31,7 @@ const staticOracleProperties = [
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.on-demand`,
+  `source-health.lazy-demand`,
   `source-health.request-errors`,
   `trailbase.page-event`,
   `electric.bound-descriptor-history`,

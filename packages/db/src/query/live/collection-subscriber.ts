@@ -221,6 +221,9 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.retireDemand(plan.id)
       return
     }
+    // The query no longer needs the data whose load failed.
+    if (update.failureRetired)
+      this.collectionConfigBuilder.clearFailedRequest(plan.id)
 
     const generation = this.collectionConfigBuilder.beginDemand(
       plan.id,

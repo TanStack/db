@@ -671,7 +671,8 @@ export class CollectionConfigBuilder<
     return true
   }
 
-  private clearFailedRequest(key: string): void {
+  /** A request settled later, or the query no longer needs its data. */
+  clearFailedRequest(key: string): void {
     this.liveQueryCollection?._lifecycle.clearRequestError(key)
   }
 

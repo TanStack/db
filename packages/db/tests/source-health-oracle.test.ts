@@ -135,9 +135,11 @@
  * The main grammar's Collections are eager, so a live query cannot become
  * ready while a Collection is still loading; a focused lane enumerates an
  * on-demand Collection that fails its first load after the query is ready.
- * The on-demand demand grammar covers a root window only: lazy join demand
- * keeps its focused lanes, and it settles all pending loads at once (the
- * overlapping-load lane owns their order). Per-row child Collections are not
+ * The demand grammars settle all pending loads at once (the overlapping-load
+ * lane owns their order). The lazy demand grammar does not yet check the
+ * request error while a source reload's replay is in flight or after one
+ * failed: a demand change during the replay can clear the error before its
+ * key loads again, which is open. Per-row child Collections are not
  * in the tree; an include's node shows its source. Pooled histories do not
  * restart or clean up: a pooled view ends for good when its Collection is
  * cleaned up. The ordering check reads the observed query only, not its
@@ -3541,6 +3543,370 @@ describe(`on-demand demand grammar`, () => {
   )(
     `generated demand histories refine the model`,
     (steps) => withDeadline(runDemandHistory(steps)),
+    120_000,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Lazy join demand grammar
+// ---------------------------------------------------------------------------
+
+/**
+ * A live query that left-joins an eager parent Collection to an on-demand
+ * child Collection loads the children of the parents it shows. The law: a
+ * load that fails before initial-query readiness fails the query's first
+ * load. After it, a failed load is a request error on the query's node while
+ * the query still needs a key whose load failed; it clears when a later load
+ * of that key succeeds, or when the query no longer needs the key. A source
+ * reload replays the query's demand; a failed replay is a request error
+ * until a later replay succeeds. Each parent shows its child once a load of
+ * the child's key succeeded.
+ *
+ * Steps: `parent` adds parent 1, 2, or 3, and `unparent` removes it; the
+ * other steps are as in the window grammar. The driver reports each load's
+ * requested keys from the adapter boundary, and the model judges outcomes.
+ * The comparison checks the query's status, whether its node shows an
+ * error, and, when no load is pending, each parent row and its child. After a
+ * failed replay the query keeps its last complete snapshot private until a
+ * replay succeeds; the model does not track that snapshot, so the rows check
+ * waits for the replay to succeed.
+ */
+type LazyStep =
+  | { kind: `parent` | `unparent`; key: RowKey }
+  | {
+      kind: `settle-ok` | `settle-fail` | `reload` | `report` | `fail` | `crash`
+    }
+
+type LazyModel = {
+  gate: `loading` | `ready` | `error` | `crashed`
+  parents: Set<number>
+  loaded: Set<number>
+  // Needed keys whose last load failed after readiness.
+  failed: Set<number>
+  // A source reload's replay is in flight: every load the query starts
+  // joins it, inside its publication barrier.
+  replayActive: boolean
+  // Needed keys a failed replay could not load again.
+  replayFailed: Set<number>
+  pending: Array<{ keys: Set<number>; replay: boolean }>
+  source: { failure: string | null; stopped: string | null; crashed: boolean }
+}
+
+// Keys a subset request asks for, read from its predicate's literal values.
+function requestedKeys(options: LoadSubsetOptions): Set<number> {
+  const keys = new Set<number>()
+  const visit = (node: unknown): void => {
+    if (typeof node === `number`) keys.add(node)
+    else if (Array.isArray(node)) node.forEach(visit)
+    else if (node && typeof node === `object`) {
+      const { type, value, args } = node as {
+        type?: string
+        value?: unknown
+        args?: Array<unknown>
+      }
+      if (type === `val`) visit(value)
+      else args?.forEach(visit)
+    }
+  }
+  visit(options.where)
+  return keys
+}
+
+// During the first load, the query is ready once no pending load is for a
+// key it still needs: a demand it retired no longer holds readiness back.
+function deriveLazyGate(model: LazyModel): void {
+  if (model.gate !== `loading`) return
+  const blocking = model.pending.some(({ keys }) =>
+    [...keys].some((key) => model.parents.has(key)),
+  )
+  if (!blocking) model.gate = `ready`
+}
+
+function applyLazyModel(model: LazyModel, step: LazyStep): void {
+  if (model.gate === `crashed`) return
+  switch (step.kind) {
+    case `parent`:
+      model.parents.add(step.key)
+      return
+    case `unparent`:
+      model.parents.delete(step.key)
+      model.failed.delete(step.key)
+      model.replayFailed.delete(step.key)
+      return
+    case `settle-ok`:
+      for (const { keys, replay } of model.pending) {
+        for (const key of keys) {
+          model.loaded.add(key)
+          model.failed.delete(key)
+        }
+        if (replay) model.replayFailed.clear()
+      }
+      model.pending = []
+      model.replayActive = false
+      if (model.gate === `loading`) model.gate = `ready`
+      return
+    case `settle-fail`:
+      if (model.pending.length === 0) return
+      if (model.gate === `loading`) {
+        model.gate = `error`
+      } else {
+        for (const { keys, replay } of model.pending) {
+          // A replay fails the query's data only for demand it still needs.
+          for (const key of keys) {
+            if (!model.parents.has(key)) continue
+            if (replay) model.replayFailed.add(key)
+            else model.failed.add(key)
+          }
+        }
+      }
+      model.pending = []
+      model.replayActive = false
+      return
+    case `reload`:
+      if (model.source.crashed) return
+      // The replay loads the demand again; a key it loads is loaded again.
+      model.source.failure = null
+      model.source.stopped = null
+      // The retired run's loads no longer apply, and its truncate drops the
+      // loaded children until the replay loads them again.
+      model.pending = []
+      model.loaded = new Set()
+      model.replayActive = true
+      return
+    case `report`:
+      if (!model.source.stopped) model.source.failure = `source problem`
+      return
+    case `fail`:
+      if (!model.source.stopped) {
+        model.source.failure = null
+        model.source.stopped = `source gave up`
+      }
+      return
+    case `crash`:
+      model.source.crashed = true
+      model.gate = `crashed`
+      return
+  }
+}
+
+async function runLazyHistory(steps: ReadonlyArray<LazyStep>) {
+  const model: LazyModel = {
+    gate: `loading`,
+    parents: new Set([1]),
+    loaded: new Set(),
+    failed: new Set(),
+    replayActive: false,
+    replayFailed: new Set(),
+    pending: [],
+    source: { failure: null, stopped: null, crashed: false },
+  }
+  const loads: Array<ReturnType<typeof createDeferred<void>>> = []
+  const requests: Array<Set<number>> = []
+  let parentParams!: SyncParams
+  let childParams!: SyncParams
+  const parents = createCollection<Row, number>({
+    id: `health-lazy-parents-${Math.random().toString(36).slice(2)}`,
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: {
+      sync: (params) => {
+        parentParams = params
+        params.begin()
+        params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+        params.commit()
+        params.markReady()
+      },
+    },
+  })
+  const children = createCollection<Row, number>({
+    id: `health-lazy-children-${Math.random().toString(36).slice(2)}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    gcTime: 0,
+    sync: {
+      sync: (params) => {
+        childParams = params
+        // Children this sync run has served; a reload's run serves them
+        // again.
+        const served = new Set<number>()
+        params.markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const keys = requestedKeys(options)
+            requests.push(keys)
+            const load = createDeferred<void>()
+            loads.push(load)
+            return load.promise.then(() => {
+              params.begin()
+              for (const key of keys) {
+                if (served.has(key)) continue
+                served.add(key)
+                params.write({
+                  type: `insert`,
+                  value: { id: key * 10, parentId: key },
+                })
+              }
+              params.commit()
+            })
+          },
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection((q) =>
+    q
+      .from({ parent: parents })
+      .leftJoin({ child: children }, ({ parent, child }) =>
+        eq(parent.id, child.parentId),
+      ),
+  )
+  const consoleError = console.error
+  console.error = () => {}
+  // Requests made since the last report, tagged with whether a source
+  // reload's replay made them.
+  const report = () => {
+    for (const keys of requests.splice(0))
+      model.pending.push({ keys, replay: model.replayActive })
+  }
+  try {
+    void query.preload().catch(() => undefined)
+    await flushPromises()
+    report()
+    for (const [index, step] of steps.entries()) {
+      const label = `step ${index} ${JSON.stringify(step)}`
+      applyLazyModel(model, step)
+      if (step.kind === `parent` || step.kind === `unparent`) {
+        parentParams.begin()
+        parentParams.write({
+          type: step.kind === `parent` ? `insert` : `delete`,
+          value: { id: step.key, parentId: step.key },
+        })
+        parentParams.commit()
+      } else if (step.kind === `settle-ok`) {
+        for (let round = 0; round < 5 && loads.length > 0; round++) {
+          for (const load of loads.splice(0)) load.resolve()
+          await flushPromises()
+          if (round > 0) report()
+        }
+      } else if (step.kind === `settle-fail`) {
+        for (const load of loads.splice(0))
+          load.reject(new Error(`child load failed`))
+      } else if (step.kind === `reload`) {
+        void children.reload().catch(() => undefined)
+      } else if (step.kind === `crash`) {
+        children._lifecycle.crash(new Error(`children crashed`))
+      } else {
+        try {
+          if (step.kind === `report`)
+            childParams.reportError(new Error(`source problem`))
+          else childParams.fail(new Error(`source gave up`))
+        } catch {
+          // After fail(), the adapter's calls throw; the model ignores them.
+        }
+      }
+      await flushPromises()
+      report()
+      deriveLazyGate(model)
+
+      expect(query.status, `${label}: query status`).toBe(model.gate)
+      // Open: a demand change while a source reload's replay is in flight
+      // can clear a request error before its key loads again (see the
+      // coverage map). Until that is settled, the check waits for the
+      // replay to succeed; it still checks the error a failed replay shows.
+      const replayOpen =
+        (model.replayActive || model.replayFailed.size > 0) &&
+        step.kind !== `settle-fail`
+      if (model.gate === `ready` && !replayOpen) {
+        expect(query.errors.error !== null, `${label}: request error`).toBe(
+          model.failed.size > 0 || model.replayFailed.size > 0,
+        )
+      }
+      // After a failed replay the query keeps its last complete snapshot
+      // private, which the model does not track.
+      if (
+        model.gate === `ready` &&
+        model.pending.length === 0 &&
+        model.replayFailed.size === 0
+      ) {
+        const rows = query.toArray.map(
+          (row: { parent: Row; child?: Row }) =>
+            [row.parent.id, row.child?.id ?? null] as const,
+        )
+        expect(
+          [...rows].sort((a, b) => a[0] - b[0]),
+          `${label}: rows`,
+        ).toEqual(
+          [...model.parents]
+            .sort((a, b) => a - b)
+            .map((key) => [key, model.loaded.has(key) ? key * 10 : null]),
+        )
+      }
+    }
+  } finally {
+    console.error = consoleError
+    for (const load of loads.splice(0)) load.resolve()
+    await query.cleanup()
+    await parents.cleanup()
+    await children.cleanup({ dependents: true })
+  }
+}
+
+describe(`lazy join demand grammar`, () => {
+  const key = fc.constantFrom<RowKey>(1, 2, 3)
+  const step: fc.Arbitrary<LazyStep> = fc.oneof(
+    key.map((k): LazyStep => ({ kind: `parent`, key: k })),
+    key.map((k): LazyStep => ({ kind: `unparent`, key: k })),
+    fc
+      .constantFrom(
+        `settle-ok` as const,
+        `settle-fail` as const,
+        `reload` as const,
+        `report` as const,
+        `fail` as const,
+        `crash` as const,
+      )
+      .map((kind): LazyStep => ({ kind })),
+  )
+  const named: Record<string, ReadonlyArray<LazyStep>> = {
+    'a failed first load fails the query': [{ kind: `settle-fail` }],
+    'a later load of the failed key clears its request error': [
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `settle-ok` },
+    ],
+    'a request error clears when the query no longer needs the failed key': [
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 3 },
+      { kind: `settle-fail` },
+      { kind: `unparent`, key: 3 },
+    ],
+    'a pending retry does not hold a request error for a key the query no longer needs':
+      [
+        { kind: `settle-ok` },
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 1 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 1 },
+      ],
+    "a failed source reload's replay is a request error": [
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+    ],
+  }
+  for (const [name, steps] of Object.entries(named))
+    it(name, () => runLazyHistory(steps))
+  fcTest.prop(
+    [fc.array(step, { maxLength: 10 })],
+    oraclePropertyOptions(60, `source-health.lazy-demand`),
+  )(
+    `generated lazy demand histories refine the model`,
+    (steps) => withDeadline(runLazyHistory(steps)),
     120_000,
   )
 })

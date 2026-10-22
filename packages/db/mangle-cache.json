@@ -392,7 +392,6 @@
   "attach": "gF",
   "sortedExactValues": "gG",
   "reachedReady": "cc",
-  "clearFailedRequest": "dp",
   "requestErrors": "gH",
   "reportFailedRequest": "gJ",
   "includeSourceIds": "gL",
