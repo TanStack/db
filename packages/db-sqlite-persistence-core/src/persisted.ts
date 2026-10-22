@@ -11,6 +11,7 @@ import {
   getLoadSubsetDemandKey,
   safeRandomUUID,
   toBooleanPredicate,
+  waitForPersistedInitialRender,
   whenSyncAccepted,
   withAcceptedReceipt,
   withCollectionConfigFactory,
@@ -803,6 +804,8 @@ class PersistedReadinessTracker implements PersistedReadinessSource {
   private readonly listeners = new Set<() => void>()
 
   constructor(readonly networkTimeoutMs: number) {}
+
+  waitForInitialRender = waitForPersistedInitialRender
 
   getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
 
