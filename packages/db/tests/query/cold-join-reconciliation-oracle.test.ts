@@ -1,18 +1,17 @@
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it } from 'vitest'
+import { Query, and, createLiveQueryCollection, eq ,
+  fullJoin as fullJoinOperator,
+  gt,
+  innerJoin,
+  joinOf,
+  leftJoin,
+  or } from '../../src/query/index.js'
 import { Func } from '../../src/query/ir.js'
 import { JoinConditionMustBeEqualityError } from '../../src/errors.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import {
-  Query,
-  and,
-  createLiveQueryCollection,
-  eq,
-  gt,
-  or,
-} from '../../src/query/index.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -146,9 +145,8 @@ async function runColdJoin(
   const live = createLiveQueryCollection((q) =>
     q
       .from({ parent: parentSource })
-      .innerJoin({ child: children }, ({ parent, child }) =>
-        eq(parent.id, child.parentId),
-      )
+      .join(innerJoin({ child: children }, ({ parent, child }) =>
+        eq(parent.id, child.parentId)))
       .select(({ parent, child }) => ({
         id: child.id,
         parentId: parent.id,
@@ -506,9 +504,8 @@ describe.each([`off`, `eager`] as const)(
           query: (q) =>
             q
               .from({ left })
-              .innerJoin({ right }, ({ left: l, right: r }) =>
-                eq(l.value, r.value),
-              )
+              .join(innerJoin({ right }, ({ left: l, right: r }) =>
+                eq(l.value, r.value)))
               .select(({ right: row }) => ({ id: row.id })),
         })
         const filtered = createLiveQueryCollection({
@@ -570,9 +567,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left: binaryLeft })
-            .innerJoin({ right: binaryRight }, ({ left, right }) =>
-              eq(left.value, right.value),
-            )
+            .join(innerJoin({ right: binaryRight }, ({ left, right }) =>
+              eq(left.value, right.value)))
             .select(({ right }) => ({ id: right.id })),
       })
 
@@ -598,9 +594,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left: nullishLeft })
-            .fullJoin({ right: nullishRight }, ({ left, right }) =>
-              eq(left.value, right.value),
-            )
+            .join(fullJoinOperator({ right: nullishRight }, ({ left, right }) =>
+              eq(left.value, right.value)))
             .select(({ left, right }) => ({
               leftId: left.id,
               rightId: right.id,
@@ -659,9 +654,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left })
-            .fullJoin({ right }, ({ left: l, right: r }) =>
-              eq(l.value, r.value),
-            )
+            .join(fullJoinOperator({ right }, ({ left: l, right: r }) =>
+              eq(l.value, r.value)))
             .select(({ left: l, right: r }) => ({
               leftId: l.id,
               rightId: r.id,
@@ -798,9 +792,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left: active })
-            .leftJoin({ right: lazy }, ({ left, right }) =>
-              eq(left.binaryId, right.binaryId),
-            )
+            .join(leftJoin({ right: lazy }, ({ left, right }) =>
+              eq(left.binaryId, right.binaryId)))
             .select(({ left, right }) => ({
               leftId: left.id,
               rightId: right.id,
@@ -1123,8 +1116,7 @@ async function runCompoundHistory(
       const live = createLiveQueryCollection((q) =>
         q
           .from({ left })
-          .join(
-            { right },
+          .join(joinOf(scenario.join, { right },
             ({ left: l, right: r }) => {
               const a = scenario.reversed ? eq(r.a, l.a) : eq(l.a, r.a)
               const b = scenario.reversed ? eq(l.b, r.b) : eq(r.b, l.b)
@@ -1133,9 +1125,7 @@ async function runCompoundHistory(
               if (scenario.width === 2) return and(first, second)
               if (scenario.nested) return and(first, and(second, c))
               return and(first, second, c)
-            },
-            scenario.join,
-          )
+            }))
           .select(({ left: l, right: r }) => ({ leftId: l.id, rightId: r.id })),
       )
       cleanupLive = () => live.cleanup()
@@ -1408,13 +1398,13 @@ it.each([`or`, `inequality`, `empty`, `nested-invalid`] as const)(
         expect(() =>
           new Query()
             .from({ left })
-            .innerJoin({ right }, ({ left: l, right: r }) => {
+            .join(innerJoin({ right }, ({ left: l, right: r }) => {
               const equality = eq(l.id, r.id)
               if (shape === `or`) return or(equality, equality)
               if (shape === `inequality`) return gt(l.id, r.id)
               if (shape === `empty`) return new Func<boolean>(`and`, [])
               return and(equality, and(equality, gt(l.id, r.id)))
-            }),
+            })),
         ).toThrow(JoinConditionMustBeEqualityError)
         return Promise.resolve()
       },

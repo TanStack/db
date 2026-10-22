@@ -10,6 +10,9 @@ import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
+import type { processJoins } from './compiler/joins.js'
+import type { applyOptimizations } from './optimizer-joins.js'
+
 export interface QueryIR {
   from: From
   select?: Select
@@ -49,6 +52,10 @@ export interface JoinClause {
   from: CollectionSourceRef | QueryRef
   type: `left` | `right` | `inner` | `outer` | `full` | `cross`
   on: BasicExpression<boolean>
+  // The join operator value that built this clause supplies the compiler,
+  // so apps without joins never import it.
+  compile: typeof processJoins
+  optimize: typeof applyOptimizations
 }
 
 export type Where =

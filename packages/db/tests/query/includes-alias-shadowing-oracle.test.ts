@@ -1,16 +1,15 @@
 import { describe, expect, test } from 'vitest'
-import {
-  Query,
-  add,
-  caseWhen,
+import { Query, add, caseWhen ,
   count,
   createLiveQueryCollection,
   eq,
   gt,
+  innerJoin,
   isUndefined,
+  joinOf,
+  leftJoin,
   multiply,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
 import { IncludesSubquery, PropRef } from '../../src/query/ir.js'
 import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
@@ -236,17 +235,15 @@ function buildQuery(
           return toArray(
             new Query()
               .unionAll(left, right)
-              .innerJoin({ anchor: locks.collection }, ({ lockId, anchor }) =>
-                eq(lockId, anchor.id),
-              )
+              .join(innerJoin({ anchor: locks.collection }, ({ lockId, anchor }) =>
+                eq(lockId, anchor.id)))
               .where(({ anchor }) => eq(anchor.id, parent.id))
               .select(({ id, lockId }) => ({ id, lockId })),
           )
         }
         return toArray(
-          base().innerJoin({ other: locks.collection }, (context: Context) =>
-            eq(voteAt(context, alias).lockId, (context.other as Lock).id),
-          ),
+          base().join(innerJoin({ other: locks.collection }, (context: Context) =>
+            eq(voteAt(context, alias).lockId, (context.other as Lock).id))),
         )
       })()
       return { id: parent.id, children }
@@ -462,9 +459,8 @@ describe(`captured alias scope oracle`, () => {
             return createLiveQueryCollection({
               query: new Query()
                 .from({ manager: managers.collection })
-                .innerJoin({ helper: shared }, ({ manager, helper }) =>
-                  eq(manager.id, helper.id),
-                )
+                .join(innerJoin({ helper: shared }, ({ manager, helper }) =>
+                  eq(manager.id, helper.id)))
                 .select(({ manager }) =>
                   reportsFor(manager as unknown as Employee),
                 ),
@@ -623,9 +619,8 @@ describe(`captured alias scope oracle`, () => {
     const live = createLiveQueryCollection({
       query: new Query()
         .unionAll(first, second)
-        .innerJoin({ anchor: source.collection }, ({ id, anchor }) =>
-          eq(id, anchor.id),
-        )
+        .join(innerJoin({ anchor: source.collection }, ({ id, anchor }) =>
+          eq(id, anchor.id)))
         .select(({ anchor }) => ({
           id: anchor.id,
           children: toArray(
@@ -665,9 +660,8 @@ describe(`captured alias scope oracle`, () => {
     const live = createLiveQueryCollection({
       query: new Query()
         .from({ wrapped: inner })
-        .innerJoin({ anchor: source.collection }, ({ wrapped, anchor }) =>
-          eq(wrapped.id, anchor.id),
-        )
+        .join(innerJoin({ anchor: source.collection }, ({ wrapped, anchor }) =>
+          eq(wrapped.id, anchor.id)))
         .select(({ anchor }) => ({
           id: anchor.id,
           children: toArray(
@@ -803,10 +797,8 @@ describe(`captured alias scope oracle`, () => {
           children: toArray(
             new Query()
               .from({ lock: votes.collection })
-              .innerJoin(
-                { other: locks.collection },
-                ({ lock: child, other }) => eq(child.lockId, other.id),
-              )
+              .join(innerJoin({ other: locks.collection },
+                ({ lock: child, other }) => eq(child.lockId, other.id)))
               .where(({ lock: child, other }) => eq(child.lockId, other.id))
               .where(({ lock: child }) => eq(child.lockId, parent.id))
               .select(({ lock: child }) => ({
@@ -1290,9 +1282,8 @@ describe(`outer filters stay with their source under alias shadowing`, () => {
               form === `join`
                 ? createLiveQueryCollection({
                     query: root
-                      .leftJoin({ w: childQuery }, ({ u, w }) =>
-                        eq(u.linkId, w.id),
-                      )
+                      .join(leftJoin({ w: childQuery }, ({ u, w }) =>
+                        eq(u.linkId, w.id)))
                       .select(({ u, w }) => ({ id: u.id, joinedId: w.id })),
                   })
                 : createLiveQueryCollection({
@@ -1437,9 +1428,8 @@ describe(`captured projections keep their binding during predicate pushdown`, ()
               matches: toArray(
                 new Query()
                   .from({ q: inner })
-                  .innerJoin({ a: anchors.collection }, ({ q, a }) =>
-                    eq(q.id, a.id),
-                  )
+                  .join(innerJoin({ a: anchors.collection }, ({ q, a }) =>
+                    eq(q.id, a.id)))
                   .where(({ q }) => eq(q.parentId, parent.id))
                   .where(({ q }) => eq(q.rank, `A`))
                   .select(({ q }) => ({ id: q.id })),
@@ -1705,9 +1695,8 @@ describe(`group keys through nested source filtering`, () => {
         const live = createLiveQueryCollection({
           query: new Query()
             .from({ x: inner })
-            .innerJoin({ t: tags.collection }, ({ x, t }) =>
-              eq(x.id, t.sourceId),
-            )
+            .join(innerJoin({ t: tags.collection }, ({ x, t }) =>
+              eq(x.id, t.sourceId)))
             .where(({ x }) => eq(x.category, `A`))
             .groupBy(({ x }) => x.category)
             .select(({ x }) => ({
@@ -1987,7 +1976,7 @@ describe(`lazy join demand across nested alias scopes`, () => {
     const live = createLiveQueryCollection({
       query: new Query()
         .from({ a: anchors.collection })
-        .leftJoin({ w: inner }, ({ a, w }) => eq(a.userId, w.id))
+        .join(leftJoin({ w: inner }, ({ a, w }) => eq(a.userId, w.id)))
         .select(({ a, w }) => ({
           anchorId: a.id,
           userId: w.id,
@@ -2111,9 +2100,8 @@ describe(`lexical bindings through recursive joins and selections`, () => {
         return createLiveQueryCollection({
           query: new Query()
             .from({ manager: managers })
-            .leftJoin({ user: people.collection }, ({ manager, user }) =>
-              eq(manager.id, user.managerId),
-            )
+            .join(leftJoin({ user: people.collection }, ({ manager, user }) =>
+              eq(manager.id, user.managerId)))
             .where(({ user }) => eq(user.managerId, 1))
             .select(({ manager, user }) => ({
               managerId: manager.id,
@@ -2184,9 +2172,8 @@ describe(`lexical bindings through recursive joins and selections`, () => {
         return createLiveQueryCollection({
           query: new Query()
             .from({ manager: inner })
-            .leftJoin({ user: users.collection }, ({ manager, user }) =>
-              eq(manager.id, user.managerId),
-            )
+            .join(leftJoin({ user: users.collection }, ({ manager, user }) =>
+              eq(manager.id, user.managerId)))
             .select(({ manager, user }) => ({
               managerId: manager.id,
               userId: user.id,
@@ -2302,12 +2289,11 @@ describe(`lexical bindings through recursive joins and selections`, () => {
               children: toArray(
                 new Query()
                   .from({ [childAlias]: children.collection })
-                  .innerJoin({ anchor: anchorQuery }, (context: Context) =>
+                  .join(innerJoin({ anchor: anchorQuery }, (context: Context) =>
                     eq(
                       (context[childAlias] as { anchorId: number }).anchorId,
                       (context.anchor as { id: number }).id,
-                    ),
-                  )
+                    )))
                   .where((context: Context) =>
                     eq(
                       (context[childAlias] as { parentId: number }).parentId,
@@ -2377,14 +2363,12 @@ describe(`lexical bindings through recursive joins and selections`, () => {
             children: toArray(
               new Query()
                 .from({ comment: comments.collection })
-                .leftJoin(
-                  { [joinAlias]: anchors.collection },
+                .join(leftJoin({ [joinAlias]: anchors.collection },
                   (context: Context) =>
                     eq(
                       (context.comment as { anchorId: number }).anchorId,
                       (context[joinAlias] as { id: number }).id,
-                    ),
-                )
+                    )))
                 .where((context: Context) =>
                   eq(
                     (context.comment as { parentId: number }).parentId,
@@ -2855,10 +2839,8 @@ describe(`nested source placement preserves captured outer rows`, () => {
             const live = createLiveQueryCollection({
               query: new Query()
                 .from({ manager: managers.collection })
-                .innerJoin(
-                  { user: assignments.collection },
-                  ({ manager, user }) => eq(manager.id, user.managerId),
-                )
+                .join(innerJoin({ user: assignments.collection },
+                  ({ manager, user }) => eq(manager.id, user.managerId)))
                 .select(({ manager, user }) => {
                   const project = (context: Context) => {
                     const detail = context[alias] as Detail
@@ -2883,14 +2865,12 @@ describe(`nested source placement preserves captured outer rows`, () => {
                           .select(project)
                       : new Query()
                           .from({ anchor: anchors.collection })
-                          .innerJoin(
-                            { [alias]: details.collection },
+                          .join(innerJoin({ [alias]: details.collection },
                             (context: Context) =>
                               eq(
                                 (context[alias] as Detail).managerId,
                                 (context.anchor as { id: number }).id,
-                              ),
-                          )
+                              )))
                           .where((context: Context) =>
                             eq(
                               (context.anchor as { id: number }).id,
@@ -3184,7 +3164,7 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
                     )
                   const anchorSource =
                     sourceForm === `direct` ? anchors.collection : scopedAnchors
-                  const joined = main.join({ anchor: anchorSource }, on, kind)
+                  const joined = main.join(joinOf(kind, { anchor: anchorSource }, on))
                   expect(getQueryIR(joined).join?.[0]?.from.type).toBe(
                     sourceForm === `direct` ? `collectionRef` : `queryRef`,
                   )
@@ -3446,15 +3426,13 @@ describe(`chained joins keep an absent local source absent`, () => {
                   rows: toArray(
                     new Query()
                       .from({ comment: comments.collection })
-                      .leftJoin(
-                        { [alias]: localIssues.collection },
+                      .join(leftJoin({ [alias]: localIssues.collection },
                         (context: Context) =>
                           eq(
                             (context.comment as Comment).localIssueId,
                             (context[alias] as Issue).id,
-                          ),
-                      )
-                      .leftJoin({ tag: tagSource }, (context: Context) =>
+                          )))
+                      .join(leftJoin({ tag: tagSource }, (context: Context) =>
                         routeCause === `queryRef`
                           ? eq(
                               (context.comment as Comment).tagId,
@@ -3466,8 +3444,7 @@ describe(`chained joins keep an absent local source absent`, () => {
                                 parent.id,
                               ),
                               add((context.tag as Tag).id, parent.id),
-                            ),
-                      )
+                            )))
                       .where((context: Context) =>
                         eq((context.comment as Comment).issueId, parent.id),
                       )
@@ -3648,9 +3625,8 @@ describe(`joined QueryRef lazy targets retain lexical source identity`, () => {
       })
       const joined = new Query()
         .from({ [alias]: posts.collection })
-        .innerJoin({ tag: tags.collection }, (context: Context) =>
-          eq((context[alias] as Post).tagId, (context.tag as Tag).id),
-        )
+        .join(innerJoin({ tag: tags.collection }, (context: Context) =>
+          eq((context[alias] as Post).tagId, (context.tag as Tag).id)))
         .select((context: Context) => ({
           tagId: (context.tag as Tag).id,
           title: (context[alias] as Post).title,
@@ -3659,7 +3635,7 @@ describe(`joined QueryRef lazy targets retain lexical source identity`, () => {
       const live = createLiveQueryCollection({
         query: new Query()
           .from({ u: users.collection })
-          .leftJoin({ p: joined }, ({ u, p }) => eq(u.tagId, p.tagId))
+          .join(leftJoin({ p: joined }, ({ u, p }) => eq(u.tagId, p.tagId)))
           .select(({ u, p }) => ({
             id: u.id,
             name: u.name,
@@ -3913,24 +3889,18 @@ describe(`mixed outer-join chains retain absent source roles`, () => {
                 rows: toArray(
                   new Query()
                     .from({ [mainAlias]: mains.collection })
-                    .join(
-                      { [anchorAlias]: anchors.collection },
+                    .join(joinOf(first, { [anchorAlias]: anchors.collection },
                       (context: Context) =>
                         eq(
                           (context[mainAlias] as Main).anchorId,
                           (context[anchorAlias] as Anchor).id,
-                        ),
-                      first,
-                    )
-                    .join(
-                      { tag: tags.collection },
+                        )))
+                    .join(joinOf(second, { tag: tags.collection },
                       (context: Context) =>
                         eq(
                           (context[anchorAlias] as Anchor).id,
                           (context.tag as Tag).anchorId,
-                        ),
-                      second,
-                    )
+                        )))
                     .where((context: Context) =>
                       correlation === `main`
                         ? eq((context[mainAlias] as Main).parentId, parent.id)
@@ -4124,8 +4094,7 @@ describe(`captured ancestor join operands retain their bindings`, () => {
                   rows: toArray(
                     new Query()
                       .from({ child: children.collection })
-                      .innerJoin(
-                        { [alias]: targets.collection },
+                      .join(innerJoin({ [alias]: targets.collection },
                         (context: Context) => {
                           const child = context.child as Child
                           const target = context[alias] as Target
@@ -4142,8 +4111,7 @@ describe(`captured ancestor join operands retain their bindings`, () => {
                           return order === `childFirst`
                             ? eq(mainKey, joinedKey)
                             : eq(joinedKey, mainKey)
-                        },
-                      )
+                        }))
                       .where((context: Context) =>
                         eq((context.child as Child).parentId, ancestor.id),
                       )
@@ -4302,9 +4270,8 @@ describe(`join operands reject captured sources outside lexical scope`, () => {
         const child = (operand: number) =>
           new Query()
             .from({ local: local.collection })
-            .innerJoin({ joined: joined.collection }, ({ joined: target }) =>
-              eq(operand, target.id),
-            )
+            .join(innerJoin({ joined: joined.collection }, ({ joined: target }) =>
+              eq(operand, target.id)))
             .select(({ local: own, joined: target }) => ({
               localId: own.id,
               joinedId: target.id,
@@ -4336,10 +4303,8 @@ describe(`join operands reject captured sources outside lexical scope`, () => {
         const localControl = createLiveQueryCollection({
           query: new Query()
             .from({ local: local.collection })
-            .innerJoin(
-              { joined: joined.collection },
-              ({ local: own, joined: target }) => eq(own.id, target.id),
-            )
+            .join(innerJoin({ joined: joined.collection },
+              ({ local: own, joined: target }) => eq(own.id, target.id)))
             .select(({ local: own, joined: target }) => ({
               localId: own.id,
               joinedId: target.id,
@@ -4933,10 +4898,8 @@ describe(`include joins reject sources hidden inside parent operands`, () => {
                   rows: toArray(
                     new Query()
                       .from({ local: local.collection })
-                      .innerJoin(
-                        { joined: joined.collection },
-                        ({ joined: target }) => eq(hiddenRef, target.id),
-                      )
+                      .join(innerJoin({ joined: joined.collection },
+                        ({ joined: target }) => eq(hiddenRef, target.id)))
                       .where(({ local: row }) => eq(row.id, parentId))
                       .select(({ local: row, joined: target }) => ({
                         localId: row.id,
@@ -5023,16 +4986,14 @@ describe(`joined subqueries reject captured sibling sources`, () => {
               })
             const joinedQuery = new Query()
               .from({ [alias]: inner.collection })
-              .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
-                eq(siblingRef, row.id),
-              )
+              .join(innerJoin({ probe: probe.collection }, ({ probe: row }) =>
+                eq(siblingRef, row.id)))
               .select((context: Context) => ({
                 id: (context[alias] as Row).id,
               }))
             const child = base
-              .innerJoin({ nested: joinedQuery }, ({ local: row, nested }) =>
-                eq(row.id, nested.id),
-              )
+              .join(innerJoin({ nested: joinedQuery }, ({ local: row, nested }) =>
+                eq(row.id, nested.id)))
               .select(({ local: row, nested }) => ({
                 localId: row.id,
                 joinedId: nested.id,
@@ -5126,9 +5087,8 @@ describe(`joined subqueries reject captured sibling sources`, () => {
                 .where((context: Context) =>
                   eq((context[alias] as Row).id, ancestor.id),
                 )
-                .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
-                  eq(ancestor.id, row.id),
-                )
+                .join(innerJoin({ probe: probe.collection }, ({ probe: row }) =>
+                  eq(ancestor.id, row.id)))
                 .select((context: Context) => ({
                   id: (context[alias] as Row).id,
                   ancestorId: ancestor.id,
@@ -5138,10 +5098,8 @@ describe(`joined subqueries reject captured sibling sources`, () => {
                 rows: toArray(
                   new Query()
                     .from({ local: main.collection })
-                    .innerJoin(
-                      { nested: joinedQuery },
-                      ({ local: row, nested }) => eq(row.id, nested.id),
-                    )
+                    .join(innerJoin({ nested: joinedQuery },
+                      ({ local: row, nested }) => eq(row.id, nested.id)))
                     .where(({ local: row }) => eq(row.id, ancestor.id))
                     .select(({ local: row, nested }) => ({
                       localId: row.id,
@@ -5207,9 +5165,8 @@ test(`mixed bound and unbound same-alias join references name separate sources`,
         rows: toArray(
           new Query()
             .from({ child: child.collection })
-            .innerJoin({ issue: local.collection }, () =>
-              eq(ancestor.id, new PropRef([`issue`, `id`])),
-            )
+            .join(innerJoin({ issue: local.collection }, () =>
+              eq(ancestor.id, new PropRef([`issue`, `id`]))))
             .where(({ child: row }) => eq(row.parentId, ancestor.id))
             .select(({ child: row, issue }) => ({
               childId: row.id,

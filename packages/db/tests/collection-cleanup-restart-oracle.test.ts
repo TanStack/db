@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  BasicIndex,
+import { BasicIndex,
   createCollection,
   createEffect,
   createLiveQueryCollection,
   eq,
-  withCollectionSyncConfigCleanup,
-} from '../src'
+  innerJoin,
+  withCollectionSyncConfigCleanup } from '../src'
 import { createDeferred } from '../src/deferred'
 import type { SyncConfig } from '../src/types'
 
@@ -520,11 +519,8 @@ describe(`Collection cleanup admission oracle`, () => {
     const live = createLiveQueryCollection((q) =>
       q
         .from({ left: source })
-        .join(
-          { right: source },
-          ({ left, right }) => eq(left.id, right.id),
-          `inner`,
-        ),
+        .join(innerJoin({ right: source },
+          ({ left, right }) => eq(left.id, right.id))),
     )
     const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
 
@@ -882,11 +878,8 @@ describe(`Collection cleanup admission oracle`, () => {
         live = createLiveQueryCollection((q) =>
           q
             .from({ first: firstSource })
-            .join(
-              { second: secondSource },
-              ({ first, second }) => eq(first.id, second.id),
-              `inner`,
-            ),
+            .join(innerJoin({ second: secondSource },
+              ({ first, second }) => eq(first.id, second.id))),
         )
         const message =
           `Source collection '${cleaningSource.id}' was manually cleaned up while live query '${live.id}' depends on it. ` +

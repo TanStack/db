@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import {
-  createLiveQueryCollection,
-  eq,
-  toArray,
-} from '../../src/query/index.js'
+import { createLiveQueryCollection, eq,
+  innerJoin,
+  leftJoin,
+  toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -64,9 +63,8 @@ describe(`Alias validation in subqueries`, () => {
       query: (q) => {
         const locksAgg = q
           .from({ lock: locksCollection })
-          .join({ vote: votesCollection }, ({ lock, vote }) =>
-            eq(lock._id, vote.lockId),
-          )
+          .join(leftJoin({ vote: votesCollection }, ({ lock, vote }) =>
+            eq(lock._id, vote.lockId)))
           .select(({ lock }) => ({
             _id: lock._id,
             lockName: lock.name,
@@ -74,9 +72,8 @@ describe(`Alias validation in subqueries`, () => {
 
         return q
           .from({ vote: votesCollection })
-          .join({ lock: locksAgg }, ({ vote, lock }) =>
-            eq(lock._id, vote.lockId),
-          )
+          .join(leftJoin({ lock: locksAgg }, ({ vote, lock }) =>
+            eq(lock._id, vote.lockId)))
           .select(({ vote, lock }) => ({
             voteId: vote._id,
             lockName: lock.lockName,
@@ -101,9 +98,8 @@ describe(`Alias validation in subqueries`, () => {
           .select(({ item }) => ({ id: item._id }))
         return q
           .from({ item: locksCollection })
-          .innerJoin({ child: reusable }, ({ item, child }) =>
-            eq(item._id, child.id),
-          )
+          .join(innerJoin({ child: reusable }, ({ item, child }) =>
+            eq(item._id, child.id)))
           .select(({ item }) => ({ id: item._id }))
       },
     })
@@ -121,12 +117,10 @@ describe(`Alias validation in subqueries`, () => {
         query: (q) =>
           q
             .from({ lock: locksCollection })
-            .join({ vote: votesCollection }, ({ lock, vote }) =>
-              eq(vote.lockId, lock._id),
-            )
-            .join({ vote: votesCollection }, ({ lock, vote }) =>
-              eq(vote.lockId, lock._id),
-            )
+            .join(leftJoin({ vote: votesCollection }, ({ lock, vote }) =>
+              eq(vote.lockId, lock._id)))
+            .join(leftJoin({ vote: votesCollection }, ({ lock, vote }) =>
+              eq(vote.lockId, lock._id)))
             .select(({ lock }) => ({ _id: lock._id })),
       })
     }).toThrow(/alias "vote" more than once/)
@@ -164,9 +158,8 @@ describe(`Alias validation in subqueries`, () => {
               .from({ tool: votesCollection })
               .select(({ tool }) => ({ rid: tool._id })),
           )
-          .innerJoin({ anchor: locksCollection }, ({ rid, anchor }) =>
-            eq(rid, anchor._id),
-          )
+          .join(innerJoin({ anchor: locksCollection }, ({ rid, anchor }) =>
+            eq(rid, anchor._id)))
           .select(({ rid, anchor }) => ({
             rid,
             votes: toArray(
@@ -212,9 +205,8 @@ describe(`Alias validation in subqueries`, () => {
               .from({ lock: locksCollection })
               .select(({ lock }) => ({ id: lock._id })),
           )
-          .innerJoin({ vote: votesCollection }, ({ id, vote }) =>
-            eq(vote._id, id),
-          )
+          .join(innerJoin({ vote: votesCollection }, ({ id, vote }) =>
+            eq(vote._id, id)))
           .select(({ id, vote }) => ({ id, lockId: vote.lockId })),
     })
     await live.preload()
@@ -261,10 +253,8 @@ describe(`Alias validation in subqueries`, () => {
       query: (q) => {
         const locksAgg = q
           .from({ lock: locksCollection })
-          .join(
-            { v: votesCollection }, // Uses unique alias "v" instead of "vote"
-            ({ lock, v }) => eq(lock._id, v.lockId),
-          )
+          .join(leftJoin({ v: votesCollection }, // Uses unique alias "v" instead of "vote"
+            ({ lock, v }) => eq(lock._id, v.lockId)))
           .select(({ lock }) => ({
             _id: lock._id,
             lockName: lock.name,
@@ -272,9 +262,8 @@ describe(`Alias validation in subqueries`, () => {
 
         return q
           .from({ vote: votesCollection })
-          .join({ lock: locksAgg }, ({ vote, lock }) =>
-            eq(lock._id, vote.lockId),
-          )
+          .join(leftJoin({ lock: locksAgg }, ({ vote, lock }) =>
+            eq(lock._id, vote.lockId)))
           .select(({ vote, lock }) => ({
             voteId: vote._id,
             lockName: lock.lockName,

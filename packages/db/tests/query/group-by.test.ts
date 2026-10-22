@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { createLiveQueryCollection, toArray } from '../../src/query/index.js'
+import { createLiveQueryCollection, leftJoin, toArray  } from '../../src/query/index.js'
 import { NonAggregateExpressionNotInGroupByError } from '../../src/errors.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
@@ -2415,9 +2415,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
             return q
               .from({ customer: customersCollection })
-              .leftJoin({ oc: orderCountSubquery }, ({ customer, oc }) =>
-                eq(customer.id, oc.customer_id),
-              )
+              .join(leftJoin({ oc: orderCountSubquery }, ({ customer, oc }) =>
+                eq(customer.id, oc.customer_id)))
               .select(({ customer, oc }) => ({
                 name: customer.name,
                 orderCount: oc.orderCount,

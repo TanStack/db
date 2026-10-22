@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { leftJoin } from '@tanstack/db'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
@@ -831,11 +832,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
-            .join(
-              { departments: departmentsCollection },
+            .join(leftJoin({ departments: departmentsCollection },
               ({ employees, departments }) =>
-                eq(employees.department_id, departments.id),
-            )
+                eq(employees.department_id, departments.id)))
             .orderBy(({ departments }) => departments.name, `asc`)
             .orderBy(({ employees }) => employees.salary, `desc`)
             .select(({ employees, departments }) => ({
@@ -1900,11 +1899,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           const collection = createLiveQueryCollection((q) =>
             q
               .from({ employees: employeesCollection })
-              .join(
-                { departments: departmentsCollection },
+              .join(leftJoin({ departments: departmentsCollection },
                 ({ employees, departments }) =>
-                  eq(employees.department_id, departments.id),
-              )
+                  eq(employees.department_id, departments.id)))
               .orderBy(({ departments }) => departments.name, `asc`)
               .limit(5)
               .select(({ employees, departments }) => ({
@@ -1940,9 +1937,8 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employee: employeesCollection })
-            .join({ manager: employeesCollection }, ({ employee, manager }) =>
-              eq(employee.id, manager.id),
-            )
+            .join(leftJoin({ manager: employeesCollection }, ({ employee, manager }) =>
+              eq(employee.id, manager.id)))
             .orderBy(({ manager }) => manager.name, `asc`)
             .limit(3)
             .select(({ employee, manager }) => ({

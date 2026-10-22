@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'vitest'
+import { applyOptimizations } from '../../src/query/optimizer-joins.js'
+import { processJoins } from '../../src/query/compiler/joins.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
   Aggregate,
@@ -133,7 +135,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -164,7 +166,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -206,7 +208,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new QueryRef(distinctSource, `p`),
             type: `inner`,
             on: createEq(createPropRef(`u`, `id`), createPropRef(`p`, `id`)),
@@ -227,7 +229,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -275,7 +277,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -314,7 +316,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -351,7 +353,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -388,7 +390,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -431,7 +433,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -491,7 +493,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -525,7 +527,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -566,7 +568,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -603,7 +605,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(existingSubquery, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -648,7 +650,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(deeplyNestedQuery, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -676,7 +678,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -701,7 +703,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -756,7 +758,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -779,7 +781,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -814,7 +816,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -857,7 +859,7 @@ describe(`Query Optimizer`, () => {
           `u`,
         ),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -905,7 +907,7 @@ describe(`Query Optimizer`, () => {
           `u`,
         ),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -961,7 +963,7 @@ describe(`Query Optimizer`, () => {
           source.bindingId,
         ),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -998,7 +1000,7 @@ describe(`Query Optimizer`, () => {
           `u`,
         ),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new QueryRef(
               {
                 from: new CollectionRef(mockCollection, `p`),
@@ -1078,7 +1080,7 @@ describe(`Query Optimizer`, () => {
           `u`,
         ),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1111,7 +1113,7 @@ describe(`Query Optimizer`, () => {
       const simpleQuery: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1147,7 +1149,7 @@ describe(`Query Optimizer`, () => {
 
       // Add JOIN and WHERE to make it optimizable
       deepQuery.join = [
-        {
+        { compile: processJoins, optimize: applyOptimizations,
           from: new CollectionRef(mockCollection, `p`),
           type: `inner`,
           on: createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
@@ -1173,7 +1175,7 @@ describe(`Query Optimizer`, () => {
           `u`,
         ),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1229,7 +1231,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(sharedSubquery, `main_users`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new QueryRef(sharedSubquery, `other_users`), // Same subquery object!
             type: `inner`,
             on: createEq(
@@ -1289,7 +1291,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithAggregates, `stats`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1332,7 +1334,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithLimitedOrder, `top_users`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1369,7 +1371,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithSelect, `filtered_users`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1417,7 +1419,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithHaving, `dept_stats`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1452,7 +1454,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithFnSelect, `computed_users`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1500,7 +1502,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithOrderOnly, `sorted_users`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1552,7 +1554,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(safeSubquery, `users`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new QueryRef(unsafeSubquery, `dept_stats`),
             type: `inner`,
             on: createEq(
@@ -1599,7 +1601,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithAggregates, `stats`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1659,7 +1661,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new QueryRef(subqueryWithAggregates, `stats`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1749,7 +1751,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(teamsCollection, `team`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             type: `left`,
             from: new CollectionRef(teamMembersCollection, `teamMember`),
             on: createEq(
@@ -1794,7 +1796,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(usersCollection, `user`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             type: `right`,
             from: new CollectionRef(profilesCollection, `profile`),
             on: createEq(
@@ -1844,7 +1846,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(ordersCollection, `order`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             type: `full`,
             from: new CollectionRef(paymentsCollection, `payment`),
             on: createEq(
@@ -1889,7 +1891,7 @@ describe(`Query Optimizer`, () => {
       const query: QueryIR = {
         from: new CollectionRef(usersCollection, `user`),
         join: [
-          {
+          { compile: processJoins, optimize: applyOptimizations,
             type: `inner`,
             from: new CollectionRef(departmentsCollection, `dept`),
             on: createEq(

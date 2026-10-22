@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { leftJoin } from '@tanstack/db'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { buildQuery } from '../../../src/query/builder/index.js'
 import { and, eq, gt, or } from '../../../src/query/builder/functions.js'
@@ -60,11 +61,9 @@ describe(`buildQuery function`, () => {
     const query = buildQuery((q) =>
       q
         .from({ employees: employeesCollection })
-        .join(
-          { departments: departmentsCollection },
+        .join(leftJoin({ departments: departmentsCollection },
           ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        )
+            eq(employees.department_id, departments.id)))
         .select(({ employees, departments }) => ({
           employee_name: employees.name,
           department_name: departments.name,
@@ -121,9 +120,8 @@ describe(`buildQuery function`, () => {
     const query = buildQuery((q) =>
       q
         .from({ comment: commentsCollection })
-        .join({ user: usersCollection }, ({ comment, user }) =>
-          eq(comment.user_id, user.id),
-        )
+        .join(leftJoin({ user: usersCollection }, ({ comment, user }) =>
+          eq(comment.user_id, user.id)))
         .where(({ comment }) => or(eq(comment.id, 1), eq(comment.id, 2)))
         .orderBy(({ comment }) => comment.date, `desc`)
         .select(({ comment, user }) => ({

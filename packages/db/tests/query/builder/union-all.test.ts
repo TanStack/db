@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { innerJoin } from '@tanstack/db'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { DbClient, collectionOptions } from '../../../src/client.js'
 import {
@@ -117,12 +118,9 @@ describe(`QueryBuilder.unionAll`, () => {
 
     const query = builder
       .unionAll({ employees: employeeDescriptor })
-      .join(
-        { departments: departmentDescriptor },
+      .join(innerJoin({ departments: departmentDescriptor },
         ({ employees, departments }) =>
-          eq(employees.department_id, departments.id),
-        `inner`,
-      )
+          eq(employees.department_id, departments.id)))
 
     expect(collectSourceRefs(getQueryIR(query)).map((ref) => ref.type)).toEqual(
       [`descriptorRef`, `descriptorRef`],
@@ -159,11 +157,8 @@ describe(`QueryBuilder.unionAll`, () => {
 
     const query = builder
       .unionAll(employeeRows, departmentRows)
-      .join(
-        { departments: departmentDescriptor },
-        ({ id, departments }) => eq(id, departments.id),
-        `inner`,
-      )
+      .join(innerJoin({ departments: departmentDescriptor },
+        ({ id, departments }) => eq(id, departments.id)))
 
     expect(collectSourceRefs(getQueryIR(query)).map((ref) => ref.type)).toEqual(
       [`descriptorRef`, `descriptorRef`, `descriptorRef`],

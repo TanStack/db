@@ -1,21 +1,20 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import {
-  add,
-  caseWhen,
+import { add, caseWhen,
   concat,
   count,
   createLiveQueryCollection,
   eq,
   gt,
+  innerJoin,
+  leftJoin,
   lt,
   materialize,
   multiply,
   sum,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { runTrace } from '../trace-runner.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
@@ -1663,9 +1662,8 @@ describe(`Collection-valued includes oracle`, () => {
           query: (q) => {
             const joined = q
               .from({ comment: comments.collection })
-              .join({ user: users.collection }, ({ comment, user }) =>
-                eq(comment.userId, user.id),
-              )
+              .join(leftJoin({ user: users.collection }, ({ comment, user }) =>
+                eq(comment.userId, user.id)))
             return mode === `value`
               ? joined.select(({ comment }) => ({
                   publicId: comment.userId,
@@ -3109,9 +3107,8 @@ describe(`Collection-valued includes oracle`, () => {
           const childRows = () =>
             q
               .from({ child: children.collection })
-              .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                eq(tag.id, add(child.tagId, parent.offset)),
-              )
+              .join(innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                eq(tag.id, add(child.tagId, parent.offset))))
               .where(({ child }) => eq(child.parentGroup, parent.group))
               .select(({ child, tag }) => ({
                 id: child.id,

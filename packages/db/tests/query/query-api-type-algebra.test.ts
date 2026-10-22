@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
+import { createLiveQueryCollection, eq, leftJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 test(`an unmatched whole-object projection publishes undefined`, () => {
@@ -24,9 +24,8 @@ test(`an unmatched whole-object projection publishes undefined`, () => {
     query: (q) =>
       q
         .from({ row: rows })
-        .leftJoin({ department: departments }, ({ row, department }) =>
-          eq(row.departmentId, department.id),
-        )
+        .join(leftJoin({ department: departments }, ({ row, department }) =>
+          eq(row.departmentId, department.id)))
         .select(({ department }) => ({ department })),
   })
 
@@ -69,15 +68,13 @@ test(`branch unions publish unmatched whole-object projections as undefined`, as
   const query = createLiveQueryCollection((q) => {
     const branchA = q
       .from({ rowA: rowsA })
-      .leftJoin({ otherA: othersA }, ({ rowA, otherA }) =>
-        eq(rowA.id, otherA.id),
-      )
+      .join(leftJoin({ otherA: othersA }, ({ rowA, otherA }) =>
+        eq(rowA.id, otherA.id)))
       .select(({ otherA }) => ({ other: otherA }))
     const branchB = q
       .from({ rowB: rowsB })
-      .leftJoin({ otherB: othersB }, ({ rowB, otherB }) =>
-        eq(rowB.id, otherB.id),
-      )
+      .join(leftJoin({ otherB: othersB }, ({ rowB, otherB }) =>
+        eq(rowB.id, otherB.id)))
       .select(({ otherB }) => ({ other: otherB }))
 
     return q.unionAll(branchA, branchB).select(({ other }) => ({ other }))

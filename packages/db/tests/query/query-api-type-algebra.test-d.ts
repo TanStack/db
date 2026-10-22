@@ -1,3 +1,4 @@
+import { describe, expectTypeOf, test } from 'vitest'
 /**
  * Oracle owner: the query-builder compile-time suites.
  *
@@ -12,8 +13,7 @@
  * paired runtime test owns the unmatched-row value witness. Existing generic,
  * join, and nullable-leaf suites remain the broader compatibility owners.
  */
-import { describe, expectTypeOf, test } from 'vitest'
-import { Query, createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { Query, createLiveQueryCollection, eq, fullJoin, leftJoin, rightJoin } from '../../src/query/index.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
   Context,
@@ -65,9 +65,8 @@ describe(`query API type algebra`, () => {
       const query = createLiveQueryCollection((q) =>
         q
           .from({ row: rows })
-          .leftJoin({ department: departments }, ({ row, department }) =>
-            eq(row.departmentId, department.id),
-          )
+          .join(leftJoin({ department: departments }, ({ row, department }) =>
+            eq(row.departmentId, department.id)))
           .select(({ department }) => ({
             department,
             departmentName: department.name,
@@ -124,15 +123,13 @@ describe(`query API type algebra`, () => {
     ) {
       const joinedBranchA = new Query()
         .from({ rowA: rowsA })
-        .leftJoin({ otherA: othersA }, ({ rowA, otherA }) =>
-          eq(rowA.id, otherA.id),
-        )
+        .join(leftJoin({ otherA: othersA }, ({ rowA, otherA }) =>
+          eq(rowA.id, otherA.id)))
         .select(({ otherA }) => ({ other: otherA }))
       const joinedBranchB = new Query()
         .from({ rowB: rowsB })
-        .leftJoin({ otherB: othersB }, ({ rowB, otherB }) =>
-          eq(rowB.id, otherB.id),
-        )
+        .join(leftJoin({ otherB: othersB }, ({ rowB, otherB }) =>
+          eq(rowB.id, otherB.id)))
         .select(({ otherB }) => ({ other: otherB }))
       const joinedUnion = new Query()
         .unionAll(joinedBranchA, joinedBranchB)
@@ -187,9 +184,8 @@ describe(`query API type algebra`, () => {
       const query = createLiveQueryCollection((q) =>
         q
           .from({ row: rows })
-          .leftJoin({ department: departments }, ({ row, department }) =>
-            eq(row.departmentId, department.id),
-          )
+          .join(leftJoin({ department: departments }, ({ row, department }) =>
+            eq(row.departmentId, department.id)))
           .select(({ department }) => ({ ...department })),
       )
 
@@ -217,11 +213,11 @@ describe(`query API type algebra`, () => {
 
       const joined = new Query()
         .from({ row: rows })
-        .leftJoin({ item: a }, ({ row, item }) => {
+        .join(leftJoin({ item: a }, ({ row, item }) => {
           // @ts-expect-error Only the generic constraint is available.
           void item.notGuaranteed
           return eq(row.id, item.id)
-        })
+        }))
         .where(({ item }) => {
           // @ts-expect-error Nullable generic refs expose only guaranteed fields.
           void item.notGuaranteed
@@ -273,13 +269,13 @@ describe(`query API type algebra`, () => {
 
       const joinedBranchUnion = new Query()
         .unionAll(aRows, bRows)
-        .leftJoin({ row: rows }, ({ id: itemId, row }) => {
+        .join(leftJoin({ row: rows }, ({ id: itemId, row }) => {
           expectTypeOf<IsAny<typeof itemId>>().toEqualTypeOf<false>()
           expectTypeOf<IsAny<typeof row.id>>().toEqualTypeOf<false>()
           // @ts-expect-error The joined source declares no other field.
           void row.notGuaranteed
           return eq(itemId, row.id)
-        })
+        }))
         .where((refs) => {
           void refs.id
           void refs.row.id
@@ -293,7 +289,7 @@ describe(`query API type algebra`, () => {
 
       const rightJoinedBranchUnion = new Query()
         .unionAll(aRows, bRows)
-        .rightJoin({ row: rows }, ({ id: itemId, row }) => eq(itemId, row.id))
+        .join(rightJoin({ row: rows }, ({ id: itemId, row }) => eq(itemId, row.id)))
         .select(({ id: itemId }) => ({ id: itemId }))
 
       return {
@@ -522,7 +518,7 @@ describe(`query API type algebra`, () => {
         },
       )
       const rightJoined = union
-        .rightJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
+        .join(rightJoin({ row: rows }, ({ id, row }) => eq(id, row.id)))
         .select(
           ({
             exactNull,
@@ -539,7 +535,7 @@ describe(`query API type algebra`, () => {
           }),
         )
       const fullJoined = union
-        .fullJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
+        .join(fullJoin({ row: rows }, ({ id, row }) => eq(id, row.id)))
         .select(
           ({
             exactNull,

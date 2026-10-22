@@ -1,16 +1,15 @@
 import { isDeepStrictEqual } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { createLiveQueryCollection, eq,
+  innerJoin,
+  isUndefined,
+  leftJoin,
+  not,
+  toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  isUndefined,
-  not,
-  toArray,
-} from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
@@ -1115,9 +1114,8 @@ describe(`synchronous initial settlement refinement`, () => {
       query: (q) =>
         q
           .from({ row: rows })
-          .leftJoin({ marker: markers }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
+          .join(leftJoin({ marker: markers }, ({ row, marker }) =>
+            eq(row.id, marker.rowId)))
           .where(({ marker }) => not(isUndefined(marker.rowId)))
           .fn.where(({ row }) => row.rank > 0)
           .orderBy(({ row }) => row.rank)
@@ -1219,9 +1217,8 @@ describe(`synchronous initial settlement refinement`, () => {
       query: (q) =>
         q
           .from({ left })
-          .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
-            eq(leftRow.group, rightRow.group),
-          )
+          .join(leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+            eq(leftRow.group, rightRow.group)))
           .orderBy(({ left: leftRow }) => leftRow.rank)
           .limit(2)
           .select(({ left: leftRow, right: rightRow }) => ({
@@ -2020,9 +2017,8 @@ async function observeLaterFallback(
     query: (q) =>
       q
         .from({ root: rootCollection })
-        .leftJoin({ marker: markerCollection }, ({ root, marker }) =>
-          eq(root.id, marker.rootId),
-        )
+        .join(leftJoin({ marker: markerCollection }, ({ root, marker }) =>
+          eq(root.id, marker.rootId)))
         .where(({ marker }) => not(isUndefined(marker.id)))
         .orderBy(({ root }) => root.at, {
           direction: `asc`,
@@ -3072,7 +3068,7 @@ function createFullSourceQuery(
       switch (feature) {
         case `inner-join`:
           return base
-            .innerJoin({ tag: tags }, ({ row, tag }) => eq(row.tag, tag.tag))
+            .join(innerJoin({ tag: tags }, ({ row, tag }) => eq(row.tag, tag.tag)))
             .orderBy(({ row }) => row.rank)
             .limit(2)
             .select(({ row }) => ({ id: row.id }))

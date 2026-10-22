@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createLiveQueryCollection, leftJoin  } from '../src'
 import { CollectionConfigurationError } from '../src/errors'
 import { createCollection } from '../src/collection/index.js'
 import {
@@ -11,7 +12,6 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { createSingleRowRefProxy } from '../src/query/builder/ref-proxy'
-import { createLiveQueryCollection } from '../src'
 import { PropRef } from '../src/query/ir'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import {
@@ -582,11 +582,8 @@ describe(`Collection Auto-Indexing`, () => {
       query: (q: any) =>
         q
           .from({ item: leftCollection })
-          .join(
-            { other: rightCollection },
-            ({ item, other }: any) => eq(item.id, other.id2),
-            `left`,
-          )
+          .join(leftJoin({ other: rightCollection },
+            ({ item, other }: any) => eq(item.id, other.id2)))
           .select(({ item, other }: any) => ({
             id: item.id,
             name: item.name,
@@ -696,8 +693,7 @@ describe(`Collection Auto-Indexing`, () => {
       query: (q: any) =>
         q
           .from({ item: leftCollection })
-          .join(
-            {
+          .join(leftJoin({
               other: q
                 .from({ other: rightCollection })
                 .select(({ other }: any) => ({
@@ -705,9 +701,7 @@ describe(`Collection Auto-Indexing`, () => {
                   name: other.name,
                 })),
             },
-            ({ item, other }: any) => eq(item.id, other.id2),
-            `left`,
-          )
+            ({ item, other }: any) => eq(item.id, other.id2)))
           .select(({ item, other }: any) => ({
             id: item.id,
             name: item.name,

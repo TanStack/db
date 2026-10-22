@@ -66,7 +66,7 @@ import {
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
-import { processJoins, registerLazyDemandPlan } from './joins.js'
+import { registerLazyDemandPlan } from './lazy-demand.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
@@ -99,7 +99,7 @@ import type {
   QueryRef,
   UnionAll,
 } from '../ir.js'
-import type { LazyCollectionCallbacks } from './joins.js'
+import type { LazyCollectionCallbacks } from './lazy-demand.js'
 import type { IStreamBuilder, KeyValue, MultiSet } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type {
@@ -591,7 +591,7 @@ function compileQueryInternal(
 
   // Process JOIN clauses if they exist
   if (query.join && query.join.length > 0) {
-    pipeline = processJoins(
+    pipeline = query.join[0]!.compile(
       pipeline,
       query.join,
       sources,

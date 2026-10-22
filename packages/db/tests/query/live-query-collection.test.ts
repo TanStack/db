@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { createCollection } from '../../src/collection/index.js'
-import {
-  and,
-  coalesce,
+import { and, coalesce,
   createLiveQueryCollection,
   eq,
   ilike,
-  liveQueryCollectionOptions,
-} from '../../src/query/index.js'
+  innerJoin,
+  leftJoin,
+  liveQueryCollectionOptions } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { Query } from '../../src/query/builder/index.js'
 import {
   flushPromises,
@@ -914,12 +913,9 @@ describe(`createLiveQueryCollection`, () => {
         query: (q: any) =>
           q
             .from({ thread: sourceLQ })
-            .join(
-              { label: labelsByEmail },
+            .join(innerJoin({ label: labelsByEmail },
               ({ thread, label }: any) =>
-                eq(thread.last_email_id, label.email_id),
-              `inner`,
-            )
+                eq(thread.last_email_id, label.email_id)))
             .orderBy(({ thread }: any) => thread.last_sent_at, {
               direction: `desc`,
             }),
@@ -1107,14 +1103,10 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ player: playerCollection })
-          .leftJoin(
-            { challenge1: challenge1Collection },
-            ({ player, challenge1 }) => eq(player.id, challenge1.id),
-          )
-          .leftJoin(
-            { challenge2: challenge2Collection },
-            ({ player, challenge2 }) => eq(player.id, challenge2.id),
-          ),
+          .join(leftJoin({ challenge1: challenge1Collection },
+            ({ player, challenge1 }) => eq(player.id, challenge1.id)))
+          .join(leftJoin({ challenge2: challenge2Collection },
+            ({ player, challenge2 }) => eq(player.id, challenge2.id))),
       )
 
       // Start the query, but don't wait it, we are doing to write the data to the
@@ -1971,9 +1963,8 @@ describe(`createLiveQueryCollection`, () => {
       const live = createLiveQueryCollection((q) =>
         q
           .from({ user: users })
-          .leftJoin({ issue: issues }, ({ user, issue }) =>
-            eq(user.id, issue.userId),
-          )
+          .join(leftJoin({ issue: issues }, ({ user, issue }) =>
+            eq(user.id, issue.userId)))
           .select(({ user, issue }) => ({
             id: user.id,
             issueId: issue.id,
@@ -2017,9 +2008,8 @@ describe(`createLiveQueryCollection`, () => {
       const live = createLiveQueryCollection((q) =>
         q
           .from({ user: users })
-          .leftJoin({ issue: issues }, ({ user, issue }) =>
-            eq(user.id, issue.userId),
-          )
+          .join(leftJoin({ issue: issues }, ({ user, issue }) =>
+            eq(user.id, issue.userId)))
           .select(({ user, issue }) => ({
             id: user.id,
             issueId: issue.id,
@@ -2116,9 +2106,8 @@ describe(`createLiveQueryCollection`, () => {
         const live = createLiveQueryCollection((q) =>
           q
             .from({ parent: parents })
-            .leftJoin({ child: children }, ({ parent, child }) =>
-              eq(parent.id, child.parentId),
-            )
+            .join(leftJoin({ child: children }, ({ parent, child }) =>
+              eq(parent.id, child.parentId)))
             .orderBy(({ parent }) => parent.rank, `asc`)
             .limit(1)
             .select(({ parent, child }) => ({
@@ -3976,11 +3965,8 @@ describe(`createLiveQueryCollection`, () => {
       const userPosts = createLiveQueryCollection((q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            { post: posts },
-            ({ user, post }) => eq(user.id, post.authorId),
-            `inner`,
-          )
+          .join(innerJoin({ post: posts },
+            ({ user, post }) => eq(user.id, post.authorId)))
           .where(({ user, post }) =>
             and(eq(user.active, true), eq(post.published, true)),
           )
@@ -4486,7 +4472,7 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ base })
-            .join({ related }, ({ base: b, related: r }) => eq(b.id, r.id))
+            .join(leftJoin({ related }, ({ base: b, related: r }) => eq(b.id, r.id)))
             .select(({ base: b, related: r }) => ({
               id: b.id,
               name: b.name,
@@ -4527,7 +4513,7 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ comments })
-            .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
+            .join(leftJoin({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id)))
             .select(({ comments: c, users: u }) => ({
               id: c.id,
               userId: coalesce(u.id, c.userId),
@@ -4920,9 +4906,8 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ task: taskCollection })
-          .leftJoin({ project: projectCollection }, ({ task, project }) =>
-            eq(task.project_id, project.id),
-          ),
+          .join(leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id))),
       )
 
       const preloadPromise = liveQuery.preload()
@@ -5036,9 +5021,8 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ task: taskCollection })
-          .leftJoin({ project: projectCollection }, ({ task, project }) =>
-            eq(task.project_id, project.id),
-          ),
+          .join(leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id))),
       )
 
       const preloadPromise = liveQuery.preload()
@@ -5121,9 +5105,8 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ team: teamsCollection })
-            .join({ user: usersCollection }, ({ team, user }) =>
-              eq(team.lead_id, user.id),
-            )
+            .join(leftJoin({ user: usersCollection }, ({ team, user }) =>
+              eq(team.lead_id, user.id)))
             .select(({ team, user }) => ({
               teamName: team.name,
               leadName: user.name,

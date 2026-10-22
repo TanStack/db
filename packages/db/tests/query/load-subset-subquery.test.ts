@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
-import {
-  and,
+import { and,
   coalesce,
   createLiveQueryCollection,
   eq,
+  fullJoin,
   gt,
   gte,
   inArray,
@@ -12,8 +11,8 @@ import {
   lt,
   lte,
   not,
-  or,
-} from '../../src/query/index.js'
+  or } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { PropRef, Value } from '../../src/query/ir.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
@@ -287,9 +286,8 @@ describe(`loadSubset with subqueries`, () => {
       // Use subquery in main query
       return q
         .from({ charge: chargesCollection })
-        .fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
-          eq(charge.address_id, prepaidOrder.address_id),
-        )
+        .join(fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
+          eq(charge.address_id, prepaidOrder.address_id)))
     })
     cleanups.push(ordersCollection, subqueryQuery)
 
@@ -361,9 +359,8 @@ describe(`loadSubset with subqueries`, () => {
       // Use subquery in main query
       return q
         .from({ charge: chargesCollection })
-        .fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
-          eq(charge.address_id, prepaidOrder.address_id),
-        )
+        .join(fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
+          eq(charge.address_id, prepaidOrder.address_id)))
     })
     cleanups.push(ordersCollection, subqueryQuery)
 
@@ -407,9 +404,8 @@ describe(`loadSubset with subqueries`, () => {
 
       return q
         .from({ charge: chargesCollection })
-        .fullJoin({ order: orderedOrders }, ({ charge, order }) =>
-          eq(charge.address_id, order.address_id),
-        )
+        .join(fullJoin({ order: orderedOrders }, ({ charge, order }) =>
+          eq(charge.address_id, order.address_id)))
     })
     cleanups.push(ordersCollection, query)
 

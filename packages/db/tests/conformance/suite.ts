@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest'
 /**
  * Shared live-query conformance suite.
  *
@@ -36,8 +37,7 @@
  * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
  */
-import { describe, expect, it } from 'vitest'
-import { waitForPersistedInitialRender } from '@tanstack/db'
+import { leftJoin, waitForPersistedInitialRender } from '@tanstack/db'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
@@ -206,9 +206,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const h = driver.mount((q) =>
           q
             .from({ left: left.collection })
-            .join({ right: right.collection }, ({ left: a, right: b }: any) =>
-              ops.eq(a.id, b.id),
-            ),
+            .join(leftJoin({ right: right.collection }, ({ left: a, right: b }: any) =>
+              ops.eq(a.id, b.id))),
         )
         await h.flush()
         expect(h.current()).toMatchObject({
@@ -247,10 +246,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const h = driver.mount((q) =>
           q
             .from({ opted: opted.collection })
-            .join(
-              { ordinary: ordinary.collection },
-              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
-            ),
+            .join(leftJoin({ ordinary: ordinary.collection },
+              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id))),
         )
         await h.apply(settle)
         await h.flush()
@@ -637,9 +634,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       const h = driver.mount((q) =>
         q
           .from({ issues: issues.collection })
-          .join({ persons: people.collection }, ({ issues: i, persons }: any) =>
-            ops.eq(i.userId, persons.id),
-          )
+          .join(leftJoin({ persons: people.collection }, ({ issues: i, persons }: any) =>
+            ops.eq(i.userId, persons.id)))
           .select(({ issues: i, persons }: any) => ({
             id: i.id,
             title: i.title,
@@ -702,9 +698,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             }))
           return q
             .from({ persons: people.collection })
-            .leftJoin({ ic: issueCounts }, ({ persons, ic }: any) =>
-              ops.eq(persons.id, ic.userId),
-            )
+            .join(leftJoin({ ic: issueCounts }, ({ persons, ic }: any) =>
+              ops.eq(persons.id, ic.userId)))
             .select(({ persons, ic }: any) => ({
               name: persons.name,
               issueCount: ic.issueCount,

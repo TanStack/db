@@ -1,3 +1,4 @@
+import { describe, expect, it, vi } from 'vitest'
 /**
  * # When may a live-query Collection start provider work?
  *
@@ -45,7 +46,6 @@
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
-import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
   DbClient,
@@ -55,6 +55,7 @@ import {
   createLiveQueryObserver,
   eq,
   getLiveQueryHash,
+  leftJoin,
   prepareLiveQueryValue,
 } from '../src'
 import { Query } from '../src/query/builder/index.js'
@@ -1222,7 +1223,7 @@ describe(`a source whose start throws on resumption`, () => {
       query: (q) =>
         q
           .from({ a: failing })
-          .join({ b: healthy }, ({ a, b }) => eq(a.id, b.id)),
+          .join(leftJoin({ b: healthy }, ({ a, b }) => eq(a.id, b.id))),
       gcTime: 0,
     })
     const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})

@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, gt, innerJoin, leftJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -99,11 +99,8 @@ describe(`Join Subquery Types`, () => {
           // Join subquery with users
           return q
             .from({ issue: project1Issues })
-            .join(
-              { user: usersCollection },
-              ({ issue, user }) => eq(issue.userId, user.id),
-              `inner`,
-            )
+            .join(innerJoin({ user: usersCollection },
+              ({ issue, user }) => eq(issue.userId, user.id)))
             .select(({ issue, user }) => ({
               issue_title: issue.title,
               user_name: user.name,
@@ -138,11 +135,8 @@ describe(`Join Subquery Types`, () => {
           // Join all issues with active users subquery - no SELECT to test namespaced result
           return q
             .from({ issue: issuesCollection })
-            .join(
-              { activeUser: activeUsers },
-              ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`,
-            )
+            .join(leftJoin({ activeUser: activeUsers },
+              ({ issue, activeUser }) => eq(issue.userId, activeUser.id)))
         },
       })
 
@@ -174,12 +168,9 @@ describe(`Join Subquery Types`, () => {
           // Join both subqueries
           return q
             .from({ longIssue: longIssues })
-            .join(
-              { activeUser: activeUsers },
+            .join(innerJoin({ activeUser: activeUsers },
               ({ longIssue, activeUser }) =>
-                eq(longIssue.userId, activeUser.id),
-              `inner`,
-            )
+                eq(longIssue.userId, activeUser.id)))
             .select(({ longIssue, activeUser }) => ({
               issue_title: longIssue.title,
               issue_duration: longIssue.duration,
@@ -215,11 +206,8 @@ describe(`Join Subquery Types`, () => {
 
           return q
             .from({ issue: issuesCollection })
-            .join(
-              { engUser: engineeringUsers },
-              ({ issue, engUser }) => eq(issue.userId, engUser.id),
-              `inner`,
-            )
+            .join(innerJoin({ engUser: engineeringUsers },
+              ({ issue, engUser }) => eq(issue.userId, engUser.id)))
             .select(({ issue, engUser }) => ({
               issue_title: issue.title,
               user_name: engUser.name,
@@ -251,11 +239,8 @@ describe(`Join Subquery Types`, () => {
 
           return q
             .from({ issue: issuesCollection })
-            .join(
-              { activeUser: activeUsers },
-              ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`,
-            )
+            .join(leftJoin({ activeUser: activeUsers },
+              ({ issue, activeUser }) => eq(issue.userId, activeUser.id)))
         },
       })
 
@@ -300,11 +285,8 @@ describe(`Join Subquery Types`, () => {
           // Join both transformed subqueries
           return q
             .from({ task: transformedIssues })
-            .join(
-              { profile: userProfiles },
-              ({ task, profile }) => eq(task.assigneeId, profile.profileId),
-              `inner`,
-            )
+            .join(innerJoin({ profile: userProfiles },
+              ({ task, profile }) => eq(task.assigneeId, profile.profileId)))
             .select(({ task, profile }) => ({
               id: task.taskId,
               name: task.taskName,
@@ -346,11 +328,8 @@ describe(`Join Subquery Types`, () => {
 
           return q
             .from({ issue: filteredIssues })
-            .join(
-              { user: usersCollection },
-              ({ issue, user }) => eq(issue.userId, user.id),
-              `inner`,
-            )
+            .join(innerJoin({ user: usersCollection },
+              ({ issue, user }) => eq(issue.userId, user.id)))
             .select(({ issue, user }) => ({
               // Should have access to all original Issue properties
               issue_id: issue.id,
@@ -394,11 +373,8 @@ describe(`Join Subquery Types`, () => {
           // Join all issues with active users subquery with SELECT
           return q
             .from({ issue: issuesCollection })
-            .join(
-              { activeUser: activeUsers },
-              ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`,
-            )
+            .join(leftJoin({ activeUser: activeUsers },
+              ({ issue, activeUser }) => eq(issue.userId, activeUser.id)))
             .select(({ issue, activeUser }) => ({
               issue_title: issue.title,
               user_name: activeUser.name, // Should now be string | undefined

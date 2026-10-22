@@ -1,15 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  and,
+import { and,
   coalesce,
   concat,
   count,
   createLiveQueryCollection,
   eq,
   gte,
+  innerJoin,
   materialize,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
@@ -3458,12 +3457,9 @@ describe(`includes subqueries`, () => {
           joinedChildren: materialize(
             q
               .from({ joinedChild: children })
-              .join(
-                { metadata: metadataRows },
+              .join(innerJoin({ metadata: metadataRows },
                 ({ joinedChild, metadata }) =>
-                  eq(joinedChild.metadataId, metadata.id),
-                `inner`,
-              )
+                  eq(joinedChild.metadataId, metadata.id)))
               .where(({ metadata }) => eq(metadata.groupId, parent.groupId))
               .where(({ metadata }) => eq(metadata.tag, parent.tag))
               .select(({ joinedChild }) => ({ id: joinedChild.id })),

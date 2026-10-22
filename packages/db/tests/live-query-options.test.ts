@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { leftJoin } from '@tanstack/db'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
 import {
@@ -125,10 +126,8 @@ describe(`live query preparation`, () => {
     for (const collection of renderDeferrals) collection._resumeSyncStart()
     renderDeferrals.clear()
 
-    const continued = prepared.join(
-      { later: laterDescriptor },
-      ({ source, later }) => eq(source.id, later.id),
-    )
+    const continued = prepared.join(leftJoin({ later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id)))
     expect(
       collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
     ).toEqual([`collectionRef`, `descriptorRef`])
@@ -169,10 +168,8 @@ describe(`live query preparation`, () => {
       client,
       deferrals,
     ) as typeof base
-    const continued = prepared.join(
-      { later: laterDescriptor },
-      ({ source, later }) => eq(source.id, later.id),
-    )
+    const continued = prepared.join(leftJoin({ later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id)))
 
     expect(starts).toBe(0)
     const consumed = prepareLiveQueryValue(
@@ -215,10 +212,8 @@ describe(`live query preparation`, () => {
       new Set(),
     )
 
-    const continued = captured!.join(
-      { later: laterDescriptor },
-      ({ source, later }) => eq(source.id, later.id),
-    )
+    const continued = captured!.join(leftJoin({ later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id)))
     expect(
       collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
     ).toEqual([`descriptorRef`, `descriptorRef`])

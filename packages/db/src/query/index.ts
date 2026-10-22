@@ -35,6 +35,17 @@ export {
   type Prettify,
 } from './builder/index.js'
 
+// Join operators
+export {
+  leftJoin,
+  rightJoin,
+  innerJoin,
+  fullJoin,
+  joinOf,
+  type JoinOperator,
+  type JoinType,
+} from './builder/join-operators.js'
+
 // Expression functions exports
 export {
   // Operators

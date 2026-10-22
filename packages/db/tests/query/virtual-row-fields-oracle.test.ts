@@ -1,3 +1,9 @@
+import { describe, expect, test } from 'vitest'
+import { createLiveQueryCollection,
+  eq,
+  leftJoin,
+  materialize,
+  toArray } from '../../src/query/index.js'
 /**
  * # Which published values carry virtual row fields?
  *
@@ -32,14 +38,7 @@
  * observations. `checkWithCleanup` retains the primary mismatch as the cause
  * when Collection cleanup also fails and attempts every cleanup.
  */
-import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  materialize,
-  toArray,
-} from '../../src/query/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -282,9 +281,8 @@ describe(`virtual row field runtime boundary`, () => {
           q
             .from({ child: rows })
             .where(({ child }) => eq(child.id, row.id))
-            .leftJoin({ missing: missingRows }, ({ child, missing }) =>
-              eq(child.id, missing.id),
-            )
+            .join(leftJoin({ missing: missingRows }, ({ child, missing }) =>
+              eq(child.id, missing.id)))
             .select(({ missing }) => missing),
         ),
         objects: toArray(

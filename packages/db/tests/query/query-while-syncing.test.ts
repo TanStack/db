@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, gt, innerJoin, leftJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -317,11 +317,8 @@ describe(`Query while syncing`, () => {
           query: (q) =>
             q
               .from({ user: usersCollection })
-              .join(
-                { dept: departmentsCollection },
-                ({ user, dept }) => eq(user.department_id, dept.id),
-                `inner`,
-              )
+              .join(innerJoin({ dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id)))
               .select(({ user, dept }) => ({
                 user_name: user.name,
                 department_name: dept.name,
@@ -444,9 +441,8 @@ describe(`Query while syncing`, () => {
           query: (q) =>
             q
               .from({ user: usersCollection })
-              .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                eq(user.department_id, dept.id),
-              )
+              .join(leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+                eq(user.department_id, dept.id)))
               .select(({ user, dept }) => ({
                 user_name: user.name,
                 department_name: dept.name,
@@ -576,16 +572,10 @@ describe(`Query while syncing`, () => {
           query: (q) =>
             q
               .from({ c1: collection1 })
-              .join(
-                { c2: collection2 },
-                ({ c1, c2 }) => eq(c1.id, c2.id),
-                `inner`,
-              )
-              .join(
-                { c3: collection3 },
-                ({ c1, c3 }) => eq(c1.id, c3.id),
-                `inner`,
-              )
+              .join(innerJoin({ c2: collection2 },
+                ({ c1, c2 }) => eq(c1.id, c2.id)))
+              .join(innerJoin({ c3: collection3 },
+                ({ c1, c3 }) => eq(c1.id, c3.id)))
               .select(({ c1 }) => ({
                 id: c1.id,
                 name: c1.name,
@@ -918,11 +908,8 @@ describe(`Query while syncing`, () => {
           query: (q) =>
             q
               .from({ user: usersCollection })
-              .join(
-                { dept: departmentsCollection },
-                ({ user, dept }) => eq(user.department_id, dept.id),
-                `inner`,
-              )
+              .join(innerJoin({ dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id)))
               .select(({ user, dept }) => ({
                 user_name: user.name,
                 department_name: dept.name,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { leftJoin } from '@tanstack/db'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { eq } from '../../../src/query/builder/functions.js'
@@ -157,7 +158,7 @@ describe(`QueryBuilder.from`, () => {
     const builder = new Query().from({ employees: employeesCollection })
 
     expect(() => {
-      builder.join(`departments` as any, () => eq(1, 1))
+      builder.join(leftJoin(`departments` as any, () => eq(1, 1)))
     }).toThrow(
       /Invalid source for join clause: Expected an object with a single key-value pair.*For example: \.join/,
     )

@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, fullJoin, innerJoin, leftJoin, rightJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -45,10 +45,8 @@ describe(`findOne() with joins`, () => {
           .from({ todo: todoCollection })
           .where(({ todo }) => eq(todo.id, `test-id`))
           .orderBy(({ todo }) => todo.order, `asc`)
-          .leftJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(leftJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .findOne(),
     })
 
@@ -68,10 +66,8 @@ describe(`findOne() with joins`, () => {
         q
           .from({ todo: todoCollection })
           .where(({ todo }) => eq(todo.id, `test-id`))
-          .innerJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(innerJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .findOne(),
     })
 
@@ -92,10 +88,8 @@ describe(`findOne() with joins`, () => {
           .from({ todo: todoCollection })
           .where(({ todo }) => eq(todo.id, `test-id`))
           .findOne()
-          .leftJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          ),
+          .join(leftJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId))),
     })
 
     expectTypeOf(query.toArray).toMatchTypeOf<
@@ -114,10 +108,8 @@ describe(`findOne() with joins`, () => {
         q
           .from({ todo: todoCollection })
           .where(({ todo }) => eq(todo.id, `test-id`))
-          .rightJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(rightJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .findOne(),
     })
 
@@ -137,10 +129,8 @@ describe(`findOne() with joins`, () => {
         q
           .from({ todo: todoCollection })
           .where(({ todo }) => eq(todo.id, `test-id`))
-          .fullJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(fullJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .findOne(),
     })
 
@@ -173,13 +163,10 @@ describe(`findOne() with joins`, () => {
       query: (q) =>
         q
           .from({ todo: todoCollection })
-          .leftJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
-          .innerJoin({ tag: todoTagsCollection }, ({ todo, tag }) =>
-            eq(todo.id, tag.todoId),
-          )
+          .join(leftJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
+          .join(innerJoin({ tag: todoTagsCollection }, ({ todo, tag }) =>
+            eq(todo.id, tag.todoId)))
           .findOne(),
     })
 
@@ -199,10 +186,8 @@ describe(`findOne() with joins`, () => {
       query: (q) =>
         q
           .from({ todo: todoCollection })
-          .leftJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(leftJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .select(({ todo, todoOptions }) => ({
             todoText: todo.text,
             optionText: todoOptions.optionText,
@@ -225,10 +210,8 @@ describe(`findOne() with joins`, () => {
       query: (q) =>
         q
           .from({ todo: todoCollection })
-          .leftJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(leftJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .findOne()
           .select(({ todo, todoOptions }) => ({
             todoText: todo.text,
@@ -253,10 +236,8 @@ describe(`findOne() with joins`, () => {
           .from({ todo: todoCollection })
           .where(({ todo }) => eq(todo.id, `test-id`))
           .orderBy(({ todo }) => todo.order, `asc`)
-          .leftJoin(
-            { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
-          )
+          .join(leftJoin({ todoOptions: todoOptionsCollection },
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)))
           .limit(1),
     })
 

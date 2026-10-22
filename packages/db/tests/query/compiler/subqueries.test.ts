@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
+import { leftJoin } from '@tanstack/db'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { compileQuery } from '../../../src/query/compiler/index.js'
 import { CollectionImpl } from '../../../src/collection/index.js'
@@ -223,9 +224,8 @@ describe(`Query2 Subqueries`, () => {
       // Use the subquery in a join
       const query = new Query()
         .from({ issue: issuesCollection })
-        .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id),
-        )
+        .join(leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
+          eq(issue.userId, activeUser.id)))
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
@@ -258,9 +258,8 @@ describe(`Query2 Subqueries`, () => {
       // Use the subquery in a join
       const query = new Query()
         .from({ issue: issuesCollection })
-        .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id),
-        )
+        .join(leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
+          eq(issue.userId, activeUser.id)))
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
@@ -362,9 +361,8 @@ describe(`Query2 Subqueries`, () => {
 
       const outerQuery = new Query()
         .from({ issue: issuesCollection })
-        .join({ userInfo: middleQuery }, ({ issue, userInfo }) =>
-          eq(issue.userId, userInfo.id),
-        )
+        .join(leftJoin({ userInfo: middleQuery }, ({ issue, userInfo }) =>
+          eq(issue.userId, userInfo.id)))
         .select(({ issue, userInfo }) => ({
           issueId: issue.id,
           issueTitle: issue.title,

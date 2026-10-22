@@ -1,15 +1,14 @@
 import { setImmediate as yieldToRunner } from 'node:timers/promises'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createLiveQueryCollection,
+  eq,
+  innerJoin,
+  materialize } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  materialize,
-} from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
@@ -134,12 +133,9 @@ function createLayeredQuery(
       const parentRows =
         q1Shape === `direct`
           ? source
-          : source.join(
-              { metadata: metadata.collection },
+          : source.join(innerJoin({ metadata: metadata.collection },
               ({ item, metadata: rowMetadata }) =>
-                eq(item.id, rowMetadata.parentId),
-              `inner`,
-            )
+                eq(item.id, rowMetadata.parentId)))
 
       return parentRows.select(({ item }) => ({
         item,

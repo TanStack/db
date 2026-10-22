@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
+import { BTreeIndex, innerJoin  } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { BTreeIndex } from '../../src/index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import {
   createLiveQueryCollection,
@@ -406,9 +406,8 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
       query: (q) =>
         q
           .from({ left })
-          .innerJoin({ right }, ({ left: leftRow, right: rightRow }) =>
-            eq(leftRow.group, rightRow.group),
-          )
+          .join(innerJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+            eq(leftRow.group, rightRow.group)))
           .select(({ left: leftRow, right: rightRow }) => ({
             leftId: leftRow.id,
             rightId: rightRow.id,

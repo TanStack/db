@@ -1,15 +1,14 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import {
-  Query,
+import { Query,
   and,
   createLiveQueryCollection,
   eq,
   gt,
+  innerJoin,
   lower,
   lt,
   lte,
-  upper,
-} from '../../src/query/index.js'
+  upper } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { Ref } from '../../src/query/index.js'
@@ -269,11 +268,8 @@ describe(`Composables`, () => {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .join(
-              { post: postsCollection },
-              ({ user, post }) => eq(user.id, post.authorId),
-              `inner`,
-            )
+            .join(innerJoin({ post: postsCollection },
+              ({ user, post }) => eq(user.id, post.authorId)))
             .where(userIsActive)
             .where(postIsPublished)
             .select(userPostJoinInfo),
@@ -423,11 +419,8 @@ describe(`Composables`, () => {
         query: (q) =>
           q
             .from({ u: usersCollection })
-            .join(
-              { p: postsCollection },
-              ({ u, p }) => eq(u.id, p.authorId),
-              `inner`,
-            )
+            .join(innerJoin({ p: postsCollection },
+              ({ u, p }) => eq(u.id, p.authorId)))
             .where(joinedUserPostPredicate)
             .select(joinedSelect),
         startSync: true,

@@ -1,3 +1,9 @@
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection,
+  eq,
+  leftJoin,
+  materialize,
+  toArray } from '../../src/query/index.js'
 /**
  * # Which types represent virtual-field-bearing rows?
  *
@@ -33,14 +39,7 @@
  * nested-helper cells and `GetRawResult` enrichment breaks eleven
  * projected-value cells.
  */
-import { describe, expectTypeOf, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  materialize,
-  toArray,
-} from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { SingleRowRefProxy } from '../../src/query/builder/ref-proxy.js'
@@ -227,9 +226,8 @@ describe(`virtual row field type boundary`, () => {
         unmatchedRows: toArray(
           q
             .from({ child: rows })
-            .leftJoin({ missing: rows }, ({ child, missing }) =>
-              eq(child.id, missing.id),
-            )
+            .join(leftJoin({ missing: rows }, ({ child, missing }) =>
+              eq(child.id, missing.id)))
             .select(({ missing }) => missing),
         ),
         objects: toArray(

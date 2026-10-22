@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, leftJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -159,11 +159,8 @@ describe(`Optional Fields - Runtime Tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            { dept: departmentsCollection },
-            ({ user, dept }) => eq(user.department_id, dept.id),
-            `left`,
-          )
+          .join(leftJoin({ dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id)))
           .select(({ user, dept }) => ({
             user_name: user.name,
 

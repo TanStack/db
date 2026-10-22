@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, innerJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { add, eq, upper } from '../../src/query/builder/functions.js'
 
@@ -258,7 +258,7 @@ describe(`select spreads (runtime)`, () => {
     const collection = createLiveQueryCollection((q) =>
       q
         .from({ m: messagesCollection })
-        .join({ u: users }, ({ m, u }) => eq(m.id, u.id), `inner`)
+        .join(innerJoin({ u: users }, ({ m, u }) => eq(m.id, u.id)))
         .select(({ m, u }) => ({
           ...m,
           ...u,

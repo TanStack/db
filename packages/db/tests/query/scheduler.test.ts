@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createLiveQueryCollection, eq, fullJoin, innerJoin, isNull, leftJoin  } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
@@ -103,7 +103,7 @@ function setupLiveQueryCollections(id: string) {
     query: (q) =>
       q
         .from({ user: users })
-        .join({ task: tasks }, ({ user, task }) => eq(user.id, task.userId))
+        .join(leftJoin({ task: tasks }, ({ user, task }) => eq(user.id, task.userId)))
         .select(({ user, task }) => ({
           userId: user.id,
           taskId: task.id,
@@ -1081,11 +1081,8 @@ describe(`live query scheduler`, () => {
       ])
       const query = new Query()
         .from({ left: leftQuery })
-        .join(
-          { right: rightQuery ?? rightSource },
-          ({ left, right }) => eq(left.id, right.id),
-          `inner`,
-        )
+        .join(innerJoin({ right: rightQuery ?? rightSource },
+          ({ left, right }) => eq(left.id, right.id)))
         .select(({ left, right }) => ({
           id: left.id,
           left: left.value,
@@ -1204,11 +1201,8 @@ describe(`live query scheduler`, () => {
       query: (q) =>
         q
           .from({ left: liveQueryA })
-          .join(
-            { right: liveQueryB },
-            ({ left, right }) => eq(left.id, right.id),
-            `full`,
-          )
+          .join(fullJoin({ right: liveQueryB },
+            ({ left, right }) => eq(left.id, right.id)))
           .select(({ left, right }) => ({
             left: left.value,
             right: right.value,
@@ -1296,11 +1290,8 @@ describe(`live query scheduler`, () => {
       query: (q) =>
         q
           .from({ left: liveQueryA })
-          .join(
-            { right: collectionB },
-            ({ left, right }) => eq(left.id, right.id),
-            `full`,
-          )
+          .join(fullJoin({ right: collectionB },
+            ({ left, right }) => eq(left.id, right.id)))
           .select(({ left, right }) => ({
             left: left.value,
             right: right.value,
@@ -1384,11 +1375,8 @@ describe(`live query scheduler`, () => {
       query: (q) =>
         q
           .from({ left: liveQueryA })
-          .join(
-            { right: collectionB },
-            ({ left, right }) => eq(left.id, right.id),
-            `full`,
-          )
+          .join(fullJoin({ right: collectionB },
+            ({ left, right }) => eq(left.id, right.id)))
           .select(({ left, right }) => ({
             left: left.value,
             right: right.value,
@@ -1815,9 +1803,8 @@ describe(`live query scheduler`, () => {
       query: (q) =>
         q
           .from({ account: accounts })
-          .join({ user: users }, ({ user, account }) =>
-            eq(user.id, account.user_id),
-          )
+          .join(leftJoin({ user: users }, ({ user, account }) =>
+            eq(user.id, account.user_id)))
           .select(({ account, user }) => ({
             account: account,
             profile: user.profile,
@@ -1840,9 +1827,8 @@ describe(`live query scheduler`, () => {
       query: (q) =>
         q
           .from({ accountWithUser: accountsWithUsers })
-          .leftJoin({ team: activeTeams }, ({ accountWithUser, team }) =>
-            eq(team.team.account_id, accountWithUser.account.id),
-          )
+          .join(leftJoin({ team: activeTeams }, ({ accountWithUser, team }) =>
+            eq(team.team.account_id, accountWithUser.account.id)))
           .select(({ accountWithUser, team }) => ({
             account: accountWithUser.account,
             profile: accountWithUser.profile,
@@ -1937,7 +1923,7 @@ describe(`live query scheduler`, () => {
       query: (q) =>
         q
           .from({ a: queryA })
-          .leftJoin({ b: queryB }, ({ a, b }) => eq(a.id, b.id))
+          .join(leftJoin({ b: queryB }, ({ a, b }) => eq(a.id, b.id)))
           .select(({ a, b }) => ({
             id: a.id,
             aValue: a.value,

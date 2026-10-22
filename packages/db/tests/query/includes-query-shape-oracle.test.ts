@@ -1,11 +1,10 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { BasicIndex } from '../../src/indexes/basic-index.js'
-import {
-  createLiveQueryCollection,
+import { createLiveQueryCollection,
   eq,
-  materialize,
-} from '../../src/query/index.js'
+  innerJoin,
+  materialize } from '../../src/query/index.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
@@ -125,10 +124,8 @@ function createMultiplicityQuery(sources: MultiplicitySources) {
     query: (q) =>
       q
         .from({ parent: sources.parents.collection })
-        .innerJoin(
-          { child: sources.children.collection },
-          ({ parent, child }) => eq(parent.id, child.parentId),
-        )
+        .join(innerJoin({ child: sources.children.collection },
+          ({ parent, child }) => eq(parent.id, child.parentId)))
         .select(({ parent }) => ({ id: parent.id })),
     getKey: (row) => row.id,
   })
@@ -231,10 +228,8 @@ function createCorrelationQuery(
       .select(({ part }) => {
         const joined = q
           .from({ production: sources.productions.collection })
-          .innerJoin(
-            { order: sources.orders.collection },
-            ({ production, order }) => eq(production.orderId, order.id),
-          )
+          .join(innerJoin({ order: sources.orders.collection },
+            ({ production, order }) => eq(production.orderId, order.id)))
         const correlated =
           target === `joined`
             ? joined.where(({ order }) => eq(order.partId, part.id))
