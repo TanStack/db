@@ -21,6 +21,14 @@
  * in parallel, and a package whose sources did not change since its last
  * build is not rebuilt. With `--files`, production mode lists each source
  * module's minified bytes in the bundle, before compression.
+ *
+ * A package bundle keeps every export, so nothing is tree-shaken. Production
+ * mode therefore also measures scenarios: small apps in
+ * `scripts/size-scenarios/` that use one part of `@tanstack/db` each (a
+ * Collection alone, a filtered live query, a join, an Effect, ...). Each is
+ * bundled with its dependencies, as an app ships it, so a scenario shows the
+ * code that its users pay for. With `--files`, the changed modules of each
+ * scenario are listed too. `--no-scenarios` skips them.
  */
 import { execFile, execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -232,6 +240,49 @@ async function measureProduction(dir, pkg) {
   return files
 }
 
+// A scenario as an app ships it: tree-shaken, with its dependencies, built
+// against one tree's packages.
+const scenarioDir = join(root, `scripts`, `size-scenarios`)
+const scenarios = existsSync(scenarioDir)
+  ? walk(scenarioDir, (name) => name.endsWith(`.js`)).sort()
+  : []
+async function measureScenario(dir, scenario) {
+  const result = await esbuild({
+    entryPoints: [scenario],
+    absWorkingDir: join(dir, `packages`, `db`),
+    bundle: true,
+    minify: true,
+    format: `esm`,
+    platform: `browser`,
+    tsconfigRaw: `{}`,
+    alias: {
+      '@tanstack/db': join(dir, `packages`, `db`, `dist`, `esm`, `index.js`),
+      '@tanstack/db-ivm': join(
+        dir,
+        `packages`,
+        `db-ivm`,
+        `dist`,
+        `esm`,
+        `index.js`,
+      ),
+    },
+    write: false,
+    metafile: true,
+    logLevel: `error`,
+    define: { 'process.env.NODE_ENV': `"production"` },
+  })
+  const bundle = Buffer.from(result.outputFiles[0].contents)
+  const files = new Map([[`(bundle)`, sizes(bundle)]])
+  const output = Object.values(result.metafile.outputs)[0]
+  for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
+    const name = input.includes(`/packages/`)
+      ? input.slice(input.lastIndexOf(`/packages/`) + 1)
+      : input.slice(input.lastIndexOf(`node_modules/`) + 13)
+    files.set(name, { gzip: bytesInOutput, brotli: bytesInOutput, raw: true })
+  }
+  return files
+}
+
 const production = !flag(`dev`)
 const measure = (dir, pkg) =>
   production
@@ -301,3 +352,38 @@ console.log(
     signed(sum.headBrotli - sum.baseBrotli),
   ].join(`\t`),
 )
+
+if (production && !flag(`no-scenarios`) && packages.includes(`db`)) {
+  console.log(
+    `\nscenarios: apps in scripts/size-scenarios, tree-shaken with their dependencies\n`,
+  )
+  console.log(
+    [`scenario`, `base gzip`, `head gzip`, `Δ gzip`, `Δ brotli`].join(`\t`),
+  )
+  for (const scenario of scenarios) {
+    const base = await measureScenario(baseDir, scenario)
+    const head = await measureScenario(root, scenario)
+    const baseGzip = base.get(`(bundle)`).gzip
+    const headGzip = head.get(`(bundle)`).gzip
+    console.log(
+      [
+        relative(scenarioDir, scenario).replace(/\.js$/, ``),
+        baseGzip,
+        headGzip,
+        signed(headGzip - baseGzip) + percent(headGzip - baseGzip, baseGzip),
+        signed(head.get(`(bundle)`).brotli - base.get(`(bundle)`).brotli),
+      ].join(`\t`),
+    )
+    if (!flag(`files`)) continue
+    const changed = [...new Set([...base.keys(), ...head.keys()])]
+      .filter((file) => file !== `(bundle)`)
+      .map((file) => [
+        file,
+        (head.get(file)?.gzip ?? 0) - (base.get(file)?.gzip ?? 0),
+      ])
+      .filter(([, delta]) => delta !== 0)
+      .sort((a, b) => b[1] - a[1])
+    for (const [file, delta] of changed)
+      console.log(`  ${file}\t\t\t${signed(delta)}`)
+  }
+}

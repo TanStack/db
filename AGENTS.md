@@ -903,7 +903,13 @@ Measure production code weight in shipped bytes, not lines. Run
 changed packages with the same minified build that the Compressed size CI
 check uses, bundles each one as an app's production build would, and
 compares gzip and brotli bytes with the merge-base on `origin/main`.
-Development-only code, such as full error messages, does not count. Comments, names, and formatting cost nothing in that measure, so
+Development-only code, such as full error messages, does not count.
+A package bundle keeps every export, so `size:compare` also reports
+scenarios: small apps in `scripts/size-scenarios/` (a Collection alone, a
+filtered live query, a join, an Effect, and others), each tree-shaken with
+its dependencies. A scenario is what its users ship. Weight that reaches
+the `collection` or `live-query` scenario affects nearly every app, so
+weigh it most. Comments, names, and formatting cost nothing in that measure, so
 keep useful comments and clear names. Never delete a comment, shorten a name,
 or reformat code to improve a code-weight number. Reduce states, branches,
 helpers, and recovery paths.
