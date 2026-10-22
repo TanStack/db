@@ -7131,6 +7131,44 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
+  // A signalling refetch moves the first page's end earlier, to a rank that
+  // a row the provider never sent ties with. The window is still inside the
+  // page, but the rank-2 row past it is local only because the old tie
+  // request read it, so it proves nothing about the rows that now tie with
+  // the end. The report must repair; ignoring it made a later window move
+  // read the local rows and skip row 11.
+  it(`repairs a signalling refetch before a window move reads past its page`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: null as unknown as number, eligible: true },
+        { id: 1, rank: 2, eligible: true },
+        { id: 2, rank: 3, eligible: true },
+        { id: 3, rank: Number.NaN, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 0, eligible: true },
+        { type: `flip`, id: 2 },
+        { type: `upsert`, id: 11, rank: 0, eligible: true },
+        { type: `refetch` },
+        { type: `move`, offset: 0, limit: 3 },
+        { type: `delete`, id: 0 },
+      ],
+    })
+  })
+
   // A page with no later page whose end moves earlier. Two rank-0 rows
   // arrive while the provider lags; the refetched page ends at rank 0, but
   // the tie request still holds the rank-1 row, so the loader sees no

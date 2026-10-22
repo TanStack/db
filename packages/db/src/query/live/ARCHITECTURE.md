@@ -1006,7 +1006,14 @@ when its window is inside that page: every window row sorts at or before the
 `offset + limit`-th source row, and the next source row sorts strictly after
 it in the leading term. The refetched page holds every row from the start
 through its end, and any row it left out sorts after that end, so the window
-is proven. A window that needs a row past the page, such as one whose page
+is proven. The loader checks the next source row through an installed row,
+which is evidence only when the page read it, or when the loader read the tie
+of the page's current end: the refetch re-read that tie, so every row that ties
+with the end is installed. A row that another request installed proves
+nothing. Neither does a tie that the loader read for an older end, because a
+refetch can move the end earlier, so a row the provider never sent can tie
+with the new end. The loader repairs in those cases. A window that needs a row
+past the page, such as one whose page
 holds rows a joined filter rejects, still repairs. So does any loader while
 its source holds accepted sync rows back, as behind a persisting optimistic
 transaction: the visible rows then predate the refetch. Core reissues the

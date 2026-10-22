@@ -34,6 +34,14 @@ type RequestOptions = LoadSubsetOptions & {
   ) => void
 }
 
+// The leading order value that a tie request asks for: its `where` is
+// `eq(rank, value)`. Other requests have no tie value.
+function tieValue(options: RequestOptions): unknown {
+  const where = options.where as
+    { name?: string; args?: Array<{ value?: unknown }> } | undefined
+  return where?.name === `eq` ? where.args?.[1]?.value : undefined
+}
+
 function createDeferred() {
   let resolve!: () => void
   let reject!: (error: unknown) => void
@@ -1816,10 +1824,20 @@ describe(`Successful finite demand retirement`, () => {
  *   exact result for its own options), or while the loader's coverage is
  *   its own first ordered prefix of at least `offset + limit` rows, with
  *   only that prefix's tie after it, and a row past the page sorts strictly
- *   after its end with no more rows needed (ARCHITECTURE.md). The law judges
- *   only quiet histories: every earlier step settled a request successfully,
- *   ran a pass, inserted a row, reported, or changed joined work, and no
- *   release callback has side effects, so no earlier event owes a repair.
+ *   after its end with no more rows needed (ARCHITECTURE.md). That row is
+ *   evidence only when the page read it, or when the tie the loader read is
+ *   the tie of the page's end. The law judges only quiet histories: every
+ *   earlier step settled a request successfully, ran a pass, inserted a row,
+ *   reported, or changed joined work, and no release callback has side
+ *   effects, so no earlier event owes a repair.
+ * - **Unproven report:** in such a quiet history, a report over the loader's
+ *   own first prefix that no row it read proves starts a repair on its pass.
+ *   An installed row past the page can come from another request, and a
+ *   refetch can move the page's end before the tie the loader read, so the
+ *   loader cannot use either as proof. This fake's installed rows ignore a
+ *   read's limit, so its tie is always for the last installed row; the
+ *   ignored-report branch for a first page is therefore unreachable here,
+ *   and only the unproven-report law runs on such a page.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -2174,6 +2192,7 @@ type AuthorityObservation = {
   joinedDeferrals: number
   ignoredReportsBeforeSettle: number
   ignoredReportsInsideFirstPage: number
+  repairedReportsOnOwnPage: number
   truncates: number
   replayFailures: number
   optimisticDepartures: number
@@ -2540,6 +2559,7 @@ async function checkAuthorityCase(
   let joinedDeferrals = 0
   let ignoredReportsBeforeSettle = 0
   let ignoredReportsInsideFirstPage = 0
+  let repairedReportsOnOwnPage = 0
   let truncates = 0
   let replayFailures = 0
   let optimisticDepartures = 0
@@ -2835,7 +2855,9 @@ async function checkAuthorityCase(
           const windowSize = testCase.offset + info.limit
           const [first, ...later] = ledger
           const beforeSettle = ledger.every(({ outcome }) => outcome !== `ok`)
-          const insideFirstPage =
+          // The loader's coverage is its own first page with only tie
+          // requests after it.
+          const ownFirstPage =
             !testCase.requiresFullSource &&
             !testCase.needsMore &&
             testCase.snapshotRows > windowSize &&
@@ -2855,10 +2877,38 @@ async function checkAuthorityCase(
                 options.cursor === undefined &&
                 options.orderBy === undefined,
             )
+          // A row past the page proves the source's next row only when the
+          // page read it, or when it ties with the page's end and the loader
+          // read that tie. Any other installed row can come from another
+          // request, so it proves nothing. The installed ranks are 1..n, so
+          // the end's rank is the window size.
+          const insideFirstPage =
+            ownFirstPage &&
+            ((first.options.limit ?? 0) > windowSize ||
+              later.some(({ options }) => tieValue(options) === windowSize))
           const before = ledger.length
           loader.revalidateLoadedCoverage()
           if (command.react) graphPass()
           await flush()
+          // A report the loader cannot prove covers nothing it could change
+          // owes a repair, which its next pass starts.
+          if (
+            command.react &&
+            quiet &&
+            !beforeSettle &&
+            ownFirstPage &&
+            !insideFirstPage
+          ) {
+            const issued = ledger
+              .slice(before)
+              .some(({ authoritative }) => authoritative)
+            if (!issued) {
+              throw new Error(
+                `unproven report: a report over a first page that no row it read proves issued no repair`,
+              )
+            }
+            repairedReportsOnOwnPage++
+          }
           if (quiet && (beforeSettle || insideFirstPage)) {
             const issued = ledger
               .slice(before)
@@ -3196,6 +3246,7 @@ async function checkAuthorityCase(
     joinedDeferrals,
     ignoredReportsBeforeSettle,
     ignoredReportsInsideFirstPage,
+    repairedReportsOnOwnPage,
     truncates,
     replayFailures,
     optimisticDepartures,
@@ -3612,9 +3663,12 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
-      // Without the first-page check, the report repaired a window that the
-      // loader's own first prefix already proves.
-      name: `a report while the window is inside the loader's first page`,
+      // The first page read only the window, and the loader's tie request
+      // read a value past it, not the page's end. An installed row past the
+      // page can come from another request, so it proves nothing, and the
+      // report must repair. Ignoring it kept a window that missed a row tied
+      // with a refetched page's end.
+      name: `a report over a first page that read only the window`,
       testCase: {
         indexed: false,
         limit: 1,
@@ -3625,6 +3679,7 @@ describe(`Ordered source request authority`, () => {
         snapshotRows: 3,
         needsMore: false,
         history: [
+          { type: `settle`, pick: 0, ok: true },
           { type: `settle`, pick: 0, ok: true },
           { type: `report`, react: true },
         ],
@@ -3667,6 +3722,7 @@ describe(`Ordered source request authority`, () => {
         joinedDeferrals: 0,
         ignoredReportsBeforeSettle: 0,
         ignoredReportsInsideFirstPage: 0,
+        repairedReportsOnOwnPage: 0,
         truncates: 0,
         replayFailures: 0,
         optimisticDepartures: 0,
@@ -3731,7 +3787,8 @@ describe(`Ordered source request authority`, () => {
         for (const [dimension, count] of Object.entries(later)) {
           if (
             dimension === `startThrowsDuringFailure` ||
-            dimension === `ignoredReportsInsideFirstPage`
+            dimension === `ignoredReportsInsideFirstPage` ||
+            dimension === `repairedReportsOnOwnPage`
           )
             continue
           expect(count, dimension).toBeGreaterThan(0)

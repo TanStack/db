@@ -695,7 +695,13 @@ export class OrderedSourceLoader {
     // Optimistic rows are left out, so a short read proves nothing.
     if (rows.length <= size) return false
     const end = rows[size - 1]!.value
+    // A row past the page proves the source's next row only when the page
+    // read it or it ties with the page's end. A refetch can move the end
+    // before the tie that the loader read for an older end, so that tie's
+    // rows prove nothing about the rows that now tie with the end.
     return (
+      ((this.ownPrefixCount ?? 0) > size ||
+        Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary)) &&
       this.info.comparator(rows[size]!.value, end) > 0 &&
       this.info.dataNeeded(end) === 0
     )
