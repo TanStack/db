@@ -14,7 +14,10 @@ import { createNodeSQLitePersistence } from '../../../../node-db-sqlite-persiste
 import { exposeElectronSQLitePersistence } from '../../../src/main'
 import { inProcessSeams } from '../../../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import type { BetterSqlite3Database } from '../../../../node-db-sqlite-persistence/src'
-import type { HeldCall } from '../../../../db-sqlite-persistence-core/tests/reload-class-oracle'
+import type {
+  HeldCall,
+  ReloadSeams,
+} from '../../../../db-sqlite-persistence-core/tests/reload-class-oracle'
 
 export const RESULT_PREFIX = `__TANSTACK_DB_RELOAD_CLASS__:`
 
@@ -117,11 +120,8 @@ ipcMain.handle(`reload:raw-exec`, (_event, filename: string, sql: string) => {
 })
 ipcMain.handle(
   `reload:hold`,
-  (_event, token: string, kind: `row` | `write`, storageId: string) => {
-    const held =
-      kind === `row`
-        ? inProcessSeams.holdFirstRowSnapshot(storageId)
-        : inProcessSeams.holdFirstWrite(storageId)
+  (_event, token: string, seam: keyof ReloadSeams, storageId: string) => {
+    const held = inProcessSeams[seam](storageId)
     holds.set(token, held)
     // Tell the renderer once the held call arrives.
     const watch = () => {

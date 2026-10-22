@@ -661,6 +661,20 @@ describe(`BrowserCollectionCoordinator`, () => {
     })
 
     /**
+     * An election waits for queued work through the scheduler barrier. A
+     * regular scope without it is an adapter written for an older contract;
+     * failing at construction keeps the election from retrying forever.
+     */
+    it(`rejects an adapter whose regular scope has no queued-work barrier`, () => {
+      const adapter = createStubAdapter()
+      adapter.runInRegularScope = ((task) =>
+        task(adapter)) as PersistenceAdapter[`runInRegularScope`]
+      expect(() => createCoordinator(adapter)).toThrow(
+        /runInRegularScope\.afterQueuedWork/,
+      )
+    })
+
+    /**
      * A physical cache generation and its claim are one election authority.
      * The reference records the claim registered for each physical ID before
      * election; a term reservation must receive that same pair. A reservation
@@ -1254,6 +1268,12 @@ describe(`BrowserCollectionCoordinator`, () => {
    * wait, an outbound RPC, `ensureLeadership`, or an inbound route request or
    * RPC from another tab. Without that rule, a hydrate that waits for its
    * first writer route would wait for an election that waits for the hydrate.
+   * A need belongs to one election: it is still waiting at the grant, or it
+   * arrives before the term. A need that an earlier leader served, for this
+   * tab or another, does not exempt a later election. The lock is exclusive,
+   * so its holder has no route to another leader: a delayed heartbeat from
+   * the departed leader does not restore one, and a request made during the
+   * election is a need.
    *
    * Model: the reference is the need table below. Every listed request is a
    * leadership need, so the term must exist while the queued read is still
@@ -1275,6 +1295,13 @@ describe(`BrowserCollectionCoordinator`, () => {
    * held), after bounded turns with the read still held (term and route), and
    * after release (settlement and RPC count). Hostile mutants that skip any
    * need mark fail the held-read checkpoint or the settlement deadline.
+   *
+   * Per-election cells: a follower takes over from a leader that served an
+   * earlier need, from another tab or from the follower itself, while the
+   * follower's queued read is held. The model has no term until the read is
+   * released. A third cell delivers the departed leader's heartbeat during
+   * the follower's election and then makes a request; the model has the
+   * follower's term while the read is still held.
    */
   describe(`leadership need under a queued read`, () => {
     const collectionId = `needed`
@@ -1450,6 +1477,101 @@ describe(`BrowserCollectionCoordinator`, () => {
       await flush(20)
       expect(durableTerms.get(collectionId)).toBe(1)
       expect(holder.isLeader(collectionId)).toBe(true)
+    })
+
+    /**
+     * Starts a leader, then a follower whose queued read is held, and lets
+     * `serve` make requests that the leader answers.
+     */
+    async function followerOfServedLeader(
+      serve: (follower: BrowserCollectionCoordinator) => Promise<unknown>,
+    ) {
+      const leader = createCoordinator()
+      leader.subscribe(collectionId, () => {})
+      await flush(20)
+      const { adapter, queuedRead } = createQueuedReadAdapter()
+      const follower = createCoordinator(adapter)
+      follower.subscribe(collectionId, () => {})
+      await flush(20)
+      await serve(follower)
+      expect(durableTerms.get(collectionId)).toBe(1)
+      return { leader, follower, queuedRead }
+    }
+
+    it.each([
+      {
+        served: `another tab's request`,
+        serve: async () => {
+          const other = createCoordinator()
+          other.subscribe(collectionId, () => {})
+          await other.pullSince(collectionId, 0)
+          other.dispose()
+        },
+      },
+      {
+        served: `the follower's own request`,
+        serve: (follower: BrowserCollectionCoordinator) =>
+          follower.pullSince(collectionId, 0),
+      },
+    ])(
+      `keeps a takeover term behind its queued read after $served was served`,
+      async ({ serve }) => {
+        const { leader, follower, queuedRead } =
+          await followerOfServedLeader(serve)
+        leader.dispose()
+        await flush(50)
+        expect(durableTerms.get(collectionId)).toBe(1)
+        expect(follower.isLeader(collectionId)).toBe(false)
+
+        queuedRead.resolve()
+        await flush(20)
+        expect(durableTerms.get(collectionId)).toBe(2)
+        expect(follower.isLeader(collectionId)).toBe(true)
+      },
+    )
+
+    it(`treats a request during a takeover as a need despite a delayed former heartbeat`, async () => {
+      const { leader, follower, queuedRead } = await followerOfServedLeader(
+        (follower) => follower.pullSince(collectionId, 0),
+      )
+      const formerId = leader.getNodeId()
+      leader.dispose()
+      await flush(50)
+      // The departed leader's last heartbeat arrives during the election.
+      injectBroadcastMessage(`tsdb:coord:test-db`, {
+        v: 1,
+        dbName: `test-db`,
+        collectionId,
+        senderId: formerId,
+        ts: Date.now(),
+        payload: {
+          type: `leader:heartbeat`,
+          term: 1,
+          leaderId: formerId,
+          latestSeq: 0,
+          latestRowVersion: 0,
+        },
+      })
+      await flush(0)
+      expect(durableTerms.get(collectionId)).toBe(1)
+
+      let settled = false
+      const pulled = follower.pullSince(collectionId, 0).finally(() => {
+        settled = true
+      })
+      void pulled.catch(() => undefined)
+      try {
+        await flush(50)
+        expect(durableTerms.get(collectionId)).toBe(2)
+        expect(follower.isLeader(collectionId)).toBe(true)
+        queuedRead.resolve()
+        await Promise.race([pulled, flush(1_000)])
+        expect(settled).toBe(true)
+        await expect(pulled).resolves.toMatchObject({ ok: true })
+      } finally {
+        queuedRead.resolve()
+        await Promise.race([pulled.catch(() => undefined), flush(0)])
+      }
     })
   })
 
@@ -6766,6 +6888,16 @@ describe(`BrowserCollectionCoordinator`, () => {
     })
 
     it(`ignores a lower-term Browser heartbeat without replaying to its stale leader`, async () => {
+      // Another holder keeps the leader lock, so this coordinator follows.
+      let releaseHolder!: () => void
+      await new Promise<void>((acquired) => {
+        void navigator.locks.request(`tsdb:leader:test-db:todos`, () => {
+          acquired()
+          return new Promise<void>((resolve) => {
+            releaseHolder = resolve
+          })
+        })
+      })
       const coordinator = createCoordinator()
       let forwardedHeartbeats = 0
       coordinator.subscribe(`todos`, (message) => {
@@ -6775,7 +6907,6 @@ describe(`BrowserCollectionCoordinator`, () => {
           forwardedHeartbeats++
         }
       })
-      coordinator.isLeader = () => false
       const internals = coordinator as unknown as {
         onChannelMessage: (message: unknown) => void
         collections: Map<
@@ -6821,6 +6952,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         })
       } finally {
         coordinator.dispose()
+        releaseHolder()
       }
     })
 

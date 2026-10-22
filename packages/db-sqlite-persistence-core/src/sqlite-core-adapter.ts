@@ -1656,7 +1656,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
   private readonly schedulingIdentitySource: SQLiteDriver
   private scheduler: SharedPersistenceScheduler | undefined
-  private activeUnscheduledHydration: Promise<unknown> | undefined
+  private readonly activeUnscheduledHydrations = new Set<Promise<unknown>>()
   private readonly hydrationAdapter: HydrationPersistenceAdapter
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
@@ -2039,8 +2039,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           observedDriverSchedulingKeys.set(options.driver, key)
           const scheduler = getSharedPersistenceScheduler(key)
           this.scheduler ??= scheduler
-          if (this.activeUnscheduledHydration) {
-            scheduler.adoptRunningHydrate(this.activeUnscheduledHydration)
+          for (const hydration of this.activeUnscheduledHydrations) {
+            scheduler.adoptRunningHydrate(hydration)
           }
         })
     this.schemaVersion = schemaVersion
@@ -2085,12 +2085,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
 
     const hydration = Promise.resolve().then(() => task(this.hydrationAdapter))
-    this.activeUnscheduledHydration = hydration
-    const clear = () => {
-      if (this.activeUnscheduledHydration === hydration) {
-        this.activeUnscheduledHydration = undefined
-      }
-    }
+    this.activeUnscheduledHydrations.add(hydration)
+    const clear = () => this.activeUnscheduledHydrations.delete(hydration)
     void hydration.then(clear, clear)
     return hydration
   }
@@ -2100,9 +2096,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
     ): Promise<T> => this.runRegular(() => task(this.hydrationAdapter)),
     {
-      // Without a shared scheduler, nothing is queued ahead of this caller.
+      // Without a shared scheduler, only this adapter's running hydrates are
+      // ahead of the caller.
       afterQueuedWork: (): Promise<void> =>
-        this.resolveScheduler()?.afterQueuedWork() ?? Promise.resolve(),
+        this.resolveScheduler()?.afterQueuedWork() ??
+        settled(Promise.all(this.activeUnscheduledHydrations)),
     },
   )
 

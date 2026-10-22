@@ -13,14 +13,22 @@
  *   Stored rows survive, unless a schema change resets them.
  * - (b) Order. A term write does not run ahead of work that was queued on its
  *   tab's shared scheduler when its leader lock was granted, unless a leader
- *   need came first. Every Collection is preloaded in one task, and a lock
- *   manager grants on a later task, so at every grant each eager Collection's
- *   startup row read and each managed Collection's cache claim are queued. A
- *   managed Collection requests its lock only after its claim, so its own
- *   startup metadata read is queued at its grant too.
- * - (c) Need. A leader need ends that wait. A local write during another
- *   startup read still gets its Collection's term and settles. A follower's
- *   write settles through the leader.
+ *   need is live in that election: one that is still waiting at the grant,
+ *   or one that arises before the term. A need that an earlier election
+ *   served, in this tab or another, exempts no later election. Every
+ *   Collection is preloaded in one task, and a lock manager grants on a later
+ *   task, so at every grant each eager Collection's startup row read and each
+ *   managed Collection's cache claim are queued. A managed Collection
+ *   requests its lock only after its claim, so its own startup metadata read
+ *   is queued at its grant too.
+ * - (c) Need. A live need ends that wait. A local write during another
+ *   startup read gets its Collection's term and settles, whether it began
+ *   before or after the grant. A follower's or another tab's write settles
+ *   through the leader. A takeover's queued work never waits on the departed
+ *   leader: a source commit that a follower's queued read flushes after the
+ *   grant settles in less than one RPC timeout, and one that the departed
+ *   leader received but never answered settles within one RPC timeout and its
+ *   retry.
  * - (e) Budget. Each adapter reads each Collection's registry row once (a
  *   Browser tab has its own; Electron renderers share their main process's),
  *   and each tab reads an eager Collection's rows once. An eager Collection takes two startup snapshots: its metadata
@@ -51,15 +59,25 @@
  * one optionally reopened with a new schema version. A lock grant 1, 2, or 5
  * tasks after the request; each SQL statement immediate or one task late
  * (where the host controls latency). At most one need: a local write while
- * another startup read is held, a local write held in flight when a second
- * Collection's lock is granted (that write is queued work at the grant, so
- * the second term follows it), or a follower tab's write. At most one
- * lifecycle event: a follower tab takes over after the leader tab closes
- * (optionally while one of its reads is held, so every takeover grant meets
- * a queued read), a managed source starts a scoped recovery that rotates its
- * cache generation, the first Collection restarts, or the tab closes while
- * its terms still wait. A managed schema change resets its generation in
- * place; it does not rotate it.
+ * another startup read is held, issued after its Collection's grant or
+ * before it (the grant waits until the write is issued), a local write held
+ * in flight when a second Collection's lock is granted (that write is queued
+ * work at the grant, so the second term follows it), a follower tab's write
+ * to the last eager Collection, or a write from a third tab that opens,
+ * writes the last eager Collection, and closes while the first tab leads.
+ * Both later writes reach every tab, so a follower sees another tab's need
+ * long before its own election. At most one lifecycle event: a follower tab
+ * takes over after the leader tab closes, optionally while its restarted
+ * first eager Collection's read is held, so every takeover grant meets a
+ * queued read; a follower that knows its leader's route takes over while
+ * its live query's subset read on
+ * a managed Collection is held with a source commit queued behind it, which
+ * that read flushes after the grant; the same, but the read flushes the
+ * commit to the leader, which receives it and closes without an answer; a
+ * managed source starts a scoped recovery that rotates its cache
+ * generation; the first Collection restarts; or the tab closes while its
+ * terms still wait. A managed schema change resets its generation in place;
+ * it does not rotate it.
  * A second tab opens after the first is ready, so the first tab's reload is
  * observed alone. Excluded: dropped row tables.
  *
@@ -79,10 +97,13 @@
  * Timing helpers are premises. `delayLeaderGrants` records, at each leader
  * grant, whether every preload had already been called; the comparison
  * rejects a history where one had not. The held read records that it is held
- * when the writer's term is observed.
+ * when the writer's term is observed. A write issued before its grant
+ * records, at the grant, that it was issued. A queued source commit records
+ * that a takeover grant arrived while its read was held; an unanswered one
+ * records that the departed leader held it when that leader closed.
  */
 import fc from 'fast-check'
-import { createCollection } from '@tanstack/db'
+import { createCollection, createLiveQueryCollection } from '@tanstack/db'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -125,11 +146,19 @@ export type ReloadHistory = {
   databaseDamage: DatabaseDamage
   grantTasks: 1 | 2 | 5
   statementLatency: 0 | 1
-  need: `none` | `local-write` | `write-queued-at-grant` | `follower-write`
+  need:
+    | `none`
+    | `local-write`
+    | `local-write-before-grant`
+    | `write-queued-at-grant`
+    | `follower-write`
+    | `bystander-write`
   lifecycle:
     | `none`
     | `takeover`
     | `takeover-while-read-held`
+    | `takeover-with-commit-queued`
+    | `takeover-with-commit-unanswered`
     | `rotate`
     | `restart`
     | `dispose-while-waiting`
@@ -165,6 +194,7 @@ export type HeldCall = {
 export type ReloadSeams = {
   holdFirstRowSnapshot: (storageId: string) => HeldCall
   holdFirstWrite: (storageId: string) => HeldCall
+  holdFirstSubsetLoad: (storageId: string) => HeldCall
 }
 
 /** What a production driver supplies. Everything else is shared. */
@@ -211,12 +241,33 @@ export type ReloadObservation = {
   rotatedStorageId: string | undefined
   /** Whether the gated grant arrived while the queued write was held. */
   grantedWhileWriteHeld: boolean | undefined
+  /** Whether the local write was issued when its gated grant arrived. */
+  writeIssuedAtGrant: boolean | undefined
+  /** Whether the departed leader held the source commit when it closed. */
+  leaderHeldCommitAtClose: boolean | undefined
+  /**
+   * Milliseconds from the release of the follower's held read until the
+   * follower led every Collection and the source commit was durable, or
+   * undefined if that did not happen within the bound.
+   */
+  sourceCommitSettledMs: number | undefined
   factsPresent: Record<string, boolean>
   storedRow: Record<string, boolean>
   databaseFactsPresent: boolean
 }
 
 type Row = { id: string; title: string }
+
+/**
+ * Settlement bounds for a takeover's source commit. One RPC timeout is 10 s
+ * and a request makes three attempts 200 and 400 ms apart. A commit flushed
+ * after the grant has a live route, so it owes less than one timeout. A
+ * commit the departed leader received owes one timeout and a retry, about
+ * 10.2 s; a design whose retry also goes to the departed leader needs at
+ * least 20.4 s.
+ */
+const COMMIT_QUEUED_BOUND_MS = 5_000
+const COMMIT_UNANSWERED_BOUND_MS = 15_000
 
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
@@ -228,6 +279,23 @@ async function waitFor(condition: () => boolean, label: string) {
     await nextTask()
   }
   throw new Error(`timed out waiting for ${label}`)
+}
+
+/**
+ * Polls an asynchronous condition every 20 ms. Returns the elapsed
+ * milliseconds once it holds, or undefined after `boundMs`, so a comparison
+ * can report a stall instead of timing out.
+ */
+async function settledWithin(
+  condition: () => Promise<boolean>,
+  boundMs: number,
+): Promise<number | undefined> {
+  const start = Date.now()
+  while (Date.now() - start < boundMs) {
+    if (await condition()) return Date.now() - start
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  return undefined
 }
 
 /**
@@ -246,6 +314,12 @@ async function holdUntilTermOrElapsed(
 
 type RecoveryCapability = { startScopedRecovery?: () => Promise<void> }
 
+/** A managed source's own sync controls, as a source commits a change. */
+type SourceControls = Pick<
+  Parameters<SyncConfig<Row, string>[`sync`]>[0],
+  `begin` | `write` | `commit`
+>
+
 function openCollections(
   persistence: PersistedCollectionPersistence,
   history: ReloadHistory,
@@ -253,6 +327,7 @@ function openCollections(
   schemaVersionFor: (index: number) => number,
   // A managed source's persistence capability, as Electric's source uses it.
   capabilities: Map<number, RecoveryCapability> = new Map(),
+  sources: Map<number, SourceControls> = new Map(),
 ): Array<Collection<Row, string>> {
   return history.collections.map((collection, index) => {
     if (collection.kind === `eager`) {
@@ -272,6 +347,7 @@ function openCollections(
         if (metadata?.persistence) {
           capabilities.set(index, metadata.persistence)
         }
+        sources.set(index, params)
         params.markReady()
         return { loadSubset: () => Promise.resolve() }
       },
@@ -330,36 +406,32 @@ function delayLeaderGrants(
   }
 }
 
-type HeldReadSeam = {
-  loadResumeSnapshotUnscheduled: (
-    target: Parameters<typeof resolvePersistedStorageTarget>[0],
-    ...rest: Array<unknown>
-  ) => Promise<unknown>
-}
+type StorageTarget = Parameters<typeof resolvePersistedStorageTarget>[0]
+type AdapterSeam = Record<
+  string,
+  (this: unknown, target: StorageTarget, ...rest: Array<unknown>) => unknown
+>
 
 /**
- * Holds one Collection's first row snapshot at its first adapter call, before
- * any SQL. It holds that tab's shared scheduler, as a long queued read does,
- * but not the database, so an unscheduled term write can still run.
+ * Holds one adapter method's first matching call at its first adapter call,
+ * before any SQL, inside whatever scheduler turn and writer lock its caller
+ * holds.
  */
-function holdFirstRowSnapshot(storageId: string): HeldCall {
-  const seam = SQLiteCorePersistenceAdapter.prototype as unknown as HeldReadSeam
-  const original = seam.loadResumeSnapshotUnscheduled
+function holdFirstCall(
+  method: string,
+  matches: (storageId: string, rest: Array<unknown>) => boolean,
+): HeldCall {
+  const seam = SQLiteCorePersistenceAdapter.prototype as unknown as AdapterSeam
+  const original = seam[method]!
   let release!: () => void
   const released = new Promise<void>((resolve) => {
     release = resolve
   })
   const state = { held: false, used: false }
-  seam.loadResumeSnapshotUnscheduled = async function (
-    this: HeldReadSeam,
-    target,
-    ...rest
-  ) {
-    const ctx = rest[0] as { includeRows?: boolean } | undefined
+  seam[method] = async function (target, ...rest) {
     if (
       !state.used &&
-      ctx?.includeRows !== false &&
-      resolvePersistedStorageTarget(target).collectionId === storageId
+      matches(resolvePersistedStorageTarget(target).collectionId, rest)
     ) {
       state.used = true
       state.held = true
@@ -373,61 +445,30 @@ function holdFirstRowSnapshot(storageId: string): HeldCall {
     release: () => release(),
     restore: () => {
       release()
-      seam.loadResumeSnapshotUnscheduled = original
-    },
-  }
-}
-
-type HeldWriteSeam = {
-  applyCommittedTxUnscheduled: (
-    target: Parameters<typeof resolvePersistedStorageTarget>[0],
-    ...rest: Array<unknown>
-  ) => Promise<unknown>
-}
-
-/**
- * Holds one Collection's first committed write at its first adapter call,
- * inside its scheduler turn and writer lock, before any SQL.
- */
-function holdFirstWrite(storageId: string): HeldCall {
-  const seam =
-    SQLiteCorePersistenceAdapter.prototype as unknown as HeldWriteSeam
-  const original = seam.applyCommittedTxUnscheduled
-  let release!: () => void
-  const released = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const state = { held: false, used: false }
-  seam.applyCommittedTxUnscheduled = async function (
-    this: HeldWriteSeam,
-    target,
-    ...rest
-  ) {
-    if (
-      !state.used &&
-      resolvePersistedStorageTarget(target).collectionId === storageId
-    ) {
-      state.used = true
-      state.held = true
-      await released
-      state.held = false
-    }
-    return original.call(this, target, ...rest)
-  }
-  return {
-    isHeld: () => state.held,
-    release: () => release(),
-    restore: () => {
-      release()
-      seam.applyCommittedTxUnscheduled = original
+      seam[method] = original
     },
   }
 }
 
 /** Seams for a host whose adapter runs in this JavaScript context. */
 export const inProcessSeams: ReloadSeams = {
-  holdFirstRowSnapshot,
-  holdFirstWrite,
+  // A Collection's first row snapshot holds that tab's shared scheduler, as
+  // a long queued read does, but not the database, so an unscheduled term
+  // write can still run.
+  holdFirstRowSnapshot: (storageId) =>
+    holdFirstCall(
+      `loadResumeSnapshotUnscheduled`,
+      (id, rest) =>
+        id === storageId &&
+        (rest[0] as { includeRows?: boolean } | undefined)?.includeRows !==
+          false,
+    ),
+  // A Collection's first committed write, inside its writer lock.
+  holdFirstWrite: (storageId) =>
+    holdFirstCall(`applyCommittedTxUnscheduled`, (id) => id === storageId),
+  // A Collection's first subset read, inside its tab's hydration scope.
+  holdFirstSubsetLoad: (storageId) =>
+    holdFirstCall(`loadSubsetUnscheduled`, (id) => id === storageId),
 }
 
 function removeFactSql(storageId: string, fact: Fact): string {
@@ -537,6 +578,8 @@ export async function observeReload(
     // Reload: the first tab alone, with a recorder and the history's seams.
     const log: Array<Logged> = []
     let termDuringHold: boolean | undefined
+    let leaderHeldCommitAtClose: boolean | undefined
+    let sourceCommitSettledMs: number | undefined
     let needSettled: boolean | undefined
     let followerLeadsAll: boolean | undefined
     let rotatedStorageId: string | undefined
@@ -573,6 +616,12 @@ export async function observeReload(
     })
     cleanups.push(() => openGate())
     let grantedWhileWriteHeld: boolean | undefined
+    // A local write issued before its grant: the writer's first grant waits
+    // until the write is issued.
+    const writeBeforeGrant = history.need === `local-write-before-grant`
+    let writeIssued = false
+    let writeIssuedAtGrant: boolean | undefined
+    const gated = queuedWrite?.gated ?? (writeBeforeGrant ? ids[0] : undefined)
     cleanups.push(
       delayLeaderGrants(
         dbName,
@@ -580,13 +629,16 @@ export async function observeReload(
         (storageId) => {
           preloadsCalledAtEveryGrant &&= preloadsCalled
           if (followerHold?.isHeld()) grantsWhileFollowerReadHeld++
-          // Only the first tab's grant meets the queued write; a later
-          // takeover grant for the same Collection does not.
+          // Only the first tab's grant meets the gate; a later takeover
+          // grant for the same Collection does not.
           if (storageId === queuedWrite?.gated) {
             grantedWhileWriteHeld ??= queuedWrite.hold.isHeld()
           }
+          if (writeBeforeGrant && storageId === ids[0]) {
+            writeIssuedAtGrant ??= writeIssued
+          }
         },
-        (storageId) => (storageId === queuedWrite?.gated ? gate : undefined),
+        (storageId) => (storageId === gated ? gate : undefined),
       ),
     )
     const heldId = heldCollection(history)
@@ -613,11 +665,15 @@ export async function observeReload(
     preloadsCalled = true
     for (const preload of preloads) void preload.catch(() => undefined)
 
-    if (history.need === `local-write` && hold) {
+    if ((history.need === `local-write` || writeBeforeGrant) && hold) {
       await waitFor(hold.isHeld, `held startup read`)
       await preloads[0]
       const write = leaderCollections[0]!.insert({ id: `local`, title: `l` })
         .isPersisted.promise
+      writeIssued = true
+      // The write asks for its route within a few tasks; then it is granted.
+      for (let task = 0; task < 5; task++) await nextTask()
+      openGate()
       const writer = storageIds[ids[0]!]!
       await holdUntilTermOrElapsed(
         () => log.some((entry) => isTermFor(entry, writer)),
@@ -704,35 +760,87 @@ export async function observeReload(
     const reloadLog = [...log]
 
     // A second tab opens after the first is ready, as a follower.
-    if (
-      history.need === `follower-write` ||
-      history.lifecycle === `takeover` ||
-      history.lifecycle === `takeover-while-read-held`
-    ) {
+    if (followerOpens(history)) {
       const follower = await host.openTab(dbName)
+      const followerSources = new Map<number, SourceControls>()
       const followerCollections = openCollections(
         follower.persistence,
         history,
         ids,
         (index) => (history.collections[index]!.schemaChange ? 2 : 1),
+        new Map(),
+        followerSources,
       )
-      cleanups.push(() => closeTab(follower, followerCollections))
+      let followerOpen = true
+      cleanups.push(async () => {
+        if (followerOpen) await closeTab(follower, followerCollections)
+        else {
+          for (const collection of followerCollections) {
+            await collection.cleanup().catch(() => undefined)
+          }
+        }
+      })
       await Promise.all(
         followerCollections.map((collection) => collection.preload()),
       )
+      const lastEager = history.collections
+        .flatMap((collection, index) =>
+          collection.kind === `eager` ? [index] : [],
+        )
+        .at(-1)!
       if (history.need === `follower-write`) {
-        const writer = history.collections.findIndex((c) => c.kind === `eager`)
-        await followerCollections[writer]!.insert({ id: `f`, title: `f` })
+        await followerCollections[lastEager]!.insert({ id: `f`, title: `f` })
           .isPersisted.promise
         needSettled = true
+      }
+      if (history.need === `bystander-write`) {
+        // A third tab comes and goes while the first tab leads. Its request
+        // reaches the follower too.
+        const bystander = await host.openTab(dbName)
+        const bystanderCollections = openCollections(
+          bystander.persistence,
+          history,
+          ids,
+          (index) => (history.collections[index]!.schemaChange ? 2 : 1),
+        )
+        await Promise.all(
+          bystanderCollections.map((collection) => collection.preload()),
+        )
+        await bystanderCollections[lastEager]!.insert({ id: `b`, title: `b` })
+          .isPersisted.promise
+        await closeTab(bystander, bystanderCollections)
+        needSettled = true
+      }
+      const followerLeads = () =>
+        ids.every((id) => follower.isLeader(storageIds[id]!))
+      /**
+       * Closes the leader tab while `held` keeps a follower read queued,
+       * counts the follower terms written while it stays held, then releases
+       * it.
+       */
+      const takeOverWhileHeld = async (held: HeldCall) => {
+        followerHold = held
+        const termsBefore = log.length
+        const followerTerms = () =>
+          log
+            .slice(termsBefore)
+            .filter((entry) =>
+              ids.some((id) => isTermFor(entry, storageIds[id]!)),
+            ).length
+        leaderOpen = false
+        await closeTab(leader, leaderCollections)
+        await waitFor(
+          () => grantsWhileFollowerReadHeld >= ids.length,
+          `takeover grants while the follower read is held`,
+        ).catch(() => undefined)
+        await holdUntilTermOrElapsed(() => followerTerms() > 0)
+        termsWhileFollowerReadHeld = followerTerms()
+        held.release()
       }
       if (history.lifecycle === `takeover`) {
         leaderOpen = false
         await closeTab(leader, leaderCollections)
-        await waitFor(
-          () => ids.every((id) => follower.isLeader(storageIds[id]!)),
-          `follower takeover`,
-        )
+        await waitFor(followerLeads, `follower takeover`)
         followerLeadsAll = true
       }
       if (history.lifecycle === `takeover-while-read-held`) {
@@ -741,39 +849,101 @@ export async function observeReload(
         const restarted = history.collections.findIndex(
           (c) => c.kind === `eager`,
         )
-        followerHold = host.seams.holdFirstRowSnapshot(
+        const held = host.seams.holdFirstRowSnapshot(
           storageIds[ids[restarted]!]!,
         )
-        cleanups.push(followerHold.restore)
+        cleanups.push(held.restore)
         await followerCollections[restarted]!.cleanup()
         const restart = followerCollections[restarted]!.preload()
-        await waitFor(followerHold.isHeld, `held follower read`)
-        const termsBefore = log.length
-        leaderOpen = false
-        await closeTab(leader, leaderCollections)
-        await waitFor(
-          () => grantsWhileFollowerReadHeld >= ids.length,
-          `takeover grants while the follower read is held`,
-        ).catch(() => undefined)
-        await holdUntilTermOrElapsed(() =>
-          log
-            .slice(termsBefore)
-            .some((entry) =>
-              ids.some((id) => isTermFor(entry, storageIds[id]!)),
-            ),
-        )
-        termsWhileFollowerReadHeld = log
-          .slice(termsBefore)
-          .filter((entry) =>
-            ids.some((id) => isTermFor(entry, storageIds[id]!)),
-          ).length
-        followerHold.release()
+        await waitFor(held.isHeld, `held follower read`)
+        await takeOverWhileHeld(held)
         await restart
-        await waitFor(
-          () => ids.every((id) => follower.isLeader(storageIds[id]!)),
-          `follower takeover`,
-        )
+        await waitFor(followerLeads, `follower takeover`)
         followerLeadsAll = true
+      }
+      if (
+        history.lifecycle === `takeover-with-commit-queued` ||
+        history.lifecycle === `takeover-with-commit-unanswered`
+      ) {
+        // The follower's live query reads a subset of its first managed
+        // Collection. Its source commits while that read is held, so the
+        // commit is queued behind the read and is flushed in its scope.
+        const sourced = history.collections.findIndex(
+          (c) => c.kind === `managed`,
+        )
+        const storageId = storageIds[ids[sourced]!]!
+        const source = followerSources.get(sourced)!
+        const commit = (id: string) => {
+          source.begin()
+          source.write({ type: `insert`, value: { id, title: id } })
+          source.commit()
+        }
+        const durable = async (id: string) =>
+          (
+            await host.rawQuery(
+              `SELECT 1 AS found FROM "${createPersistedTableName(storageId, `c`)}" WHERE key = ?`,
+              [`s:${id}`],
+            )
+          ).length > 0
+        // A long-lived follower knows its leader's route. Its first commit
+        // through the leader teaches it, so the departed leader's route is
+        // the one the follower holds when the leader closes.
+        commit(`warm`)
+        if (
+          (await settledWithin(() => durable(`warm`), 15_000)) === undefined
+        ) {
+          throw new Error(`timed out waiting for the follower's first commit`)
+        }
+        const held = host.seams.holdFirstSubsetLoad(storageId)
+        cleanups.push(held.restore)
+        const query = createLiveQueryCollection({
+          query: (q) => q.from({ row: followerCollections[sourced]! }),
+        })
+        cleanups.push(() => query.cleanup())
+        const loaded = query.preload().catch(() => undefined)
+        await waitFor(held.isHeld, `held follower subset read`)
+        commit(`source`)
+        let released: number
+        if (history.lifecycle === `takeover-with-commit-queued`) {
+          await takeOverWhileHeld(held)
+          released = Date.now()
+        } else {
+          // The leader receives the flushed commit and closes without an
+          // answer. Closing a tab releases its locks, so its held write
+          // ends with its connection.
+          const leaderWrite = host.seams.holdFirstWrite(storageId)
+          cleanups.push(leaderWrite.restore)
+          held.release()
+          released = Date.now()
+          await waitFor(leaderWrite.isHeld, `leader holding the commit`)
+          leaderOpen = false
+          await leader.close()
+          leaderHeldCommitAtClose = leaderWrite.isHeld()
+          leaderWrite.release()
+          for (const collection of leaderCollections) {
+            await collection.cleanup().catch(() => undefined)
+          }
+        }
+        // A bound past a wrong design's stall, but under the RPC retry
+        // budget, so a stalled run is reported, not timed out.
+        const bound =
+          history.lifecycle === `takeover-with-commit-queued`
+            ? COMMIT_QUEUED_BOUND_MS
+            : COMMIT_UNANSWERED_BOUND_MS
+        const settled = await settledWithin(
+          async () => followerLeads() && (await durable(`source`)),
+          bound - (Date.now() - released),
+        )
+        followerLeadsAll = followerLeads()
+        if (settled === undefined) {
+          // A stalled follower is closed at once, so its pending work ends
+          // and the comparison reports the stall.
+          followerOpen = false
+          await follower.close()
+        } else {
+          sourceCommitSettledMs = Date.now() - released
+        }
+        await loaded
       }
     }
     return await finish(reloadLog)
@@ -820,6 +990,9 @@ export async function observeReload(
         grantsWhileFollowerReadHeld,
         termsWhileFollowerReadHeld,
         grantedWhileWriteHeld,
+        writeIssuedAtGrant,
+        leaderHeldCommitAtClose,
+        sourceCommitSettledMs,
         rotatedStorageId,
         factsPresent,
         storedRow,
@@ -828,6 +1001,19 @@ export async function observeReload(
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
   }
+}
+
+function isTakeover(history: ReloadHistory): boolean {
+  return history.lifecycle.startsWith(`takeover`)
+}
+
+/** Whether a follower tab opens after the first tab is ready. */
+function followerOpens(history: ReloadHistory): boolean {
+  return (
+    history.need === `follower-write` ||
+    history.need === `bystander-write` ||
+    isTakeover(history)
+  )
 }
 
 /** The rotated Collection: the first managed one, when the history rotates. */
@@ -841,6 +1027,7 @@ function rotatedCollection(history: ReloadHistory): number | undefined {
 function heldCollection(history: ReloadHistory): number | undefined {
   if (
     history.need !== `local-write` &&
+    history.need !== `local-write-before-grant` &&
     history.lifecycle !== `dispose-while-waiting`
   ) {
     return undefined
@@ -945,21 +1132,24 @@ export function expectedReload(
   tabs: number
   writerExemptFromOrder: number | undefined
 } {
-  const heldTakeover = history.lifecycle === `takeover-while-read-held`
-  const secondTab =
-    history.need === `follower-write` ||
-    history.lifecycle === `takeover` ||
-    heldTakeover
-  const followerRestarts = heldTakeover
-    ? history.collections.findIndex((c) => c.kind === `eager`)
-    : -1
+  // A bystander tab reads every Collection once, as the follower does.
+  const tabs =
+    1 +
+    (followerOpens(history) ? 1 : 0) +
+    (history.need === `bystander-write` ? 1 : 0)
+  const followerRestarts =
+    history.lifecycle === `takeover-while-read-held`
+      ? history.collections.findIndex((c) => c.kind === `eager`)
+      : -1
   const disposed = history.lifecycle === `dispose-while-waiting`
-  const tabs = secondTab ? 2 : 1
   const held = heldCollection(history)
   return {
     tabs,
+    // The first tab's own write needs its Collection's leader.
     writerExemptFromOrder:
-      history.need === `local-write` || history.need === `write-queued-at-grant`
+      history.need === `local-write` ||
+      history.need === `local-write-before-grant` ||
+      history.need === `write-queued-at-grant`
         ? 0
         : undefined,
     collections: history.collections.map((collection, index) => {
@@ -996,10 +1186,12 @@ export function expectedReload(
         snapshots: disposed
           ? undefined
           : (eager ? 2 : 1) * (tabsOnThisGeneration + (restarted ? 1 : 0)),
+        // Each election reserves one term: the first tab's, a takeover's,
+        // and a restart's.
         terms: disposed
           ? 0
           : 1 +
-            (history.lifecycle === `takeover` || heldTakeover ? 1 : 0) +
+            (isTakeover(history) ? 1 : 0) +
             (history.lifecycle === `restart` && index === 0 ? 1 : 0),
       }
     }),
@@ -1152,21 +1344,51 @@ export function reloadViolations(
     }
   }
   // (c) need
-  if (history.need === `local-write` && observed.termDuringHold !== true) {
+  if (
+    (history.need === `local-write` ||
+      history.need === `local-write-before-grant`) &&
+    observed.termDuringHold !== true
+  ) {
     violations.push(`${ids[0]}: no term while another startup read was held`)
+  }
+  if (
+    history.need === `local-write-before-grant` &&
+    observed.writeIssuedAtGrant !== true
+  ) {
+    violations.push(`premise: the write was not issued before its grant`)
   }
   if (history.need !== `none` && observed.needSettled !== true) {
     violations.push(`the leader need did not settle`)
   }
-  if (
-    (history.lifecycle === `takeover` ||
-      history.lifecycle === `takeover-while-read-held`) &&
-    observed.followerLeadsAll !== true
-  ) {
+  if (isTakeover(history) && observed.followerLeadsAll !== true) {
     violations.push(`the follower did not take over`)
   }
+  // (c) a takeover's queued work does not wait on the departed leader
+  if (
+    history.lifecycle === `takeover-with-commit-queued` ||
+    history.lifecycle === `takeover-with-commit-unanswered`
+  ) {
+    if (observed.sourceCommitSettledMs === undefined) {
+      violations.push(
+        `the follower's queued source commit did not settle within ${
+          history.lifecycle === `takeover-with-commit-queued`
+            ? COMMIT_QUEUED_BOUND_MS
+            : COMMIT_UNANSWERED_BOUND_MS
+        } ms of its takeover`,
+      )
+    }
+  }
+  if (
+    history.lifecycle === `takeover-with-commit-unanswered` &&
+    observed.leaderHeldCommitAtClose !== true
+  ) {
+    violations.push(`premise: the leader did not hold the commit at close`)
+  }
   // (b) order at takeover: no follower term while its queued read waits
-  if (history.lifecycle === `takeover-while-read-held`) {
+  if (
+    history.lifecycle === `takeover-while-read-held` ||
+    history.lifecycle === `takeover-with-commit-queued`
+  ) {
     if (observed.grantsWhileFollowerReadHeld === 0) {
       violations.push(
         `premise: no takeover grant while the follower read waited`,
@@ -1208,22 +1430,31 @@ function legal(history: ReloadHistory): ReloadHistory {
   const firstEager = history.collections[0]?.kind === `eager`
   let { need, lifecycle } = history
   // A local write needs an eager writer first and another eager read held.
-  if (need === `local-write` && !(firstEager && eager >= 2)) need = `none`
-  if (need === `follower-write` && eager === 0) need = `none`
+  if (
+    (need === `local-write` || need === `local-write-before-grant`) &&
+    !(firstEager && eager >= 2)
+  )
+    need = `none`
+  if ((need === `follower-write` || need === `bystander-write`) && eager === 0)
+    need = `none`
   if (need === `write-queued-at-grant` && !(firstEager && eager >= 2))
     need = `none`
   if (lifecycle === `restart` && !firstEager) lifecycle = `none`
   if (lifecycle === `dispose-while-waiting` && (eager === 0 || need !== `none`))
     lifecycle = `none`
+  // A takeover follows the first tab's settled reload; a local write keeps
+  // one of its reads held until the write's term.
   if (
-    (lifecycle === `takeover` || lifecycle === `takeover-while-read-held`) &&
-    need === `local-write`
+    lifecycle.startsWith(`takeover`) &&
+    (need === `local-write` || need === `local-write-before-grant`)
   )
     lifecycle = `none`
   if (lifecycle === `takeover-while-read-held` && eager === 0)
     lifecycle = `none`
   const managed = history.collections.length - eager
   if (lifecycle === `rotate` && managed === 0) lifecycle = `none`
+  if (lifecycle.startsWith(`takeover-with-commit`) && managed === 0)
+    lifecycle = `none`
   return { ...history, need, lifecycle }
 }
 
@@ -1241,13 +1472,17 @@ export const reloadHistoryArb: fc.Arbitrary<ReloadHistory> = fc
     need: fc.constantFrom(
       `none` as const,
       `local-write` as const,
+      `local-write-before-grant` as const,
       `write-queued-at-grant` as const,
       `follower-write` as const,
+      `bystander-write` as const,
     ),
     lifecycle: fc.constantFrom(
       `none` as const,
       `takeover` as const,
       `takeover-while-read-held` as const,
+      `takeover-with-commit-queued` as const,
+      `takeover-with-commit-unanswered` as const,
       `rotate` as const,
       `restart` as const,
       `dispose-while-waiting` as const,
@@ -1351,6 +1586,10 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
     },
   ],
   [
+    `local write before its grant while a read is held`,
+    { ...base, need: `local-write-before-grant`, collections: [eager, eager] },
+  ],
+  [
     `write queued at another grant`,
     {
       ...base,
@@ -1372,6 +1611,40 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
       ...base,
       lifecycle: `takeover-while-read-held`,
       collections: [eager, managed, eager],
+    },
+  ],
+  [
+    `follower write, then takeover while a read is held`,
+    {
+      ...base,
+      need: `follower-write`,
+      lifecycle: `takeover-while-read-held`,
+      collections: [eager, eager],
+    },
+  ],
+  [
+    `another tab's write, then takeover while a read is held`,
+    {
+      ...base,
+      need: `bystander-write`,
+      lifecycle: `takeover-while-read-held`,
+      collections: [eager, managed, eager],
+    },
+  ],
+  [
+    `takeover with a queued source commit`,
+    {
+      ...base,
+      lifecycle: `takeover-with-commit-queued`,
+      collections: [eager, managed],
+    },
+  ],
+  [
+    `takeover with a source commit the leader never answered`,
+    {
+      ...base,
+      lifecycle: `takeover-with-commit-unanswered`,
+      collections: [managed, eager],
     },
   ],
   [

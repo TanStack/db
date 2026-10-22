@@ -126,8 +126,9 @@ type CollectionState = {
   latestRowVersion: number
   subscribers: Set<(message: ProtocolEnvelope<unknown>) => void>
   routeWaiters?: Set<() => void>
-  leadershipNeeded: Promise<void>
-  markLeadershipNeeded: () => void
+  // Set while this node holds the leader lock. It ends that election's wait
+  // for queued work before the term write.
+  markElectionNeeded: (() => void) | null
 }
 
 // Adapter capabilities used by coordinator-side operations. Resume snapshots
@@ -178,6 +179,15 @@ type CoordinatorAdapter = Pick<
 function requireDurableElection(adapter: CoordinatorAdapter): void {
   if (typeof adapter.reserveLeadershipTerm !== `function`) {
     throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
+  }
+  // An election waits for queued work through this barrier.
+  if (
+    adapter.runInRegularScope &&
+    typeof adapter.runInRegularScope.afterQueuedWork !== `function`
+  ) {
+    throw new InvalidPersistenceAdapterError(
+      `runInRegularScope.afterQueuedWork`,
+    )
   }
 }
 
@@ -902,13 +912,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private getOrCreateCollectionState(collectionId: string): CollectionState {
     let state = this.collections.get(collectionId)
     if (!state) {
-      let markLeadershipNeeded!: () => void
-      const leadershipNeeded = new Promise<void>((resolve) => {
-        markLeadershipNeeded = resolve
-      })
       state = {
-        leadershipNeeded,
-        markLeadershipNeeded,
+        markElectionNeeded: null,
         participatesInLeadership: false,
         isLeader: false,
         leaderId: null,
@@ -961,6 +966,14 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             return
           }
 
+          // The lock is exclusive, so a route that another node advertised
+          // is gone. A need belongs to this election: one that still waits
+          // for a route now, or one that arrives before the term.
+          state.leaderId = null
+          const needed = new Promise<void>((resolve) => {
+            state.markElectionNeeded = resolve
+          })
+          if (state.routeWaiters?.size) state.markElectionNeeded!()
           try {
             // Reserve an election term durably before advertising this route.
             // Election bypasses the shared scheduler because a hydrate may be
@@ -975,7 +988,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             // because a scheduled hydrate may be waiting for this route.
             await Promise.race([
               adapter.runInRegularScope?.afterQueuedWork(),
-              state.leadershipNeeded,
+              needed,
               new Promise((resolve) => {
                 abortController.signal.addEventListener(`abort`, resolve, {
                   once: true,
@@ -1040,6 +1053,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             })
           } finally {
             this.releaseInboundRemoteSubsetAcquisitions(collectionId)
+            state.markElectionNeeded = null
             state.isLeader = false
             state.leaderId = null
             if (state.heartbeatTimer) {
@@ -1107,7 +1121,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     if (routed()) return Promise.resolve()
     // A local or remote lock holder may be waiting for this need before it
     // reserves its term.
-    state.markLeadershipNeeded()
+    state.markElectionNeeded?.()
     this.channel.postMessage({
       v: 1,
       dbName: this.dbName,
@@ -1354,7 +1368,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
 
     if (type === `leader:routeRequest` || type?.endsWith(`:req`)) {
       const state = this.collections.get(envelope.collectionId)
-      if (state?.participatesInLeadership) state.markLeadershipNeeded()
+      state?.markElectionNeeded?.()
     }
 
     if (type === `leader:routeRequest`) {
@@ -1377,9 +1391,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         typeof heartbeat.latestRowVersion === `number`
       ) {
         const state = this.getOrCreateCollectionState(envelope.collectionId)
-        // The local Web Lock owns this route even if an older heartbeat arrives
-        // while leadership changes.
-        if (state.isLeader) return
+        // While this node holds the leader lock, no other node leads, so a
+        // heartbeat that arrives is older.
+        if (state.markElectionNeeded) return
         if (heartbeat.term < state.latestTerm) return
         const changedLeader = state.leaderId !== heartbeat.leaderId
         state.leaderId = heartbeat.leaderId

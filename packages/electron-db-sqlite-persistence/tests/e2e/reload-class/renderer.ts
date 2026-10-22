@@ -19,6 +19,7 @@ import { ElectronCollectionCoordinator } from '../../../src/electron-coordinator
 import type {
   HeldCall,
   ReloadHost,
+  ReloadSeams,
 } from '../../../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import type {
   ElectronPersistenceInvoke,
@@ -50,10 +51,10 @@ const invoke: ElectronPersistenceInvoke = (channel, request) =>
 const heldTokens = new Set<string>()
 bridge.on(`reload:held`, (token) => heldTokens.add(token as string))
 
-function remoteHold(kind: `row` | `write`, storageId: string): HeldCall {
+function remoteHold(seam: keyof ReloadSeams, storageId: string): HeldCall {
   const token = crypto.randomUUID()
   let released = false
-  void bridge.invoke(`reload:hold`, token, kind, storageId)
+  void bridge.invoke(`reload:hold`, token, seam, storageId)
   return {
     isHeld: () => !released && heldTokens.has(token),
     release: () => {
@@ -71,8 +72,11 @@ function electronAppHost(filename: string): ReloadHost {
   let renderers = 0
   return {
     seams: {
-      holdFirstRowSnapshot: (storageId) => remoteHold(`row`, storageId),
-      holdFirstWrite: (storageId) => remoteHold(`write`, storageId),
+      holdFirstRowSnapshot: (storageId) =>
+        remoteHold(`holdFirstRowSnapshot`, storageId),
+      holdFirstWrite: (storageId) => remoteHold(`holdFirstWrite`, storageId),
+      holdFirstSubsetLoad: (storageId) =>
+        remoteHold(`holdFirstSubsetLoad`, storageId),
     },
     adapterPerTab: false,
     controlsLatency: false,

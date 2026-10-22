@@ -30,6 +30,9 @@
  * when the scheduler is idle, and never rejects, even when the work it waits
  * for fails. A hydrate adopted through promise discovery counts as running
  * work, whether or not the scheduler was already busy when it was adopted.
+ * So does an unscheduled hydrate that has issued no query yet: before
+ * discovery, and on a driver without scheduling support, it is still the
+ * adapter's own running work.
  * Each relation is checked at a held query, so a barrier that waits too
  * long, too briefly, or only for one lane is pending or settled at the wrong
  * cut. The shared-driver fairness oracle checks that the barrier is not a
@@ -472,6 +475,34 @@ describe(`shared logical scheduling`, () => {
       await hydrate
       expect(await settlesNow(barrier)).toBe(true)
     })
+
+    it.each([
+      [
+        `before promise discovery`,
+        () => new PromiseBrandedFirstQueryGatedDriver(),
+      ],
+      [`without scheduling support`, () => new UnbrandedPromiseLookupDriver()],
+    ] as const)(
+      `waits for an unscheduled hydrate that has issued no query, %s`,
+      async (_driverKind, createDriver) => {
+        const adapter = createSQLiteCorePersistenceAdapter({
+          driver: createDriver(),
+        })
+        const gate = createDeferred()
+        const hydrate = adapter.runInHydrationScope!(async (scoped) => {
+          await gate.promise
+          await scoped.getStreamPosition!({
+            kind: `eager`,
+            collectionId: `unscheduled`,
+          })
+        })
+        const barrier = adapter.runInRegularScope!.afterQueuedWork()
+        expect(await settlesNow(barrier)).toBe(false)
+        gate.resolve()
+        await hydrate
+        expect(await settlesNow(barrier)).toBe(true)
+      },
+    )
 
     // A second wrapper over the same key discovers it only from a promise.
     // Its unscheduled hydrate is adopted while the scheduler already runs
