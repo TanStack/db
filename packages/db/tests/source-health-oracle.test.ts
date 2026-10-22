@@ -139,7 +139,7 @@
  * lane owns their order). The lazy demand grammar does not yet check the
  * request error while a source reload's replay is in flight or after one
  * failed: a demand change during the replay can clear the error before its
- * key loads again, which is open. Per-row child Collections are not
+ * key loads again, which stays open (the maintainer deferred a fix). Per-row child Collections are not
  * in the tree; an include's node shows its source. Pooled histories do not
  * restart or clean up: a pooled view ends for good when its Collection is
  * cleaned up. The ordering check reads the observed query only, not its
