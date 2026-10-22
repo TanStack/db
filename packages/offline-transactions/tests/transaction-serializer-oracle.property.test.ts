@@ -18,6 +18,8 @@ import type { PendingMutation } from '@tanstack/db'
  * Contract and source: SerializedOfflineTransaction and the offline persistence
  * contract preserve mutation meaning across process boundaries. Encoding v3
  * supports JSON trees, Date, and the eight restorable Temporal scalar types.
+ * Opt-in v4 records delegate mutation payloads to their identified codec.
+ * Default v3 metadata and mutation behavior stays unchanged.
  * Marker-shaped user objects remain data. Unversioned and v2 records retain
  * their prior meanings. Unsupported or malformed encodings fail visibly.
  *
@@ -291,7 +293,7 @@ async function checkRoundtrip(
       if (fault === `omit-changes`)
         encoded = encoded.replaceAll(`"changes":`, `"lostChanges":`)
       if (fault === `unknown-encoding`)
-        encoded = encoded.replace(`"valueEncoding":3`, `"valueEncoding":4`)
+        encoded = encoded.replace(`"valueEncoding":3`, `"valueEncoding":5`)
       return encoded
     }
     const serialized = serializer.serialize(offline)
@@ -1580,7 +1582,7 @@ it.each(
               message:
                 fault === `wrong-registry`
                   ? `Collection with id writer:0 not found`
-                  : `Unsupported transaction value encoding: 4`,
+                  : `Unsupported transaction value encoding: 5`,
             }
       await expect(
         checkRoundtrip(pinned, 0, fault, boundary),
@@ -1591,3 +1593,158 @@ it.each(
     }
   },
 )
+
+/**
+ * Opt-in mutation codecs own their mutation-value domain independently of the
+ * default JSON/Date/Temporal encoding above. The wire records the codec ID and
+ * a new version so a reader cannot mistake opaque data for ordinary rows.
+ * Missing, mismatched, or failing codecs reject reads without changing storage.
+ *
+ * The supplied fixture codec uses Node's V8 structured serialization. Expected
+ * runtime values come directly from generated native leaves, not a reimplementation
+ * of production dispatch or codec output. Histories cross insert/update/delete,
+ * native values nested in all three mutation payloads, fresh readers, and
+ * unsupported reader configurations. Existing v3 histories remain unchanged.
+ * The Convex receiving witness supplies its real public value codec and tests
+ * disk/process replay against the actual backend.
+ */
+it(`preserves opt-in mutation values and rejects unreadable codec records without losing work`, async () => {
+  const { serialize, deserialize } = await import('node:v8')
+  const codec = {
+    id: `v8-test/1`,
+    encode: (value: unknown) => serialize(value).toString(`base64`),
+    decode: (value: unknown) =>
+      deserialize(Buffer.from(value as string, `base64`)) as unknown,
+  }
+  const native = fc.oneof(
+    fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n }),
+    fc.constantFrom(NaN, Infinity, -Infinity, -0),
+    fc.uint8Array({ maxLength: 12 }).map((bytes) => bytes.buffer),
+  )
+  const property = fc.asyncProperty(
+    fc.array(native, { minLength: 1, maxLength: 5 }),
+    fc.constantFrom(`insert`, `update`, `delete`),
+    async (values, kind) => {
+      type CodecRow = { id: string; values: Array<unknown> }
+      const makeCollection = (id: string) =>
+        createCollection<CodecRow>({
+          id,
+          getKey: (row) => row.id,
+          sync: { sync: ({ markReady }) => markReady() },
+        })
+      const writer = makeCollection(`codec-writer`)
+      const reader = makeCollection(`codec-reader`)
+      const row: CodecRow = { id: `one`, values }
+      const transaction: OfflineTransaction = {
+        id: `codec-transaction`,
+        mutationFnName: `save`,
+        keys: [`one`],
+        idempotencyKey: `stable`,
+        createdAt: new Date(0),
+        retryCount: 0,
+        nextAttemptAt: 0,
+        version: 1,
+        metadata: { when: new Date(0) },
+        mutations: [
+          {
+            globalKey: `one`,
+            type: kind,
+            modified: row,
+            original: row,
+            changes: { values },
+            collection: writer,
+          } as unknown as PendingMutation,
+        ],
+      }
+      const storage = new FakeStorageAdapter()
+      try {
+        await new OutboxManager(storage, { rows: writer }, codec).add(
+          transaction,
+        )
+        const before = storage.snapshot()
+        const restored = await new OutboxManager(
+          storage,
+          { rows: reader },
+          codec,
+        ).get(`codec-transaction`)
+        expect(restored?.mutations[0]?.modified).toEqual(row)
+        expect(restored?.mutations[0]?.original).toEqual(row)
+        expect(restored?.mutations[0]?.changes).toEqual({ values })
+        expect(restored?.mutations[0]?.collection).toBe(reader)
+        expect(restored?.metadata).toEqual({ when: new Date(0) })
+        const invalidEncoder = {
+          ...codec,
+          encode: () => null,
+        } as unknown as typeof codec
+        await expect(
+          new OutboxManager(storage, { rows: writer }, invalidEncoder).add(
+            transaction,
+          ),
+        ).rejects.toThrow(`codec`)
+        expect(storage.snapshot()).toEqual(before)
+        const wire = JSON.parse(Object.values(before)[0]!)
+        expect(wire.valueEncoding).toBe(4)
+        expect(wire.mutationEncoding).toBe(codec.id)
+        for (const unsupported of [
+          undefined,
+          { ...codec, id: `other` },
+          {
+            ...codec,
+            decode: () => {
+              throw new Error(`broken codec`)
+            },
+          },
+        ]) {
+          const outbox = new OutboxManager(
+            storage,
+            { rows: reader },
+            unsupported,
+          )
+          await expect(outbox.get(`codec-transaction`)).rejects.toThrow(`codec`)
+          await expect(outbox.getAll()).rejects.toThrow(`codec`)
+          expect(storage.snapshot()).toEqual(before)
+        }
+        const plain = { id: `one`, values: [] }
+        const legacy = {
+          ...transaction,
+          id: `legacy-transaction`,
+          mutations: [
+            {
+              ...transaction.mutations[0]!,
+              modified: plain,
+              original: plain,
+              changes: { values: [] },
+            },
+          ],
+        }
+        await new OutboxManager(storage, { rows: writer }).add(legacy)
+        const mixed = await new OutboxManager(
+          storage,
+          { rows: reader },
+          codec,
+        ).getAll()
+        expect(mixed).toHaveLength(2)
+        expect(
+          mixed.find((entry) => entry.id === legacy.id)?.mutations[0]?.modified,
+        ).toEqual(plain)
+      } finally {
+        await writer.cleanup()
+        await reader.cleanup()
+      }
+    },
+  )
+  const config = readOfflineOracleConfig({
+    prefix: `OFFLINE_ORACLE`,
+    defaultRuns: 60,
+  })
+  if (config.seed !== undefined)
+    await fc.assert(property, {
+      numRuns: config.runs,
+      seed: config.seed,
+      path: config.path,
+    })
+  else {
+    await fc.assert(property, { numRuns: config.runs, seed: 20261022 })
+    await fc.assert(property, { numRuns: config.runs })
+  }
+})

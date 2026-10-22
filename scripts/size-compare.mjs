@@ -47,6 +47,7 @@ const flag = (name) => args.includes(`--${name}`)
 
 const DEFAULT_PACKAGES = [
   `db`,
+  `convex-db-collection`,
   `react-db`,
   `query-db-collection`,
   `electric-db-collection`,
@@ -199,6 +200,8 @@ function exportedEntries(pkgDir) {
 // is the compressed bundle; each file's entry is its minified bytes in it.
 async function measureProduction(dir, pkg) {
   const pkgDir = join(dir, `packages`, pkg)
+  // New or removed packages have no shipped bytes on the absent side.
+  if (!existsSync(pkgDir)) return new Map()
   const entries = exportedEntries(pkgDir).filter(existsSync)
   if (entries.length === 0) return new Map()
   const result = await esbuild({

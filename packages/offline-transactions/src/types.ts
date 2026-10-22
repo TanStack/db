@@ -60,7 +60,9 @@ export interface OfflineTransaction {
 // Serialized representation for storage
 export interface SerializedOfflineTransaction {
   /** Absent for the original Date-marker format. */
-  valueEncoding?: 2 | 3
+  valueEncoding?: 2 | 3 | 4
+  /** Required for opt-in mutation encoding v4. */
+  mutationEncoding?: string
   id: string
   mutationFnName: string
   mutations: Array<SerializedMutation>
@@ -95,7 +97,16 @@ export interface StorageDiagnostic {
   error?: Error
 }
 
+/** Encodes mutation payloads into JSON-safe values, and restores them on replay. */
+export interface MutationValueCodec {
+  /** Stable format/version identifier, retained in every encoded transaction. */
+  id: string
+  encode: (value: unknown) => string
+  decode: (value: string) => unknown
+}
+
 export interface OfflineConfig {
+  mutationCodec?: MutationValueCodec
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
