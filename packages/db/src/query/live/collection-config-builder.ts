@@ -487,17 +487,30 @@ export class CollectionConfigBuilder<
     )
   }
 
-  failDemand(planId: string, generation: number, error: unknown): void {
+  /**
+   * A lazy demand load failure ends the query unless it failed a truncate
+   * replay: that replay keeps the last publication until a later replay of
+   * the source reacquires the demand. A failed demand is settled either way,
+   * so it holds no ordered loading.
+   */
+  failDemand(
+    planId: string,
+    generation: number,
+    error: unknown,
+    fatal = true,
+  ): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
+    demand.settled = true
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    this.transitionToError(
-      devBuild() && process.env.NODE_ENV !== `production`
-        ? `Subset demand '${planId}' failed: ${normalized.message}`
-        : codedMessage(228, { planId, cause: normalized.message }),
-      normalized,
-    )
+    if (fatal)
+      this.transitionToError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Subset demand '${planId}' failed: ${normalized.message}`
+          : codedMessage(228, { planId, cause: normalized.message }),
+        normalized,
+      )
   }
 
   recordSubsetError(error: unknown, fatalBeforeReady = false): Error {

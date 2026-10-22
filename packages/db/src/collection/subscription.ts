@@ -401,11 +401,18 @@ export class CollectionSubscription
       this.collection._sync.syncLoadSubsetFn !== null
     // Deferred demand never acquired, so a truncate gives it nothing to
     // reload; it acquires the replacement rows when acquisition resumes.
-    const demandsToReload =
-      reloadsSubsets && !this.defersAcquisition ? [...this.subsetDemands] : []
+    const acquires = reloadsSubsets && !this.defersAcquisition
+    const demandsToReload = acquires ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
-    if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
+    // A query subscription that acquires opens the replay without demand too:
+    // the commit's private deletes can make its graph start demand, and that
+    // demand belongs to this replay.
+    if (
+      demandsToReload.length === 0 &&
+      this.stalePublishedRows.size === 0 &&
+      !(acquires && this.options.truncateReplayPublication)
+    ) {
       this.resetSnapshotTracking()
       return
     }

@@ -739,6 +739,9 @@ old constant, even after its first load settles: deduplication and query state
 may retain its identity. Request data uses stable data properties, not stateful
 getters. The signal and subscription references do not change, but their
 lifecycle remains live. Cancellation and release are not data mutations.
+A truncate replay asks again for each retained demand with that demand's
+request data, so an adapter sees the same `where` expression it received
+before the truncate.
 The immutable-demand boundary matrix checks direct and deferred sync startup,
 adapter return and asynchronous settlement, cancellation, and release identity.
 
@@ -884,7 +887,10 @@ applied settlement. A failed or obsolete replacement cannot retire established
 coverage, and a retry requests the same union again. A partial shrink may keep
 one intersecting acquisition without replacement. This avoids repeatedly
 loading the growing prefix while allowing a changing bounded window to return
-to one acquisition.
+to one acquisition. The controller starts new coverage before it releases an
+acquisition that no longer intersects current demand. A demand change
+therefore never leaves its subscription without logical demand partway
+through, which would end that subscription's truncate replay.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
@@ -1431,6 +1437,17 @@ while the retired transport can no longer gate it. A genuine replay failure is
 normalized once by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
+
+A truncate's commit deletes the source's rows privately, so the graph can
+demand keys that the query never published. A query subscription that acquires
+from an on-demand source therefore opens a replay at every truncate, even when
+it holds no demand. Lazy demand that the graph starts while that replay is open
+belongs to it. A lazy demand load whose failure fails its subscription's replay
+does not end the live query. The query records the error and keeps its last
+complete publication until a later truncate replay of that source succeeds,
+which reacquires the retained demand. A lazy demand load that fails outside a
+replay ends the query (error 228): the parent rows it serves may already be
+public, and no barrier keeps their incomplete join side or bucket private.
 
 ### Mutation boundaries and initial readiness
 
