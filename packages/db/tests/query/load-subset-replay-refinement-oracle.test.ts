@@ -1082,6 +1082,11 @@ describe(`loadSubset replay refinement`, () => {
  * - **Convergence:** after a final truncate with no faults, and an explicit
  *   window move that revalidates a window whose own move failed, the window
  *   equals the model.
+ * - **Include children:** wherever the window law holds, each shown row's
+ *   included markers equal the model's: its own marker if it is marked, and
+ *   none otherwise. A windowed query routes child demand only from the rows
+ *   it shows (ARCHITECTURE.md), so this also judges child loads through
+ *   holds, failures, and marker truncates.
  * - **Terminal error:** a failed lazy join demand load is fatal, because the
  *   join side can no longer be complete, so the query stays in `error` and
  *   convergence does not apply. Either side can be the lazy one: the planner
@@ -1108,8 +1113,11 @@ describe(`loadSubset replay refinement`, () => {
  * demand through the same held and failing loads; markers change and truncate
  * through sync.
  *
+ * The include scenarios add a `toArray` child that reads the marker source
+ * for each shown row.
+ *
  * Limits: one ordered source; no full joins (the ordered-work oracle owns
- * them) and no includes; and a provider that reads its rows at the time it
+ * them); includes one level deep; and a provider that reads its rows at the time it
  * answers.
  */
 type OrderedRow = { id: number; rank: number }
@@ -1138,6 +1146,8 @@ type OrderedScenario = {
   // Whether the marker source holds every marker or loads them on demand,
   // sharing the history's held and failing loads.
   markerMode: `eager` | `on-demand`
+  // Whether each shown row includes its markers as a `toArray` child.
+  includes: boolean
 }
 
 const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
@@ -1153,6 +1163,7 @@ const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
     `inner` as const,
   ),
   markerMode: fc.constantFrom(`eager` as const, `on-demand` as const),
+  includes: fc.boolean(),
 })
 
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
@@ -1219,6 +1230,7 @@ type OrderedReach = {
   windowMoves: number
   descendingRuns: number
   joinedRuns: number
+  includeChecks: number
   markChanges: number
   antiJoinedRuns: number
   innerJoinedRuns: number
@@ -1236,6 +1248,7 @@ const ordinaryOrderedScenario: OrderedScenario = {
   peer: false,
   joined: false,
   markerMode: `eager`,
+  includes: false,
 }
 
 async function checkOrderedReplay(
@@ -1282,6 +1295,13 @@ async function checkOrderedReplay(
     if (new Set(rows.map(({ rank }) => rank)).size < rows.length) {
       reach.tiedWindows++
     }
+    if (!scenario.includes) return
+    for (const row of rows as Array<OrderedRow & { markers?: Array<number> }>) {
+      expect(row.markers, `${label}: row ${row.id} markers`).toEqual(
+        marked.has(row.id) ? [row.id] : [],
+      )
+    }
+    reach.includeChecks++
   }
   const installed = new Map<number, OrderedRow>()
   // Each load records the truncate count it was issued after, so a fault can
@@ -1335,6 +1355,7 @@ async function checkOrderedReplay(
     windowMoves: 0,
     descendingRuns: scenario.direction === `desc` ? 1 : 0,
     joinedRuns: scenario.joined ? 1 : 0,
+    includeChecks: 0,
     markChanges: 0,
     antiJoinedRuns: scenario.joined === `none` ? 1 : 0,
     innerJoinedRuns: scenario.joined === `inner` ? 1 : 0,
@@ -1346,7 +1367,9 @@ async function checkOrderedReplay(
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
   const installedMarkers = new Set<number>()
-  const onDemandMarkers = scenario.joined && scenario.markerMode === `on-demand`
+  // The query reads the marker source through a join, an include, or both.
+  const readsMarkers = scenario.joined !== false || scenario.includes
+  const onDemandMarkers = readsMarkers && scenario.markerMode === `on-demand`
   const markers = createCollection<Marker, number>({
     getKey: (marker) => marker.id,
     ...(onDemandMarkers
@@ -1545,7 +1568,20 @@ async function checkOrderedReplay(
         .orderBy(({ row }) => row.rank, scenario.direction)
         .offset(scenario.offset)
         .limit(scenario.limit)
-        .select(({ row }) => ({ id: row.id, rank: row.rank }))
+        .select(({ row }) =>
+          scenario.includes
+            ? {
+                id: row.id,
+                rank: row.rank,
+                markers: toArray(
+                  q
+                    .from({ child: markers })
+                    .where(({ child }) => eq(child.rowId, row.id))
+                    .select(({ child }) => child.id),
+                ),
+              }
+            : { id: row.id, rank: row.rank },
+        )
     })
   const live = query()
   // A peer reads the same source; its leases must survive the first
@@ -1668,7 +1704,7 @@ async function checkOrderedReplay(
             break
           // A row gains or loses its marker in the joined source.
           case `mark`: {
-            if (!scenario.joined || marked.has(command.id) === command.on) {
+            if (!readsMarkers || marked.has(command.id) === command.on) {
               break
             }
             reach.markChanges++
@@ -1691,7 +1727,7 @@ async function checkOrderedReplay(
           // The joined source truncates. An eager source redelivers every
           // marker; an on-demand one replays its loaded demands.
           case `truncateMarkers`: {
-            if (!scenario.joined) break
+            if (!readsMarkers) break
             reach.markerTruncates++
             await truncateMarkers()
             break
@@ -1770,7 +1806,7 @@ async function checkOrderedReplay(
     // authoritative replay of that source (ARCHITECTURE.md), so recovery
     // replays every source.
     await truncate()
-    if (scenario.joined) await truncateMarkers()
+    if (readsMarkers) await truncateMarkers()
     await settleAll()
     await flushPromises()
     if (violation) throw new Error(`adapter release: ${violation}`)
@@ -2014,6 +2050,7 @@ describe(`Ordered windows across truncate replays`, () => {
         windowMoves: 0,
         descendingRuns: 0,
         joinedRuns: 0,
+        includeChecks: 0,
         markChanges: 0,
         antiJoinedRuns: 0,
         innerJoinedRuns: 0,
