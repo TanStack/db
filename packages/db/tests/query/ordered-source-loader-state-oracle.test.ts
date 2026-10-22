@@ -1748,6 +1748,16 @@ describe(`Successful finite demand retirement`, () => {
  * - **Cost:** once loading is quiet and a bounded repair is available, an
  *   invalidation reads no full source, and it issues at most one chain (in
  *   this fake, a prefix, a tie, and a refill) per ordering epoch move.
+ * - **Ignored report:** a sync adapter's report that served pages may have
+ *   shifted issues no authoritative request when nothing it describes can
+ *   be wrong: before any request settled (a request in flight still owes an
+ *   exact result for its own options), or while the loader's coverage is
+ *   its own first ordered prefix of at least `offset + limit` rows, with
+ *   only that prefix's tie after it, and a row past the page sorts strictly
+ *   after its end with no more rows needed (ARCHITECTURE.md). The law judges
+ *   only quiet histories: every earlier step settled a request successfully,
+ *   ran a pass, inserted a row, reported, or changed joined work, and no
+ *   release callback has side effects, so no earlier event owes a repair.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -2100,6 +2110,8 @@ type AuthorityObservation = {
   // Commands of the later dimensions that changed loader input.
   unexpressibleBoundaries: number
   joinedDeferrals: number
+  ignoredReportsBeforeSettle: number
+  ignoredReportsInsideFirstPage: number
   truncates: number
   replayFailures: number
   optimisticDepartures: number
@@ -2464,6 +2476,8 @@ async function checkAuthorityCase(
   }
   let unexpressibleBoundaries = 0
   let joinedDeferrals = 0
+  let ignoredReportsBeforeSettle = 0
+  let ignoredReportsInsideFirstPage = 0
   let truncates = 0
   let replayFailures = 0
   let optimisticDepartures = 0
@@ -2736,11 +2750,67 @@ async function checkAuthorityCase(
           if (command.react) graphPass()
           await flush()
           break
-        case `report`:
+        case `report`: {
+          // The premises come from the case and the ledger alone.
+          const quiet =
+            !testCase.releaseFault &&
+            !testCase.releaseReenters &&
+            !testCase.releaseTruncates &&
+            !testCase.releaseDisposes &&
+            !boundaryUnexpressible &&
+            testCase.history
+              .slice(0, step)
+              .every(
+                (earlier) =>
+                  (earlier.type === `settle` && earlier.ok) ||
+                  earlier.type === `settleNewest` ||
+                  earlier.type === `pass` ||
+                  earlier.type === `report` ||
+                  earlier.type === `joinedBusy` ||
+                  earlier.type === `joinedIdle`,
+              ) &&
+            ledger.every(({ outcome }) => outcome !== `failed`)
+          const windowSize = testCase.offset + info.limit
+          const [first, ...later] = ledger
+          const beforeSettle = ledger.every(({ outcome }) => outcome !== `ok`)
+          const insideFirstPage =
+            !testCase.requiresFullSource &&
+            !testCase.needsMore &&
+            testCase.snapshotRows > windowSize &&
+            first !== undefined &&
+            first.outcome === `ok` &&
+            !first.authoritative &&
+            first.options.orderBy !== undefined &&
+            first.options.where === undefined &&
+            first.options.cursor === undefined &&
+            first.options.minValues === undefined &&
+            (first.options.limit ?? 0) >= windowSize &&
+            later.every(
+              ({ options, outcome, authoritative }) =>
+                outcome === `ok` &&
+                !authoritative &&
+                options.where !== undefined &&
+                options.cursor === undefined &&
+                options.orderBy === undefined,
+            )
+          const before = ledger.length
           loader.revalidateLoadedCoverage()
           if (command.react) graphPass()
           await flush()
+          if (quiet && (beforeSettle || insideFirstPage)) {
+            const issued = ledger
+              .slice(before)
+              .find(({ authoritative }) => authoritative)
+            if (issued) {
+              throw new Error(
+                `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
+              )
+            }
+            if (beforeSettle) ignoredReportsBeforeSettle++
+            else ignoredReportsInsideFirstPage++
+          }
           break
+        }
         case `pass`:
           graphPass()
           await flush()
@@ -3062,6 +3132,8 @@ async function checkAuthorityCase(
     invalidatingPages,
     unexpressibleBoundaries,
     joinedDeferrals,
+    ignoredReportsBeforeSettle,
+    ignoredReportsInsideFirstPage,
     truncates,
     replayFailures,
     optimisticDepartures,
@@ -3477,6 +3549,39 @@ describe(`Ordered source request authority`, () => {
         ],
       },
     },
+    {
+      // Without the first-page check, the report repaired a window that the
+      // loader's own first prefix already proves.
+      name: `a report while the window is inside the loader's first page`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: true },
+        ],
+      },
+    },
+    {
+      // Without the settled check, a report before the first page settled
+      // forced a full-source read.
+      name: `a report before any request settles`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        history: [{ type: `report`, react: true }],
+      },
+    },
   ] satisfies Array<{ name: string; testCase: AuthorityCase }>)(
     `keeps request authority for $name (generated-lane replay)`,
     async ({ testCase }) => {
@@ -3498,6 +3603,8 @@ describe(`Ordered source request authority`, () => {
       const later = {
         unexpressibleBoundaries: 0,
         joinedDeferrals: 0,
+        ignoredReportsBeforeSettle: 0,
+        ignoredReportsInsideFirstPage: 0,
         truncates: 0,
         replayFailures: 0,
         optimisticDepartures: 0,
@@ -3557,10 +3664,14 @@ describe(`Ordered source request authority`, () => {
         expect(syncRepairs).toBeGreaterThan(0)
         expect(invalidatingPages).toBeGreaterThan(0)
         // A recovery start that throws while the loader handles a superseded
-        // failure is too rare to require of every campaign; a named replay
-        // reaches it.
+        // failure, and a report inside the loader's first page, are too rare
+        // to require of every campaign; named replays reach them.
         for (const [dimension, count] of Object.entries(later)) {
-          if (dimension === `startThrowsDuringFailure`) continue
+          if (
+            dimension === `startThrowsDuringFailure` ||
+            dimension === `ignoredReportsInsideFirstPage`
+          )
+            continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
