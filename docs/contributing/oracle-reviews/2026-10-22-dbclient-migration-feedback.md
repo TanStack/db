@@ -831,3 +831,114 @@ Final evaluated source identities (SHA-256), based on reviewed HEAD
 | `packages/db/tests/query/pooled-live-query-gc-oracle.test.ts` | `5eba86cb508775f885a9c13ec17253d04256f857002664bdeedfbce685426f89` |
 | `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx` | `101b8030b4d5e2ee4a090dca940c9708344fa2bdbd482ca94065969ef41478ab` |
 | `packages/react-db/tests/useLiveSuspenseQuery.test.tsx` | `7d0ace536f2a4a8b6a5ccf124463ddf68cdb53ff390058a556fce3e6363bb136` |
+
+## Current-head summary: cleanup during ownership transfer
+
+CodeRabbit's summary at `da37bc9bbafbed4b2cc901adcbad9181b0aeb93d` reported no
+actionable comments, but said: “The deferred-resumption cleanup edge case is
+unresolved but has no established user impact.” It then paused automatic
+reviews. This concern required an experiment without an inline finding.
+The previous appendix's closeout is historical and does not cover this new
+counterexample. The earlier eight-item ledger remains unchanged.
+
+### Law, experiment, and repair
+
+A returned acquiring subscription remains demand after cleanup. Explicit restart
+must serve it. A still-deferred subscription contributes no acquisition.
+Cleanup during admission retires that start. Admission must not start another
+run unless a caller explicitly requested one. Authority comes from the primary
+owner's surviving-subscriber contract, cleanup start, and shared startup judgment.
+
+Eight probes varied plain/live-query Collection, eager/on-demand source and
+cleanup from loading/ready callbacks during resumption. Two on-demand live
+queries remained loading after explicit restart with one acquiring subscriber.
+Removing the target render gate exposed a neighbor: first-demand notification
+could clean up the query, after which admission started it again. These are
+concrete consequences absent from the summary.
+
+The old surviving-subscriber grammar cleaned up after admission settled. The
+retirement grammar unsubscribed at the interruption. Neither represented a
+surviving owner whose transfer was still in progress. The primary deferred-
+acquisition owner now adds 192 finite histories: two modes, two shapes, one/two
+levels, ordinary/resumed/deferred readers, render gate present/absent, source
+loading/ready cleanup, and explicit restart later/from terminal publication.
+
+The independent judgment counts returned acquiring handles as next-run demand.
+A deferred handle contributes none. Eager local rows can establish readiness
+without acquisition. The driver reaches cleanup through real status callbacks.
+It compares the complete target status trace after cleanup starts, ownership
+and absence of implicit restart, then acquisition, readiness and rows after
+explicit restart. Two-level histories permit an inner query's earlier accepted
+acquisition to remain useful. They require acquisition to exist, without forcing
+an unnecessary new physical attempt for each outer restart.
+
+The first draft incorrectly required that additional attempt. Its assertion
+was corrected before production changed. The corrected original implementation
+fails 44 histories at unintended-restart or replacement-progress assertions.
+Keeping ownership retention while removing the sync-run guard fails 16
+unintended-restart assertions. Both runs have no type errors. Evidence:
+`review-da37-surviving-red-original.log` and
+`review-da37-surviving-red-no-generation-guard.log` in the existing scratch root.
+The earlier draft total is not calibration evidence. Mutants restore source
+bytes in finally and verify identity.
+
+The repair uses the existing sync-run generation to fence admission after a
+first-demand callback cleans up. Current acquiring ownership also contributes
+to the demand judgment. Ownership commitment restores a demand mark cleared
+during startup cleanup, including an explicit cleanup-listener restart.
+Retired owners do not commit that notification. Ordinary admission includes
+its fallible ownership notification in rollback, preserving the setup error if
+a release listener throws too. Rollback removes the pending owner's count,
+without resetting a total that could erase a reentrant peer. No stored lifecycle
+state, retry queue or recovery lifecycle was added.
+
+The same 53-file core selection passes **2,776 tests**. The full 22-file React
+selection passes **457 tests**. Both report no type errors or unhandled errors.
+Scoped ESLint has zero errors. The production bundle is **+138 gzip / +191
+brotli bytes** against merge-base `205ab7158`; React is unchanged. This adds
+36 gzip / 20 brotli bytes beyond `da37bc9bb`. Additional source weight is
+production +23/-6 and tests +112/-0, with documentation separate. Evidence logs:
+`review-da37-core-green.log`, `review-da37-react-green.log`,
+`review-da37-lint.log`, and `review-da37-size.log`.
+
+| Item | Technical judgment | Action and durable value |
+| --- | --- | --- |
+| CR3-01: unresolved resumption/cleanup edge, without established impact | Plausible concern. Same-path probes establish stalled replacement and unintended restart. Concrete diagnoses are S03/S04 below. | `fixed-now`; primary surviving-owner grammar and ownership-transfer repair. |
+| CR3-02: docstring score 16.67%, below the bot's 80% threshold; generate docstrings | Reported default metric, with no named function or missing contract. Neither AGENTS.md nor ESLint imposes that threshold. The summary says no repository configuration applied. The score establishes no repository defect. | `refuted` as a required PR repair. Preserve the metric and documentation idea here. Existing contract prose remains required and was updated. No comments were generated only for the score. |
+| CR3-03: no actionable comments, covered head da37, minimal risk, automatic pause | Exact covered commit verified. Risk classification is opinion and does not override F02 or the executed cleanup counterexample. | `duplicate` provenance retained here, without extra correctness authority. |
+| S03: startup cleanup loses a surviving acquiring owner's demand | Confirmed on-demand progress failure after explicit restart. | `fixed-now`; current ownership and demand commitment survive the transfer. |
+| S04: first-demand cleanup is followed by implicit startup | Confirmed ordering failure with an already-running local query. | `fixed-now`; existing sync-run generation fences admission. |
+
+New-summary accounting: three raw items = one fixed-now + one refuted repository-
+requirement claim + one duplicate provenance entry. S03/S04 remain separate
+violations. No finding is deferred. Reviewer recommendation for this summary
+alone: insufficient evidence for a hire decision. It preserved a useful concern,
+but gave no trace and missed the demonstrated consequence.
+
+ORC-001–014: authority, limits, independent handle judgment, literate layers,
+real entry points and immediate/settled comparisons are stated above and beside
+the grammar. New cases are bounded enumeration, so generated controls and new
+campaign/replay interfaces are not triggered (004/007). Existing fixed/random
+campaigns remain unchanged and green. No reference state was added (008).
+Glossary terms and the existing projection remain unchanged (009). Controlled
+teardown removes callbacks before cleanup, with the preceding failure-fidelity
+limits (010). No concrete shared semantic fault calls for a second formulation
+(011). Original and narrow-mutant assertion failures calibrate both ownership
+retention and startup fencing (006/013). This versioned appendix and the source
+identities below supply 012. These cases claim controlled core callbacks only,
+so no additional real-provider/framework handoff is claimed (014). The React
+run is compatibility evidence, not a receiving witness for this new premise.
+
+The law is encoded and asserted across the stated 192 histories, including
+no-acquisition and explicit-listener-restart neighbors. No counterexample remains
+within this declared boundary. Arbitrary recursive cleanup, asynchronous
+provider work before acquisition and other framework schedules remain outside
+these finite histories. The primary owner's coverage-map entry retains those
+wider witnesses. No universal history or provider-shutdown proof is claimed.
+
+Source identities for this follow-up on `da37bc9bb` (SHA-256):
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/db/src/collection/changes.ts` | `4d0849637a03e8012ee965191d9ed9332957e0bdf07b19d25d4deb0e400e9d34` |
+| `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` | `0198add12e3c185aaa70a378bdfe115632686f864a178a42cbaa934809d387bd` |

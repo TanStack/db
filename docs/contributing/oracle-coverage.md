@@ -134,6 +134,16 @@ extensions do not establish arbitrary async/provider schedules or new framework
 error policy. The [follow-up audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
 records original RED, hostile controls, and the unchanged rejection decision.
 
+A subsequent current-head summary exposed cleanup during ownership transfer.
+The deferred-acquisition owner adds 192 surviving-owner histories crossing both
+source modes, shapes, depths, ordinary/resumed/deferred readers, render gates,
+source loading/ready cleanup, and explicit restart later or from terminal
+publication. They check the complete post-cleanup status trace, ownership,
+replacement acquisition, readiness and rows. The previous implementation fails
+44 assertions; retaining ownership without fencing first-demand cleanup fails
+16. The controlled grammar does not claim arbitrary recursive cleanup or async
+provider work before acquisition. This owner retains those wider witnesses.
+
 The Collection lifecycle history owner includes a 26-cell cleanup-restart
 matrix. It crosses explicit and default eager sources with absent or present
 loaders, empty or nonempty replacements, and no interruption, truncate during

@@ -1103,6 +1103,118 @@ describe(`DbClient preload releases independent source starts`, () => {
  * clean up while subscribed, restart, then settle.
  */
 describe(`a subscriber that outlives cleanup`, () => {
+  // Admission may still be transferring ownership when a source status callback
+  // cleans up the live-query Collection. Cleanup retires that start, not the
+  // surviving logical subscription. It must not restart before an explicit restart request.
+  // The model counts a returned acquiring handle as demand for the next run;
+  // a still-deferred handle contributes none. This extends the settled-cleanup
+  // histories below with the construction boundary, both shapes and depths.
+  it.each(
+    ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
+      QUERY_SHAPES.flatMap((shape) =>
+        ([1, 2] as const).flatMap((depth) =>
+          ([`ordinary`, `resumed`, `deferred`] as const).flatMap((reader) =>
+            [false, true].flatMap((renderGate) =>
+              ([`loading`, `ready`] as const).flatMap((cleanupAt) =>
+                [false, true].map((restartFromCleanup) => ({
+                  state,
+                  shape,
+                  depth,
+                  reader,
+                  renderGate,
+                  cleanupAt,
+                  restartFromCleanup,
+                })),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  )(
+    `$state $shape depth=$depth $reader gate=$renderGate survives $cleanupAt cleanup during admission (restart=$restartFromCleanup)`,
+    async ({
+      state,
+      shape,
+      depth,
+      reader,
+      renderGate,
+      cleanupAt,
+      restartFromCleanup,
+    }) => {
+      const expected = {
+        acquiring: reader === `deferred` ? 0 : 1,
+        ready: reader !== `deferred` || state === `eager-idle`,
+        acquires: reader !== `deferred` && state === `on-demand-idle`,
+      }
+      const { collection: source, counts } = makeSource(state)
+      const { outer, collections } = makeLiveQuery(source, shape, depth)
+      if (renderGate) expect(outer._deferSyncStart()).toBe(true)
+      let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
+      if (reader !== `ordinary`) {
+        subscription = outer.subscribeChanges(() => {}, {
+          deferAcquisition: true,
+        })
+      }
+      let pending: Promise<void> | undefined
+      let reached = false
+      const retiredStatuses: Array<string> = []
+      const stopTarget = outer.on(`status:change`, ({ status }) => {
+        if (reached) {
+          retiredStatuses.push(status)
+          if (restartFromCleanup && status === `cleaned-up`)
+            outer.startSyncImmediate()
+        }
+      })
+      const stopSource = source.on(`status:change`, ({ status }) => {
+        if (status === cleanupAt && !reached) {
+          reached = true
+          pending = outer.cleanup()
+        }
+      })
+      try {
+        if (reader === `ordinary`)
+          subscription = outer.subscribeChanges(() => {})
+        else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
+        else source.startSyncImmediate()
+        expect(reached, `source startup reached cleanup`).toBe(true)
+        await pending
+        if (!restartFromCleanup) {
+          expect(outer.status, `cleanup must not retry admission`).toBe(
+            `cleaned-up`,
+          )
+          expect(retiredStatuses).toEqual([`cleaned-up`])
+        } else {
+          expect(retiredStatuses[0]).toBe(`cleaned-up`)
+          expect(
+            retiredStatuses.filter((status) => status === `loading`),
+          ).toHaveLength(1)
+        }
+        expect(outer.subscriberCount).toBe(expected.acquiring)
+        stopSource()
+        stopTarget()
+        outer.startSyncImmediate()
+        await settle()
+        expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
+          expected.acquires,
+        )
+        expect(outer.status === `ready`, `replacement readiness`).toBe(
+          expected.ready,
+        )
+        expect(outer.toArray.map((row) => row.id)).toEqual(
+          expected.ready ? EXPECTED_IDS[shape] : [],
+        )
+        expect(outer.subscriberCount).toBe(expected.acquiring)
+      } finally {
+        stopSource()
+        stopTarget()
+        subscription?.unsubscribe()
+        for (const collection of collections) await collection.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   for (const state of [
     `eager-idle`,
     `on-demand-idle`,
