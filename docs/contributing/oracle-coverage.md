@@ -2568,8 +2568,8 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
 The persisted-readiness oracle in
 `packages/db-sqlite-persistence-core/tests/persisted-readiness-oracle.test.ts`
 owns the opted-in eager restore boundary through the persisted wrapper,
-Collection, live query, and observer. A finite two-source model checks all 36
-opt-in/outcome combinations independently of the observer classifier. Its
+Collection, live query, and observer. A finite two-source model checks all 64
+opt-in/outcome combinations, including an unavailable completed snapshot independently of the observer classifier. Its
 controlled persistence histories check nonempty
 and empty restore while upstream remains pending, all-source conjunction,
 mixed opt-out, nested live-query sources, exact failure, SSR seed handoff,
@@ -2598,6 +2598,29 @@ This owner uses a controlled persistence adapter, not native SQLite or a real
 network provider; it does not prove browser scheduling or arbitrary histories.
 The framework identity scenario does not cover every possible rejection value
 or an error already present before a hook mounts.
+
+Progressive sources supply an adapter-owned completed-snapshot capability.
+The empty/nonempty controlled histories exercise that capability through core's
+on-demand representation, with a held subset acquisition. Joined restoration and
+stale cleanup/restart histories cover both eager and progressive representations.
+A network failure before or after discovering an unavailable snapshot must reject,
+not render or hang. The finite conjunction includes unavailable source outcomes.
+The React Suspense receiving case holds rendering when restoration is unavailable.
+
+The cases in `electric-resume-snapshot-races.test.ts` use the Electric adapter,
+real Node SQLite managed caches, and controlled SDK delivery. Completed empty and
+nonempty snapshots are eligible before delivery. Cold, partial, legacy, reset,
+shape-mismatched, tag-dependent, and row-loss caches are ineligible. Explicit
+cursor starts cannot certify an unseen full baseline. Network completion saves
+the marker and rows together; reopening renders those rows without SDK delivery.
+Removing the completion check makes the partial/cold/legacy cases report ready
+at their unavailable checkpoint; all three fail under that mutation. Existing
+resume/recovery fixtures explicitly seed completion evidence when their contract
+starts from a complete snapshot; the separate legacy case retains missing evidence.
+These witnesses do not establish browser OPFS scheduling, multi-tab coordination,
+or cache rotation during a pending initial fallback. Those host-specific paths
+remain with the persistence lifecycle owners; this change makes no new guarantees
+about them.
 
 ## Deferred contracts and evidence
 

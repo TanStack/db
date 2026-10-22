@@ -376,6 +376,11 @@ describe(`useLiveSuspenseQuery`, () => {
     },
     { name: `network readiness`, networkTimeoutMs: 60_000, outcome: `ready` },
     {
+      name: `no completed snapshot`,
+      networkTimeoutMs: 0,
+      outcome: `missing-cache`,
+    },
+    {
       name: `early network failure`,
       networkTimeoutMs: 60_000,
       outcome: `error`,
@@ -410,7 +415,7 @@ describe(`useLiveSuspenseQuery`, () => {
           },
         },
       })
-      let persistedStatus: `loading` | `ready` = `loading`
+      let persistedStatus: `loading` | `ready` | `unavailable` = `loading`
       let networkDeadlineAt: number | undefined
       const listeners = new Set<() => void>()
       Object.defineProperty(
@@ -450,11 +455,14 @@ describe(`useLiveSuspenseQuery`, () => {
           sync!.begin()
           sync!.write(initialPersons[0]!)
           sync!.commit()
-          persistedStatus = `ready`
+          persistedStatus =
+            outcome === `missing-cache` ? `unavailable` : `ready`
           for (const listener of listeners) listener()
         })
         await waitFor(() =>
-          expect(statusView.result.current.persistedStatus).toBe(`ready`),
+          expect(statusView.result.current.persistedStatus).toBe(
+            outcome === `missing-cache` ? `unavailable` : `ready`,
+          ),
         )
         if (outcome === `pending` || outcome === `timeout`) {
           await waitFor(() => expect(view.getByText(`John Doe`)).toBeTruthy())
@@ -462,11 +470,14 @@ describe(`useLiveSuspenseQuery`, () => {
         } else {
           expect(view.getByText(`Waiting for network`)).toBeTruthy()
           await act(() => {
-            if (outcome === `ready`) sync!.markReady()
+            if (outcome === `ready` || outcome === `missing-cache`)
+              sync!.markReady()
             else sync!.markError(new Error(`network failed`))
           })
           await waitFor(() => expect(view.getByText(`John Doe`)).toBeTruthy())
-          expect(source.status).toBe(outcome)
+          expect(source.status).toBe(
+            outcome === `missing-cache` ? `ready` : outcome,
+          )
         }
       } finally {
         view.unmount()

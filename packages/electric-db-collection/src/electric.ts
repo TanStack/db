@@ -103,6 +103,7 @@ type ElectricResumeState =
       shapeId: string
       updatedAt: number
       requiresTagState?: boolean
+      snapshotComplete?: boolean
     }
   | {
       kind: `reset`
@@ -178,6 +179,9 @@ function parseElectricResumeState(
       handle: record.handle,
       shapeId: record.shapeId,
       updatedAt: record.updatedAt,
+      ...(typeof record.snapshotComplete === `boolean` && {
+        snapshotComplete: record.snapshotComplete,
+      }),
       ...(typeof record.requiresTagState === `boolean` && {
         requiresTagState: record.requiresTagState,
       }),
@@ -272,7 +276,9 @@ function getNewestElectricResumeState(
       (incoming.kind === `resume` &&
         current.offset === incoming.offset &&
         current.handle === incoming.handle &&
-        current.shapeId === incoming.shapeId))
+        current.shapeId === incoming.shapeId &&
+        current.snapshotComplete === incoming.snapshotComplete &&
+        current.requiresTagState === incoming.requiresTagState))
 
   // Equal timestamps have no causal ordering. Preserve an identical state,
   // but collapse every conflict to reset so merge order cannot resurrect an
@@ -1866,12 +1872,17 @@ function createElectricSync<T extends Row<unknown>>(
       shapeOptions.offset === undefined &&
       shapeOptions.handle === undefined &&
       persistedResumeState?.kind === `resume` &&
+      (syncMode !== `progressive` ||
+        persistedResumeState.snapshotComplete === true) &&
       !hasIncompatiblePersistedResume &&
       // Cached rows do not contain authoritative tag/active-condition state.
       // Only a complete adapter ledger can justify a persisted cursor.
       !requiresFreshSourceEvidence
     const hasExplicitResumeOffset =
       shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
+    // An explicitly supplied cursor can begin after rows we have never seen.
+    // Only a fresh full snapshot (including must-refetch) can certify it.
+    let canCertifyFullSnapshot = !hasExplicitResumeOffset
     if (!canUsePersistedResume && !hasExplicitResumeOffset) {
       clearTagTrackingState()
     }
@@ -2107,7 +2118,7 @@ function createElectricSync<T extends Row<unknown>>(
     const syncedKeys = new Set<string | number>()
     let resumeInvalid = false
 
-    const stageResumeMetadata = () => {
+    const stageResumeMetadata = (snapshotComplete: boolean) => {
       if (
         !isActiveLifecycle() ||
         resumeInvalid ||
@@ -2129,6 +2140,9 @@ function createElectricSync<T extends Row<unknown>>(
         shapeId: shapeIdentity,
         updatedAt: Date.now(),
         requiresTagState: tagState.hasTags(),
+        ...(syncMode === `progressive`
+          ? { snapshotComplete: snapshotComplete && canCertifyFullSnapshot }
+          : {}),
       }
       lifecycle.resumeState = resumeState
       metadata?.collection.set(`electric:resume`, resumeState)
@@ -2510,6 +2524,7 @@ function createElectricSync<T extends Row<unknown>>(
           syncedKeys.clear()
           recordPendingTruncate()
           isResettingSnapshot = true
+          canCertifyFullSnapshot = true
           resetGeneration++
 
           // Reset the loadSubset deduplication state since we're starting fresh
@@ -2596,7 +2611,7 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           // Commit the atomic swap
-          stageResumeMetadata()
+          stageResumeMetadata(true)
           applied = commitSourceTransaction()
 
           // Exit buffering phase by marking that we've received up-to-date
@@ -2612,13 +2627,16 @@ function createElectricSync<T extends Row<unknown>>(
           // Both up-to-date and subset-end trigger a commit
           if (transactionStarted) {
             if (!isResettingSnapshot || finishesReset) {
-              stageResumeMetadata()
+              stageResumeMetadata(
+                syncMode === `progressive` &&
+                  (commitPoint === `up-to-date` || hasReceivedUpToDate),
+              )
             }
             applied = commitSourceTransaction()
             transactionStarted = false
           } else if (commitPoint === `up-to-date` && metadata) {
             beginSourceTransaction()
-            stageResumeMetadata()
+            stageResumeMetadata(true)
             applied = commitSourceTransaction()
           }
         }
@@ -2774,6 +2792,27 @@ function createElectricSync<T extends Row<unknown>>(
   }
 
   return {
+    ...(syncMode === `progressive`
+      ? {
+          isPersistedSnapshotComplete: (
+            metadata: ReadonlyMap<string, unknown>,
+          ) => {
+            const resume = parseElectricResumeState(
+              metadata.get(`electric:resume`),
+            )
+            const shapeId = getStableShapeIdentity(shapeOptions)
+            return (
+              shapeOptions.offset === undefined &&
+              shapeOptions.handle === undefined &&
+              resume?.kind === `resume` &&
+              resume.snapshotComplete === true &&
+              resume.requiresTagState === false &&
+              resume.offset !== `-1` &&
+              resume.shapeId === shapeId
+            )
+          },
+        }
+      : {}),
     getSyncMetadata: () => ({
       relation: shapeOptions.params?.table
         ? [relationSchema || `public`, shapeOptions.params.table]

@@ -1,6 +1,11 @@
 import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  createLiveQueryObserver,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
   SQLiteCorePersistenceAdapter,
@@ -23,6 +28,7 @@ type Subscriber = (messages: Array<Message<Item>>) => void
 const subscribers: Array<Subscriber> = []
 let synchronousMessages: Array<Message<Item>> | undefined
 let snapshotRequest: (() => Promise<void>) | undefined
+let fetchSnapshotRequest: (() => Promise<void>) | undefined
 const mockSubscribe = vi.fn((subscriber: Subscriber) => {
   subscribers.push(subscriber)
   if (synchronousMessages) subscriber(synchronousMessages)
@@ -34,7 +40,10 @@ vi.mock(`@electric-sql/client`, async () => ({
   ShapeStream: vi.fn(() => ({
     subscribe: mockSubscribe,
     requestSnapshot: vi.fn(() => snapshotRequest?.() ?? Promise.resolve()),
-    fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+    fetchSnapshot: vi.fn(async () => {
+      await fetchSnapshotRequest?.()
+      return { metadata: {}, data: [] }
+    }),
     forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
     isUpToDate: false,
     shapeHandle: `shape-current`,
@@ -55,7 +64,7 @@ function toBinding(value: unknown): string | number | bigint | null {
   return String(value)
 }
 
-function createDriver(database: DatabaseSync): SQLiteDriver {
+function createDriver(database: DatabaseSync, serialize = false): SQLiteDriver {
   const driver: SQLiteDriver = {
     exec: (sql) => {
       database.exec(sql)
@@ -84,7 +93,25 @@ function createDriver(database: DatabaseSync): SQLiteDriver {
       }
     },
   }
-  return driver
+  if (!serialize) return driver
+  // Match the host driver's transaction isolation when startup hydration and
+  // cleanup overlap. Transaction callbacks receive the direct scoped driver.
+  let queue = Promise.resolve()
+  const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
+    const result = queue.then(task)
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+  return {
+    exec: (sql) => enqueue(() => driver.exec(sql)),
+    run: (sql, params) => enqueue(() => driver.run(sql, params)),
+    query: <T>(sql: string, params?: ReadonlyArray<unknown>) =>
+      enqueue(() => driver.query<T>(sql, params)),
+    transaction: (task) => enqueue(() => driver.transaction(task)),
+  }
 }
 
 function deferred() {
@@ -975,10 +1002,248 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
  * persistence-driver and real-provider owners.
  */
 describe(`Electric resume snapshot races`, () => {
+  it.each([
+    `complete`,
+    `complete-empty`,
+    `partial`,
+    `cold`,
+    `legacy`,
+    `reset`,
+    `other-shape`,
+    `tags`,
+    `row-loss`,
+    `explicit-offset`,
+  ] as const)(
+    `only renders a previously completed progressive snapshot (%s)`,
+    async (cacheState) => {
+      const complete =
+        cacheState === `complete` || cacheState === `complete-empty`
+      const empty = cacheState === `cold` || cacheState === `complete-empty`
+      const subset = deferred()
+      fetchSnapshotRequest = () => subset.promise
+      // Completion evidence must distinguish empty-complete from cold and
+      // interrupted caches. Real SQLite owns atomic rows/metadata and key-set
+      // validation; the controlled SDK delivers no network result until released.
+      // Calibration: omitting the metadata check makes partial/cold/legacy
+      // cases report ready at this cut; all three fail their unavailable check.
+      // An explicit cursor cannot certify rows omitted before that cursor.
+      const database = new DatabaseSync(`:memory:`)
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver: createDriver(database, true),
+        schemaVersion: 1,
+      })
+      const collectionId = `progressive-initial-render`
+      const cached = { id: 1, name: `cached` }
+      const claim = await adapter.claimCacheGeneration(collectionId)
+      await adapter.applyCommittedTx(
+        { kind: `managed`, ...claim },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: claim.claimId,
+          mutations: empty ? [] : [{ type: `insert`, key: 1, value: cached }],
+          collectionMetadataMutations:
+            cacheState !== `partial` && cacheState !== `cold`
+              ? [
+                  {
+                    type: `set`,
+                    key: `electric:resume`,
+                    value: {
+                      kind: cacheState === `reset` ? `reset` : `resume`,
+                      requiresTagState: cacheState === `tags`,
+                      ...(cacheState !== `legacy`
+                        ? { snapshotComplete: true }
+                        : {}),
+                      offset: `10_0`,
+                      handle: `shape-old`,
+                      shapeId:
+                        cacheState === `other-shape`
+                          ? `other-shape`
+                          : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+                      updatedAt: 1,
+                    },
+                  },
+                ]
+              : [],
+        },
+      )
+      if (cacheState === `row-loss`) {
+        const table = createPersistedTableName(claim.storageCollectionId, `c`)
+        database.prepare(`DELETE FROM "${table}"`).run()
+      }
+      await adapter.releaseCacheGenerationClaim(claim.claimId)
+      const createSource = () =>
+        createCollection(
+          persistedCollectionOptions<
+            Item,
+            string | number,
+            never,
+            ElectricCollectionUtils<Item>
+          >({
+            ...electricCollectionOptions<Item>({
+              id: collectionId,
+              getKey: (row) => row.id,
+              syncMode: `progressive`,
+              shapeOptions: {
+                url: `http://test-url`,
+                params: {
+                  table: `test_table`,
+                  ...(cacheState === `explicit-offset`
+                    ? { replica: `full` }
+                    : {}),
+                },
+                ...(cacheState === `explicit-offset`
+                  ? { offset: `10_0` as const, handle: `manual` }
+                  : {}),
+              },
+            }),
+            persistence: { adapter },
+            initialRender: {
+              strategy: `network-first`,
+              networkTimeoutMs: 0,
+            },
+          }),
+        )
+      const collection = createSource()
+      const query = createLiveQueryCollection({
+        query: (q) => q.from({ row: collection }),
+      })
+      const observer = createLiveQueryObserver(query)
+      const unsubscribe = observer.subscribe(() => {})
+      let primaryFailure: unknown
+      const cleanupFailures: Array<unknown> = []
+      try {
+        let rendered = false
+        const initialRender = observer.preloadForInitialRender().then(() => {
+          rendered = true
+        })
+        void initialRender.catch(() => undefined)
+        await vi.waitFor(() =>
+          expect(observer.getSnapshot().persistedStatus).toBe(
+            complete ? `ready` : `unavailable`,
+          ),
+        )
+        if (complete) {
+          await reachCheckpoint(initialRender, `completed local initial render`)
+          expect(observer.getSnapshot().data).toHaveLength(empty ? 0 : 1)
+          expect(observer.getSnapshot().data).toMatchObject(
+            empty ? [] : [cached],
+          )
+        } else {
+          expect(rendered).toBe(false)
+          expect(observer.getSnapshot().isPersistedReady).toBe(false)
+        }
+        expect(collection.status).toBe(`loading`)
+        await vi.waitFor(() => expect(subscribers).toHaveLength(1))
+        // The fresh full snapshot replaces provisional cached rows. A resumed
+        // stream keeps its established baseline and applies only new changes.
+        subscribers[0]!([change(`insert`, { id: 2, name: `network` })])
+        if (!complete) {
+          expect(observer.getSnapshot().isPersistedReady).toBe(false)
+          expect(rendered).toBe(false)
+        }
+        subscribers[0]!([{ headers: { control: `up-to-date` } }])
+        await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+        subset.resolve()
+        await reachCheckpoint(initialRender, `network initial render`)
+        const expected =
+          complete && !empty
+            ? [cached, { id: 2, name: `network` }]
+            : [{ id: 2, name: `network` }]
+        expect(
+          [...collection.values()]
+            .map(({ id, name }) => ({ id, name }))
+            .sort((a, b) => a.id - b.id),
+        ).toEqual(expected)
+        const verificationClaim =
+          await adapter.claimCacheGeneration(collectionId)
+        try {
+          const snapshot = await adapter.loadResumeSnapshot({
+            kind: `managed`,
+            ...verificationClaim,
+          })
+          expect(snapshot.keySet).toEqual({ status: `consistent` })
+          expect(
+            snapshot.collectionMetadata.find(
+              ({ key }) => key === `electric:resume`,
+            )?.value,
+          ).toMatchObject({
+            kind: `resume`,
+            snapshotComplete: cacheState !== `explicit-offset`,
+            requiresTagState: false,
+          })
+          expect(
+            snapshot.rows
+              .map(({ value }) => value)
+              .sort((a, b) => Number(a.id) - Number(b.id)),
+          ).toEqual(expected)
+        } finally {
+          await adapter.releaseCacheGenerationClaim(verificationClaim.claimId)
+        }
+        if (cacheState !== `explicit-offset`) {
+          unsubscribe()
+          observer.dispose()
+          await query.cleanup()
+          await collection.cleanup()
+          // Reopen the snapshot written by the real adapter above. No SDK batch
+          // is delivered to this new sync run; its first render must be local.
+          const reopened = createSource()
+          const reopenedQuery = createLiveQueryCollection({
+            query: (q) => q.from({ row: reopened }),
+          })
+          const reopenedObserver = createLiveQueryObserver(reopenedQuery)
+          const stop = reopenedObserver.subscribe(() => {})
+          try {
+            await reachCheckpoint(
+              reopenedObserver.preloadForInitialRender(),
+              `reopened completed snapshot`,
+            )
+            expect(reopenedObserver.getSnapshot().isPersistedReady).toBe(true)
+            expect(reopenedObserver.getSnapshot().data).toHaveLength(
+              expected.length,
+            )
+            expect(reopenedObserver.getSnapshot().data).toMatchObject(expected)
+            expect(reopened.status).toBe(`loading`)
+          } finally {
+            stop()
+            reopenedObserver.dispose()
+            await reopenedQuery.cleanup()
+            await reopened.cleanup()
+          }
+        }
+      } catch (error) {
+        primaryFailure = error
+      } finally {
+        subset.resolve()
+        for (const cleanup of [
+          unsubscribe,
+          () => observer.dispose(),
+          () => query.cleanup(),
+          () => collection.cleanup(),
+          () => database.close(),
+        ]) {
+          try {
+            await cleanup()
+          } catch (error) {
+            cleanupFailures.push(error)
+          }
+        }
+      }
+      reportReceivingOutcome(
+        primaryFailure,
+        cleanupFailures,
+        `progressive initial render`,
+      )
+    },
+  )
+
   beforeEach(() => {
     subscribers.length = 0
     synchronousMessages = undefined
     snapshotRequest = undefined
+    fetchSnapshotRequest = undefined
     vi.clearAllMocks()
   })
 

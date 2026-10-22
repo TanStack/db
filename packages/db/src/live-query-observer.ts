@@ -370,6 +370,7 @@ class LiveQueryObserverImpl<
     let failed = false
     for (const source of sources) {
       const snapshot = source.readiness.getSnapshot()
+      if (snapshot.status === `unavailable`) return NO_PERSISTED_READINESS
       if (snapshot.status === `error` && !failed) {
         error = snapshot.error
         failed = true
@@ -1117,7 +1118,10 @@ class LiveQueryObserverImpl<
           persisted.status === `ready`
         ) {
           finish()
-        } else if (networkFailed && persisted.status === `error`) {
+        } else if (
+          networkFailed &&
+          (persisted.status === `error` || persisted.status === `unavailable`)
+        ) {
           finish({ error: networkError ?? persisted.error })
         } else if (!deadlinePassed && !networkFailed) {
           timer = setTimeout(check, remainingNetworkMs)

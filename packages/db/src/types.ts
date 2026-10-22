@@ -500,6 +500,17 @@ export interface SyncConfig<
   exportSyncMeta?: () => unknown
 
   /**
+   * Certify that durable collection metadata describes a completed full snapshot
+   * for this source. Persistence checks this against the same atomic snapshot
+   * as the restored rows, and also requires consistent durable key-set evidence.
+   * Returning false disables local initial-render fallback for that sync run.
+   * Subset-only adapters must not provide this capability.
+   */
+  isPersistedSnapshotComplete?: (
+    metadata: ReadonlyMap<string, unknown>,
+  ) => boolean
+
+  /**
    * Import adapter-specific metadata produced by exportSyncMeta.
    */
   importSyncMeta?: (meta: unknown) => void

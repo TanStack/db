@@ -339,6 +339,20 @@ await todosCollection.utils.awaitMatch(
 )
 ```
 
+### Persisted initial rendering with progressive sync
+
+Progressive sources expose completion evidence to SQLite persistence. Configure
+`initialRender: { strategy: 'network-first', networkTimeoutMs: 0 }` on the
+persisted options to render a previously completed snapshot while syncing.
+Partial caches and cold starts continue to wait for the network. See
+[SQLite persistence](../guides/sqlite-persistence.md#render-after-sqlite-restore).
+
+Electric writes `snapshotComplete` in its durable resume metadata in the same
+transaction as a completed progressive snapshot. Progressive caches written by
+older versions lack this evidence and conservatively fetch a fresh full snapshot
+once; subsequent launches can resume normally. This also prevents a cursor
+left by a subset-only source from being treated as a complete progressive cache.
+
 ### Cleanup and resume safety
 
 Transaction evidence and pending `awaitTxId`/`awaitMatch` calls belong to one

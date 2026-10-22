@@ -1,6 +1,8 @@
 /** The local-restore boundary of one opted-in persisted Collection. */
 export type PersistedReadinessSnapshot =
   | { status: `loading`; error?: never }
+  /** Restore finished, but the source cannot certify a usable persisted snapshot. */
+  | { status: `unavailable`; error?: never }
   | { status: `ready`; error?: never }
   | { status: `error`; error: unknown }
 
