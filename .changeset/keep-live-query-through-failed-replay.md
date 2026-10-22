@@ -6,4 +6,4 @@ Keep a live query running when a lazy join or include load fails as part of a so
 
 An aborted subset request that a source rejects with `AbortError`, as the source contract asks, no longer ends a live query. A truncate replay or newer demand decides that request instead.
 
-An ordered window over a source that reports shifted pages after a refetch no longer skips a row tied with the refetched first page's new end. When the report arrives, the window repairs instead of reading a row that an older tie request installed.
+Some sources refetch and then report that their pages shifted. An ordered window over such a source no longer skips a row tied with the refetched first page's new end. When the report arrives, the window repairs instead of reading a row that an older tie request installed.
