@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { Query, collectionOptions, createCollection, eq } from '@tanstack/db'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
-import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import {
+  captureMicrotaskErrors,
+  mockSyncCollectionOptions,
+} from '../../db/tests/utils'
 import type { DeltaEvent, EffectConfig } from '@tanstack/db'
 
 type User = {
@@ -42,7 +45,9 @@ describe(`useLiveQueryEffect`, () => {
     ).toThrow(/requires a DbClient.*DbProvider/)
   })
 
-  it(`reports a source release failure when unmount disposes the Effect`, async () => {
+  // A throwing unloadSubset is an adapter bug: core reports it uncaught, once,
+  // and unmount still disposes the Effect.
+  it(`reports a source release failure uncaught when unmount disposes the Effect`, async () => {
     const failure = new Error(`source release failed`)
     let unloadCalls = 0
     const source = createCollection<{ id: number }>({
@@ -63,6 +68,7 @@ describe(`useLiveQueryEffect`, () => {
       },
     })
     const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const uncaught = captureMicrotaskErrors()
     try {
       const mounted = renderHook(() =>
         useLiveQueryEffect({
@@ -79,11 +85,13 @@ describe(`useLiveQueryEffect`, () => {
 
       expect(unloadCalls).toBe(1)
       expect(source.subscriberCount).toBe(0)
-      expect(reported).toHaveBeenCalledWith(
+      expect(uncaught.errors).toEqual([failure])
+      expect(reported).not.toHaveBeenCalledWith(
         expect.stringContaining(`failed to dispose`),
         failure,
       )
     } finally {
+      uncaught.restore()
       reported.mockRestore()
       await source.cleanup()
     }

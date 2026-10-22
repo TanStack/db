@@ -92,7 +92,15 @@ export class CollectionSubscriber<
     // Used as a fallback for status transitions not covered by direct tracking
     // (e.g., truncate-triggered reloads that call trackLoadSubsetPromise directly).
     const onStatusChange = (event: SubscriptionStatusChangeEvent) => {
-      if (this.collectionConfigBuilder.isLazySource(this.sourceId)) return
+      if (this.collectionConfigBuilder.isLazySource(this.sourceId)) {
+        // A joined source's finished load can clear the gate that holds an
+        // ordered publication, and settling it may deliver no row. Run the
+        // graph so the held changes publish.
+        if (event.status === `ready`) {
+          this.collectionConfigBuilder.scheduleGraphRun()
+        }
+        return
+      }
       const subscription = event.subscription as CollectionSubscription
       if (event.status === `loadingSubset`) {
         this.ensureLoadingPromise(subscription)

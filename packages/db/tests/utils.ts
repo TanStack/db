@@ -1,4 +1,4 @@
-import { expect } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import { withCollectionConfigFactory } from '../src/client'
@@ -512,6 +512,30 @@ export function mockSyncCollectionOptionsNoInitialState<
 }
 
 // Utility to flush microtasks and promises
+/**
+ * Capture errors rethrown from microtasks, as the ordered loader reports an
+ * adapter's failing lease release. Callbacks still run in their turn.
+ */
+export function captureMicrotaskErrors(): {
+  errors: Array<unknown>
+  restore: () => void
+} {
+  const queue = globalThis.queueMicrotask.bind(globalThis)
+  const errors: Array<unknown> = []
+  const spy = vi
+    .spyOn(globalThis, `queueMicrotask`)
+    .mockImplementation((callback) =>
+      queue(() => {
+        try {
+          callback()
+        } catch (error) {
+          errors.push(error)
+        }
+      }),
+    )
+  return { errors, restore: () => spy.mockRestore() }
+}
+
 export const flushPromises = () =>
   new Promise((resolve) => setTimeout(resolve, 0))
 
