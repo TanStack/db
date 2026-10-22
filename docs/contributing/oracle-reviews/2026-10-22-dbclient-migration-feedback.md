@@ -507,3 +507,144 @@ Reviewer recommendation: hire, with low confidence from this review alone.
 It supplies three useful documentation corrections and no new runtime
 counterexample. The original open hydration decision and typing fixture gap
 remain separate; pending CI and a mergeable flag do not establish PR readiness.
+
+
+## Cleanup admission follow-up — CodeRabbit review 5620262151
+
+[Review 5620262151](https://github.com/TanStack/db/pull/2229#pullrequestreview-5620262151)
+covers `75a7d043fee10f50f34ecd4b1f13df918b2bf373`. Its runtime code is
+identical to the starting head `7f2ad8e12f44c1811d1b557b19b9116435259763`.
+This appendix audits the follow-up on that head. The executable content hashes
+below identify the tested tree independently of this report's commit.
+
+### Law, experiment, and repair
+
+A same-path diagnostic reproduced the admitted-but-idle subscription in eight
+cells: loading/ready status, eager/on-demand mode, and both initial-snapshot
+options. The adapter cleanup promise remained held when `subscribeChanges`
+returned an active subscription. After cleanup settled, the Collection stayed
+`cleaned-up` with one subscriber until an explicit restart. The same observations
+held with `changes.ts` from merge-base `205ab7158`; this predates the PR.
+
+The review proposed automatic retry. The public cleanup contract instead closes
+restart admission while cleanup is active. On 2026-10-22, the user selected
+rejection: “yes reject during cleanup.” This decision applies to ordinary
+subscription admission and deferred acquisition resumption. A subscription that
+still defers acquisition can retain logical demand without starting source work.
+Existing subscriptions can survive cleanup for an explicit restart. An Effect
+constructed during active cleanup must still return a disposed handle.
+
+| Law and authority | Oracle extension and observations | Decisive evidence |
+| --- | --- | --- |
+| Ordinary admission and deferred resumption reject during active cleanup. Authority: the user decision, `subscribeChanges` contract, and glossary cleanup boundary. | The primary cleanup/restart owner's three-cut model now drives 18 cells: loading/ready/error, eager/on-demand, and plain/snapshot/resumed admission. At the held cut it checks the error, unchanged subscriber ownership and callbacks, zero new sync runs or acquisitions, and retained deferral. After settlement it checks no automatic restart, successful explicit admission, and the replacement row. | Original implementation: 18 admission assertion failures. Omitting only the resume guard: six resumption assertion failures. Final owner: all 70 tests pass. |
+| Cleanup start makes an Effect terminal without retaining partial source ownership. Authority: the existing Effect cleanup contract and glossary. | Twelve receiving histories use real `createEffect`: all three prior statuses, both source modes, and cleanup on either joined source. They check a disposed handle, one cleanup report, no batches, no source subscriptions or retained cleanup observers, and successful new construction after settlement. | Guards with the old Effect observer order fail all 12 receiving histories during construction with `CollectionStateError`. The final observer order passes them. |
+
+The production repair adds the existing lifecycle admission assertion before
+ordinary ownership or deferred resumption changes. The Effect cleanup observer
+moves before subscription admission. It can retire a late Effect before that
+Effect requests forbidden source work. There is no retry queue or new state.
+These are two new executable guard statements; the Effect machinery is moved.
+Tests and contract prose account for the remaining source growth.
+
+The old cleanup owner checked start/preload admission and the late Effect
+handle, but did not exercise fresh ordinary admission or deferred resumption
+while adapter cleanup remained pending. The general subscription grammar models
+completed cleanup and explicit restart. R01 checks cleanup during an admission
+already in progress. Neither history is this new admission boundary.
+
+The new oracle retains the independent three-cut judgment. It adds production
+paths and finite histories, without changing that model to match production.
+A deferred subscription may report its local snapshot before a rejected resume.
+The callback recorder preserves that prefix and requires rejection to add no
+callbacks. The later row projection deliberately compares only `id` and `rank`;
+virtual-field semantics are outside this law. All recorder entries remain
+countable, so an extra callback cannot disappear in a final row map.
+
+### Executed evidence and limits
+
+Scratch root: `/tmp/tanstack-skill-reading-update/`. It retains the complete raw
+review, append-only item ledger, diagnostic source, and logs. Calibration restores
+the final source bytes in `finally` and verifies their identity. The original
+and missing-resume outcomes are assertion failures at the held admission cut.
+The guard-only outcome is a runtime failure after setup at Effect construction;
+it is not a timeout or a refinement-assertion kill.
+
+| Check | Result | Evidence file |
+| --- | --- | --- |
+| Same-path current and merge-base diagnostics | Eight observed histories pass on each version | cleanup-probe-current.log, cleanup-probe-base.log |
+| Original implementation, final 30-cell selection | 18 admission failures, 12 Effect controls pass | cleanup-calibration-original.log |
+| Fresh-subscriber-only guard | Six resumption failures, 24 controls pass | cleanup-calibration-no-resume-guard.log |
+| Guards without Effect observer reorder | 12 construction failures, 18 admission controls pass | cleanup-calibration-guard-only.log |
+| Core and Effect surrounding suites | Ten files, 951 tests pass | cleanup-surrounding.log |
+| Collection, DbClient, immutable-demand and receiving query suites | Four files, 224 tests pass | cleanup-additional.log |
+| Full React suite | 22 files, 441 tests pass | cleanup-react.log |
+| Scoped ESLint and whitespace | No lint errors; diff check passes | Direct command output |
+| Production bundle against merge-base 205ab7158 | db +12 gzip / +64 brotli bytes; React unchanged | cleanup-size.log |
+
+All Vitest runs report no type errors. The complete repository `pnpm test`
+command was not run. The ordinary receiving checks use controlled adapter
+cleanup and real Collection entry points; the Effect checks use that same
+premise through real Effect construction. They establish the stated finite
+admission and ownership cuts, not actual provider shutdown or every framework
+schedule. The owner already has cleanup rejection and terminal-status restart
+histories. Ordinary admission specifically at a terminal-status callback,
+multiple overlapping cleanup failures, and arbitrary framework scheduling are
+not new coverage here. The primary cleanup/restart owner owns additional core
+boundary histories; framework conformance drivers own their host schedules.
+
+Replay the new finite selection from `packages/db`:
+
+```sh
+pnpm exec vitest run --coverage.enabled=false \
+  tests/collection-cleanup-restart-oracle.test.ts \
+  -t 'closes .* admission during|releases a late Effect'
+```
+
+The ten-file command adds the lifecycle history, acquisition cells, subscription
+reentrancy, deferred acquisition, sync reentrancy, idle cleanup, ordinary
+subscription, Effect, and Effect disposal suites named in the evidence table.
+The four-file command selects `collection.test.ts`, `db-client.test.ts`, and
+`query/immutable-demand-boundary.test.ts`; Vitest also selects the receiving
+`query/live-query-collection.test.ts` by path matching.
+
+| ORC requirement | Follow-up outcome |
+| --- | --- |
+| 001 authority and limits | The explicit rejection decision, public cleanup contract, and finite bounds are recorded above and beside the executable law. |
+| 002 independent judgment | The reused three-cut model derives admission and terminality from the contract, without importing production classifiers. |
+| 003 literate responsibilities | Opening prose, model, case arrays, real drivers, and checks remain distinguishable in the primary owner. |
+| 004 generated grammar controls | No new generated property. The fixed products reconstruct the report and add error status, resumption, snapshot, and join-position neighbors. |
+| 005 production path and observations | Public admission, callbacks, subscriber counts, statuses, replacement row, Effect handle, and cleanup observer ownership are compared at held and settled cuts. |
+| 006 calibration | Original, missing-resume, and guard-only outcomes are classified above. Each reaches its named admission or construction boundary. |
+| 007 campaign parity and replay | No new important generated property. The finite selection runs directly with the command above. Existing lifecycle campaigns still run fixed and random seeds. |
+| 008 state minimality | No reference-model state was introduced or removed. |
+| 009 vocabulary mapping | Existing cleanup-start, settlement, subscription, acquisition, and sync-run concepts are reused. The prior model's dependent abstraction is unchanged. |
+| 010 failure fidelity | New drivers use the owner's cleanup aggregator to preserve primary and teardown errors and release every resource. Its existing calibration remains green. |
+| 011 second formulation | No concrete shared semantic fault remains after the explicit policy choice; no additional independent formulation is claimed. |
+| 012 review evidence | This appendix records applicable outcomes and exact source identities. This is a self-review, not an independent agent review. |
+| 013 boundary witness | Held cleanup rejects while explicit admission after settlement succeeds. Ready, loading, and error statuses prevent a ready-only repair from defining the law. |
+| 014 receiving handoff | Real Effect construction receives controlled adapter cleanup through the same owner and judgment. No real provider-shutdown or all-framework claim is made. |
+
+### Loss audit and reviewer assessment
+
+CR2-01 is the single unique behavioral finding, repeated in generated prompts.
+Its admitted-but-idle counterexample is confirmed. Its proposed retry is
+superseded by the user's rejection decision. The boundary repair and its finite
+oracle coverage are `fixed-now`; no cleanup finding is deferred or left open.
+The review body, both repeated prompts, selected-file metadata, and outside-diff
+placement were reconciled. There is no associated inline finding. Loss total:
+**one raw item = one fixed-now**. The original F02 hydration policy and F07
+application typing fixture remain separate open work.
+
+Reviewer assessment: hire for counterexample discovery, with low confidence
+from one finding. The report supplies a useful public lifecycle cut and a
+correct symptom. Its proposed cure lacks contract authority and misses the
+Effect guarantee, so its fix guidance needs independent verification.
+
+Executed source identities (SHA-256):
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/db/src/collection/changes.ts` | `f6b2e2fff7b782e1306838ae860e467f21fcaf9aaff5271486bec9e9a5aa4c5d` |
+| `packages/db/src/collection/index.ts` | `29bf79f5b702a1bfea91040c86d08b439e99688c5bff10a5b9983f6bd652e11c` |
+| `packages/db/src/query/effect.ts` | `0e7cd82b5213edf3666e8793f6bd71ffd1dd9166f7574cbf5c75920c74610f7b` |
+| `packages/db/tests/collection-cleanup-restart-oracle.test.ts` | `a87b7b3fad0637a1d3cb7de831d3943304f3c8c4e84c11b558367e35be1f52c6` |

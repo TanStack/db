@@ -2,4 +2,6 @@
 '@tanstack/db': patch
 ---
 
-Resume collection sync when a new subscriber follows a suspended render. Preserve cleanup during startup so a retired sync run does not restart.
+Resume Collection sync when a new subscriber follows a suspended render, while preserving cleanup during startup.
+
+Reject ordinary subscriptions and deferred acquisition resumption during active cleanup. Effects created during that interval still return disposed handles.

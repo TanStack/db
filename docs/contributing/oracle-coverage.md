@@ -90,6 +90,23 @@ that test identifiers must copy production's private data structures.
 
 ### Guide-audit boundary handoffs
 
+The cleanup/restart owner checks ordinary subscription admission and deferred
+acquisition resumption during held adapter cleanup. Its eighteen cases cross
+loading/ready/error status, eager/on-demand sources, and direct, snapshot, or resumed
+admission. The three-cut model requires rejection before subscriber ownership
+or acquisition, followed by successful explicit admission after cleanup settles.
+Twelve Effect receiving cases cross both source modes, all three prior statuses, and
+cleanup on the first or second joined source. A late Effect returns disposed,
+reports the cleanup once, and retains no subscription or cleanup observer. A
+new Effect after settlement is admitted. The original implementation fails all
+eighteen admission cases; a guard limited to fresh subscribers misses six
+resumption cases. A guard without earlier Effect cleanup observation fails the
+twelve receiving cases during construction. The owner covers these controlled
+adapter cuts, with cleanup rejection and terminal-listener restart covered by
+its existing histories. It does not establish arbitrary concurrent framework
+schedules or actual provider shutdown. The [migration feedback review](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
+records the rejection policy and exact calibration.
+
 The Collection lifecycle history owner includes a 26-cell cleanup-restart
 matrix. It crosses explicit and default eager sources with absent or present
 loaders, empty or nonempty replacements, and no interruption, truncate during

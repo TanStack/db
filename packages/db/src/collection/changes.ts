@@ -411,6 +411,7 @@ export class CollectionChangesManager<
 
   /** A deferring subscription resumed: it may now start this sync run. */
   private resumeSubscriber(): void {
+    this.lifecycle.assertCanStartSync()
     // Mark first, so a sync run that starts now builds non-deferred demand.
     this.markSubscriberOrPreload()
     this.startSyncIfStopped()
@@ -439,6 +440,7 @@ export class CollectionChangesManager<
    * defers its own acquisition, but no other Collection's sync run.
    */
   private addSubscriber(defersAcquisition: boolean): void {
+    if (!defersAcquisition) this.lifecycle.assertCanStartSync()
     const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
