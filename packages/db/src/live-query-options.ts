@@ -42,6 +42,11 @@ export function resumeDeferredLiveQueryCollections(
   for (const collection of pending) {
     try {
       collection._resumeSyncStart()
+      // Independent demand may have released this render's gate already.
+      // Its startup failure still belongs to this deferred-source handoff.
+      if (collection.status === `error`) {
+        throw collection._lifecycle.getSyncError()
+      }
     } catch (error) {
       firstFailure ??= { error }
     }

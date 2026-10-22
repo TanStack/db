@@ -42,7 +42,7 @@ import type { SyncConfig } from '../src/types'
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and every local error as an ordered secondary
  * diagnostic. A lone error keeps its identity.
- * No replacement owner is admitted until terminal publication. Concurrent
+ * No replacement sync run is admitted until terminal publication. Concurrent
  * callers share the cleanup promise. Rejection still finalizes the old run and
  * rejects every waiter. A later ordinary preload starts a new sync run.
  * A subset load still pending at cleanup ends with one `loadingSubset:change`
@@ -220,6 +220,151 @@ describe(`Collection cleanup oracle calibration`, () => {
 })
 
 describe(`Collection cleanup admission oracle`, () => {
+  // Logical demand is distinct from a request to start a sync run. Cleanup
+  // rejects the latter, including resumption, while a deferred subscription
+  // may retain demand without starting even a live-query Collection's run.
+  // Idle and cleaned-up sources distinguish this law from checking only ready
+  // Collections. The callback is the synchronous cleanup-start observation cut.
+  it.each(
+    ([`plain`, `live-query`] as const).flatMap((kind) =>
+      ([`idle`, `ready`, `cleaned-up`] as const).map((priorStatus) => ({
+        kind,
+        priorStatus,
+      })),
+    ),
+  )(
+    `retains deferred demand during $priorStatus $kind cleanup`,
+    async ({ kind, priorStatus }) => {
+      let starts = 0
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+          },
+        },
+      })
+      const live = createLiveQueryCollection({
+        query: (q) => q.from({ row: source }),
+        gcTime: 0,
+      })
+      const collection = kind === `plain` ? source : live
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let reached = false
+      if (priorStatus === `ready`) {
+        source.startSyncImmediate()
+        collection.startSyncImmediate()
+      } else if (priorStatus === `cleaned-up`) {
+        await collection.cleanup()
+      }
+      const before = starts
+      const stop = collection._onCleanupStart(() => {
+        reached = true
+        expect(() => collection.subscribeChanges(() => {})).toThrow(
+          expect.objectContaining(cleanupError),
+        )
+        subscription = collection.subscribeChanges(() => {}, {
+          deferAcquisition: true,
+          includeInitialState: true,
+        })
+        expect(subscription.isDeferringAcquisition()).toBe(true)
+        expect(() => subscription!.resumeDeferredAcquisition()).toThrow(
+          expect.objectContaining(cleanupError),
+        )
+        expect(collection.subscriberCount).toBe(0)
+        expect(starts).toBe(before)
+      })
+      await withOracleCleanup(async () => {
+        await collection.cleanup()
+        expect(reached).toBe(true)
+        expect(subscription).toBeDefined()
+        expect(starts).toBe(before)
+        stop()
+        subscription!.resumeDeferredAcquisition()
+        for (let turn = 0; turn < 10; turn++) await Promise.resolve()
+        expect(collection.status).toBe(`ready`)
+        expect(collection.subscriberCount).toBe(1)
+      }, [
+        stop,
+        () => subscription?.unsubscribe(),
+        () => live.cleanup(),
+        () => source.cleanup(),
+      ])
+    },
+  )
+
+  // Promise ownership changes only when a replacement run actually starts.
+  // A validation failure or a still-deferred start cannot create a second
+  // retirement. Successful admission is the neighboring case: its new run
+  // must have a distinct cleanup promise even before the old one settles.
+  it.each([
+    `none`,
+    `deferred-start`,
+    `listener-failure`,
+    `subscribe`,
+    `resume`,
+    `preload`,
+  ] as const)(
+    `preserves retirement identity through %s admission`,
+    async (admission) => {
+      let starts = 0
+      let cleanups = 0
+      const collection = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return () => {
+              cleanups++
+            }
+          },
+        },
+      })
+      collection.startSyncImmediate()
+      const first = collection.cleanup()
+      const failure = new Error(`demand failed before replacement startup`)
+      let stop = () => {}
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let preload: Promise<void> | undefined
+      await withOracleCleanup(async () => {
+        if (admission === `listener-failure`) {
+          stop = collection[`_changes`].onFirstSubscriberOrPreload(() => {
+            throw failure
+          })
+          expect(() => collection.subscribeChanges(() => {})).toThrow(failure)
+        } else if (admission === `deferred-start`) {
+          collection._deferSyncStart()
+          collection.startSyncImmediate()
+        } else if (admission === `subscribe`) {
+          subscription = collection.subscribeChanges(() => {})
+        } else if (admission === `resume`) {
+          subscription = collection.subscribeChanges(() => {}, {
+            deferAcquisition: true,
+          })
+          subscription.resumeDeferredAcquisition()
+        } else if (admission === `preload`) preload = collection.preload()
+        const replacement = [`subscribe`, `resume`, `preload`].includes(
+          admission,
+        )
+        const second = collection.cleanup()
+        expect(second === first).toBe(!replacement)
+        expect(starts).toBe(replacement ? 2 : 1)
+        expect(cleanups).toBe(starts)
+        await Promise.all([first, second, preload])
+      }, [
+        () => stop(),
+        () => subscription?.unsubscribe(),
+        () => collection.cleanup(),
+      ])
+    },
+  )
+
   // These paths share the three-cut model above. The held adapter promise
   // reaches cleanup start without confusing the retained public status with
   // permission to start another sync run. No automatic retry is requested.

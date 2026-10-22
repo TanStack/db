@@ -15,7 +15,9 @@ import {
   readOracleRunConfig,
 } from './oracle-config.js'
 import {
+  modelSubscriberResumeRetirement,
   modelSubscriberStartCleanup,
+  subscriberResumeRetirementHistories,
   subscriberStartCleanupHistories,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import type { CollectionSubscription } from '../src/collection/subscription.js'
@@ -2592,9 +2594,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  // Resuming a query-owned acquisition does not release the renderer's
-  // separate sync-start gate. An ordinary new subscriber does release it;
-  // descriptor-query-binding-oracle checks that independent-reader boundary.
+  // Demand created while acquisition is deferred stays logical until an
+  // explicit resumption. That resumption also releases any render start gate;
+  // retirement before it returns no acquisition lease. The phase named
+  // `deferred` here is deferred acquisition, not an already resumed owner
+  // whose provider work is still blocked by an unrelated render.
   acquisitionCase(
     [`deferred:request`, `deferred:resume`],
     `owns deferred-start acquisition only when it reaches the adapter`,
@@ -2624,7 +2628,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           includeInitialState: false,
           deferAcquisition: true,
         })
-        subscription.resumeDeferredAcquisition()
         subscription.requestSnapshot({ where })
         reach(`deferred:request`)
         expect(loads).toEqual([])
@@ -2632,7 +2635,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         if (action === `release-before-resume`) {
           subscription.releaseSnapshot(where)
         }
-        collection._resumeSyncStart()
+        subscription.resumeDeferredAcquisition()
         await flushPromises()
         if (action === `resume`) reach(`deferred:resume`)
 
@@ -2671,7 +2674,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         includeInitialState: false,
         deferAcquisition: true,
       })
-      subscription.resumeDeferredAcquisition()
       subscription.requestSnapshot({
         where,
         onLoadSubsetResult: (result) => observed.push(result),
@@ -2680,7 +2682,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (action === `cleanup`) await collection.cleanup()
       else if (action === `release`) subscription.releaseSnapshot(where)
       else if (action === `unsubscribe`) subscription.unsubscribe()
-      else collection._resumeSyncStart()
+      else subscription.resumeDeferredAcquisition()
       await flushPromises()
       if (action === `cleanup`) {
         observeAcquisitionInteraction(`none:cleanup`, `no-acquisition`)
@@ -3421,7 +3423,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         includeInitialState: false,
         deferAcquisition: true,
       })
-      subscription.resumeDeferredAcquisition()
       const removeReadyListener = collection.on(`status:${phase}`, () => {
         if (!cancelOnEntry) return
         cancelOnEntry = false
@@ -3436,7 +3437,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       try {
         cancelOnEntry = true
-        collection._resumeSyncStart()
+        subscription.resumeDeferredAcquisition()
         await flushPromises()
 
         expect(collection.status).toBe(
@@ -3550,6 +3551,93 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         await cleanup
         peer?.unsubscribe()
         subscription?.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // The callback can release this owner before resumption commits, or from
+  // its acquiring notification. Both cuts must leave balanced public counts
+  // and no later acquisition. The no-retirement neighbor must acquire normally.
+  it.each(
+    subscriberResumeRetirementHistories.flatMap((history) =>
+      ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+        [false, true].map((renderGate) => ({
+          ...history,
+          syncMode,
+          renderGate,
+        })),
+      ),
+    ),
+  )(
+    `balances resume at $retireAt (cleanup=$cleanup, $syncMode, gate=$renderGate)`,
+    async (history) => {
+      const expected = modelSubscriberResumeRetirement(history)
+      let starts = 0
+      let loads = 0
+      const counts: Array<number> = []
+      const collection = createCollection<{ id: string }>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        syncMode: history.syncMode,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                return true
+              },
+            }
+          },
+        },
+      })
+      if (history.renderGate) collection._deferSyncStart()
+      const subscription = collection.subscribeChanges(() => {}, {
+        deferAcquisition: true,
+        includeInitialState: true,
+      })
+      let cleanup: Promise<void> | undefined
+      let retired = false
+      const retire = () => {
+        if (retired) return
+        retired = true
+        subscription.unsubscribe()
+        if (history.cleanup) cleanup = collection.cleanup()
+      }
+      const offStatus = collection.on(`status:change`, ({ status }) => {
+        if (status === history.retireAt) retire()
+      })
+      const offCounts = collection.on(
+        `subscribers:change`,
+        ({ subscriberCount }) => {
+          counts.push(subscriberCount)
+          if (history.retireAt === `subscribers` && subscriberCount === 1)
+            retire()
+        },
+      )
+      try {
+        subscription.resumeDeferredAcquisition()
+        expect(starts).toBe(expected.starts)
+        expect(collection.subscriberCount).toBe(expected.acquiring)
+        expect(counts).toEqual(expected.counts)
+        await cleanup
+        await flushPromises()
+        expect(collection.subscriberCount).toBe(expected.acquiring)
+        expect(loads).toBe(
+          history.syncMode === `on-demand` && history.retireAt === `none`
+            ? 1
+            : 0,
+        )
+        offStatus()
+        offCounts()
+        subscription.unsubscribe()
+        expect(collection.subscriberCount).toBe(0)
+      } finally {
+        offStatus()
+        offCounts()
+        subscription.unsubscribe()
         await collection.cleanup()
       }
     },

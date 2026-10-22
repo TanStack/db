@@ -626,24 +626,28 @@ class LiveQueryObserverImpl<
     }
 
     const record: SubscriptionRecord<T, TKey> = { listener, active: true }
-    this.subscriptions.add(record)
-    if (this.subscriptions.size === 1) {
-      this.attach()
-    } else {
-      // The initial-state replay only happens on attach, so a granular
-      // subscriber that arrives while already attached is seeded with the
-      // current rows — delivered to this subscription alone, without advancing
-      // the observer's revision (the collection state did not change).
-      // Wholesale consumers read getSnapshot() instead and need no seed.
-      if (!this.wholesale) this.seed(record)
-    }
-
-    return () => {
+    const release = () => {
       if (!record.active) return
       record.active = false
       this.subscriptions.delete(record)
       if (this.subscriptions.size === 0) this.detach()
     }
+    this.subscriptions.add(record)
+    try {
+      if (this.subscriptions.size === 1) {
+        this.attach()
+      } else {
+        // Seed only this late granular listener; a failed seed releases its
+        // record without detaching peers that already own subscriptions.
+        if (!this.wholesale) this.seed(record)
+      }
+    } catch (error) {
+      // Setup returned no ownership handle. Release every acquired channel
+      // and the logical record, so a later explicit subscription can attach.
+      release()
+      throw error
+    }
+    return release
   }
 
   /** Deliver the collection's current rows to one late subscription as inserts. */

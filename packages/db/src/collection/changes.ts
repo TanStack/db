@@ -410,12 +410,18 @@ export class CollectionChangesManager<
   }
 
   /** A deferring subscription resumed: it may now start this sync run. */
-  private resumeSubscriber(): void {
+  private resumeSubscriber(): () => void {
     this.lifecycle.assertCanStartSync()
+    this.startSyncForSubscriber()
+    return () => this.changeAcquiringSubscribers(1)
+  }
+
+  private startSyncForSubscriber(): void {
     // Mark first, so a sync run that starts now builds non-deferred demand.
     this.markSubscriberOrPreload()
     this.startSyncIfStopped()
-    this.changeAcquiringSubscribers(1)
+    // Committed demand releases even an abandoned render's sync-start gate.
+    this.sync.resumeStart()
   }
 
   private changeAcquiringSubscribers(delta: 1 | -1): void {
@@ -447,12 +453,11 @@ export class CollectionChangesManager<
 
     try {
       if (!defersAcquisition) {
-        // Mark first, so a sync run that starts now builds non-deferred demand.
-        this.markSubscriberOrPreload()
-        // Request before release so cleanup during startup cannot trigger a retry.
-        this.startSyncIfStopped()
-        this.sync.resumeStart()
-      } else if (getBuilderFromConfig(this.collection.config)) {
+        this.startSyncForSubscriber()
+      } else if (
+        !this.lifecycle.isCleaningUp() &&
+        getBuilderFromConfig(this.collection.config)
+      ) {
         this.startSyncIfStopped()
       }
     } catch (error) {

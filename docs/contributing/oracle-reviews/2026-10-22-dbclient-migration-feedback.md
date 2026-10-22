@@ -648,3 +648,186 @@ Executed source identities (SHA-256):
 | `packages/db/src/collection/index.ts` | `29bf79f5b702a1bfea91040c86d08b439e99688c5bff10a5b9983f6bd652e11c` |
 | `packages/db/src/query/effect.ts` | `0e7cd82b5213edf3666e8793f6bd71ffd1dd9166f7574cbf5c75920c74610f7b` |
 | `packages/db/tests/collection-cleanup-restart-oracle.test.ts` | `a87b7b3fad0637a1d3cb7de831d3943304f3c8c4e84c11b558367e35be1f52c6` |
+
+## Eight-item review of 16824f677 — follow-up evaluation
+
+The user supplied eight deduplicated, unverified findings against PR #2229 at
+`16824f6778bc3feb21c67d4f865c4f444e11f2e4`. The reviewer used medium effort and
+reported no clear AGENTS.md violations. Those statements describe provenance,
+not correctness evidence. This appendix records a self-review and executed
+experiments. The earlier appendices remain historical records.
+
+### Laws, experiments, and inference
+
+The review exposed incomplete ownership handling around a deliberate rejection
+boundary. It also exposed a separate resumption defect. The user's decision,
+“yes reject during cleanup,” remains authoritative. Automatic admission and
+restart would revise that contract. It would not establish failure atomicity
+for other setup errors.
+
+| Law and authority | Existing coverage and precise gap | Experiment and repair |
+| --- | --- | --- |
+| Explicit demand can start a source independently of an abandoned render. Authority: subscriber/preload contract and the deferred-acquisition owner's opening law. | Ordinary admission released the render gate. The deferred-acquisition grammar lacked render-deferred source states and explicit subscription resumption. Stream preloads covered only an eager source without that gate. | R03 fails with zero source starts. The grammar now crosses seven source states, two query shapes, one/two levels and eleven histories. Both ordinary admission and resumption use the existing request-then-release ordering. Eight stream histories cross pending/success, eager/on-demand and idle/render-deferred. Omitting release only from resumption fails all four render-deferred stream cases; the four idle controls pass. |
+| A failed subscription call transfers no listener ownership because it returns no release handle. Authority: observer subscribe/dispose contract. | The eligibility ledger covered publication and reentry after successful registration. It did not fail source admission during attachment or inspect leases before cleanup. | R07 leaves failed records and client/status/layout leases. Eight histories cross mode, cleanup/startup failure and one/two attempts. They inspect leases immediately, then explicit retry, publication and release. Two granular late-seed histories keep a healthy peer. Shared release removes only the failed record and detaches channels when the last owner leaves. A detach-only mutant fails all ten ownership histories. Synchronous setup errors still propagate. |
+| Source cleanup makes a dependent pooled live query terminal and releases partial ownership. Authority: pooled/live-query lifecycle equivalence and glossary cleanup start. | The row grammar never releases a partition. The release owner covered reattachment and pending cleanup separately, but not their intersection or cleanup during startup before assignment. | R02 fails on a released partition reattaching during held cleanup. Twelve histories cross new/retained/released ownership, both observer modes and loading/ready cleanup. Two startup reentry histories check total logical ownership as well as public acquiring count. Observe cleanup before subscribing, release on failure, and unsubscribe a handle returned after synchronous retirement. |
+| Cleanup callers share one operation until a replacement sync run actually starts. Authority: public cleanup promise and restart contract. | Admission validation also cleared cleanup ownership. A successful replacement was indistinguishable from a deferred request or a failed first-demand notification. | R05's successful subscriber legitimately starts a replacement. Its narrower defect appears when no replacement starts. Six outcomes compare promise identity, adapter entries and cleanup counts before settlement. Validation is now pure; entering loading transfers cleanup ownership to the actual replacement run. |
+| Deferred logical demand starts no source work during cleanup. Authority: deferred-acquisition contract and the approved ordinary-admission rejection policy. | R06 was absent from the cleanup grammar: idle/cleaned-up cleanup-start callbacks could subscribe to a plain Collection, but a live-query Collection attempted local startup and threw. | Six histories cross plain/live-query and idle/ready/cleaned-up cleanup. Ordinary admission and resumption reject at the callback cut; logical demand stays deferred, then resumes explicitly after settlement. Local live-query startup now waits while cleanup is active. A universal rejection of deferred demand would violate this neighboring law. |
+| Resumption cannot restore a retired subscription. Authority: subscription ownership and unsubscribe contract. | Releasing the render gate makes startup callbacks reachable during resumption. The old ownership increment followed those callbacks even when they unsubscribed. | S02 adds 28 histories from an independent token-count judgment: seven retirement/cleanup forms, both modes and both render-gate states. Start, acquisition count and the complete subscriber-count trace are checked at return and after settlement. Resumption commits its flag before notification and checks retirement on both sides. Removing the post-start guard fails 16 lifecycle and two pooled reentry assertions. |
+| A deferred-source handoff preserves startup error identity and releases healthy peers. Authority: existing DbClient failure/peer contract. | After R03, independent demand may consume the render gate before the later handoff. The existing source-failure tests then exposed a lost error. | S01 preserves the current Collection sync error after the render release is already consumed. Existing exact-error, failed-stream replacement and healthy-peer witnesses pass. No automatic retry or new lifecycle state is introduced. |
+
+These repairs preserve cleanup rejection, terminal dependents, render-only
+zero-work behavior, independent preload demand, publication eligibility and
+explicit restart. The laws are encoded and reached at the listed observation
+cuts within their finite domains. No known reachable counterexample remains
+within these declared repair boundaries. This is not a proof over arbitrary
+provider, callback or framework schedules.
+
+The receiving React driver adds deferred subscription resumption to the real
+abandoned Suspense grammar. It reuses the core startup/cleanup judgment and
+checks adapter entries, complete status traces, cleanup settlement and later
+demand. Its 64 tests pass. A full-suite failure also exposed an older conflicting
+expectation in `useLiveSuspenseQuery.test.tsx`: it expected no browser acquisition
+while a server stream was pending. The established stream-preload law predicts
+one local start, independently of stream availability. The corrected assertion
+requires that start. The unchanged later assertions require the server row
+until browser acquisition completes, then the browser row. This changes the
+work observation to the accepted law without weakening snapshot authority.
+
+### Source-order item ledger
+
+Severity below is this evaluation's assessment. The supplied review gave no
+severity except marking R06 as a design issue. Complete raw claims and the
+append-only working ledger remain in the scratch root named below.
+
+| ID | Original claim and proposal | Technical judgment and evidence | PR action and durable value |
+| --- | --- | --- | --- |
+| R01 | Ordinary admission throws during GC cleanup while status remains ready; framework subscription can fail; no public promise/status exists to wait on. Proposed automatic admission/restart. | Rejection and retained status are approved. The no-promise subclaim is false: the same-path fake-timer GC probe calls cleanup(), obtains the exact pending operation, awaits it and subscribes successfully. A framework that does not handle the throw can still surface it. | `accepted-design`. Preserve the API-suitability concern and the GC timeline evidence. The public retry instruction remains valid. No automatic restart added. |
+| R02 | registry.add precedes a throwing source subscription, retaining a nonterminal partition without a cleanup observer. | Confirmed, medium. Released-partition reattachment during pending cleanup exposes nonterminal status and partial ownership. Original expanded owner has four assertion failures on that boundary. | `fixed-now`. Earlier cleanup observation and complete partial release; release-owner grammar and startup reentry checks above. |
+| R03 | resumeSubscriber checks admission but does not release an abandoned render gate, leaving a live query loading; changed fixtures hide it. | Confirmed, high. Both source modes have zero starts at the required demand cut. The correct React invocation fails all 16 added resumption cells before repair. | `fixed-now`. Shared subscriber start path and expanded acquisition/React grammars. Cancellation fixtures now create logical demand before explicit resumption. The DbClient fixture queues actual render-owned work directly, preserving its original cancellation assertion. |
+| R04 | A startup throw consumes deferral, rejects other queued loads, and retains the first-demand flag while rolling back only counts. | These observations are real but belong to a failed sync run. The same-path probe reaches error, preserves the exact startup error for queued work, proves the old render release does not retry, and proves cleanup/new demand restores first-demand notification and readiness. Rolling back to an implicitly retryable idle run is not promised. | `accepted-design`. Preserve failure identity and explicit-restart witnesses. S01 enforces the neighboring handoff error law. This does not endorse partial ownership on failure, which R02/R07 repair. |
+| R05 | Admission validation clears cleanupPromise, so concurrent cleanup can lose coalescing. Proposed a pure check. | Partly correct, medium. Successful ordinary admission starts a replacement and should receive a new operation. Deferred requests and failure before replacement startup must retain the old promise; those cases fail originally. | `fixed-now`. Pure assertion, transfer at actual loading, six distinguishing promise-identity histories. |
+| R06 | Split admission differs between deferred plain/live-query Collections and requires cleanup-listener ordering. Proposed one shared method. | Narrower defect confirmed, medium: idle/cleaned-up cleanup-start reentry differs; ready cleanup does not show a blanket difference. Internal terminal dependents still need cleanup observation before source work. A common method cannot remove that ownership obligation. | `fixed-now`. Shared ordinary/resumed start logic and no local startup for deferred demand during cleanup. Six histories retain valid logical admission. No general policy/state-machine replacement. |
+| R07 | Observer attach leaks client/status/layout listeners when source admission throws; should expose observer error status. | Leak confirmed, medium, including the logical listener record. A retry on the same observer originally attaches no source. Snapshot-error conversion is a separate unapproved policy. | `fixed-now`. Release failed registration and channels, preserve healthy peers and synchronous error reporting. Ten ownership histories plus existing publication campaigns. |
+| R08 | An Effect created during cleanup returns disposed, never runs after restart, and gives no public reason. | Terminality is approved. The no-diagnostic subclaim is false: the same-path probe observes disposed and exactly one onSourceError with the cleanup cause, zero source ownership and no revival. The existing twelve joined-source receiving histories agree. | `accepted-design`. Keep explicit new Effect construction after settlement. No automatic revival. |
+| R09 | Closing proposal: admitting then restarting would likely remove R01/R02/R07/R08; R03–R06 are separate. | This is a proposed contract revision, not a demonstrated cure. It conflicts with the user's rejection choice and does not prove setup-failure atomicity. | `accepted-design` for retaining rejection. Preserve automatic admission as an evaluated alternative, without implementation. |
+| R10 | Metadata: eight deduplicated issues, medium effort, verified head 16824f67, no verification and no clear AGENTS violations. | Provenance retained. Matching HEAD was verified locally; effort and absence claims have no independent behavioral authority. | `duplicate` of the provenance recorded at this appendix's opening, with no product action or independent correctness credit. |
+| S01 | Evaluation-discovered lost startup error after independent demand consumes the render gate. | Existing exact-error/healthy-peer tests fail on the first R03 repair. | `fixed-now`; deferred-source handoff now preserves that failure and peer release. |
+| S02 | Evaluation-discovered resumption restores an owner retired during startup or misbalances notification reentry. | Original post-start ownership order fails pooled reentry; the calibrated guard mutant fails 18 assertions. | `fixed-now`; token-count grammar and two-sided retirement guards. |
+
+Loss accounting: **eight raw findings = five fixed-now + three accepted-design**.
+The two additional raw prose/metadata items remain separately accounted for.
+Including them gives ten raw items = five fixed-now + four accepted-design +
+one duplicate provenance entry.
+Two discovered siblings are fixed separately. False subclaims remain explicit
+inside their source items. No item is deferred or silently merged.
+
+Reviewer recommendation: **hire for bug discovery, with reservations about fix
+judgment**. Five of eight findings expose real defects, sometimes on a narrower
+trace. R02/R03/R07 identify useful lifecycle cuts and R05 correctly questions
+side effects in validation. The report does not execute them, overstates the
+absence of public diagnostics in R01/R08, and treats an approved terminal policy
+as a defect. Its automatic-restart proposal lacks contract authority and misses
+failure atomicity. The ranking of R03 below the policy concern understates the
+most direct progress failure. The reviewer is useful with independent contract
+and experimental verification.
+
+### Executed evidence and limits
+
+Scratch root: `/tmp/tanstack-skill-reading-update/`. Logs retain assertion
+messages and exact selected tests. No mutant remains in the working source.
+Every mutation restores original bytes in `finally` and checks SHA-256 identity.
+
+| Experiment | Executed outcome | Log basename |
+| --- | --- | --- |
+| Original same-path probes | Seven assertion failures / seven passing controls; R01/R04/R08 reach the reported premises | review-eight-probes-red-2.log |
+| Corrected original cleanup/observer/pool owner selection | 16 assertion failures / 125 passes: four cleanup, eight observer and four released-partition failures | review-eight-boundaries-red.log |
+| Original real React receiving driver | 16 added resumption assertion failures | review-eight-react-red-proper.log |
+| First repair, source handoff | Existing exact-error/peer tests expose S01 | review-eight-oracles-green-first.log |
+| Startup cleanup during resumption | Two acquiring-count assertion failures expose S02 | review-eight-pool-reentry.log |
+| Resumption retains render gate mutant | Four stream-preload assertion failures / four idle controls pass | review-eight-mutant-resume-keeps-render-gate.log |
+| Observer detach-only mutant | All ten setup-ownership histories fail assertions, including healthy-peer preservation | review-eight-mutant-observer-detach-only-final.log |
+| Retired-owner guard removed | 18 count assertion failures / 268 passes across complete lifecycle and pool files; no type or cell-audit error | review-eight-mutant-resume-retired-owner-final.log |
+| Final five modified oracle owners | 741 tests pass; no type errors | review-eight-owners-final.log |
+| Broad core/Effect/query surrounding run | 53 files, 2,584 tests pass; no type errors or unhandled errors | review-eight-core-final-3.log |
+| Full React suite | 22 files, 457 tests pass; no type errors | review-eight-react-final-2.log |
+| Scoped ESLint | Zero errors; pre-existing warnings remain | review-eight-lint-final-2.log, final command output |
+| Production bundle vs merge-base 205ab7158 | db +102 gzip / +171 brotli bytes; react-db unchanged | review-eight-size.log |
+
+The early `review-eight-oracles-red.log` is not a clean calibration total. It
+contains eight invalid virtual-field comparisons and eight progress timeouts
+among 80 failures. The invalid comparisons were corrected to the declared row
+projection. The clean boundary and React assertions above carry the RED claim.
+`review-eight-react-red.log` selected no tests and supplies no evidence.
+The first retired-owner mutant used a test-name selection that also triggered
+the existing cell audit because other tests were skipped. Only its count
+assertions were useful; the complete-file rerun supersedes that audit artifact.
+Intermediate broad GREEN attempts passed runtime assertions but had test-fixture
+type errors. They are not cited as clean GREEN runs.
+
+Production source weight for this follow-up is +71/-39 lines, net +32 across six
+files. Shared admission startup, shared observer release and centralized pooled
+status release remove duplicate control flow. The remaining added checks defend
+observable partial-construction and reentry boundaries. Tests add dimensions
+and assertions separately from production. Shipped growth above is +90 gzip and
++107 brotli bytes beyond reviewed head's earlier measured delta. No new stored
+state, retry queue or recovery lifecycle was added.
+
+Replay the broad core run from `packages/db`:
+
+```sh
+pnpm exec vitest run tests/collection tests/db-client.test.ts tests/effect \
+  tests/live-query tests/query/pooled-live-query --coverage.enabled=false \
+  --pool-options.threads.maxThreads=2 --pool-options.threads.minThreads=1
+```
+
+From `packages/react-db`, run the same command without path selections. The
+complete repository `pnpm test` was not run. These results do not establish
+actual provider shutdown, every framework commit schedule, arbitrary recursive
+callbacks or unbounded failure histories. Source/error and cleanup facts are
+available at the asserted cut; no concrete missing-input hypothesis remains for
+these repairs. The coverage map retains each owner's wider limits.
+
+| ORC requirement | Follow-up result |
+| --- | --- |
+| 001 authority and limits | Accepted rejection, demand, ownership, error and cleanup-promise laws are stated above and beside executable checks. |
+| 002 independent judgment | Demand model, three-cut cleanup timeline, handle-count ownership and token-count retirement judgment do not import production semantic helpers. Private counts supplement public ownership observations; they do not compute expectations. |
+| 003 literate responsibilities | Changed owners explain contract, independent judgment, finite grammar, real driver and immediate/settled comparisons. The shared grammar is named by core and React drivers. |
+| 004 grammar controls | New cases are bounded enumerations, not important generated properties. Existing random campaigns are unchanged. Render deferral, explicit resume, held cleanup, released partition and failed attachment reconstruct the reports. Idle/no-retirement/successful replacement/healthy-peer neighbors distinguish their boundaries. No pending cleanup before adapter entry is claimed; callback cleanup at loading is synchronous. |
+| 005 path and observations | Real Collection, observer, pooled view, Effect and React entry points run. Start counts, exact errors, handles, raw callback/count traces, rows, promise identity and resource leases reach immediate and settled assertions. Row projection omits unrelated virtual fields but retains full promised id/value fields. |
+| 006 calibration | Original and mutant outcomes are classified above. Clean kills are assertion failures. Timeouts, invalid comparisons, missing selection and type errors supply no sensitivity credit. |
+| 007 campaigns/replay | No important generated property added or altered. Existing observer and lifecycle fixed/random campaigns remain green with unchanged generators, recorder, budget and replay interface. Finite cases run directly through the listed test paths. |
+| 008 minimal state | No new reference state. New source states project idle render deferral; explicit demand must erase its work distinction. The token model needs only retirement point and cleanup to predict counts and adapter entry. Distinguishing loading from ready is necessary because cleanup can prevent adapter entry only at loading. |
+| 009 vocabulary | Canonical sync run, cleanup start, settlement, deferred acquisition, subscription and acquiring ownership remain distinct. The token-count judgment abstracts one logical owner's transfer and release, not production acquisition states. |
+| 010 failure fidelity | New observer and cleanup checks use the existing primary/secondary cleanup aggregator. Pool and retirement fixtures resolve controlled gates and remove reentry callbacks before deterministic cleanup. No failure erasure or shrinking claim is made. |
+| 011 second formulation | No concrete shared semantic fault requiring another formulation was identified. Terminal dependent policy is independently authorized by the user's decision and glossary, not inferred from the model. |
+| 012 evidence | This versioned appendix records every applicable outcome and nonapplicable trigger, exact source identities, calibration and finite limits. This is self-review. |
+| 013 boundary neighbors | Held cleanup versus post-settlement admission, logical versus acquiring demand, idle versus render-deferred source, failed validation versus actual replacement, retirement versus live owner, and failed late seed versus healthy peer all change asserted observations. |
+| 014 receiving handoff | Real React abandoned Suspense resumption reuses the shared core judgment. The streaming React witness receives on-demand render deferral, starts acquisition before stream settlement and checks server/browser snapshot handoff. No actual remote-provider shutdown or other-framework schedule claim follows. |
+
+The eight-item implementation and bounded oracle repair are complete. Whole-PR
+readiness remains separate: F02 still needs an initial-snapshot policy and F07
+still needs the reported failing application fixture. Earlier browser E2E runs
+failed in dependency setup rather than demonstrating an assertion failure.
+A new CI run does not erase those independent limits.
+
+Final evaluated source identities (SHA-256), based on reviewed HEAD
+`16824f6778bc3feb21c67d4f865c4f444e11f2e4` plus this follow-up:
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/db/mangle-cache.json` | `d16ffa42f01a034ee4786bc6b12e26b8b00d0e474c5ae94b8e2fa2e97883e27e` |
+| `packages/db/src/collection/changes.ts` | `64e0b1d507dc9390a87c1db907bb178998f971910957ebe18a4d9565398f4433` |
+| `packages/db/src/collection/lifecycle.ts` | `19025f597061032ad0dfd1fe394e6fa873af473d3b67698cfdb2e6ecb0d1ffef` |
+| `packages/db/src/collection/subscription.ts` | `40d0d093671dcab5464614820de7799883577bf22a754922e29ba54f4fa3730d` |
+| `packages/db/src/live-query-observer.ts` | `e212d8b1d10ed334c8268e7125a74f3de32ce7ca81c14627a3003e5c31a4b023` |
+| `packages/db/src/live-query-options.ts` | `e6117272c8dfbc5d4c0636a2c3ff760a6db6b99e42e0edf8b10e36529e7a2dbf` |
+| `packages/db/src/query/pooled-live-query.ts` | `2d247b2b14e9b8cc9a96e054d1b5dd4bb632b5a392086594c023263c8f98fc3e` |
+| `packages/db/tests/collection-cleanup-restart-oracle.test.ts` | `65b3b32f54bc1ecaa61e62a2754142c7f5cf25ef1917df7ac14177342d094a20` |
+| `packages/db/tests/collection-subscription-lifecycle-grammar-oracle.ts` | `e8144f0517fb21d55b66b3c0e63b2e628df6cc4ebda4edc8825adb384e8bf46b` |
+| `packages/db/tests/collection-subscription-lifecycle-oracle.test.ts` | `f43e492ede9e000bf5c8a82687001d8b9a4c0b74c960a4022ef4708216b0dc9d` |
+| `packages/db/tests/db-client.test.ts` | `e9aecb15f4bf1b29d07fb010ad6f79cc8eb379ba70b232d517f56c39b0836908` |
+| `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` | `7df15face42f44bff73f7eab3e05a62c802650de9d671eedacfb1421bb9551b6` |
+| `packages/db/tests/live-query-observer-history-oracle.property.test.ts` | `66a4803dd813967874f02db368595cca57cc4887208699247225ca25a27e938b` |
+| `packages/db/tests/query/pooled-live-query-gc-oracle.test.ts` | `5eba86cb508775f885a9c13ec17253d04256f857002664bdeedfbce685426f89` |
+| `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx` | `101b8030b4d5e2ee4a090dca940c9708344fa2bdbd482ca94065969ef41478ab` |
+| `packages/react-db/tests/useLiveSuspenseQuery.test.tsx` | `7d0ace536f2a4a8b6a5ccf124463ddf68cdb53ff390058a556fce3e6363bb136` |

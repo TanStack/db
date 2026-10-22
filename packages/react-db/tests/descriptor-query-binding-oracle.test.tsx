@@ -81,7 +81,7 @@
  * reader. An ordinary subscription or preload is independent demand for data:
  * it starts the source even though the earlier render never committed. A
  * deferring subscription retains the zero-start cut. The finite grammar crosses
- * all three readers with startSync true/false and eager/on-demand sources. It
+ * all four readers with startSync true/false and eager/on-demand sources. It
  * extends ordinary admission with loading/ready callback cleanup, including
  * held resource cleanup. The shared lifecycle judgment predicts adapter entries
  * and the complete status trace at admission return and cleanup settlement.
@@ -278,12 +278,15 @@ describe(`standalone descriptor query binding`, () => {
         { reader: `preload`, startSync: false },
         { reader: `subscriber`, startSync: true },
         { reader: `subscriber`, startSync: false },
+        { reader: `resumed subscriber`, startSync: true },
+        { reader: `resumed subscriber`, startSync: false },
         { reader: `deferring subscriber`, startSync: true },
         { reader: `deferring subscriber`, startSync: false },
       ] as const
     ).flatMap((history) =>
       ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
-        (history.reader === `subscriber`
+        (history.reader === `subscriber` ||
+        history.reader === `resumed subscriber`
           ? subscriberStartCleanupHistories
           : [subscriberStartCleanupHistories[0]]
         ).map((cleanupHistory) => ({
@@ -366,9 +369,18 @@ describe(`standalone descriptor query binding`, () => {
           void directRead.catch(() => {})
         } else {
           subscription = source.subscribeChanges(() => {}, {
-            deferAcquisition: reader === `deferring subscriber`,
+            deferAcquisition:
+              reader === `deferring subscriber` ||
+              reader === `resumed subscriber`,
             includeInitialState: true,
           })
+          if (reader === `resumed subscriber`) {
+            expect(
+              starts,
+              `deferred demand preserves the abandoned-render cut`,
+            ).toBe(0)
+            subscription.resumeDeferredAcquisition()
+          }
         }
         expect(starts, `direct demand starts the source`).toBe(
           reader === `deferring subscriber` ? 0 : expected.starts,
@@ -396,7 +408,9 @@ describe(`standalone descriptor query binding`, () => {
         if (cleanupAt === `none`) {
           const expectsRow =
             reader !== `deferring subscriber` &&
-            (syncMode === `eager` || reader === `subscriber`)
+            (syncMode === `eager` ||
+              reader === `subscriber` ||
+              reader === `resumed subscriber`)
           expect(source.get(`one`)?.value).toBe(expectsRow ? `live` : undefined)
         }
         removeStatusListener()

@@ -1,11 +1,227 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { DbClient } from '../src/client.js'
+import { createDeferred } from '../src/deferred.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { withOracleCleanup } from './utils.js'
 import type { ChangeMessage } from '../src/types.js'
 
 type Row = { id: string; version: number }
+
+/**
+ * Failed subscription setup transfers no listener ownership to the observer:
+ * the caller received no release handle. This is the resource counterpart of
+ * the eligibility ledger below, and follows the observer's subscribe/dispose
+ * contract. A later explicit subscription must work on the same observer.
+ *
+ * The bounded grammar crosses both modes, cleanup rejection and a real sync
+ * startup throw, and one or two failed attempts before an explicit retry.
+ * The independent ownership judgment counts only calls that returned handles.
+ * We observe client/status/layout leases immediately after each failure, then source
+ * ownership and listener delivery after retry, publication and final release.
+ * A neighboring granular history rejects one or two late listener seeds while
+ * a healthy peer remains subscribed. Only the peer owns later publications.
+ * These are controlled core boundaries; framework commit errors are not modeled.
+ */
+describe(`observer subscription setup ownership`, () => {
+  it.each([1, 2])(
+    `preserves a healthy peer across %s failed late listener seeds`,
+    async (failures) => {
+      let publish = () => {}
+      const source = createCollection<Row>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            let version = 0
+            publish = () => {
+              begin()
+              write({
+                type: version === 0 ? `insert` : `update`,
+                value: { id: `a`, version: ++version },
+              })
+              commit()
+            }
+            publish()
+            markReady()
+          },
+        },
+      })
+      const observer = createLiveQueryObserver(source, { mode: `granular` })
+      const healthy = vi.fn()
+      const failure = new Error(`late listener seed failed`)
+      const failed = vi.fn(() => {
+        throw failure
+      })
+      let stop: (() => void) | undefined
+      await withOracleCleanup(() => {
+        stop = observer.subscribe(healthy)
+        for (let attempt = 1; attempt <= failures; attempt++) {
+          expect(() => observer.subscribe(failed)).toThrow(failure)
+          expect(failed).toHaveBeenCalledTimes(attempt)
+          expect(source.subscriberCount).toBe(1)
+        }
+        const prefix = healthy.mock.calls.length
+        expect(publish).not.toThrow()
+        expect(healthy).toHaveBeenCalledTimes(prefix + 1)
+        expect(failed).toHaveBeenCalledTimes(failures)
+        expect(observer.getSnapshot().state?.get(`a`)?.version).toBe(2)
+        stop()
+        expect(source.subscriberCount).toBe(0)
+      }, [() => stop?.(), () => observer.dispose(), () => source.cleanup()])
+    },
+  )
+
+  it.each(
+    ([`granular`, `wholesale`] as const).flatMap((mode) =>
+      ([`cleanup`, `sync-throw`] as const).flatMap((failureAt) =>
+        ([1, 2] as const).map((failures) => ({ mode, failureAt, failures })),
+      ),
+    ),
+  )(
+    `releases failed $mode setup at $failureAt before $failures-attempt retry`,
+    async ({ mode, failureAt, failures }) => {
+      const gate = createDeferred<void>()
+      const failure = new Error(`source startup failed`)
+      let failStart = failureAt === `sync-throw`
+      let publish = () => {}
+      const source = createCollection<Row>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            if (failStart) throw failure
+            publish = () => {
+              begin()
+              write({ type: `insert`, value: { id: `a`, version: 1 } })
+              commit()
+            }
+            markReady()
+            return { cleanup: () => gate.promise }
+          },
+        },
+      })
+      const client = new DbClient()
+      let statusLeases = 0
+      const on = source.on.bind(source)
+      source.on = (event, listener) => {
+        const stop = on(event, listener)
+        if (event !== `status:change`) return stop
+        statusLeases++
+        let active = true
+        return () => {
+          if (active) {
+            active = false
+            statusLeases--
+            stop()
+          }
+        }
+      }
+      let clientLeases = 0
+      const subscribeClient = client.subscribe.bind(client)
+      vi.spyOn(client, `subscribe`).mockImplementation((listener) => {
+        clientLeases++
+        const stop = subscribeClient(listener)
+        let active = true
+        return () => {
+          if (active) {
+            active = false
+            clientLeases--
+            stop()
+          }
+        }
+      })
+      let layoutLeases = 0
+      const subscribeLayout = source._subscribeLayoutChanges.bind(source)
+      vi.spyOn(source, `_subscribeLayoutChanges`).mockImplementation(
+        (listener) => {
+          layoutLeases++
+          const stop = subscribeLayout(listener)
+          let active = true
+          return () => {
+            if (active) {
+              active = false
+              layoutLeases--
+              stop()
+            }
+          }
+        },
+      )
+      const observer = createLiveQueryObserver(source, {
+        mode,
+        client,
+        queryHash: `setup-${mode}-${failureAt}-${failures}`,
+      })
+      const failedListener = vi.fn()
+      const listener = vi.fn()
+      let pending: Promise<void> | undefined
+      let release: (() => void) | undefined
+      await withOracleCleanup(async () => {
+        if (failureAt === `cleanup`) {
+          source.startSyncImmediate()
+          pending = source.cleanup()
+        }
+        for (let attempt = 0; attempt < failures; attempt++) {
+          expect(() => observer.subscribe(failedListener)).toThrow(
+            failureAt === `cleanup` ? /during cleanup/ : failure,
+          )
+          expect({
+            clientLeases,
+            layoutLeases,
+            statusLeases,
+            source: source.subscriberCount,
+          }).toEqual({
+            clientLeases: 0,
+            layoutLeases: 0,
+            statusLeases: 0,
+            source: 0,
+          })
+          if (failureAt === `sync-throw`) await source.cleanup()
+        }
+        const failedPrefix = failedListener.mock.calls.length
+        gate.resolve()
+        await pending
+        failStart = false
+        release = observer.subscribe(listener)
+        expect(source.subscriberCount).toBe(1)
+        expect({ clientLeases, layoutLeases }).toEqual({
+          clientLeases: 1,
+          layoutLeases: 1,
+        })
+        publish()
+        expect(
+          Array.from(
+            observer.getSnapshot().state!.values(),
+            ({ id, version }) => ({ id, version }),
+          ),
+        ).toEqual([{ id: `a`, version: 1 }])
+        expect(listener).toHaveBeenCalled()
+        expect(failedListener).toHaveBeenCalledTimes(failedPrefix)
+        release()
+        expect({
+          clientLeases,
+          layoutLeases,
+          statusLeases,
+          source: source.subscriberCount,
+        }).toEqual({
+          clientLeases: 0,
+          layoutLeases: 0,
+          statusLeases: 0,
+          source: 0,
+        })
+      }, [
+        () => gate.resolve(),
+        () => release?.(),
+        () => observer.dispose(),
+        () => source.cleanup(),
+        () => client.cleanup(),
+      ])
+    },
+  )
+})
+
 type Mode = `granular` | `wholesale`
 type Reaction =
   | `none`

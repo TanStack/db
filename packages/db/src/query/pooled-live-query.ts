@@ -154,11 +154,6 @@ class Partition {
     if (!this.terminated && !this.subscription) {
       // A released partition that subscribes again serves new mounts too.
       this.registry.add()
-      this.subscription = this.source.subscribeChanges(
-        (changes) =>
-          this.apply(changes as Array<ChangeMessage<Row, string | number>>),
-        { includeInitialState: true, deferAcquisition },
-      )
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)
       })
@@ -175,9 +170,28 @@ class Partition {
           status: `error`,
         })
       })
+      // Late registration can terminate before either release handle exists.
+      if (this.terminated as boolean) {
+        stopStatus()
+        stopCleanupStart()
+        return
+      }
       this.stopStatusEvents = () => {
         stopStatus()
         stopCleanupStart()
+      }
+      try {
+        const subscription = this.source.subscribeChanges(
+          (changes) =>
+            this.apply(changes as Array<ChangeMessage<Row, string | number>>),
+          { includeInitialState: true, deferAcquisition },
+        )
+        // Cleanup can re-enter while source sync starts, before assignment.
+        if (this.terminated as boolean) subscription.unsubscribe()
+        else this.subscription = subscription
+      } catch (error) {
+        this.terminate()
+        throw error
       }
     }
   }
@@ -187,10 +201,6 @@ class Partition {
       ? { ...event, status: `error` as const }
       : event
     for (const listener of [...this.statusListeners]) listener(delivered)
-    if (this.terminated) {
-      this.stopStatusEvents?.()
-      this.stopStatusEvents = undefined
-    }
   }
 
   addListener(group: PartitionGroup, listener: Listener): void {
@@ -213,6 +223,8 @@ class Partition {
   }
 
   private release(): void {
+    this.stopStatusEvents?.()
+    this.stopStatusEvents = undefined
     this.subscription?.unsubscribe()
     this.subscription = undefined
     this.registry.remove()
@@ -228,8 +240,6 @@ class Partition {
 
   private readonly releaseIfUnused = (): void => {
     if (this.listenerCount > 0) return
-    this.stopStatusEvents?.()
-    this.stopStatusEvents = undefined
     // Views read groups by key, so a later subscription refills new ones.
     this.groups.clear()
     this.release()

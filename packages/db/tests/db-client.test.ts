@@ -417,13 +417,15 @@ describe(`DbClient`, () => {
       includeInitialState: true,
       deferAcquisition: true,
     })
-    subscription.resumeDeferredAcquisition()
+    // Exercise a render-owned queued load. Resuming this subscription would
+    // itself be independent demand and must release the render gate immediately.
+    const queuedLoad = collection._sync.loadSubset({})
 
     expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `stale` })
     expect(lifecycleOrder).toEqual([])
 
     collection._resumeSyncStart()
-    await Promise.resolve()
+    await queuedLoad
 
     expect(lifecycleOrder).toEqual([`sync`, `load`])
     expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `fresh` })

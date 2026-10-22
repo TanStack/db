@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
-import { Query } from '../../src/query/builder/index.js'
+import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq, not } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
+import { createDeferred } from '../../src/deferred.js'
 import { resolveLiveQueryValue } from '../../src/live-query-options.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
@@ -18,6 +19,9 @@ import type { Collection } from '../../src/collection/index.js'
  * Collection lifecycle's 50 ms floor. Views of one partition with different `gcTime`s release with the longest.
  * A view that subscribes again after its partition released, as a hidden
  * React Activity does, follows the source like its restarted Collection.
+ * Source cleanup instead makes that partition terminal, including a released
+ * partition that reattaches during cleanup. Failed or interrupted startup must
+ * retain no partial source ownership.
  *
  * Each case runs the same timeline against a pooled query and a live-query
  * Collection on separate sources and compares when each source loses its
@@ -78,6 +82,158 @@ function compiled(gcTime: number, subscribe: boolean) {
 describe(`pooled live query gcTime`, () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
+
+  it.each([`loading`, `ready`] as const)(
+    `releases a partition when source startup re-enters cleanup at %s`,
+    async (cleanupAt) => {
+      const gate = createDeferred<void>()
+      let starts = 0
+      const source = createCollection<Row>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return { cleanup: () => gate.promise }
+          },
+        },
+      })
+      const builder = new Query()
+        .from({ r: source })
+        .where(({ r }) => eq(r.g, `x`))
+      if (!(builder instanceof BaseQueryBuilder))
+        throw new Error(`not a builder`)
+      const view = createPooledLiveQuery(builder, { gcTime: 1 })!
+      let pending: Promise<void> | undefined
+      const off = source.on(`status:change`, ({ status }) => {
+        if (status === cleanupAt) pending = source.cleanup()
+      })
+      let stop: { unsubscribe: () => void } | undefined
+      try {
+        stop = view.subscribeChanges(() => {})
+        expect(pending).toBeDefined()
+        expect(starts).toBe(cleanupAt === `loading` ? 0 : 1)
+        expect(view.status).toBe(`error`)
+        expect(source.subscriberCount).toBe(0)
+        expect(source[`_changes`].activeSubscribersCount).toBe(0)
+        gate.resolve()
+        await pending
+        expect(source.subscriberCount).toBe(0)
+      } finally {
+        off()
+        gate.resolve()
+        stop?.unsubscribe()
+        await source.cleanup()
+      }
+    },
+  )
+
+  // Cleanup start makes a dependent terminal even if it registers late. A
+  // released partition has no source subscription, so its next attachment
+  // must observe cleanup before acquiring one. The bounded grammar varies
+  // initial ownership (new, retained, released), callback mode and held source
+  // status. It checks terminality before settlement, after restart, and after a
+  // fresh partition mounts. Source counts detect retained or duplicate ownership.
+  it.each(
+    ([`new`, `retained`, `released`] as const).flatMap((ownership) =>
+      ([`granular`, `wholesale`] as const).flatMap((mode) =>
+        ([`loading`, `ready`] as const).map((priorStatus) => ({
+          ownership,
+          mode,
+          priorStatus,
+        })),
+      ),
+    ),
+  )(
+    `retires $ownership $mode partition during $priorStatus cleanup`,
+    async ({ ownership, mode, priorStatus }) => {
+      const gate = createDeferred<void>()
+      let starts = 0
+      const source = createCollection<Row>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            starts++
+            begin()
+            write({ type: `insert`, value: { id: `a`, g: `x` } })
+            commit()
+            if (priorStatus === `ready` || starts > 1) markReady()
+            return { cleanup: () => gate.promise }
+          },
+        },
+      })
+      const build = () => {
+        const builder = new Query()
+          .from({ r: source })
+          .where(({ r }) => eq(r.g, `x`))
+        if (!(builder instanceof BaseQueryBuilder))
+          throw new Error(`not a builder`)
+        return createPooledLiveQuery(builder, { gcTime: 1 })!
+      }
+      let view: ReturnType<typeof build> | undefined
+      let observer: ReturnType<typeof createLiveQueryObserver> | undefined
+      let stop: (() => void) | undefined
+      let fresh:
+        | ReturnType<typeof createLiveQueryObserver<Row, string | number>>
+        | undefined
+      let stopFresh: (() => void) | undefined
+      try {
+        source.startSyncImmediate()
+        if (ownership !== `new`) {
+          view = build()
+          observer = createLiveQueryObserver(view, { mode })
+          stop = observer.subscribe(() => {})
+          if (ownership === `released`) {
+            stop()
+            stop = undefined
+            await vi.advanceTimersByTimeAsync(100)
+            expect(source.subscriberCount).toBe(0)
+          }
+        }
+        const pending = source.cleanup()
+        expect(source.status).toBe(priorStatus)
+        view ??= build()
+        observer ??= createLiveQueryObserver(view, { mode })
+        let attachmentError: unknown
+        try {
+          if (ownership !== `retained`) stop = observer.subscribe(() => {})
+        } catch (error) {
+          attachmentError = error
+        }
+        expect(
+          attachmentError,
+          `late dependent becomes terminal without acquiring a source`,
+        ).toBeUndefined()
+        expect(view.status).toBe(`error`)
+        expect(observer.getSnapshot().status).toBe(`error`)
+        expect(source.subscriberCount).toBe(0)
+        expect(source[`_changes`].activeSubscribersCount).toBe(0)
+        gate.resolve()
+        await pending
+        source.startSyncImmediate()
+        expect(view.status).toBe(`error`)
+        fresh = createLiveQueryObserver(build(), { mode })
+        stopFresh = fresh.subscribe(() => {})
+        expect(fresh.getSnapshot().status).toBe(`ready`)
+        expect(
+          Array.from(fresh.getSnapshot().state!.values(), ({ id, g }) => ({
+            id,
+            g,
+          })),
+        ).toEqual([{ id: `a`, g: `x` }])
+        expect(source.subscriberCount).toBe(1)
+      } finally {
+        gate.resolve()
+        stop?.()
+        stopFresh?.()
+        observer?.dispose()
+        fresh?.dispose()
+        await source.cleanup()
+      }
+    },
+  )
 
   for (const gcTime of [1, 100, 0, Number.POSITIVE_INFINITY]) {
     for (const subscribe of [true, false]) {

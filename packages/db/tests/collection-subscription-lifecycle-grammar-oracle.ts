@@ -86,6 +86,35 @@ export function modelSubscriberStartCleanup({
 }
 
 /**
+ * Resumption transfers one logical subscription from deferred to acquiring.
+ * Unsubscription at any startup callback removes that owner permanently.
+ * Cleanup can additionally invalidate the sync run, before or after adapter
+ * entry. Notification happens only for a transfer that actually committed;
+ * an unsubscribe from that notification contributes its matching decrement.
+ * This token-count judgment uses no production acquisition state machine.
+ */
+export const subscriberResumeRetirementHistories = (
+  [`none`, `loading`, `ready`, `subscribers`] as const
+).flatMap((retireAt) =>
+  (retireAt === `none` ? [false] : [false, true]).map((cleanup) => ({
+    retireAt,
+    cleanup,
+  })),
+)
+
+export function modelSubscriberResumeRetirement({
+  retireAt,
+  cleanup,
+}: (typeof subscriberResumeRetirementHistories)[number]) {
+  return {
+    starts: cleanup && retireAt === `loading` ? 0 : 1,
+    acquiring: retireAt === `none` ? 1 : 0,
+    counts:
+      retireAt === `none` ? [1] : retireAt === `subscribers` ? [1, 0] : [],
+  }
+}
+
+/**
  * A bounded callback-reentry grammar for direct snapshots. The callback phase
  * is an observation cut, not a second subscription state machine. A released
  * or unsubscribed request has no authority to publish its local snapshot.
