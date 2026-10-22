@@ -1,7 +1,8 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { and,
+import {
+  and,
   count,
   createLiveQueryCollection,
   eq,
@@ -10,7 +11,8 @@ import { and,
   lt,
   not,
   queryOnce,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
@@ -540,8 +542,11 @@ function createFlatQuery(
     query: (q) =>
       q
         .from({ parent: parents })
-        .join(leftJoin({ child: children }, ({ parent, child }) =>
-          eq(parent.group, child.parentGroup)))
+        .join(
+          leftJoin({ child: children }, ({ parent, child }) =>
+            eq(parent.group, child.parentGroup),
+          ),
+        )
         .select(({ parent, child }) => ({
           parentId: parent.id,
           parentGroup: parent.group,

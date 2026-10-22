@@ -35,6 +35,9 @@ export {
   type Prettify,
 } from './builder/index.js'
 
+// Grouping without aggregates
+export { groupKeys, type GroupKeys } from './builder/group-keys.js'
+
 // Join operators
 export {
   leftJoin,

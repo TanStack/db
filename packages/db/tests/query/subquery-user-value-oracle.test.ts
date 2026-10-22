@@ -1,10 +1,12 @@
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
-import { count,
+import {
+  count,
   createLiveQueryCollection,
   eq,
   innerJoin,
-  materialize } from '../../src/query/index.js'
+  materialize,
+} from '../../src/query/index.js'
 import { buildQuery } from '../../src/query/builder/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { collectCollectionSources } from '../../src/query/ir.js'
@@ -81,8 +83,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
         .distinct()
       return q
         .from({ person: persons.collection })
-        .join(innerJoin({ group: distinctGroups }, ({ person, group }) =>
-          eq(person.groupId, group.groupId)))
+        .join(
+          innerJoin({ group: distinctGroups }, ({ person, group }) =>
+            eq(person.groupId, group.groupId),
+          ),
+        )
         .where(({ person }) => eq(person.enabled, true))
         .select(({ person, group }) => ({
           personId: person.id,
@@ -174,8 +179,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .distinct()
         return q
           .from({ person: persons.collection })
-          .join(innerJoin({ group: distinctGroups }, ({ person, group }) =>
-            eq(person.groupId, group.groupId)))
+          .join(
+            innerJoin({ group: distinctGroups }, ({ person, group }) =>
+              eq(person.groupId, group.groupId),
+            ),
+          )
           .where(({ person }) => eq(person.enabled, true))
           .select(({ person, group }) => ({
             personId: person.id,
@@ -405,8 +413,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .distinct()
         return q
           .from({ person: people.collection })
-          .join(innerJoin({ group: groups }, ({ person, group }) =>
-            eq(person.groupId, group.groupId)))
+          .join(
+            innerJoin({ group: groups }, ({ person, group }) =>
+              eq(person.groupId, group.groupId),
+            ),
+          )
           .where(({ group }) => eq(group.$key, 2))
           .select(({ group }) => ({ groupId: group.groupId }))
       },
@@ -439,8 +450,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           }))
         return q
           .from({ person: people.collection })
-          .join(innerJoin({ result: stats }, ({ person, result }) =>
-            eq(person.id, result.stats.total)))
+          .join(
+            innerJoin({ result: stats }, ({ person, result }) =>
+              eq(person.id, result.stats.total),
+            ),
+          )
           .where(({ result }) => eq(result.$key, 'single_group'))
           .select(({ result }) => ({ total: result.stats.total }))
       },
@@ -476,8 +490,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           }))
         return q
           .from({ person: persons.collection })
-          .join(innerJoin({ result: stats }, ({ person, result }) =>
-            eq(person.id, result.stats.total)))
+          .join(
+            innerJoin({ result: stats }, ({ person, result }) =>
+              eq(person.id, result.stats.total),
+            ),
+          )
           .where(({ result }) => eq(result.$key, 'single_group'))
           .select(({ person, result }) => ({
             personId: person.id,
@@ -549,8 +566,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .select(({ item }) => ({ total: count(item.id) }))
         return q
           .from({ person: persons.collection })
-          .join(innerJoin({ result: stats }, ({ person, result }) =>
-            eq(person.id, result.total)))
+          .join(
+            innerJoin({ result: stats }, ({ person, result }) =>
+              eq(person.id, result.total),
+            ),
+          )
           .where(({ result }) => eq(result.$key, 'single_group'))
           .select(({ person, result }) => ({
             personId: person.id,
@@ -616,8 +636,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .findOne()
         return q
           .from({ anchor: anchors.collection })
-          .join(innerJoin({ first: firstQuery }, ({ anchor, first: row }) =>
-            eq(anchor.id, row.id)))
+          .join(
+            innerJoin({ first: firstQuery }, ({ anchor, first: row }) =>
+              eq(anchor.id, row.id),
+            ),
+          )
           .select(({ first: row }) => ({ id: row.id }))
       },
       getKey: (row) => row.id,
@@ -630,8 +653,12 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .findOne()
         return q
           .from({ first: firstQuery })
-          .join(innerJoin({ anchor: anchors.collection }, ({ first: row, anchor }) =>
-            eq(row.id, anchor.id)))
+          .join(
+            innerJoin(
+              { anchor: anchors.collection },
+              ({ first: row, anchor }) => eq(row.id, anchor.id),
+            ),
+          )
           .select(({ first: row }) => ({ id: row.id }))
       },
       getKey: (row) => row.id,
@@ -690,8 +717,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
       query: (q) => {
         const firstJoined = q
           .from({ person: persons.collection })
-          .join(innerJoin({ tag: tagRows.collection }, ({ person, tag }) =>
-            eq(person.groupId, tag.groupId)))
+          .join(
+            innerJoin({ tag: tagRows.collection }, ({ person, tag }) =>
+              eq(person.groupId, tag.groupId),
+            ),
+          )
           .orderBy(({ person }) => person.id, 'asc')
           .select(({ person, tag }) => ({
             personId: person.id,
@@ -700,8 +730,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .findOne()
         return q
           .from({ anchor: anchors.collection })
-          .join(innerJoin({ first: firstJoined }, ({ anchor, first }) =>
-            eq(anchor.id, first.personId)))
+          .join(
+            innerJoin({ first: firstJoined }, ({ anchor, first }) =>
+              eq(anchor.id, first.personId),
+            ),
+          )
           .select(({ anchor, first }) => ({
             anchorId: anchor.id,
             tagId: first.tagId,
@@ -803,8 +836,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
             q
               .from({ person: persons.collection })
               .where(({ person }) => eq(person.scope, anchor.id))
-              .join(innerJoin({ tag: tagRows.collection }, ({ person, tag }) =>
-                eq(person.groupId, tag.groupId)))
+              .join(
+                innerJoin({ tag: tagRows.collection }, ({ person, tag }) =>
+                  eq(person.groupId, tag.groupId),
+                ),
+              )
               .orderBy(({ person }) => person.id, 'asc')
               .select(({ person, tag }) => ({
                 personId: person.id,

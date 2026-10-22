@@ -1,11 +1,14 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq,
+import {
+  createLiveQueryCollection,
+  eq,
   inArray,
   innerJoin,
   leftJoin,
   materialize,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -321,9 +324,13 @@ async function observeWork({
                         links: joinTargets
                           ? materialize(
                               selectedLinks
-                                .join(innerJoin({ target: sources.terms },
-                                  ({ link, target }) =>
-                                    eq(link.targetId, target.id)))
+                                .join(
+                                  innerJoin(
+                                    { target: sources.terms },
+                                    ({ link, target }) =>
+                                      eq(link.targetId, target.id),
+                                  ),
+                                )
                                 .select(({ link, target }) => ({
                                   id: link.id,
                                   text: target.text,
@@ -2077,7 +2084,11 @@ describe(`static include demand and setWindow ownership`, () => {
           ? q.from({ page })
           : q
               .from({ row: rows })
-              .join(leftJoin({ page }, ({ row, page: paged }) => eq(row.id, paged.id)))
+              .join(
+                leftJoin({ page }, ({ row, page: paged }) =>
+                  eq(row.id, paged.id),
+                ),
+              )
       })
       try {
         await live.preload()

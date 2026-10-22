@@ -2479,3 +2479,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 A windowed or findOne result row has no include route
 ```
+
+<a id="error-246"></a>
+
+## Error 246: `GroupingOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.
+```

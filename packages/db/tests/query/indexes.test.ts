@@ -390,8 +390,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(leftJoin({ other: secondCollection }, ({ item, other }: any) =>
-                eq(item.status, other.status)))
+              .join(
+                leftJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.status, other.status),
+                ),
+              )
               .where(({ item }: any) => eq(item.age, 25))
               .select(({ item, other }: any) => ({
                 id: item.id,
@@ -499,8 +502,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(leftJoin({ other: secondCollection }, ({ item, other }: any) =>
-                eq(item.id, other.id)))
+              .join(
+                leftJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )
@@ -602,8 +608,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(innerJoin({ other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id2)))
+              .join(
+                innerJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id2),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )
@@ -699,8 +708,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(innerJoin({ other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id2)))
+              .join(
+                innerJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id2),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )
@@ -791,8 +803,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(leftJoin({ other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id2)))
+              .join(
+                leftJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id2),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )
@@ -908,8 +923,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(leftJoin({ other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id2)))
+              .join(
+                leftJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id2),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )
@@ -1003,8 +1021,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(rightJoin({ other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id2)))
+              .join(
+                rightJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id2),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )
@@ -1094,8 +1115,11 @@ describe(`Query Index Optimization`, () => {
           query: (q: any) =>
             q
               .from({ item: collection })
-              .join(rightJoin({ other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id2)))
+              .join(
+                rightJoin({ other: secondCollection }, ({ item, other }: any) =>
+                  eq(item.id, other.id2),
+                ),
+              )
               .where(({ item, other }: any) =>
                 and(eq(item.status, `active`), eq(other.status, `active`)),
               )

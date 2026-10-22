@@ -1,5 +1,9 @@
 import { describe, test } from 'vitest'
-import { createLiveQueryCollection, eq, leftJoin  } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  leftJoin,
+} from '../../src/query/index.js'
 import type { Collection } from '../../src/collection/index.js'
 
 // Regression tests for https://github.com/TanStack/db/issues/1677
@@ -42,8 +46,11 @@ describe(`queries over generic collection row types`, () => {
         const sub = q.from({ a })
         return q
           .from({ b })
-          .join(leftJoin({ sub }, ({ b: bRef, sub: subRef }) =>
-            eq(bRef.id, subRef.id)))
+          .join(
+            leftJoin({ sub }, ({ b: bRef, sub: subRef }) =>
+              eq(bRef.id, subRef.id),
+            ),
+          )
       })
     }
 

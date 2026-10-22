@@ -1,5 +1,6 @@
 import { Aggregate, Func, isBasicOrAggregateExpression } from '../ir'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { grouping } from '../compiler/grouping.js'
 import { isRefProxy, toExpression } from './ref-proxy.js'
 import { registerWrapper } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir'
@@ -658,7 +659,7 @@ export function divide<T1 extends ExpressionLike, T2 extends ExpressionLike>(
 // Aggregates
 
 export function count(arg: ExpressionLike): Aggregate<number> {
-  return new Aggregate(`count`, [toExpression(arg)])
+  return new Aggregate(`count`, [toExpression(arg)], grouping)
 }
 
 export function avg<T extends number>(arg: T): Aggregate<number>
@@ -669,7 +670,7 @@ export function avg<T extends ExpressionLike>(
   arg: NumericAggregateArgument<T>,
 ): Aggregate<number>
 export function avg(arg: ExpressionLike): Aggregate<number> {
-  return new Aggregate(`avg`, [toExpression(arg)])
+  return new Aggregate(`avg`, [toExpression(arg)], grouping)
 }
 
 export function sum<T extends number>(arg: T): Aggregate<number>
@@ -680,7 +681,7 @@ export function sum<T extends ExpressionLike>(
   arg: NumericAggregateArgument<T>,
 ): Aggregate<number>
 export function sum(arg: ExpressionLike): Aggregate<number> {
-  return new Aggregate(`sum`, [toExpression(arg)])
+  return new Aggregate(`sum`, [toExpression(arg)], grouping)
 }
 
 export function min<T extends OrderableAggregateValue>(arg: T): Aggregate<T>
@@ -689,7 +690,7 @@ export function min<T extends ExpressionLike>(
   arg: OrderableAggregateArgument<T>,
 ): Aggregate<ExtractType<T>>
 export function min(arg: ExpressionLike): Aggregate {
-  return new Aggregate(`min`, [toExpression(arg)])
+  return new Aggregate(`min`, [toExpression(arg)], grouping)
 }
 
 export function max<T extends OrderableAggregateValue>(arg: T): Aggregate<T>
@@ -698,7 +699,7 @@ export function max<T extends ExpressionLike>(
   arg: OrderableAggregateArgument<T>,
 ): Aggregate<ExtractType<T>>
 export function max(arg: ExpressionLike): Aggregate {
-  return new Aggregate(`max`, [toExpression(arg)])
+  return new Aggregate(`max`, [toExpression(arg)], grouping)
 }
 
 /**

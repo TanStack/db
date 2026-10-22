@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq, leftJoin  } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  leftJoin,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
@@ -160,8 +164,11 @@ describe(`live-query lazy demand hold outcomes`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ user: users })
-          .join(leftJoin({ post: posts.collection }, ({ user, post }) =>
-            eq(user.id, post.userId)))
+          .join(
+            leftJoin({ post: posts.collection }, ({ user, post }) =>
+              eq(user.id, post.userId),
+            ),
+          )
           .select(({ user, post }) => ({ id: user.id, postId: post.id })),
       )
       const subscription = liveQuery.subscribeChanges(() => {})
@@ -189,8 +196,11 @@ describe(`live-query lazy demand hold outcomes`, () => {
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: users })
-        .join(leftJoin({ post: posts.collection }, ({ user, post }) =>
-          eq(user.id, post.userId)))
+        .join(
+          leftJoin({ post: posts.collection }, ({ user, post }) =>
+            eq(user.id, post.userId),
+          ),
+        )
         .select(({ user, post }) => ({ id: user.id, postId: post.id })),
     )
     cleanups.push(() => liveQuery.cleanup())

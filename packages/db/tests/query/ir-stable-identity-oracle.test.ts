@@ -871,7 +871,9 @@ function createAlphaRenamedJoinQuery(
       userAlias,
     ),
     join: [
-      { compile: processJoins, optimize: applyOptimizations,
+      {
+        compile: processJoins,
+        optimize: applyOptimizations,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -913,7 +915,9 @@ function createAlphaRenamedImplicitJoinQuery(
       userAlias,
     ),
     join: [
-      { compile: processJoins, optimize: applyOptimizations,
+      {
+        compile: processJoins,
+        optimize: applyOptimizations,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -1276,8 +1280,11 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
       getQueryIR(
         new Query()
           .from({ user: usersCollection })
-          .join(leftJoin({ post: postsCollection },
-            ({ user, post }) => eq(user.id, post.userId)))
+          .join(
+            leftJoin({ post: postsCollection }, ({ user, post }) =>
+              eq(user.id, post.userId),
+            ),
+          )
           .where(({ post }) => eq(post.published, true))
           .select(({ user, post }) => ({
             userId: user.id,
@@ -1295,12 +1302,16 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
               .from({ post: postsCollection })
               .where(({ post }) => gt(post.views, 100)),
           })
-          .join(innerJoin({
-              activeUser: new Query()
-                .from({ user: usersCollection })
-                .where(({ user }) => eq(user.status, `active`)),
-            },
-            ({ post, activeUser }) => eq(post.userId, activeUser.id))),
+          .join(
+            innerJoin(
+              {
+                activeUser: new Query()
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`)),
+              },
+              ({ post, activeUser }) => eq(post.userId, activeUser.id),
+            ),
+          ),
       ),
   ],
   [

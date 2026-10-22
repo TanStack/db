@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'vitest'
 import { applyOptimizations } from '../../src/query/optimizer-joins.js'
 import { processJoins } from '../../src/query/compiler/joins.js'
-import { createLiveQueryCollection, innerJoin, leftJoin, rightJoin  } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  innerJoin,
+  leftJoin,
+  rightJoin,
+} from '../../src/query/index.js'
 /**
  * An outer predicate on an aggregate subquery's result must run after the
  * aggregate. Moving it to source rows can change or remove the result.
@@ -142,7 +147,9 @@ describe('optimizer aggregate semantics', () => {
           query: (q) =>
             q
               .from({ s: aggregate })
-              .join(innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target)))
+              .join(
+                innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target)),
+              )
               .select(({ s }) => ({ total: s.total })),
         })
         expect(materialized.toArray.map(stripVirtualProps)).toEqual(
@@ -225,7 +232,9 @@ describe('optimizer aggregate semantics', () => {
             }))
             return q
               .from({ s: summary })
-              .join(leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target)))
+              .join(
+                leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target)),
+              )
               .where(({ s }) =>
                 outerPredicate === `accept` ? eq(s.k, 2) : eq(s.k, 1),
               )
@@ -500,7 +509,9 @@ describe(`optimizer residual convergence`, () => {
             const query: QueryIR = {
               from: new CollectionRef(collection, `team`),
               join: [
-                { compile: processJoins, optimize: applyOptimizations,
+                {
+                  compile: processJoins,
+                  optimize: applyOptimizations,
                   type: join.type,
                   from: new CollectionRef(collection, `member`),
                   on: new Func('eq', [
@@ -564,7 +575,9 @@ describe(`optimizer residual convergence`, () => {
     const query: QueryIR = {
       from: new CollectionRef(collection, `team`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -572,7 +585,9 @@ describe(`optimizer residual convergence`, () => {
             new PropRef([`member`, `teamId`]),
           ]),
         },
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `inner`,
           from: new CollectionRef(collection, `tag`),
           on: new Func('eq', [
@@ -619,7 +634,9 @@ describe(`optimizer residual convergence`, () => {
       const query: QueryIR = {
         from: new CollectionRef(collection, `team`),
         join: [
-          { compile: processJoins, optimize: applyOptimizations,
+          {
+            compile: processJoins,
+            optimize: applyOptimizations,
             type: joinType,
             from: new CollectionRef(collection, `member`),
             on: new Func('eq', [
@@ -651,7 +668,9 @@ describe(`optimizer residual convergence`, () => {
     const query: QueryIR = {
       from: new CollectionRef(collection, `team`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -684,7 +703,9 @@ describe(`optimizer residual convergence`, () => {
     const query: QueryIR = {
       from: new CollectionRef(collection, `team`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -713,7 +734,9 @@ describe(`optimizer residual convergence`, () => {
     const query: QueryIR = {
       from: new CollectionRef(collection, `team`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -751,7 +774,9 @@ describe(`optimizer residual convergence`, () => {
       const query: QueryIR = {
         from: new CollectionRef(collection, `team`),
         join: [
-          { compile: processJoins, optimize: applyOptimizations,
+          {
+            compile: processJoins,
+            optimize: applyOptimizations,
             type: `left`,
             from: new CollectionRef(collection, `member`),
             on: new Func('eq', [
@@ -759,7 +784,9 @@ describe(`optimizer residual convergence`, () => {
               new PropRef([`member`, `teamId`]),
             ]),
           },
-          { compile: processJoins, optimize: applyOptimizations,
+          {
+            compile: processJoins,
+            optimize: applyOptimizations,
             type: laterJoin,
             from: new CollectionRef(collection, `tag`),
             on: new Func('eq', [
@@ -820,7 +847,9 @@ describe(`optimizer residual convergence`, () => {
         `team`,
       ),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -859,7 +888,9 @@ describe(`optimizer residual convergence`, () => {
         `team`,
       ),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -918,8 +949,11 @@ describe(`optimizer residual convergence`, () => {
       query: (q) =>
         q
           .from({ team: teamCollection })
-          .join(leftJoin({ member: memberCollection }, ({ team, member }) =>
-            eq(team.id, member.teamId)))
+          .join(
+            leftJoin({ member: memberCollection }, ({ team, member }) =>
+              eq(team.id, member.teamId),
+            ),
+          )
           .where(({ team }) => eq(team.active, true))
           .where(() => new Value(false)),
     })
@@ -977,8 +1011,11 @@ describe(`optimizer residual convergence`, () => {
               query: (q) =>
                 q
                   .from({ team: teamCollection })
-                  .join(leftJoin({ member: memberCollection }, ({ team, member }) =>
-                    eq(team.id, member.teamId)))
+                  .join(
+                    leftJoin({ member: memberCollection }, ({ team, member }) =>
+                      eq(team.id, member.teamId),
+                    ),
+                  )
                   .where(({ team }) => eq(team.active, true))
                   .where(({ member }) =>
                     or(isUndefined(member.id), eq(member.userId, 100)),
@@ -993,8 +1030,12 @@ describe(`optimizer residual convergence`, () => {
               query: (q) =>
                 q
                   .from({ team: teamCollection })
-                  .join(rightJoin({ member: memberCollection }, ({ team, member }) =>
-                    eq(team.id, member.teamId)))
+                  .join(
+                    rightJoin(
+                      { member: memberCollection },
+                      ({ team, member }) => eq(team.id, member.teamId),
+                    ),
+                  )
                   .where(({ member }) => eq(member.userId, 100))
                   .where(({ team }) =>
                     or(isUndefined(team.id), eq(team.active, true)),
@@ -1070,10 +1111,16 @@ describe(`optimizer residual convergence`, () => {
       query: (q) =>
         q
           .from({ team: teamCollection })
-          .join(leftJoin({ member: memberCollection }, ({ team, member }) =>
-            eq(team.id, member.teamId)))
-          .join(innerJoin({ tag: tagCollection }, ({ team, tag }) =>
-            eq(team.id, tag.teamId)))
+          .join(
+            leftJoin({ member: memberCollection }, ({ team, member }) =>
+              eq(team.id, member.teamId),
+            ),
+          )
+          .join(
+            innerJoin({ tag: tagCollection }, ({ team, tag }) =>
+              eq(team.id, tag.teamId),
+            ),
+          )
           .where(({ member }) =>
             or(isUndefined(member.id), eq(member.userId, 100)),
           )

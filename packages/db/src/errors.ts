@@ -726,6 +726,16 @@ export class FnSelectWithGroupByError extends QueryCompilationError {
   }
 }
 
+export class GroupingOperatorRequiredError extends QueryCompilationError {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.`
+        : codedMessage(246),
+    )
+  }
+}
+
 export class UnsupportedFnSelectResultError extends QueryCompilationError {
   constructor(valueDescription: string) {
     super(

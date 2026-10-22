@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'vitest'
-import { caseWhen, count,
+import {
+  caseWhen,
+  count,
   createLiveQueryCollection,
   eq,
   gt,
   innerJoin,
   leftJoin,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
@@ -436,8 +439,11 @@ describe(`caseWhen`, () => {
     const query = createLiveQueryCollection((q) =>
       q
         .from({ user: users })
-        .join(leftJoin({ post: posts },
-          ({ user, post }) => eq(user.id, post.userId)))
+        .join(
+          leftJoin({ post: posts }, ({ user, post }) =>
+            eq(user.id, post.userId),
+          ),
+        )
         .select(({ user, post }) => ({
           id: user.id,
           title: caseWhen(post, post.title, `none`),
@@ -464,9 +470,11 @@ describe(`caseWhen`, () => {
     const query = createLiveQueryCollection((q) =>
       q
         .from({ user: users })
-        .join(innerJoin({ post: posts },
-          ({ user, post }) =>
-            eq(caseWhen(eq(user.active, true), user.id, -1), post.userId)))
+        .join(
+          innerJoin({ post: posts }, ({ user, post }) =>
+            eq(caseWhen(eq(user.active, true), user.id, -1), post.userId),
+          ),
+        )
         .select(({ user, post }) => ({
           userId: user.id,
           title: post.title,

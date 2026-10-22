@@ -1,6 +1,11 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
-import { fullJoin as fullJoinOperator, innerJoin, leftJoin, toArray  } from '../../src/query/index.js'
+import {
+  fullJoin as fullJoinOperator,
+  innerJoin,
+  leftJoin,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -467,8 +472,11 @@ async function observeConsumer(
   const query = (q: InitialQueryBuilder) => {
     const joined = q
       .from({ row: source })
-      .join(leftJoin({ marker: markerSource }, ({ row, marker }) =>
-        eq(row.id, joinFilter === `to-one` ? marker.id : marker.rowId)))
+      .join(
+        leftJoin({ marker: markerSource }, ({ row, marker }) =>
+          eq(row.id, joinFilter === `to-one` ? marker.id : marker.rowId),
+        ),
+      )
       .where(({ row, marker }) => {
         switch (joinFilter) {
           case `joined-only`:
@@ -1942,8 +1950,11 @@ describe(`ordered source work oracle`, () => {
             query: (q) =>
               q
                 .from({ row: root })
-                .join(leftJoin({ marker }, ({ row, marker: child }) =>
-                  eq(row.id, child.rowId)))
+                .join(
+                  leftJoin({ marker }, ({ row, marker: child }) =>
+                    eq(row.id, child.rowId),
+                  ),
+                )
                 .orderBy(({ row }) => row.rank)
                 .limit(1)
                 .select(({ row }) => ({
@@ -2037,8 +2048,11 @@ describe(`ordered source work oracle`, () => {
       query: (q) =>
         q
           .from({ row: root })
-          .join(leftJoin({ marker: child }, ({ row, marker }) =>
-            eq(row.id, marker.rowId)))
+          .join(
+            leftJoin({ marker: child }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
+            ),
+          )
           .where(({ marker }) => isUndefined(marker.rowId))
           .orderBy(({ row }) => row.rank)
           .limit(1)
@@ -2105,8 +2119,11 @@ describe(`ordered source work oracle`, () => {
       query: (q) =>
         q
           .from({ row: root })
-          .join(leftJoin({ marker: joined }, ({ row, marker }) =>
-            eq(row.id, marker.rowId)))
+          .join(
+            leftJoin({ marker: joined }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
+            ),
+          )
           .where(({ marker }) => isUndefined(marker.rowId))
           .orderBy(({ row }) => row.rank)
           .limit(0)
@@ -2229,8 +2246,11 @@ describe(`ordered source work oracle`, () => {
         .from({ order: orders })
         .where(({ order }) => gte(order.scheduledAt, `2024-01-12`))
         .where(({ order }) => eq(order.status, `queued`))
-        .join(innerJoin({ charge: charges }, ({ order, charge }) =>
-          eq(order.addressId, charge.addressId))),
+        .join(
+          innerJoin({ charge: charges }, ({ order, charge }) =>
+            eq(order.addressId, charge.addressId),
+          ),
+        ),
     )
 
     try {
@@ -2351,8 +2371,11 @@ describe(`ordered source work oracle`, () => {
       const query = (q: InitialQueryBuilder) =>
         q
           .from({ row: source })
-          .join(innerJoin({ marker: markers }, ({ row, marker }) =>
-            eq(row.id, marker.rowId)))
+          .join(
+            innerJoin({ marker: markers }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
+            ),
+          )
           .orderBy(({ row }) => row.rank)
           .limit(0)
       const live =
@@ -2598,9 +2621,13 @@ describe(`ordered source work oracle`, () => {
       const live = createLiveQueryCollection((q) =>
         q
           .from({ primaryRow: primary })
-          .join(innerJoin({ secondaryRow: secondary },
-            ({ primaryRow, secondaryRow }) =>
-              eq(primaryRow.joinKey, secondaryRow.joinKey)))
+          .join(
+            innerJoin(
+              { secondaryRow: secondary },
+              ({ primaryRow, secondaryRow }) =>
+                eq(primaryRow.joinKey, secondaryRow.joinKey),
+            ),
+          )
           .orderBy(({ primaryRow }) => primaryRow.rank)
           .limit(2),
       )
@@ -2717,9 +2744,13 @@ describe(`ordered source work oracle`, () => {
         q
           .from({ primaryRow: primary })
           .where(({ primaryRow }) => eq(primaryRow.id, id))
-          .join(innerJoin({ secondaryRow: secondary },
-            ({ primaryRow, secondaryRow }) =>
-              eq(primaryRow.joinKey, secondaryRow.joinKey)))
+          .join(
+            innerJoin(
+              { secondaryRow: secondary },
+              ({ primaryRow, secondaryRow }) =>
+                eq(primaryRow.joinKey, secondaryRow.joinKey),
+            ),
+          )
           .orderBy(({ primaryRow }) => primaryRow.rank)
           .limit(1),
       )
@@ -2871,8 +2902,11 @@ describe(`ordered source work oracle`, () => {
     const live = createLiveQueryCollection((q) =>
       q
         .from({ row: primary })
-        .join(leftJoin({ child: secondary }, ({ row, child }) =>
-          eq(row.id, child.primaryId)))
+        .join(
+          leftJoin({ child: secondary }, ({ row, child }) =>
+            eq(row.id, child.primaryId),
+          ),
+        )
         .orderBy(({ row }) => row.rank)
         .limit(1)
         .select(({ row, child }) => ({
@@ -3123,8 +3157,11 @@ describe(`ordered source work oracle`, () => {
       query: (q) =>
         q
           .from({ root: rootCollection })
-          .join(leftJoin({ child: childCollection }, ({ root, child }) =>
-            eq(root.id, child.rootId)))
+          .join(
+            leftJoin({ child: childCollection }, ({ root, child }) =>
+              eq(root.id, child.rootId),
+            ),
+          )
           .where(({ child }) => not(isUndefined(child.rootId)))
           .orderBy(({ root }) => root.rank)
           .limit(1)
@@ -3223,8 +3260,11 @@ describe(`ordered source work oracle`, () => {
         query: (q) =>
           q
             .from({ root: rootCollection })
-            .join(leftJoin({ child: childCollection }, ({ root, child }) =>
-              eq(root.id, child.rootId)))
+            .join(
+              leftJoin({ child: childCollection }, ({ root, child }) =>
+                eq(root.id, child.rootId),
+              ),
+            )
             .where(({ child }) => isUndefined(child.rootId))
             .orderBy(({ root }) => root.rank)
             .limit(1)
@@ -3396,8 +3436,11 @@ describe(`ordered source work oracle`, () => {
       query: (q) =>
         q
           .from({ root: rootCollection })
-          .join(leftJoin({ child: childCollection }, ({ root, child }) =>
-            eq(root.id, child.rootId)))
+          .join(
+            leftJoin({ child: childCollection }, ({ root, child }) =>
+              eq(root.id, child.rootId),
+            ),
+          )
           .where(({ child }) => isUndefined(child.rootId))
           .orderBy(({ root }) => root.rank)
           .limit(1)
@@ -4136,8 +4179,11 @@ describe(`ordered source work oracle`, () => {
       const query = (q: InitialQueryBuilder) =>
         q
           .from({ row: root })
-          .join(leftJoin({ marker: markerSource }, ({ row, marker }) =>
-            eq(row.id, marker.rowId)))
+          .join(
+            leftJoin({ marker: markerSource }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
+            ),
+          )
           .where(({ marker }) => isUndefined(marker.rowId))
           .orderBy(({ row }) => row.rank)
           .limit(2)
@@ -4248,8 +4294,11 @@ describe(`ordered source work oracle`, () => {
       query: (q) =>
         q
           .from({ row: root })
-          .join(leftJoin({ marker: joined }, ({ row, marker }) =>
-            eq(row.id, marker.rowId)))
+          .join(
+            leftJoin({ marker: joined }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
+            ),
+          )
           .where(({ marker }) => isUndefined(marker.rowId))
           .orderBy(({ row }) => row.rank)
           .limit(1)
@@ -5483,15 +5532,21 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   ) => {
     const joinedRows = q
       .from({ row: source })
-      .join(leftJoin({ marker: markers }, ({ row, marker }) =>
-        eq(row.link, marker.rowId)))
+      .join(
+        leftJoin({ marker: markers }, ({ row, marker }) =>
+          eq(row.link, marker.rowId),
+        ),
+      )
     const ordered = (
       fullJoin
         ? // Same aliases as the LEFT join; only the join kind differs.
           (q
             .from({ row: source })
-            .join(fullJoinOperator({ marker: markers }, ({ row, marker }) =>
-              eq(row.link, marker.rowId))) as unknown as typeof joinedRows)
+            .join(
+              fullJoinOperator({ marker: markers }, ({ row, marker }) =>
+                eq(row.link, marker.rowId),
+              ),
+            ) as unknown as typeof joinedRows)
         : joined
           ? admitsWhenMatched
             ? joinedRows.where(({ marker }) => not(isUndefined(marker.rowId)))
@@ -6546,8 +6601,11 @@ async function checkOptimisticWindow(
       .where(({ row }) => eq(row.eligible, true))
     const left = q
       .from({ row: source })
-      .join(leftJoin({ marker: markers }, ({ row, marker }) =>
-        eq(row.link, marker.rowId)))
+      .join(
+        leftJoin({ marker: markers }, ({ row, marker }) =>
+          eq(row.link, marker.rowId),
+        ),
+      )
     const filtered =
       shape === `source`
         ? direct

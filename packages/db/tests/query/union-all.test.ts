@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { caseWhen, coalesce, concat, count,
+import {
+  caseWhen,
+  coalesce,
+  concat,
+  count,
   createLiveQueryCollection,
   eq,
   fullJoin,
@@ -7,7 +11,8 @@ import { caseWhen, coalesce, concat, count,
   innerJoin,
   leftJoin,
   rightJoin,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
@@ -370,8 +375,9 @@ describe(`unionAll`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(innerJoin({ user: users },
-          ({ userId, user }) => eq(userId, user.id)))
+        .join(
+          innerJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,
@@ -424,8 +430,9 @@ describe(`unionAll`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(innerJoin({ user: users },
-          ({ userId, user }) => eq(userId, user.id)))
+        .join(
+          innerJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,
@@ -911,8 +918,11 @@ describe(`unionAll`, () => {
     const collection = createLiveQueryCollection((q) => {
       const visibleMessagesWithUsers = q
         .from({ message: messages })
-        .join(innerJoin({ user: users },
-          ({ message, user }) => eq(message.userId, user.id)))
+        .join(
+          innerJoin({ user: users }, ({ message, user }) =>
+            eq(message.userId, user.id),
+          ),
+        )
         .where(({ message }) => eq(message.kind, `visible`))
         .select(({ message, user }) => ({
           id: message.id,
@@ -964,9 +974,11 @@ describe(`unionAll`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(innerJoin({ user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id)))
+        .join(
+          innerJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        )
         .select(({ message, toolCall, user }) => ({
           messageId: message.id,
           toolCallId: toolCall.id,
@@ -998,8 +1010,11 @@ describe(`unionAll`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(leftJoin({ user: users }, ({ message, toolCall, user }) =>
-          eq(coalesce(message.userId, toolCall.userId), user.id)))
+        .join(
+          leftJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        )
         .select(({ message, toolCall, user }) => ({
           eventId: coalesce(message.id, toolCall.id),
           userName: user.name,
@@ -1033,8 +1048,11 @@ describe(`unionAll`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(rightJoin({ user: users }, ({ message, toolCall, user }) =>
-          eq(coalesce(message.userId, toolCall.userId), user.id)))
+        .join(
+          rightJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        )
         .orderBy(({ user }) => user.id),
     )
 
@@ -1072,8 +1090,11 @@ describe(`unionAll`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(fullJoin({ user: users }, ({ message, toolCall, user }) =>
-          eq(coalesce(message.userId, toolCall.userId), user.id)))
+        .join(
+          fullJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        )
         .orderBy(({ message, toolCall, user }) =>
           coalesce(message.timestamp, toolCall.timestamp, user.id),
         ),
@@ -1117,9 +1138,11 @@ describe(`unionAll`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(innerJoin({ user: users },
-          ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id)))
+        .join(
+          innerJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        )
         .select(({ message, toolCall, user }) => ({
           id: coalesce(message.id, toolCall.id),
           userName: user.name,
@@ -1160,8 +1183,11 @@ describe(`unionAll`, () => {
 
       return q
         .from({ user: users })
-        .join(leftJoin({ event: events }, ({ user, event }) =>
-          eq(user.id, event.userId)))
+        .join(
+          leftJoin({ event: events }, ({ user, event }) =>
+            eq(user.id, event.userId),
+          ),
+        )
         .select(({ user, event }) => ({
           userId: user.id,
           eventTimestamp: event.timestamp,
@@ -1212,8 +1238,11 @@ describe(`unionAll`, () => {
 
       return q
         .from({ user: users })
-        .join(leftJoin({ event: events }, ({ user, event }) =>
-          eq(user.name, event.label)))
+        .join(
+          leftJoin({ event: events }, ({ user, event }) =>
+            eq(user.name, event.label),
+          ),
+        )
         .select(({ user, event }) => ({
           userId: user.id,
           label: event.label,
@@ -1270,8 +1299,11 @@ describe(`unionAll`, () => {
 
       return q
         .from({ user: users })
-        .join(leftJoin({ event: events }, ({ user, event }) =>
-          eq(user.id, event.userId)))
+        .join(
+          leftJoin({ event: events }, ({ user, event }) =>
+            eq(user.id, event.userId),
+          ),
+        )
         .select(({ user, event }) => ({
           userId: user.id,
           eventTimestamp: event.timestamp,
@@ -1376,8 +1408,12 @@ describe(`unionAll`, () => {
       createLiveQueryCollection((q) =>
         q
           .from({ message: messages })
-          .join(leftJoin({ toolCall: toolCalls, user: users }, ({ message, toolCall }) =>
-            eq(message.id, toolCall.id))),
+          .join(
+            leftJoin(
+              { toolCall: toolCalls, user: users },
+              ({ message, toolCall }) => eq(message.id, toolCall.id),
+            ),
+          ),
       ),
     ).toThrow(OnlyOneSourceAllowedError)
   })

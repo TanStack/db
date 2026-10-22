@@ -1,9 +1,11 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   leftJoin,
   materialize,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 /**
  * # Which types represent virtual-field-bearing rows?
  *
@@ -226,8 +228,11 @@ describe(`virtual row field type boundary`, () => {
         unmatchedRows: toArray(
           q
             .from({ child: rows })
-            .join(leftJoin({ missing: rows }, ({ child, missing }) =>
-              eq(child.id, missing.id)))
+            .join(
+              leftJoin({ missing: rows }, ({ child, missing }) =>
+                eq(child.id, missing.id),
+              ),
+            )
             .select(({ missing }) => missing),
         ),
         objects: toArray(

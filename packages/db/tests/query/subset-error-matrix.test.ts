@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createEffect, createLiveQueryCollection, eq, leftJoin  } from '../../src/index.js'
+import {
+  createEffect,
+  createLiveQueryCollection,
+  eq,
+  leftJoin,
+} from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
@@ -147,8 +152,11 @@ function startEffect(
       query: (q) =>
         q
           .from({ item: primary })
-          .join(leftJoin({ child }, ({ item, child: childRow }) =>
-            eq(item.id, childRow.parentId))),
+          .join(
+            leftJoin({ child }, ({ item, child: childRow }) =>
+              eq(item.id, childRow.parentId),
+            ),
+          ),
       ...callbacks,
     })
   }
@@ -175,8 +183,11 @@ function startLive(
     return createLiveQueryCollection((q) =>
       q
         .from({ item: primary })
-        .join(leftJoin({ child }, ({ item, child: childRow }) =>
-          eq(item.id, childRow.parentId))),
+        .join(
+          leftJoin({ child }, ({ item, child: childRow }) =>
+            eq(item.id, childRow.parentId),
+          ),
+        ),
     )
   }
   return createLiveQueryCollection((q) => q.from({ item: primary }))
@@ -429,8 +440,11 @@ describe(`loadSubset failure matrix`, () => {
               query: (q) =>
                 q
                   .from({ item: parent })
-                  .join(leftJoin({ child }, ({ item, child: childRow }) =>
-                    eq(item.id, childRow.parentId))),
+                  .join(
+                    leftJoin({ child }, ({ item, child: childRow }) =>
+                      eq(item.id, childRow.parentId),
+                    ),
+                  ),
               onBatch: () => {},
               onSourceError: (error) => sourceErrors.push(error),
             })
@@ -440,8 +454,11 @@ describe(`loadSubset failure matrix`, () => {
           ? createLiveQueryCollection((q) =>
               q
                 .from({ item: parent })
-                .join(leftJoin({ child }, ({ item, child: childRow }) =>
-                  eq(item.id, childRow.parentId))),
+                .join(
+                  leftJoin({ child }, ({ item, child: childRow }) =>
+                    eq(item.id, childRow.parentId),
+                  ),
+                ),
             )
           : undefined
 
@@ -505,8 +522,11 @@ describe(`loadSubset failure matrix`, () => {
       const live = createLiveQueryCollection((q) =>
         q
           .from({ item: parent })
-          .join(leftJoin({ child }, ({ item, child: childRow }) =>
-            eq(item.id, childRow.parentId))),
+          .join(
+            leftJoin({ child }, ({ item, child: childRow }) =>
+              eq(item.id, childRow.parentId),
+            ),
+          ),
       )
       const originalQueueMicrotask = globalThis.queueMicrotask
       const queuedMicrotasks: Array<() => void> = []

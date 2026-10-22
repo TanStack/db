@@ -11,6 +11,7 @@ import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
 import type { processJoins } from './compiler/joins.js'
+import type { Grouping } from './compiler/grouping.js'
 import type { applyOptimizations } from './optimizer-joins.js'
 
 export interface QueryIR {
@@ -19,6 +20,8 @@ export interface QueryIR {
   join?: Join
   where?: Array<Where>
   groupBy?: GroupBy
+  // groupKeys supplies the grouping compiler when no aggregate does.
+  grouping?: Grouping
   having?: Array<Having>
   orderBy?: OrderBy
   limit?: Limit
@@ -269,6 +272,8 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   constructor(
     public name: string, // such as count, avg, sum, min, max, etc.
     public args: Array<BasicExpression>,
+    // The aggregate function brings the grouping compiler with it.
+    public grouping: Grouping,
   ) {
     super()
   }

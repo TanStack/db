@@ -43,6 +43,7 @@ import {
 } from './functions.js'
 import type { CollectionResolver } from './clone-query.js'
 import type { JoinOperator, JoinType } from './join-operators.js'
+import type { GroupKeys } from './group-keys.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
@@ -687,7 +688,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *   }))
    * ```
    */
-  groupBy(callback: GroupByCallback<TContext>): QueryBuilder<TContext> {
+  groupBy(
+    keys: GroupByCallback<TContext> | GroupKeys<TContext>,
+  ): QueryBuilder<TContext> {
+    const callback = typeof keys === `function` ? keys : keys.callback
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(
       aliases,
@@ -704,6 +708,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     return this._clone({
       ...this.query,
       groupBy: [...existingGroupBy, ...newExpressions],
+      ...(typeof keys === `function` ? {} : { grouping: keys.grouping }),
     }) as any
   }
 

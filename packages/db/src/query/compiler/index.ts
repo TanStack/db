@@ -23,6 +23,7 @@ import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
   FnSelectWithGroupByError,
+  GroupingOperatorRequiredError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
   NonAggregateExpressionNotInGroupByError,
@@ -67,7 +68,8 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import { registerLazyDemandPlan } from './lazy-demand.js'
-import { containsAggregate, processGroupBy } from './group-by.js'
+import { containsAggregate } from './group-by.js'
+import { findAggregate } from './find-aggregate.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
@@ -1108,8 +1110,17 @@ function compileQueryInternal(
       unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
     )
   }
+  // An aggregate value or groupKeys brings the grouping compiler.
+  const grouping =
+    query.grouping ??
+    findAggregate([
+      query.select,
+      query.having,
+      query.orderBy?.map((clause) => clause.expression),
+    ])?.grouping
   if (query.groupBy && query.groupBy.length > 0) {
-    pipeline = processGroupBy(
+    if (!grouping) throw new GroupingOperatorRequiredError()
+    pipeline = grouping.processGroupBy(
       pipeline,
       query.groupBy,
       valueIdentity,
@@ -1123,7 +1134,7 @@ function compileQueryInternal(
     )
   } else if (selectHasAggregates) {
     // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
-    pipeline = processGroupBy(
+    pipeline = grouping!.processGroupBy(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,

@@ -1,19 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { createCollection } from '../../src/collection/index.js'
-import {
-  add,
+import { add,
   caseWhen,
   coalesce,
   count,
   createLiveQueryCollection,
   eq,
+  groupKeys,
   inArray,
   max,
   sum,
   toArray,
-  upper,
-} from '../../src/query/index.js'
+  upper } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -614,7 +613,9 @@ async function runHistory(
     alias === undefined ? refs : refs[alias]
   const group = (query: any, alias: string | undefined) =>
     grouped
-      ? query.groupBy((refs: any) => keyExpression(rowOf(refs, alias)))
+      ? query.groupBy(
+          groupKeys((refs: any) => keyExpression(rowOf(refs, alias))),
+        )
       : query
   const having = (
     s: Shape,
@@ -905,7 +906,7 @@ describe(`aggregate select shapes`, () => {
       const query = createLiveQueryCollection((q) =>
         q
           .from({ c: source })
-          .groupBy(({ c }) => key(c))
+          .groupBy(groupKeys(({ c }) => key(c)))
           .select(({ c }) => ({ g: key(c), n: count(c.id) })),
       )
       await query.preload()

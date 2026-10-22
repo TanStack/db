@@ -1,11 +1,15 @@
 import { fc } from '@fast-check/vitest'
-import { and, createLiveQueryCollection, eq ,
+import {
+  and,
+  createLiveQueryCollection,
+  eq,
   innerJoin,
   joinOf,
   leftJoin,
   materialize,
   not,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -613,8 +617,11 @@ export function createScopedQuery(
           branch(n.activeBranch!, true),
           branch(n.inactiveBranch!, false),
         )
-        .join(innerJoin({ [n.anchor!]: sources.parts.collection }, (c: Context) =>
-          eq(c.id, c[n.anchor!].id)))
+        .join(
+          innerJoin({ [n.anchor!]: sources.parts.collection }, (c: Context) =>
+            eq(c.id, c[n.anchor!].id),
+          ),
+        )
         .select((c: Context) => ({
           id: c.id,
           active: c.active,
@@ -645,8 +652,11 @@ export function createScopedQuery(
           [n.wrapped!]: q.from({ [n.wrapped!]: sources.parts.collection }),
         } as any) as any
       )
-        .join(joinOf(shape.wrapperJoin, { [n.joinSub!]: clientOne },
-          (c: Context) => eq(c[n.joinSub!].partId, c[n.wrapped!].id)))
+        .join(
+          joinOf(shape.wrapperJoin, { [n.joinSub!]: clientOne }, (c: Context) =>
+            eq(c[n.joinSub!].partId, c[n.wrapped!].id),
+          ),
+        )
         .select((c: Context) => ({
           id: c[n.wrapped!].id,
           active: c[n.wrapped!].active,
@@ -657,12 +667,20 @@ export function createScopedQuery(
     const { subquery, include } = shape
     let sub: any = q.from({ [n.sub!]: sources.parts.collection })
     if (subquery.joins !== `none`) {
-      sub = sub.join(joinOf(subquery.refsJoin, { [n.joined!]: sources.refs.collection },
-        (c: Context) => eq(c[n.joined!].partId, c[n.sub!].id)))
+      sub = sub.join(
+        joinOf(
+          subquery.refsJoin,
+          { [n.joined!]: sources.refs.collection },
+          (c: Context) => eq(c[n.joined!].partId, c[n.sub!].id),
+        ),
+      )
     }
     if (subquery.joins === `refsThenNotes`) {
-      sub = sub.join(leftJoin({ [n.noted!]: sources.notes.collection },
-        (c: Context) => eq(c[n.noted!].partId, c[n.sub!].id)))
+      sub = sub.join(
+        leftJoin({ [n.noted!]: sources.notes.collection }, (c: Context) =>
+          eq(c[n.noted!].partId, c[n.sub!].id),
+        ),
+      )
     }
     const predicates = subquery.predicates.map((predicate) =>
       predicate === `subActive`
@@ -718,8 +736,12 @@ export function createScopedQuery(
               branch(n.include!, clientOne),
               branch(n.includeOther!, (member) => not(clientOne(member))),
             )
-            .join(innerJoin({ [n.includeAnchor!]: includeCollection },
-              (cc: Context) => eq(cc.memberId, cc[n.includeAnchor!].id)))
+            .join(
+              innerJoin(
+                { [n.includeAnchor!]: includeCollection },
+                (cc: Context) => eq(cc.memberId, cc[n.includeAnchor!].id),
+              ),
+            )
             .where((cc: Context) => eq(cc[n.includeAnchor!].partId, outer.id))
           if (include.clientFilter) {
             child = child.where((cc: Context) =>
@@ -748,8 +770,12 @@ export function createScopedQuery(
                 })
               : q.from({ [member]: includeCollection })
           if (include.body === `joined`) {
-            child = child.join(innerJoin({ [n.includeJoin!]: sources.parts.collection },
-              (cc: Context) => eq(cc[n.includeJoin!].id, cc[member].partId)))
+            child = child.join(
+              innerJoin(
+                { [n.includeJoin!]: sources.parts.collection },
+                (cc: Context) => eq(cc[n.includeJoin!].id, cc[member].partId),
+              ),
+            )
           }
           child = child.where((cc: Context) => eq(cc[member].partId, outer.id))
           if (include.clientFilter) {

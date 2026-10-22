@@ -20,7 +20,7 @@ import { hasVirtualPropPath } from '../../virtual-props.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
-import { replaceAggregatesByRefs } from './group-by.js'
+import { findAggregate } from './find-aggregate.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
 import type { CompiledSingleRowExpression } from './evaluators.js'
@@ -132,12 +132,16 @@ export function processOrderBy(
   groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   const compiledOrderBy = orderByClause.map((clause) => {
-    // Aggregate references read the SELECT result under $selected.
-    const clauseWithoutAggregates = replaceAggregatesByRefs(
-      clause.expression,
-      selectClause,
-      `$selected`,
-    )
+    // Aggregate references read the SELECT result under $selected. The
+    // aggregate brings the code that rewrites them.
+    const aggregate = findAggregate(clause.expression)
+    const clauseWithoutAggregates = aggregate
+      ? aggregate.grouping.replaceAggregatesByRefs(
+          clause.expression,
+          selectClause,
+          `$selected`,
+        )
+      : clause.expression
 
     return {
       compiledExpression: compileExpression(clauseWithoutAggregates),

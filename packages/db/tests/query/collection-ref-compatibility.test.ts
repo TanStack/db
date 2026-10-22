@@ -106,7 +106,9 @@ describe(`CollectionRef public shape`, () => {
         query: {
           from: ref(`root`),
           join: [
-            { compile: processJoins, optimize: applyOptimizations,
+            {
+              compile: processJoins,
+              optimize: applyOptimizations,
               from: ref(`joined`),
               type: `inner`,
               on: new IR.Func(`eq`, [

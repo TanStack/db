@@ -1,11 +1,13 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   leftJoin,
   materialize,
   queryOnce,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -2984,7 +2986,9 @@ function laggingSourceQuery(
       }))
     return q
       .from({ user: users! })
-      .join(leftJoin({ post: posts }, ({ user, post }) => eq(user.id, post.userId)))
+      .join(
+        leftJoin({ post: posts }, ({ user, post }) => eq(user.id, post.userId)),
+      )
       .select(({ user, post }) => ({ id: user.id, postId: post.id }))
   }
 }

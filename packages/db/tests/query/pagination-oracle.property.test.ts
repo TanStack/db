@@ -1,6 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
-import { BTreeIndex, innerJoin, leftJoin  } from '../../src/index.js'
+import { BTreeIndex, innerJoin, leftJoin } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
@@ -3006,8 +3006,11 @@ describe(`pagination recomputation oracle`, () => {
     const live = createLiveQueryCollection((query) =>
       query
         .from({ parent: parentSource })
-        .join(innerJoin({ child: childSource }, ({ parent, child }) =>
-          eq(parent.groupId, child.groupId)))
+        .join(
+          innerJoin({ child: childSource }, ({ parent, child }) =>
+            eq(parent.groupId, child.groupId),
+          ),
+        )
         .orderBy(({ parent }) => parent.rank, `asc`)
         .orderBy(({ parent }) => parent.id, `asc`)
         .limit(2)
@@ -3054,8 +3057,11 @@ describe(`pagination recomputation oracle`, () => {
     const live = createLiveQueryCollection((query) =>
       query
         .from({ parent: parentSource })
-        .join(innerJoin({ child: childSource }, ({ parent, child }) =>
-          eq(parent.groupId, child.groupId)))
+        .join(
+          innerJoin({ child: childSource }, ({ parent, child }) =>
+            eq(parent.groupId, child.groupId),
+          ),
+        )
         .orderBy(({ parent }) => parent.rank, `asc`)
         .orderBy(({ parent }) => parent.id, `asc`)
         .limit(2)
@@ -3102,8 +3108,11 @@ describe(`pagination recomputation oracle`, () => {
     const live = createLiveQueryCollection((query) =>
       query
         .from({ parent: parentSource })
-        .join(leftJoin({ child: childSource }, ({ parent, child }) =>
-          eq(parent.childId, child.id)))
+        .join(
+          leftJoin({ child: childSource }, ({ parent, child }) =>
+            eq(parent.childId, child.id),
+          ),
+        )
         .orderBy(({ parent }) => parent.sourceRank, `asc`)
         .orderBy(({ child }) => child.score, `asc`)
         .orderBy(({ parent }) => parent.id, `asc`)
@@ -6542,8 +6551,11 @@ describe(`pagination recomputation oracle`, () => {
     const live = createLiveQueryCollection((query) =>
       query
         .from({ scope })
-        .join(innerJoin({ row: source }, ({ scope: outer, row }) =>
-          eq(outer.groupId, row.groupId)))
+        .join(
+          innerJoin({ row: source }, ({ scope: outer, row }) =>
+            eq(outer.groupId, row.groupId),
+          ),
+        )
         .where(({ row }) => eq(row.keep, true))
         .orderBy(({ row }) => row.label, {
           direction: `asc`,

@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   leftJoin,
   materialize,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 /**
  * # Which published values carry virtual row fields?
  *
@@ -281,8 +283,11 @@ describe(`virtual row field runtime boundary`, () => {
           q
             .from({ child: rows })
             .where(({ child }) => eq(child.id, row.id))
-            .join(leftJoin({ missing: missingRows }, ({ child, missing }) =>
-              eq(child.id, missing.id)))
+            .join(
+              leftJoin({ missing: missingRows }, ({ child, missing }) =>
+                eq(child.id, missing.id),
+              ),
+            )
             .select(({ missing }) => missing),
         ),
         objects: toArray(

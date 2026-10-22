@@ -1,10 +1,12 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { caseWhen,
+import {
+  caseWhen,
   createLiveQueryCollection,
   eq,
   gt,
   leftJoin,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -289,8 +291,11 @@ describe(`caseWhen types`, () => {
     const query = createLiveQueryCollection((q) =>
       q
         .from({ user: users })
-        .join(leftJoin({ post: posts },
-          ({ user, post }) => eq(user.id, post.userId)))
+        .join(
+          leftJoin({ post: posts }, ({ user, post }) =>
+            eq(user.id, post.userId),
+          ),
+        )
         .select(({ user, post }) => ({
           id: user.id,
           postStatus: caseWhen(post, `has-post`, `no-post`),

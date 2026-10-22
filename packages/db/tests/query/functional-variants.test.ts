@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import { caseWhen,
+import {
+  caseWhen,
   count,
   createLiveQueryCollection,
   eq,
   gt,
   leftJoin,
   materialize,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
@@ -191,8 +193,11 @@ describe(`Functional Variants Query`, () => {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .join(leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id)))
+            .join(
+              leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+                eq(user.department_id, dept.id),
+              ),
+            )
             .fn.select((row) => ({
               employeeInfo: `${row.user.name} works in ${row.dept?.name || `Unknown`}`,
               isHighEarner: row.user.salary > 70000,
@@ -848,8 +853,11 @@ describe(`Functional Variants Query`, () => {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .join(leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id)))
+            .join(
+              leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+                eq(user.department_id, dept.id),
+              ),
+            )
             .fn.where((row) => row.user.active)
             .fn.where((row) => row.user.salary > 60000)
             .fn.select((row) => ({

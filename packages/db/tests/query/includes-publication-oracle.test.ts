@@ -1,10 +1,12 @@
 import { setImmediate as yieldToRunner } from 'node:timers/promises'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   innerJoin,
-  materialize } from '../../src/query/index.js'
+  materialize,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -133,9 +135,13 @@ function createLayeredQuery(
       const parentRows =
         q1Shape === `direct`
           ? source
-          : source.join(innerJoin({ metadata: metadata.collection },
-              ({ item, metadata: rowMetadata }) =>
-                eq(item.id, rowMetadata.parentId)))
+          : source.join(
+              innerJoin(
+                { metadata: metadata.collection },
+                ({ item, metadata: rowMetadata }) =>
+                  eq(item.id, rowMetadata.parentId),
+              ),
+            )
 
       return parentRows.select(({ item }) => ({
         item,

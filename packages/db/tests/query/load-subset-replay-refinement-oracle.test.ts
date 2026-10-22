@@ -1,11 +1,14 @@
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
-import { createLiveQueryCollection, eq,
+import {
+  createLiveQueryCollection,
+  eq,
   innerJoin,
   isUndefined,
   leftJoin,
   not,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -924,9 +927,13 @@ describe(`loadSubset replay refinement`, () => {
     const live = createLiveQueryCollection((q) =>
       q
         .from({ primary: primary.collection })
-        .join(innerJoin({ secondary: secondary.collection },
-          ({ primary: left, secondary: right }) =>
-            eq(left.joinKey, right.joinKey)))
+        .join(
+          innerJoin(
+            { secondary: secondary.collection },
+            ({ primary: left, secondary: right }) =>
+              eq(left.joinKey, right.joinKey),
+          ),
+        )
         .orderBy(({ primary: row }) => row.version)
         .limit(1)
         .select(({ primary: left, secondary: right }) => ({
@@ -1585,12 +1592,18 @@ async function checkOrderedReplay(
       const from = q.from({ row: source })
       const filtered =
         scenario.joined === `inner`
-          ? from.join(innerJoin({ marker: markers }, ({ row, marker }) =>
-              eq(row.id, marker.rowId)))
+          ? from.join(
+              innerJoin({ marker: markers }, ({ row, marker }) =>
+                eq(row.id, marker.rowId),
+              ),
+            )
           : scenario.joined
             ? from
-                .join(leftJoin({ marker: markers }, ({ row, marker }) =>
-                  eq(row.id, marker.rowId)))
+                .join(
+                  leftJoin({ marker: markers }, ({ row, marker }) =>
+                    eq(row.id, marker.rowId),
+                  ),
+                )
                 .where(({ marker }) =>
                   scenario.joined === `none`
                     ? isUndefined(marker.rowId)

@@ -1,9 +1,11 @@
 import { describe, expect, test, vi } from 'vitest'
-import { Query,
+import {
+  Query,
   createLiveQueryCollection,
   eq,
   joinOf,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
@@ -152,8 +154,13 @@ describe(`direct outer-join route work`, () => {
                 rows: toArray(
                   new Query()
                     .from({ main: mains.collection })
-                    .join(joinOf(kind, { anchor: anchors.collection },
-                      ({ main, anchor }) => eq(main.anchorId, anchor.id)))
+                    .join(
+                      joinOf(
+                        kind,
+                        { anchor: anchors.collection },
+                        ({ main, anchor }) => eq(main.anchorId, anchor.id),
+                      ),
+                    )
                     .where(({ main }) => eq(main.parentId, parent.id))
                     .select(({ main, anchor }) => ({
                       mainId: main.id,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, innerJoin  } from '../../src/query/index.js'
+import { createLiveQueryCollection, innerJoin } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { add, eq, upper } from '../../src/query/builder/functions.js'

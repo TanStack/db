@@ -42,7 +42,7 @@
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq, joinOf  } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, joinOf } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
   oraclePropertyOptions,

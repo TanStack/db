@@ -287,8 +287,6 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   }
 }
 
-const { sum, count, avg, min, max } = groupByOperators
-
 /**
  * Processes the GROUP BY clause with optional HAVING and SELECT
  * Works with the new $selected structure from early SELECT processing
@@ -731,6 +729,10 @@ function getAggregateFunction(aggExpr: Aggregate) {
   const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     return compiledExpr(namespacedRow)
   }
+
+  // Read the operators here: a top-level destructure counts as a side
+  // effect and would keep them in bundles that never aggregate.
+  const { sum, count, avg, min, max } = groupByOperators
 
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {

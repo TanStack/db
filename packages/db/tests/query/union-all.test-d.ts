@@ -1,10 +1,15 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { coalesce, count, createLiveQueryCollection, eq,
+import {
+  coalesce,
+  count,
+  createLiveQueryCollection,
+  eq,
   fullJoin,
   gt,
   innerJoin,
   leftJoin,
-  rightJoin } from '../../src/query/index.js'
+  rightJoin,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -331,8 +336,9 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(innerJoin({ user: users },
-          ({ userId, user }) => eq(userId, user.id)))
+        .join(
+          innerJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,
@@ -366,8 +372,11 @@ describe(`unionAll types`, () => {
     const collection = createLiveQueryCollection((q) => {
       const messagesWithUsers = q
         .from({ message: messages })
-        .join(innerJoin({ user: users },
-          ({ message, user }) => eq(message.userId, user.id)))
+        .join(
+          innerJoin({ user: users }, ({ message, user }) =>
+            eq(message.userId, user.id),
+          ),
+        )
       const toolCallRows = q.from({ toolCall: toolCalls })
 
       return q.unionAll(messagesWithUsers, toolCallRows)
@@ -394,8 +403,11 @@ describe(`unionAll types`, () => {
     const collection = createLiveQueryCollection((q) => {
       const messagesWithUsers = q
         .from({ message: messages })
-        .join(innerJoin({ user: users },
-          ({ message, user }) => eq(message.userId, user.id)))
+        .join(
+          innerJoin({ user: users }, ({ message, user }) =>
+            eq(message.userId, user.id),
+          ),
+        )
         .select(({ message, user }) => ({
           id: message.id,
           timestamp: message.timestamp,
@@ -439,8 +451,11 @@ describe(`unionAll types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(leftJoin({ user: users }, ({ message, toolCall, user }) =>
-          eq(coalesce(message.userId, toolCall.userId), user.id))),
+        .join(
+          leftJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        ),
     )
 
     expectTypeOf(collection.toArray).toMatchTypeOf<
@@ -472,8 +487,11 @@ describe(`unionAll types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(rightJoin({ user: users }, ({ message, toolCall, user }) =>
-          eq(coalesce(message.userId, toolCall.userId), user.id))),
+        .join(
+          rightJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        ),
     )
 
     expectTypeOf(collection.toArray).toMatchTypeOf<
@@ -498,8 +516,11 @@ describe(`unionAll types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(fullJoin({ user: users }, ({ message, toolCall, user }) =>
-          eq(coalesce(message.userId, toolCall.userId), user.id))),
+        .join(
+          fullJoin({ user: users }, ({ message, toolCall, user }) =>
+            eq(coalesce(message.userId, toolCall.userId), user.id),
+          ),
+        ),
     )
 
     expectTypeOf(collection.toArray).toMatchTypeOf<
@@ -548,7 +569,9 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(rightJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)))
+        .join(
+          rightJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,
@@ -590,7 +613,9 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(fullJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)))
+        .join(
+          fullJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
+        )
         .select(({ kind, id, user }) => ({
           kind,
           id,
