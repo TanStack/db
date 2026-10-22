@@ -431,8 +431,9 @@
   "recordOutcome": "gP",
   "replacements": "dp",
   "onLoaded": "gR",
-  "reloadReplay": "gU",
   "publishedHealth": "gK",
   "reportHealth": "gT",
-  "healthTree": "gV"
+  "healthTree": "gV",
+  "reloadReplaying": "gU",
+  "demandsToReplay": "gY"
 }

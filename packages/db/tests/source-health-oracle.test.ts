@@ -1359,6 +1359,7 @@ async function withDeadline(work: Promise<void>): Promise<void> {
 async function runHistory(
   shape: Shape,
   steps: ReadonlyArray<Step>,
+  directSubscribers = true,
 ): Promise<void> {
   const sources = { A: createSource(`A`), B: createSource(`B`) }
   const { query, inner, start, size } = buildQuery(
@@ -1404,25 +1405,31 @@ async function runHistory(
   // after one fails. What a subscription that survives cleanup sees belongs
   // to the subscription lifecycle oracle, so the check stops at cleanup
   // start and a restart subscribes again.
+  // A generated history may leave them out, so the query is then a source's
+  // only subscriber.
   const mirrors = { A: new Map<number, number>(), B: new Map<number, number>() }
-  const mirrored = { A: true, B: true }
-  let mirrorSubscriptions: Array<{ unsubscribe: () => void }> = []
+  const mirrored = { A: false, B: false }
+  const mirrorSubscriptions: Partial<
+    Record<SourceName, { unsubscribe: () => void }>
+  > = {}
+  const mirrorSource = (name: SourceName) => {
+    mirrorSubscriptions[name]?.unsubscribe()
+    mirrors[name] = new Map()
+    mirrored[name] = true
+    mirrorSubscriptions[name] = sources[name].collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          const key = change.key
+          if (change.type === `delete`) mirrors[name].delete(key)
+          else mirrors[name].set(key, (change.value as Row).tag ?? 0)
+        }
+      },
+      { includeInitialState: true },
+    )
+  }
   const mirror = () => {
-    for (const subscription of mirrorSubscriptions) subscription.unsubscribe()
-    mirrorSubscriptions = shapeSources[shape].map((name) => {
-      mirrors[name] = new Map()
-      mirrored[name] = true
-      return sources[name].collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            const key = change.key
-            if (change.type === `delete`) mirrors[name].delete(key)
-            else mirrors[name].set(key, (change.value as Row).tag ?? 0)
-          }
-        },
-        { includeInitialState: true },
-      )
-    })
+    if (!directSubscribers) return
+    for (const name of shapeSources[shape]) mirrorSource(name)
   }
   mirror()
   let listenersBeforeEffect = 0
@@ -1646,6 +1653,9 @@ async function runHistory(
           sortedTags(source.rows),
         )
         if (source.cleaning || source.retired) mirrored[name] = false
+        // A source that started again after cleanup, by any path, gets a
+        // fresh direct subscriber.
+        else if (directSubscribers && !mirrored[name]) mirrorSource(name)
         if (mirrored[name])
           expect(
             sortedTags(mirrors[name]),
@@ -1732,7 +1742,8 @@ async function runHistory(
   } finally {
     console.error = consoleError
     stop()
-    for (const subscription of mirrorSubscriptions) subscription.unsubscribe()
+    for (const subscription of Object.values(mirrorSubscriptions))
+      subscription.unsubscribe()
     await settleCleanups()
     await effect?.dispose()
     await query.cleanup()
@@ -2147,11 +2158,16 @@ describe(`source failure and health oracle`, () => {
     },
   )
   fcTest.prop(
-    [fc.constantFrom(...shapes), fc.array(stepArb, { maxLength: 12 })],
+    [
+      fc.constantFrom(...shapes),
+      fc.array(stepArb, { maxLength: 12 }),
+      fc.boolean(),
+    ],
     oraclePropertyOptions(60, `source-health.history`),
   )(
     `generated histories refine the model`,
-    (shape, steps) => withDeadline(runHistory(shape, steps)),
+    (shape, steps, directSubscribers) =>
+      withDeadline(runHistory(shape, steps, directSubscribers)),
     120_000,
   )
 })
@@ -3999,6 +4015,7 @@ type LazyStep =
         | `settle-last-fail`
         | `throw-next`
         | `reload`
+        | `truncate`
         | `report`
         | `fail`
         | `crash`
@@ -4006,11 +4023,15 @@ type LazyStep =
 
 // One load the query requested, as the adapter saw it.
 // `fromReplay`: the replay itself made the request, not a demand change.
+// `superseded`: a newer truncate replaced the replay attempt that made it. It
+// still holds the replay's completion, decides nothing, and its rows apply
+// if it succeeds.
 type LazyLoad = {
   serial: number
   keys: Set<number>
   replay: boolean
-  fromReplay?: boolean
+  fromReplay: boolean
+  superseded: boolean
 }
 
 type LazyModel = {
@@ -4054,12 +4075,40 @@ function settleLazyLoad(
 ): void {
   model.pending = model.pending.filter((entry) => entry !== load)
   if (model.gate === `crashed`) return
+  if (load.superseded) {
+    if (succeeded) for (const key of load.keys) model.loaded.add(key)
+    settleReplay(model)
+    return
+  }
   const latestFor = (key: number) => latestLoadFor(model, key) === load.serial
+  // A demand change's replacement that applies for every needed key releases
+  // the older loads it replaces: they no longer hold the first load.
+  if (
+    succeeded &&
+    !load.fromReplay &&
+    [...model.parents].every((key) => load.keys.has(key))
+  )
+    model.retiredInFlight.clear()
+  if (succeeded && !load.fromReplay)
+    // A demand change's load that covers a superseded load's keys replaces
+    // that coverage. A newer replay still waits for the older work.
+    model.pending = model.pending.filter(
+      (entry) =>
+        !entry.superseded ||
+        ![...entry.keys]
+          .filter((key) => model.parents.has(key))
+          .every((key) => load.keys.has(key)),
+    )
   if (succeeded) {
     for (const key of load.keys) {
       model.loaded.add(key)
-      // A key loaded: its failure clears, unless a newer load of it failed.
-      if ((model.failed.get(key) ?? 0) < load.serial) model.failed.delete(key)
+      // A key loaded: its failure clears, unless a newer load of it failed
+      // and this load no longer holds the key (the query aborted it).
+      if (
+        (model.failed.get(key) ?? 0) < load.serial ||
+        model.requested.has(load.serial)
+      )
+        model.failed.delete(key)
     }
     if (load.replay) model.replayFailed = false
     settleReplay(model)
@@ -4095,7 +4144,11 @@ function latestLoadFor(model: LazyModel, key: number): number | undefined {
 // key the query still needs then fails the query's first load, or shows a
 // request error after it.
 function settleReplay(model: LazyModel): void {
-  if (model.pending.some((entry) => entry.replay)) return
+  // A superseded load holds the replay only while the query needs its data.
+  const holds = (entry: LazyLoad) =>
+    entry.replay &&
+    (!entry.superseded || [...entry.keys].some((key) => model.parents.has(key)))
+  if (model.pending.some(holds)) return
   model.replayActive = false
   const failed = [...model.replayFailedKeys].some((key) =>
     model.parents.has(key),
@@ -4185,6 +4238,26 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       model.loaded = new Set()
       model.replayActive = true
       return
+    case `truncate`:
+      // The adapter replaces every row in the same sync run, as a
+      // must-refetch does. The truncate replay loads the demand again. A load
+      // started before it decides nothing: it may still hold the first load,
+      // and its rows apply if it succeeds. A failed replay's error stays
+      // until a later replay succeeds.
+      if (model.source.crashed || model.source.stopped) return
+      for (const load of model.pending) {
+        if (load.replay) load.superseded = true
+        else {
+          model.retiredInFlight.set(load.serial, load.keys)
+          model.obsolete.set(load.serial, load.keys)
+        }
+      }
+      model.replayFailedKeys = new Set()
+      model.pending = model.pending.filter((load) => load.superseded)
+      model.requested = new Map()
+      model.loaded = new Set()
+      model.replayActive = true
+      return
     case `report`:
       if (!model.source.stopped) model.source.failure = `source problem`
       return
@@ -4233,7 +4306,11 @@ async function runLazyHistory(
     serial: number
     deferred: ReturnType<typeof createDeferred<void>>
   }> = []
-  const requests: Array<LazyLoad & { thrown: boolean }> = []
+  const requests: Array<{
+    serial: number
+    keys: Set<number>
+    thrown: boolean
+  }> = []
   const aborted = new Set<number>()
   let serials = 0
   let throwNext = false
@@ -4241,6 +4318,9 @@ async function runLazyHistory(
   let childRuns = 0
   let parentParams!: SyncParams
   let childParams!: SyncParams
+  let forgetServed = () => {}
+  // Loads that threw, by serial.
+  const thrownLoads = new Set<number>()
   const parents = createCollection<Row, number>({
     id: `health-lazy-parents-${Math.random().toString(36).slice(2)}`,
     getKey: (row) => row.id,
@@ -4263,9 +4343,10 @@ async function runLazyHistory(
     sync: {
       sync: (params) => {
         childParams = params
-        // Children this sync run has served; a reload's run serves them
-        // again.
+        // Children this sync run has served; a reload's run, or a load
+        // after the run's own truncate, serves them again.
         const served = new Set<number>()
+        forgetServed = () => served.clear()
         if (childRuns++ > 0 && asyncChildReady)
           setTimeout(() => params.markReady(), 0)
         else params.markReady()
@@ -4275,7 +4356,7 @@ async function runLazyHistory(
             const serial = ++serials
             const thrown = throwNext
             throwNext = false
-            requests.push({ serial, keys, replay: false, thrown })
+            requests.push({ serial, keys, thrown })
             if (thrown) throw new Error(`child load ${++failures} threw`)
             const deferred = createDeferred<void>()
             loads.push({ serial, deferred })
@@ -4320,10 +4401,16 @@ async function runLazyHistory(
   const report = (replayMade = false) => {
     // An aborted request is obsolete: it decides nothing, but if its run
     // still serves it, its rows apply when it succeeds.
+    // A superseded replay load the adapter still serves stays: it holds its
+    // replay until it settles.
+    const retired = (load: LazyLoad) =>
+      aborted.has(load.serial) &&
+      !(load.superseded && loads.some((entry) => entry.serial === load.serial))
     const retireAborted = () => {
       for (const load of model.pending)
-        if (aborted.has(load.serial)) model.obsolete.set(load.serial, load.keys)
-      model.pending = model.pending.filter((load) => !aborted.has(load.serial))
+        if (retired(load) && !load.superseded)
+          model.obsolete.set(load.serial, load.keys)
+      model.pending = model.pending.filter((load) => !retired(load))
       for (const serial of aborted) model.requested.delete(serial)
     }
     // A demand change releases the loads it retires before it requests new
@@ -4341,22 +4428,17 @@ async function runLazyHistory(
         keys: request.keys,
         replay: model.replayActive && (replayMade || !request.thrown),
         fromReplay: replayMade,
+        superseded: false,
       }
       model.requested.set(load.serial, load.keys)
       model.pending.push(load)
       return { load, thrown: request.thrown }
     })
     for (const { load, thrown } of reported)
-      if (thrown) settleLazyLoad(model, load, false)
-    // A demand change that requests every needed key again replaces the
-    // older loads: readiness waits only for the replacement.
-    if (
-      !replayMade &&
-      reported.some(({ load }) =>
-        [...model.parents].every((key) => load.keys.has(key)),
-      )
-    )
-      model.retiredInFlight.clear()
+      if (thrown) {
+        thrownLoads.add(load.serial)
+        settleLazyLoad(model, load, false)
+      }
     retireAborted()
     aborted.clear()
     settleReplay(model)
@@ -4426,6 +4508,13 @@ async function runLazyHistory(
         throwNext = true
       } else if (step.kind === `reload`) {
         void children.reload().catch(() => undefined)
+      } else if (step.kind === `truncate`) {
+        if (children.status !== `crashed` && !model.source.stopped) {
+          childParams.begin()
+          childParams.truncate()
+          childParams.commit()
+          forgetServed()
+        }
       } else if (step.kind === `crash`) {
         children._lifecycle.crash(new Error(`children crashed`))
       } else {
@@ -4438,7 +4527,25 @@ async function runLazyHistory(
         }
       }
       await flushPromises()
-      report(step.kind === `reload`)
+      const stepRequests = [...requests]
+      // A load that threw holds no demand, so a replay does not load its
+      // key again.
+      report(step.kind === `reload` || step.kind === `truncate`)
+      // A truncate replays the query's demand: the adapter receives a
+      // request for every key the query still needs.
+      if (
+        step.kind === `truncate` &&
+        (model.gate === `ready` || model.gate === `loading`) &&
+        !model.source.stopped
+      )
+        expect(
+          [...model.parents].filter(
+            (key) =>
+              !thrownLoads.has(model.failed.get(key) ?? 0) &&
+              stepRequests.every((request) => !request.keys.has(key)),
+          ),
+          `${label}: keys the truncate replay did not request`,
+        ).toEqual([])
       deriveLazyGate(model)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
@@ -4513,6 +4620,7 @@ describe(`lazy join demand grammar`, () => {
         `settle-last-fail` as const,
         `throw-next` as const,
         `reload` as const,
+        `truncate` as const,
         `report` as const,
         `fail` as const,
         `crash` as const,
@@ -4521,6 +4629,13 @@ describe(`lazy join demand grammar`, () => {
   )
   const named: Record<string, ReadonlyArray<LazyStep>> = {
     'a failed first load fails the query': [{ kind: `settle-fail` }],
+    "a truncate after a reload's failed replay loads the demand again": [
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+      { kind: `truncate` },
+      { kind: `settle-ok` },
+    ],
     'a later load of the failed key clears its request error': [
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
