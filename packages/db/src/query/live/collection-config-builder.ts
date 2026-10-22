@@ -340,17 +340,36 @@ export class CollectionConfigBuilder<
     const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      const deferred: Promise<void> = sourceRecovery.then(async () => {
+      const syncRunGeneration = this.syncRunGeneration
+      const resume = async (): Promise<void> => {
+        // Wait for every replay that holds publication, including one a
+        // newer truncate starts meanwhile. A replay that a newer truncate or
+        // a retired demand discards rejects its completion with an
+        // AbortError, but it did not fail. Cleanup also rejects it, and then
+        // the move rejects with that error.
+        for (
+          let recovery: Promise<void> | undefined = sourceRecovery;
+          recovery;
+          recovery = this.pendingSourceRecovery()
+        ) {
+          try {
+            await recovery
+          } catch (error) {
+            if (syncRunGeneration !== this.syncRunGeneration) throw error
+          }
+        }
         // A newer call wins, even if this deferred one resumes after it.
         if (request !== this.windowRequestGeneration) {
           await this.latestWindowRequest
           return
         }
+        // A failed replay rejects the call. Otherwise it applies the window.
         const settlement = this.setWindow(requestedWindow)
         // The resumed call settles on behalf of this one.
         this.latestWindowRequest = deferred
         if (settlement !== true) await settlement
-      })
+      }
+      const deferred = resume()
       return (this.latestWindowRequest = deferred)
     }
     if (this.hasFailedSourceRecovery()) {

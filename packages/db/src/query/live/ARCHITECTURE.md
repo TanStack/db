@@ -1012,7 +1012,13 @@ of the page's current end: the refetch re-read that tie, so every row that ties
 with the end is installed. A row that another request installed proves
 nothing. Neither does a tie that the loader read for an older end, because a
 refetch can move the end earlier, so a row the provider never sent can tie
-with the new end. The loader repairs in those cases. A window that needs a row
+with the new end. When the end moved, the loader reads only the new end's tie
+on the next pass: the refetched page holds every row before the end, so that
+tie completes the proof without a repair. It then releases the older tie,
+whose rows sort after the end and outside the window, and the deletes that
+release causes are not an order change. A loader that already owes a repair,
+has other work in flight, or has an end that no cursor can express repairs
+instead. A window that needs a row
 past the page, such as one whose page
 holds rows a joined filter rejects, still repairs. So does any loader while
 its source holds accepted sync rows back, as behind a persisting optimistic
@@ -1322,7 +1328,10 @@ late rejection from an abandoned sync run cannot reset the replacement sync
 run's requested window.
 A window move started during an active source replay waits for that replay and
 applies only after its replacement is complete. A failed replay rejects the
-move without advancing the reported window. Replay completion callbacks carry
+move without advancing the reported window. A replay that a newer truncate or
+the retirement of its last demand discards did not fail, even though its
+completion rejects with `AbortError`: the move waits for any replay that still
+holds publication and then applies. Replay completion callbacks carry
 their sync-run identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.

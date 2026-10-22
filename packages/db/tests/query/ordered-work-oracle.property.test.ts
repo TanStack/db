@@ -4970,6 +4970,28 @@ function expectEagerWindow(
   expect(new Set(actual).size, `${label}: distinct rows`).toBe(actual.length)
 }
 
+/**
+ * Whether a bounded prefix of the source leaves the window short. The prefix
+ * is the first `offset + limit` source rows in the query's order. A source
+ * filter runs inside the request, so its prefix holds only eligible rows. A
+ * joined or function filter drops rows only after the source's limit, so its
+ * prefix can hold fewer eligible rows than the window needs.
+ */
+function prefixLeavesWindowShort(
+  rows: ReadonlyMap<number, Row>,
+  testCase: EagerCase,
+): boolean {
+  const size = testCase.offset + testCase.limit
+  const candidates =
+    testCase.filter === `source`
+      ? rows
+      : new Map(
+          [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
+        )
+  const prefix = eagerOrder(candidates, testCase).slice(0, size)
+  return prefix.filter(({ id }) => rows.get(id)!.eligible).length < size
+}
+
 /** Ranks of the last window row and the first row after the window. */
 function boundaryRanks(
   rows: ReadonlyMap<number, Row>,
@@ -5890,9 +5912,16 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         await refetch()
         // The repair a report starts reads each window's bounded prefix,
         // tie, and refill; a whole-source read would be the cost the report
-        // exists to avoid. A page that ends on a null or NaN rank takes the
-        // documented full-source fallback instead.
-        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
+        // exists to avoid. Two documented fallbacks read the full source
+        // instead: a page that ends on a null or NaN rank, and the refill of
+        // an unindexed plan whose bounded prefix leaves the window short
+        // (ARCHITECTURE.md, "an underfilled unindexed prefix retains the
+        // established full-source fallback").
+        if (
+          signalsRefetch &&
+          unexpressiblePageEnds === unexpressibleBefore &&
+          (testCase.indexed || !prefixLeavesWindowShort(rows, shown))
+        ) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
@@ -7131,12 +7160,41 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
+  // An unindexed joined window whose only domain row is ineligible. After a
+  // signalling refetch the repair's bounded prefix holds just that row, so
+  // the window is short and the refill takes the documented full-source
+  // fallback. The refetch law allows that read for an unindexed plan only
+  // when its prefix leaves the window short.
+  it(`allows the full-source refill of a short unindexed window after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+      initial: [],
+      history: [
+        { type: `upsert`, id: 0, rank: 0, eligible: false },
+        { type: `dup`, id: 0 },
+        { type: `refetch` },
+      ],
+    })
+  })
+
   // A signalling refetch moves the first page's end earlier, to a rank that
   // a row the provider never sent ties with. The window is still inside the
   // page, but the rank-2 row past it is local only because the old tie
   // request read it, so it proves nothing about the rows that now tie with
-  // the end. The report must repair; ignoring it made a later window move
-  // read the local rows and skip row 11.
+  // the end. The loader must read the new end's tie; ignoring the report
+  // made a later window move read the local rows and skip row 11.
   it(`repairs a signalling refetch before a window move reads past its page`, async () => {
     await checkEagerWindow({
       path: `on-demand`,

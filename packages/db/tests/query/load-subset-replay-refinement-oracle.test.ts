@@ -2001,8 +2001,8 @@ describe(`Ordered windows across truncate replays`, () => {
   //   graph that the pending joined work had held, so the window stayed on
   //   old rows until an unrelated write);
   // - a window move whose joined load a truncate aborts (the model counted
-  //   the move's AbortError as an escaped fault; it is a legal rejection, and
-  //   this replay keeps the branch reached);
+  //   the move's AbortError as an escaped fault; the move now waits for the
+  //   newer replay and applies, so this replay checks the moved window);
   // - a window move that retires lazy joined demand whose release throws (the
   //   subscription reported the release failure as a load error, so the move
   //   rejected with it; core now reports it uncaught);
@@ -2078,7 +2078,7 @@ describe(`Ordered windows across truncate replays`, () => {
         joined: `none`,
         markerMode: `on-demand`,
       },
-      reaches: `abortedMoves`,
+      reaches: `settledWindowChecks`,
     },
     {
       name: `a window move that retires lazy joined demand whose release throws`,
@@ -2270,6 +2270,27 @@ describe(`Ordered windows across truncate replays`, () => {
       },
       reaches: `failedLoads`,
       recovers: true,
+    },
+    {
+      // A move during the initial load waits behind a marker replay that the
+      // source truncate then discards. The discarded replay rejected the
+      // move, so the older move's window won.
+      name: `a newer window move deferred behind a discarded replay`,
+      history: [
+        { type: `move`, id: 1, rank: 1 },
+        { type: `window`, offset: 0, limit: 2 },
+        { type: `truncateMarkers` },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncate`, armAfterStart: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        markerMode: `on-demand`,
+        includes: true,
+        historyDuringPreload: true,
+      },
+      reaches: `settledWindowChecks`,
     },
   ] satisfies Array<{
     name: string

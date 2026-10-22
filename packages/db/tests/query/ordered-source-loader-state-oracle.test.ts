@@ -1831,7 +1831,8 @@ describe(`Successful finite demand retirement`, () => {
  *   reported, or changed joined work, and no release callback has side
  *   effects, so no earlier event owes a repair.
  * - **Unproven report:** in such a quiet history, a report over the loader's
- *   own first prefix that no row it read proves starts a repair on its pass.
+ *   own first prefix that no row it read proves starts a repair on its pass,
+ *   or reads the tie of the page's end, which completes the proof.
  *   An installed row past the page can come from another request, and a
  *   refetch can move the page's end before the tie the loader read, so the
  *   loader cannot use either as proof. This fake's installed rows ignore a
@@ -2891,7 +2892,8 @@ async function checkAuthorityCase(
           if (command.react) graphPass()
           await flush()
           // A report the loader cannot prove covers nothing it could change
-          // owes a repair, which its next pass starts.
+          // owes a repair, which its next pass starts, or a tie request for
+          // the page's end, which completes the proof.
           if (
             command.react &&
             quiet &&
@@ -2901,10 +2903,13 @@ async function checkAuthorityCase(
           ) {
             const issued = ledger
               .slice(before)
-              .some(({ authoritative }) => authoritative)
+              .some(
+                ({ authoritative, options }) =>
+                  authoritative || tieValue(options) === windowSize,
+              )
             if (!issued) {
               throw new Error(
-                `unproven report: a report over a first page that no row it read proves issued no repair`,
+                `unproven report: a report over a first page that no row it read proves issued no repair and no tie of its end`,
               )
             }
             repairedReportsOnOwnPage++
