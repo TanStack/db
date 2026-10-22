@@ -79,30 +79,33 @@ export const queryTodoCollection = createCollection(
     getKey: (item) => item.id,
     schema: selectTodoSchema,
     queryClient,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const {
         id: _id,
         created_at: _crea,
         updated_at: _up,
         ...modified
       } = transaction.mutations[0].modified
-      return await api.todos.create(modified)
+      await api.todos.create(modified)
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
-      return await Promise.all(
+    onUpdate: async ({ transaction, collection }) => {
+      await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
           return await api.todos.update(original.id, changes)
         }),
       )
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
-      return await Promise.all(
+    onDelete: async ({ transaction, collection }) => {
+      await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original } = mutation
           await api.todos.delete(original.id)
         }),
       )
+      await collection.utils.refetch()
     },
   }),
 )
@@ -183,20 +186,19 @@ export const queryConfigCollection = createCollection(
     getKey: (item) => item.id,
     schema: selectConfigSchema,
     queryClient,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const modified = transaction.mutations[0].modified
-      const response = await api.config.create(modified)
-      return { txid: response.txid }
+      await api.config.create(modified)
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
-      const txids = await Promise.all(
+    onUpdate: async ({ transaction, collection }) => {
+      await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
-          const response = await api.config.update(original.id, changes)
-          return response.txid
+          await api.config.update(original.id, changes)
         }),
       )
-      return { txid: txids }
+      await collection.utils.refetch()
     },
   }),
 )

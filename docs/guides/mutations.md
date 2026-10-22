@@ -71,12 +71,13 @@ const todoCollection = createCollection(
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
     schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
           api.todos.create(mutation.modified)
         )
       )
+      await collection.utils.refetch()
     },
   })
 )
@@ -526,8 +527,6 @@ onUpdate: async ({ transaction, collection }) => {
   )
   // Trigger refetch to sync server state
   await collection.utils.refetch()
-  // Prevent QueryCollection from refetching a second time.
-  return { refetch: false }
 }
 ```
 
@@ -999,8 +998,9 @@ const userProfile = createCollection(
     queryKey: ["profile"],
     queryFn: async () => api.profile.get(),
     getKey: (item) => item.id,
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       await api.profile.update(transaction.mutations[0].modified)
+      await collection.utils.refetch()
     },
   })
 )

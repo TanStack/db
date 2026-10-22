@@ -233,7 +233,6 @@ const collection = createCollection(
         await api.todos.create(payload)
       }
       await collection.utils.refetch()
-      return { refetch: false }
     },
   })
 )
@@ -934,7 +933,7 @@ const todoCollection = createCollection(
     schema: todoSchema,
     queryClient,
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const todo = transaction.mutations[0].modified
 
       // Serialize dates for API
@@ -947,9 +946,10 @@ const todoCollection = createCollection(
           created_at: todo.created_at.toISOString()
         })
       })
+      await collection.utils.refetch()
     },
 
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
@@ -969,9 +969,10 @@ const todoCollection = createCollection(
           })
         })
       )
+      await collection.utils.refetch()
     },
 
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
           await fetch(`/api/todos/${mutation.original.id}`, {
@@ -979,6 +980,7 @@ const todoCollection = createCollection(
           })
         })
       )
+      await collection.utils.refetch()
     }
   })
 )
@@ -1090,7 +1092,7 @@ const productCollection = createCollection(
     schema: productSchema,
     queryClient,
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const product = transaction.mutations[0].modified
 
       // API only needs base fields, not computed ones
@@ -1104,6 +1106,7 @@ const productCollection = createCollection(
         category: product.category,
         tags: product.tags
       })
+      await collection.utils.refetch()
     }
   })
 )

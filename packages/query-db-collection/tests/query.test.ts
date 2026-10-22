@@ -1372,12 +1372,13 @@ describe(`QueryCollection`, () => {
           .mockImplementation(() => Promise.resolve(productsData)),
         getKey: (product) => product.id,
         startSync: true,
-        onUpdate: async ({ transaction }) => {
+        onUpdate: async ({ transaction, collection }) => {
           for (const mutation of transaction.mutations) {
             productsData = productsData.map((product) =>
               product.id === mutation.key ? mutation.modified : product,
             )
           }
+          await collection.utils.refetch()
         },
       }),
     )
@@ -2443,240 +2444,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should call refetch based on handler return value`, async () => {
-      // Create a mock transaction for testing with proper type
-      const insertTransaction = {
-        id: `test-transaction-insert`,
-        mutations: [] as any,
-      } as TransactionWithMutations<TestItem, `insert`>
-
-      // Create handlers with different return values
-      const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
-      const onInsertFalse = vi.fn().mockResolvedValue({ refetch: false }) // No refetch
-      const onInsertPrimitive = vi.fn().mockResolvedValue(`legacy-result`) // Legacy values should still refetch
-
-      // Create configs with the handlers
-      const queryFnDefault = vi
-        .fn()
-        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
-      const queryFnFalse = vi
-        .fn()
-        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
-      const queryFnPrimitive = vi
-        .fn()
-        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
-
-      const configDefault: QueryCollectionConfig<TestItem> = {
-        id: `test-default`,
-        queryClient,
-        queryKey: [`refetchTest`, `default`],
-        queryFn: queryFnDefault,
-        getKey,
-        onInsert: onInsertDefault,
-        startSync: true,
-      }
-
-      const configFalse: QueryCollectionConfig<TestItem> = {
-        id: `test-false`,
-        queryClient,
-        queryKey: [`refetchTest`, `false`],
-        queryFn: queryFnFalse,
-        getKey,
-        onInsert: onInsertFalse,
-        startSync: true,
-      }
-
-      const configPrimitive: QueryCollectionConfig<TestItem> = {
-        id: `test-primitive`,
-        queryClient,
-        queryKey: [`refetchTest`, `primitive`],
-        queryFn: queryFnPrimitive,
-        getKey,
-        onInsert: onInsertPrimitive,
-        startSync: true,
-      }
-
-      // Test case 1: Default behavior (undefined return) should trigger refetch
-      const optionsDefault = queryCollectionOptions(configDefault)
-      const collectionDefault = createCollection(optionsDefault)
-
-      // Wait for initial sync
-      await vi.waitFor(() => {
-        expect(collectionDefault.status).toBe(`ready`)
-      })
-
-      // Clear initial call
-      queryFnDefault.mockClear()
-
-      const insertParamsDefault = {
-        transaction: insertTransaction,
-        collection: collectionDefault,
-      } satisfies InsertMutationFnParams<
-        TestItem,
-        string | number,
-        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
-      >
-
-      await optionsDefault.onInsert!(insertParamsDefault)
-
-      // Verify handler was called and refetch was triggered (queryFn called again)
-      expect(onInsertDefault).toHaveBeenCalledOnce()
-      expect(onInsertDefault.mock.calls[0]![0].transaction).toBe(
-        insertTransaction,
-      )
-      await vi.waitFor(() => {
-        expect(queryFnDefault).toHaveBeenCalledTimes(1)
-      })
-
-      // Test case 2: Explicit { refetch: false } should not trigger refetch
-      const optionsFalse = queryCollectionOptions(configFalse)
-      const collectionFalse = createCollection(optionsFalse)
-
-      // Wait for initial sync
-      await vi.waitFor(() => {
-        expect(collectionFalse.status).toBe(`ready`)
-      })
-
-      // Clear initial call
-      queryFnFalse.mockClear()
-
-      const insertParamsFalse = {
-        transaction: insertTransaction,
-        collection: collectionFalse,
-      } satisfies InsertMutationFnParams<
-        TestItem,
-        string | number,
-        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
-      >
-
-      await optionsFalse.onInsert!(insertParamsFalse)
-
-      // Verify handler was called but refetch was NOT triggered (queryFn not called)
-      expect(onInsertFalse).toHaveBeenCalledOnce()
-      expect(onInsertFalse.mock.calls[0]![0].transaction).toBe(
-        insertTransaction,
-      )
-      // Wait a bit to ensure no refetch happens
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      expect(queryFnFalse).not.toHaveBeenCalled()
-
-      // Test case 3: Legacy primitive returns should retain auto-refetch behavior
-      const optionsPrimitive = queryCollectionOptions(configPrimitive)
-      const collectionPrimitive = createCollection(optionsPrimitive)
-
-      await vi.waitFor(() => {
-        expect(collectionPrimitive.status).toBe(`ready`)
-      })
-
-      queryFnPrimitive.mockClear()
-
-      const insertParamsPrimitive = {
-        transaction: insertTransaction,
-        collection: collectionPrimitive,
-      } satisfies InsertMutationFnParams<
-        TestItem,
-        string | number,
-        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
-      >
-
-      await optionsPrimitive.onInsert!(insertParamsPrimitive)
-
-      expect(onInsertPrimitive).toHaveBeenCalledOnce()
-      expect(onInsertPrimitive.mock.calls[0]![0].transaction).toBe(
-        insertTransaction,
-      )
-      await vi.waitFor(() => {
-        expect(queryFnPrimitive).toHaveBeenCalledTimes(1)
-      })
-
-      await Promise.all([
-        collectionDefault.cleanup(),
-        collectionFalse.cleanup(),
-        collectionPrimitive.cleanup(),
-      ])
-    })
-
-    it(`does not warn that retained automatic refetch is being removed`, async () => {
-      resetWarnings()
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
-      const options = queryCollectionOptions<TestItem>({
-        id: `retained-auto-refetch`,
-        queryClient,
-        queryKey: [`retained-auto-refetch`],
-        queryFn,
-        getKey,
-        onInsert: () => Promise.resolve(),
-        startSync: true,
-      })
-      const collection = createCollection(options)
-      const transaction = {
-        id: `retained-auto-refetch-transaction`,
-        mutations: [],
-      } as unknown as TransactionWithMutations<TestItem, `insert`>
-
-      try {
-        await collection.stateWhenReady()
-        await options.onInsert!({ transaction, collection })
-        expect(queryFn).toHaveBeenCalledTimes(2)
-        expect(
-          warning.mock.calls.some(([message]) =>
-            String(message).includes(`removed in v1.0`),
-          ),
-        ).toBe(false)
-      } finally {
-        warning.mockRestore()
-        await collection.cleanup()
-      }
-    })
-
-    it(`does not reject automatic refetch when result application fails`, async () => {
-      resetWarnings()
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const consoleError = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
-      const queryFn = vi
-        .fn<() => Promise<Array<TestItem>>>()
-        .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
-        .mockResolvedValueOnce(42 as unknown as Array<TestItem>)
-      const onInsert = vi.fn().mockResolvedValue(undefined)
-      const options = queryCollectionOptions<TestItem>({
-        id: `invalid-deprecated-auto-refetch`,
-        queryClient,
-        queryKey: [`invalid-deprecated-auto-refetch`],
-        queryFn,
-        getKey,
-        onInsert,
-        startSync: true,
-      })
-      const collection = createCollection(options)
-      const transaction = {
-        id: `invalid-deprecated-auto-refetch-transaction`,
-        mutations: [],
-      } as unknown as TransactionWithMutations<TestItem, `insert`>
-
-      try {
-        await collection.stateWhenReady()
-
-        await expect(
-          options.onInsert!({ transaction, collection }),
-        ).resolves.toBeUndefined()
-        expect(queryFn).toHaveBeenCalledTimes(2)
-        await vi.waitFor(() => {
-          expect(consoleError).toHaveBeenCalledWith(
-            expect.stringContaining(`[QueryCollection] Error applying query`),
-            expect.objectContaining({ name: `InvalidQueryResultError` }),
-          )
-        })
-      } finally {
-        warning.mockRestore()
-        consoleError.mockRestore()
-        await collection.cleanup()
-      }
-    })
-
-    it(`supports a warning-free single-refetch migration path`, async () => {
+    it(`fetches exactly once when a handler explicitly refetches`, async () => {
       resetWarnings()
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
@@ -2689,7 +2457,6 @@ describe(`QueryCollection`, () => {
         startSync: true,
         onInsert: async ({ collection }) => {
           await collection.utils.refetch()
-          return { refetch: false }
         },
       })
       const collection = createCollection(options)
@@ -4663,8 +4430,6 @@ describe(`QueryCollection`, () => {
                 todosCollection.utils.writeInsert(serverItem)
               })
             })
-
-            return { refetch: false }
           },
         }),
       )
@@ -4752,8 +4517,6 @@ describe(`QueryCollection`, () => {
               }
             })
             rowWhileHandlerRuns = stripVirtualProps(collection.get(`123`))
-
-            return { refetch: false }
           },
         }),
       )
@@ -4780,7 +4543,7 @@ describe(`QueryCollection`, () => {
       ])
     })
 
-    it(`should not rollback object field updates after server response with refetch: false`, async () => {
+    it(`should not rollback object field updates after a direct server-response write`, async () => {
       const queryKey = [`object-field-update-test`]
 
       type Todo = {
@@ -4830,8 +4593,6 @@ describe(`QueryCollection`, () => {
                 }
               })
             })
-
-            return { refetch: false }
           },
         }),
       )
@@ -4902,7 +4663,6 @@ describe(`QueryCollection`, () => {
               server = { ...request, a: 10, revision: server.revision + 1 }
               await handlerCollection.utils.writeUpdate({ ...server })
               expect(adapter.rows.get(`p`)?.revision).toBe(server.revision)
-              return { refetch: false }
             },
           }),
           persistence: { adapter },
@@ -4988,7 +4748,6 @@ describe(`QueryCollection`, () => {
               onUpdate: async ({ collection: handlerCollection }) => {
                 server = { id: `row`, value: 3 }
                 await handlerCollection.utils.writeUpsert({ ...server })
-                return { refetch: false }
               },
             }),
             persistence: { adapter },
@@ -5055,7 +4814,6 @@ describe(`QueryCollection`, () => {
           onUpdate: async ({ collection: handlerCollection }) => {
             server = { id: `row`, value: 3 }
             await handlerCollection.utils.writeUpsert({ ...server })
-            return { refetch: false }
           },
         }),
       )
@@ -6272,7 +6030,7 @@ describe(`QueryCollection`, () => {
         const deletedItem = transaction.mutations[0]?.original
         // Call writeDelete inside onDelete handler - this should work without throwing
         collection.utils.writeDelete(deletedItem.id)
-        return Promise.resolve({ refetch: false })
+        return Promise.resolve()
       })
 
       const config: QueryCollectionConfig<TestItem> = {
@@ -7475,7 +7233,7 @@ describe(`QueryCollection`, () => {
         syncMode: `on-demand`,
         // Keep the insert persisting while query2 observes it; its
         // optimistic row drops when the handler returns.
-        onInsert: () => insertPersisted.then(() => ({ refetch: false })),
+        onInsert: () => insertPersisted,
       }
 
       const options = queryCollectionOptions(config)
@@ -11451,14 +11209,12 @@ describe(`QueryCollection`, () => {
             const { id: _id, ...rest } = transaction.mutations[0].modified
             const serverItem = await apiCreate(rest)
             col.utils.writeInsert(serverItem)
-            return { refetch: false }
           },
 
           onDelete: async ({ transaction, collection: col }) => {
             const id = transaction.mutations[0].key as number
             await apiDelete(id)
             col.utils.writeDelete(id)
-            return { refetch: false }
           },
         }),
       )

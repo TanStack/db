@@ -107,7 +107,6 @@ async function checkOptimisticOrderedRefetch(
         moved.folder = `archive`
         providerPhase = `handler-refetch`
         await collection.utils.refetch()
-        return { refetch: false }
       },
     }),
   )

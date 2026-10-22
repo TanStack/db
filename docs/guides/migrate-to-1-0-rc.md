@@ -19,8 +19,8 @@ npm install @tanstack/react-db@rc @tanstack/electric-db-collection@rc
 
 The first candidate is `1.0.0-rc.1`. `@tanstack/query-db-collection` and
 `@tanstack/offline-transactions` were both accidentally released as 1.0 before
-the RC. Keep them on 1.x and update to their latest 1.x patch releases. Those
-patches use the app's `@tanstack/db` as a peer dependency, so the RC and stable
+the RC. Keep them on 1.x and update to their latest 1.x releases. These
+releases use the app's `@tanstack/db` as a peer dependency, so the RC and stable
 packages share one DB instance.
 
 ## Replace `$synced` with `$hasPendingWrites`
@@ -107,10 +107,34 @@ For several transaction IDs, await all of them with `Promise.all`. The
 [Electric Collection guide](../collections/electric-collection.md#persistence-handlers--synchronization)
 also covers custom matching when your API cannot return transaction IDs.
 
-**Query Collection remains on stable 1.x.** It still refetches automatically
-after a handler returns and still accepts `{ refetch: false }` to skip that
-refetch. If your handler calls `collection.utils.refetch()` itself, return
-`{ refetch: false }` to avoid a second refetch. See
+### Query Collection handlers no longer refetch
+
+The accompanying Query Collection 1.x minor release removes automatic refetch
+from `onInsert`, `onUpdate`, and `onDelete`. Refresh explicitly inside each
+handler:
+
+```ts
+// Before: returning triggered an automatic refetch.
+onUpdate: async ({ transaction }) => {
+  await api.todos.update(transaction.mutations[0].changes)
+}
+
+// After
+onUpdate: async ({ transaction, collection }) => {
+  await api.todos.update(transaction.mutations[0].changes)
+  await collection.utils.refetch()
+}
+```
+
+Alternatively, await a `writeInsert`, `writeUpdate`, `writeUpsert`, or
+`writeDelete` call with the confirmed server result. These utilities do not
+fetch. If the handler neither refreshes nor writes confirmed data, its
+optimistic changes revert to the previous synced rows when the transaction
+settles, even if the server accepted the mutation.
+
+Handlers now return `Promise<void>`. Remove `{ refetch: false }`; it is no
+longer supported. A handler that already explicitly refetches or writes its
+server response needs only to remove that return value. See
 [Controlling Refetch Behavior](../collections/query-collection.md#controlling-refetch-behavior).
 
 For TypeScript code that uses the handler type aliases directly,
@@ -201,8 +225,8 @@ try {
 Direct writes no longer automatically refetch active on-demand Query subsets.
 They update Collection and Query cache rows where the write can be represented.
 Call `await todosCollection.utils.refetch()` when you need current server rows.
-This change concerns the `write*` utilities; the handler auto-refetch behavior
-described above still applies to Query Collection 1.x. Use TanStack Query Core
+Mutation handlers also require explicit synchronization as described above.
+Use TanStack Query Core
 5.90.15 or later for post-write refetch replacement and error recovery. See
 [Direct Writes](../collections/query-collection.md#direct-writes).
 

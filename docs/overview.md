@@ -463,8 +463,6 @@ const todoCollection = collectionOptions("todos", (client) =>
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
       await collection.utils.refetch()
-      // Prevent QueryCollection from refetching again.
-      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -484,8 +482,6 @@ const listCollection = collectionOptions("todo-lists", (client) =>
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
       await collection.utils.refetch()
-      // Prevent QueryCollection from refetching again.
-      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })

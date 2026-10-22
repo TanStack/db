@@ -161,7 +161,7 @@ Defined in: [packages/query-db-collection/src/query.ts:261](https://github.com/T
 ### onDelete()?
 
 ```ts
-optional onDelete: (params) => Promise<unknown>;
+optional onDelete: (params) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:168](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L168)
@@ -174,17 +174,19 @@ Defined in: [packages/query-db-collection/src/query.ts:168](https://github.com/T
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<`void`\>
 
 ***
 
 ### onInsert()?
 
 ```ts
-optional onInsert: (params) => Promise<unknown>;
+optional onInsert: (params) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:144](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L144)
+
+Mutation handlers must await an explicit refetch or write confirmed data before settling.
 
 #### Parameters
 
@@ -194,14 +196,14 @@ Defined in: [packages/query-db-collection/src/query.ts:144](https://github.com/T
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<`void`\>
 
 ***
 
 ### onUpdate()?
 
 ```ts
-optional onUpdate: (params) => Promise<unknown>;
+optional onUpdate: (params) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:156](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L156)
@@ -214,7 +216,7 @@ Defined in: [packages/query-db-collection/src/query.ts:156](https://github.com/T
 
 #### Returns
 
-`Promise`\<`unknown`\>
+`Promise`\<`void`\>
 
 ***
 

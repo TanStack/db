@@ -61,15 +61,18 @@ const todoCollection = createCollection(
     queryClient,
     getKey: (item) => item.id,
     schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       await api.todos.create(transaction.mutations[0].modified)
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const mut = transaction.mutations[0]
       await api.todos.update(mut.key, mut.changes)
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       await api.todos.delete(transaction.mutations[0].key)
+      await collection.utils.refetch()
     },
   }),
 )
@@ -446,7 +449,7 @@ Correct:
 ```ts
 todoCollection.utils.writeInsert(newItem)
 // Use staleTime to prevent immediate refetch
-// Or return { refetch: false } from mutation handlers
+// Handlers do not refetch automatically; await confirmed direct writes
 ```
 
 Direct writes update the collection immediately, but the next `queryFn` returns complete server state which overwrites them.

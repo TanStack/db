@@ -18,12 +18,15 @@ import {
   versionOnRcExit,
 } from './version-packages.mjs'
 
-test('the two existing 1.x packages publish a compatible DB peer and a first-RC patch', () => {
+test('the two existing 1.x packages publish compatible DB peers and stable releases', () => {
   const firstRc = readFileSync(
     new URL('../.changeset/first-rc.md', import.meta.url),
     'utf8',
   )
-  for (const directory of ['query-db-collection', 'offline-transactions']) {
+  for (const [directory, bump] of [
+    ['query-db-collection', 'minor'],
+    ['offline-transactions', 'patch'],
+  ]) {
     const manifest = JSON.parse(
       readFileSync(
         new URL(`../packages/${directory}/package.json`, import.meta.url),
@@ -35,7 +38,7 @@ test('the two existing 1.x packages publish a compatible DB peer and a first-RC 
       manifest.peerDependencies['@tanstack/db'],
       '^0.15.0 || ^1.0.0-rc.0',
     )
-    assert.match(firstRc, new RegExp(`'${manifest.name}': patch`))
+    assert.match(firstRc, new RegExp(`'${manifest.name}': ${bump}`))
   }
 })
 
@@ -157,7 +160,7 @@ function createFirstCandidateWorkspace() {
   addChangeset(root, 'first-rc', {
     '@tanstack/db': 'major',
     '@tanstack/react-db': 'major',
-    '@tanstack/query-db-collection': 'patch',
+    '@tanstack/query-db-collection': 'minor',
     '@tanstack/offline-transactions': 'patch',
   })
   return root
@@ -192,7 +195,7 @@ test('the first RC versions mixed and stable-only changesets without changing st
 
   assert.equal(packageVersion(root, 'db'), '1.0.0-rc.1')
   assert.equal(packageVersion(root, 'react-db'), '1.0.0-rc.1')
-  assert.equal(packageVersion(root, 'query-db-collection'), '1.4.6')
+  assert.equal(packageVersion(root, 'query-db-collection'), '1.5.0')
   assert.equal(packageVersion(root, 'offline-transactions'), '1.1.3')
   assert.deepEqual(
     JSON.parse(readFileSync(join(root, '.changeset', 'pre.json'))).changesets,
@@ -202,6 +205,23 @@ test('the first RC versions mixed and stable-only changesets without changing st
     JSON.parse(readFileSync(join(root, '.changeset', 'config.json'))).ignore,
     [],
   )
+})
+
+test('the first RC rejects a major bump for an already-1.x package before changing files', async (t) => {
+  const root = createFirstCandidateWorkspace()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const path = join(root, '.changeset', 'first-rc.md')
+  writeFileSync(
+    path,
+    readFileSync(path, 'utf8').replace(
+      "'@tanstack/query-db-collection': minor",
+      "'@tanstack/query-db-collection': major",
+    ),
+  )
+  await assert.rejects(seedFirstCandidate(root), /patch or minor/)
+  assert.equal(packageVersion(root, 'db'), '0.15.0')
+  assert.equal(packageVersion(root, 'query-db-collection'), '1.4.5')
+  assert.equal(existsSync(join(root, '.changeset', 'pre.json')), false)
 })
 
 test('a failed first RC restores versions, config, changelogs, and pre-state', async (t) => {

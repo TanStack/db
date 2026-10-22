@@ -355,7 +355,7 @@ const collection = createCollection(
         created_at: new Date(todo.created_at)  // ISO string → Date
       }))
     },
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       // User manually serializes for their backend
       await fetch('/api/todos', {
         method: 'POST',
@@ -364,6 +364,7 @@ const collection = createCollection(
           created_at: transaction.mutations[0].modified.created_at.toISOString()  // Date → ISO string
         })
       })
+      await collection.utils.refetch()
     }
   })
 )
@@ -974,8 +975,6 @@ const collection = createCollection(
       await api.createTodos(transaction.mutations.map(m => m.modified))
       // User explicitly triggers refetch
       await collection.utils.refetch()
-      // Prevent QueryCollection from refetching again.
-      return { refetch: false }
     }
   })
 )

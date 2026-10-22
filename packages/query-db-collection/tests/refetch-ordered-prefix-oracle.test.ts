@@ -576,11 +576,9 @@ async function startRun(testCase: Case): Promise<Run> {
       // backend does not change.
       onUpdate: async () => {
         await heldWrite
-        return { refetch: false }
       },
       onDelete: async () => {
         await heldWrite
-        return { refetch: false }
       },
     }),
   )

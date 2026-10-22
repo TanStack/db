@@ -1,20 +1,20 @@
-import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { QueryClient } from '@tanstack/query-core'
+import { createCollection } from "@tanstack/react-db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { QueryClient } from "@tanstack/query-core"
 import {
-  selectTodoSchema,
   selectProjectSchema,
+  selectTodoSchema,
   selectUsersSchema,
-} from '@/db/schema'
-import { trpc } from '@/lib/trpc-client'
+} from "@/db/schema"
+import { trpc } from "@/lib/trpc-client"
 
 // Create a query client for query collections
 const queryClient = new QueryClient()
 
 export const usersCollection = createCollection(
   queryCollectionOptions({
-    id: 'users',
-    queryKey: ['users'],
+    id: "users",
+    queryKey: ["users"],
     // Poll for updates every 5 seconds
     refetchInterval: 5000,
     queryFn: async () => {
@@ -32,8 +32,8 @@ export const usersCollection = createCollection(
 )
 export const projectCollection = createCollection(
   queryCollectionOptions({
-    id: 'projects',
-    queryKey: ['projects'],
+    id: "projects",
+    queryKey: ["projects"],
     // Poll for updates every 5 seconds
     refetchInterval: 5000,
     queryFn: async () => {
@@ -47,7 +47,7 @@ export const projectCollection = createCollection(
     queryClient,
     schema: selectProjectSchema,
     getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { modified: newProject } = transaction.mutations[0]
       await trpc.projects.create.mutate({
         name: newProject.name,
@@ -55,8 +55,9 @@ export const projectCollection = createCollection(
         owner_id: newProject.owner_id,
         shared_user_ids: newProject.shared_user_ids,
       })
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { modified: updatedProject } = transaction.mutations[0]
       await trpc.projects.update.mutate({
         id: updatedProject.id,
@@ -66,20 +67,22 @@ export const projectCollection = createCollection(
           shared_user_ids: updatedProject.shared_user_ids,
         },
       })
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       const { original: deletedProject } = transaction.mutations[0]
       await trpc.projects.delete.mutate({
         id: deletedProject.id,
       })
+      await collection.utils.refetch()
     },
   })
 )
 
 export const todoCollection = createCollection(
   queryCollectionOptions({
-    id: 'todos',
-    queryKey: ['todos'],
+    id: "todos",
+    queryKey: ["todos"],
     // Poll for updates every 5 seconds
     refetchInterval: 5000,
     queryFn: async () => {
@@ -93,7 +96,7 @@ export const todoCollection = createCollection(
     queryClient,
     schema: selectTodoSchema,
     getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { modified: newTodo } = transaction.mutations[0]
       await trpc.todos.create.mutate({
         user_id: newTodo.user_id,
@@ -102,8 +105,9 @@ export const todoCollection = createCollection(
         project_id: newTodo.project_id,
         user_ids: newTodo.user_ids,
       })
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { modified: updatedTodo } = transaction.mutations[0]
       await trpc.todos.update.mutate({
         id: updatedTodo.id,
@@ -112,12 +116,14 @@ export const todoCollection = createCollection(
           completed: updatedTodo.completed,
         },
       })
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       const { original: deletedTodo } = transaction.mutations[0]
       await trpc.todos.delete.mutate({
         id: deletedTodo.id,
       })
+      await collection.utils.refetch()
     },
   })
 )

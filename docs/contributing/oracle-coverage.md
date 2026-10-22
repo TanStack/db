@@ -798,6 +798,16 @@ tracks remaining design and coverage questions, including valid Temporal kinds
 without public order and mixed-kind query order. Earlier PR-branch
 counterexamples do not by themselves establish an `origin/main` failure.
 
+The Query DB ownership oracle also owns the explicit mutation-handler refresh
+contract ([evidence](oracle-reviews/pr-2171-explicit-query-refresh.md)). Its nine-case table crosses insert, update, and delete with no
+confirmation, explicit refetch, and direct writes. At transaction settlement it
+checks exact Query fetch counts and public rows: no confirmation exposes the
+initial synced rows; either confirmation path exposes the server result. The
+old automatic-refetch implementation fails all nine cases at the fetch-count
+comparison (including a duplicate request after explicit refetch). This table
+uses a real QueryClient and Collection with controlled backend rows; polling,
+focus, reconnect, and external invalidation are outside its grammar.
+
 The Query DB ownership oracle owns the direct-write no-automatic-refetch law
 ([review](oracle-reviews/issue-1935-direct-write-refetch.md)).
 The Query DB `optimistic-ordered-refetch-oracle.test.ts` receiver runs a real

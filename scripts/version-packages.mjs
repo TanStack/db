@@ -80,12 +80,12 @@ export async function seedFirstCandidate(
     releaseEntries.some(
       (match) =>
         (expectedNames.has(match[1]) && match[2] !== 'major') ||
-        (stableNames.has(match[1]) && match[2] !== 'patch') ||
+        (stableNames.has(match[1]) && match[2] === 'major') ||
         (!expectedNames.has(match[1]) && !stableNames.has(match[1])),
     )
   ) {
     throw new Error(
-      'The first RC changeset must list every public pre-1.0 package as major and any already-1.x package as patch, each exactly once.',
+      'The first RC changeset must list every public pre-1.0 package as major and any already-1.x package as patch or minor, each exactly once.',
     )
   }
 
