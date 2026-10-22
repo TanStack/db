@@ -37,6 +37,19 @@
  * eventuality, multi-process coordination, or a browser matrix; the Chromium
  * OPFS fixture separately refines the provider boundary.
  *
+ * Election barrier: a `barrier` work item calls the scheduler's
+ * `runInRegularScope.afterQueuedWork()` after every earlier work item has
+ * entered the scheduler. A coordinator uses it to hold a durable election term
+ * behind work already queued on the shared scheduler, in either lane. The
+ * barrier is not logical work: the K=1 reference ignores it, so it must not
+ * let an additional persist through or change the interleaving. The scheduler
+ * trace records hydrate scope ends and barrier settlement, so a test can
+ * check that the barrier waited for the work queued before it and not for
+ * later work. Two hostile controls take a scheduler turn instead:
+ * `empty-hydrate` enqueues an empty hydrate scope, which K=1 counts as a
+ * hydrate, and `empty-regular` enqueues an empty regular task, which K=1
+ * counts as the persist slot after a hydrate.
+ *
  * Challenge and replay: the named persist-first FIFO wrong answer must violate
  * the same K=1 checker while using the public/core/driver path. The generated
  * property has fixed-seed and seedless-random lanes. Supplying both
@@ -80,6 +93,10 @@ export type SharedDriverFairnessWork =
       id: string
       mutationsPerPersist: number
     }
+  | {
+      kind: `barrier`
+      id: string
+    }
 
 export type SharedDriverFairnessScenario = {
   id: string
@@ -122,6 +139,8 @@ export type SharedDriverFairnessObservation = {
   driverAdmissions: ReadonlyArray<RawDriverAdmission>
   rawDequeues: ReadonlyArray<RawDriverDequeue>
   hydratedCollections: ReadonlyArray<HydratedCollectionRows>
+  /** Hydrate scope ends and barrier calls/settlements, in scheduler order. */
+  schedulerTrace: ReadonlyArray<string>
   cleanupFailures: ReadonlyArray<string>
 }
 
@@ -137,6 +156,8 @@ export type SharedDriverFairnessViolation = {
 export type SharedDriverFairnessOptions = {
   /** Test-only hostile control that preserves the current global FIFO fault. */
   schedulingFault?: `persist-first-fifo`
+  /** Test-only hostile barriers that take a scheduler turn K=1 counts. */
+  barrierFault?: `empty-hydrate` | `empty-regular`
 }
 
 type Deferred = {
@@ -666,6 +687,7 @@ export function createPersistFirstFaultObservation(
     rawDequeues: [],
     driverAdmissions: [],
     hydratedCollections: [],
+    schedulerTrace: [],
     cleanupFailures: [],
   }
 }
@@ -743,6 +765,19 @@ export async function observeSharedDriverFairness(
     undefined,
     options.schedulingFault,
   )
+  const schedulerTrace: Array<string> = []
+  const barrierPromises: Array<Promise<void>> = []
+  const adapter = persistence.adapter
+  const runInHydrationScope = adapter.runInHydrationScope!.bind(adapter)
+  let queuedHydrateScopes = 0
+  let endedHydrateScopes = 0
+  adapter.runInHydrationScope = (task) => {
+    queuedHydrateScopes++
+    return runInHydrationScope(task).finally(() => {
+      endedHydrateScopes++
+      schedulerTrace.push(`hydrate-scope-end:${endedHydrateScopes}`)
+    })
+  }
 
   const collections: Array<Collection<FairnessRow, string>> = []
   const persistPromises: Array<Promise<void>> = []
@@ -781,6 +816,33 @@ export async function observeSharedDriverFairness(
     // is therefore observable at the same deterministic release checkpoint.
     for (const work of scenario.work) {
       const collectionId = collectionIdFor(scenario, work)
+      if (work.kind === `barrier`) {
+        // Wait until every earlier preload has entered the scheduler, so the
+        // barrier sits between hydrates that are both really queued.
+        for (
+          let turn = 0;
+          queuedHydrateScopes < admittedHydrateIds.length && turn < 100;
+          turn++
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+        if (queuedHydrateScopes < admittedHydrateIds.length) {
+          throw new Error(`earlier hydrates never entered the scheduler`)
+        }
+        schedulerTrace.push(`barrier-call:${work.id}@${queuedHydrateScopes}`)
+        const barrier =
+          options.barrierFault === `empty-hydrate`
+            ? runInHydrationScope(async () => {})
+            : options.barrierFault === `empty-regular`
+              ? adapter.runInRegularScope!(async () => {})
+              : adapter.runInRegularScope!.afterQueuedWork()
+        barrierPromises.push(
+          barrier.then(() => {
+            schedulerTrace.push(`barrier-settled:${work.id}`)
+          }),
+        )
+        continue
+      }
       if (work.kind === `persist`) {
         persistSequence += 1
         const sequence = persistSequence
@@ -835,7 +897,11 @@ export async function observeSharedDriverFairness(
     releaseHeldBegin?.()
     releaseHeldBegin = undefined
 
-    await Promise.all([...persistPromises, ...preloadPromises])
+    await Promise.all([
+      ...persistPromises,
+      ...preloadPromises,
+      ...barrierPromises,
+    ])
 
     observation = {
       scenario,
@@ -858,13 +924,18 @@ export async function observeSharedDriverFairness(
             observedRows.get(collectionId)?.map((row) => ({ ...row })) ?? [],
         }
       }),
+      schedulerTrace: [...schedulerTrace],
       cleanupFailures,
     }
   } catch (error) {
     primaryFailure = error
   } finally {
     releaseHeldBegin?.()
-    await Promise.allSettled([...persistPromises, ...preloadPromises])
+    await Promise.allSettled([
+      ...persistPromises,
+      ...preloadPromises,
+      ...barrierPromises,
+    ])
     for (const collection of collections) {
       try {
         await collection.cleanup()
