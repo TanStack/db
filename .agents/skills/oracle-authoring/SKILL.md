@@ -13,9 +13,18 @@ Use this skill whenever an oracle changes, or the production driver, history
 grammar, or comparison that it uses. This includes a change made while you fix
 a bug, fix a review finding, or evaluate review findings.
 
-Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
-[the glossary](../../../docs/contributing/glossary.md), and the relevant owner
-and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).
+Read [the oracle guide](../../../docs/contributing/oracle-rubric.md) and
+[the glossary](../../../docs/contributing/glossary.md) in full, then read the
+relevant owner and limits in
+[the coverage map](../../../docs/contributing/oracle-coverage.md).
+
+After a handoff or compaction, reopen required sources whose relevant contents
+are absent from the current context. A prior agent's statement that it read
+them does not supply their definitions. Apply the glossary's model alignment
+rule before naming or renaming a state, action, boundary, or observation. Use
+canonical terms and declare abstractions that combine or split production
+concepts. Delegated agents must do the reading relevant to their own scope.
+
 Follow the subsystem reading requirements in AGENTS.md.
 
 Use the [instrument library](../../../docs/contributing/instruments/index.md)
