@@ -112,7 +112,7 @@ describe(`node persistence helpers`, () => {
       source.write({ type: `update`, value: { id: `row`, title: `two` } })
       const predecessor = Promise.resolve(source.commit())
       releaseHandler()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       await predecessor
 
       expect(collection.get(`row`)?.title).toBe(`three`)

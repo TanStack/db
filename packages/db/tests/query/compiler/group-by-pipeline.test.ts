@@ -36,31 +36,22 @@ const cases = [false, true].flatMap((grouped) =>
 )
 
 describe(`group-by production pipeline`, () => {
-  // Current Collections publish both fields. These relation rows also cover
-  // the new-field-only input expected after the deprecated alias is removed.
+  // Group metadata reports a pending write when any contributing row has one.
   test.each([
     {
-      name: `new-field-only pending row`,
-      rows: [{ key: `first`, pending: true, shape: `new` }],
+      name: `pending row`,
+      rows: [{ key: `first`, pending: true }],
     },
     {
-      name: `new-field-only settled row`,
-      rows: [{ key: `first`, pending: false, shape: `new` }],
+      name: `settled row`,
+      rows: [{ key: `first`, pending: false }],
     },
     {
-      name: `legacy pending row`,
-      rows: [{ key: `first`, pending: true, shape: `legacy` }],
-    },
-    {
-      name: `mixed new and legacy rows`,
+      name: `mixed pending and settled rows`,
       rows: [
-        { key: `first`, pending: true, shape: `new` },
-        { key: `second`, pending: false, shape: `legacy` },
+        { key: `first`, pending: true },
+        { key: `second`, pending: false },
       ],
-    },
-    {
-      name: `current rows with both fields`,
-      rows: [{ key: `first`, pending: true, shape: `both` }],
     },
   ] as const)(`derives grouped pending writes from $name`, ({ rows }) => {
     const graph = new D2()
@@ -84,14 +75,13 @@ describe(`group-by production pipeline`, () => {
 
     input.sendData(
       new MultiSet<KeyedNamespacedRow>(
-        rows.map(({ key, pending, shape }): [KeyedNamespacedRow, number] => [
+        rows.map(({ key, pending }): [KeyedNamespacedRow, number] => [
           [
             key,
             {
               row: {
                 id: key,
-                ...(shape !== `legacy` ? { $hasPendingWrites: pending } : {}),
-                ...(shape !== `new` ? { $synced: !pending } : {}),
+                $hasPendingWrites: pending,
               },
             },
           ],
@@ -105,7 +95,6 @@ describe(`group-by production pipeline`, () => {
     const grouped = actual.getInner()[0]![0][1]
     const expectedPending = rows.some((row) => row.pending)
     expect(grouped.$hasPendingWrites).toBe(expectedPending)
-    expect(grouped.$synced).toBe(!expectedPending)
   })
 
   // A source field that is not grouped has no single value, with or without
@@ -152,7 +141,7 @@ describe(`group-by production pipeline`, () => {
       type Result = {
         key: unknown
         selected: unknown
-        synced: unknown
+        hasPendingWrites: unknown
         origin: unknown
       }
       let actual = new MultiSet<Result>()
@@ -196,7 +185,7 @@ describe(`group-by production pipeline`, () => {
                 return {
                   key,
                   selected: row.$selected,
-                  synced: row.$synced,
+                  hasPendingWrites: row.$hasPendingWrites,
                   origin: row.$origin,
                 }
               }),
@@ -215,7 +204,7 @@ describe(`group-by production pipeline`, () => {
               {
                 row: {
                   ...row,
-                  $synced: !row.local,
+                  $hasPendingWrites: row.local,
                   $origin: row.local ? `local` : `remote`,
                 },
               },
@@ -252,7 +241,7 @@ describe(`group-by production pipeline`, () => {
                       ...(grouped ? { group: key } : {}),
                       [totalAlias]: amount,
                     },
-              synced: members.every((row) => !row.local),
+              hasPendingWrites: members.some((row) => row.local),
               origin: members.some((row) => row.local) ? `local` : `remote`,
             },
           ]

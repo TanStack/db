@@ -29,6 +29,8 @@ Query function that defines what data to fetch
 
 ### Returns
 
+`Accessor`\<`InferResultType`\<`TContext`\>\> & `object`
+
 Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
@@ -109,7 +111,7 @@ return (
 function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:135](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L135)
+Defined in: [useLiveQuery.ts:130](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L130)
 
 Create a live query using a query function
 
@@ -128,6 +130,8 @@ Create a live query using a query function
 Query function that defines what data to fetch
 
 ### Returns
+
+`Accessor`\<`InferConditionalResultType`\<`TContext`\>\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -209,7 +213,7 @@ return (
 function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:199](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L199)
+Defined in: [useLiveQuery.ts:189](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L189)
 
 Create a live query using configuration object
 
@@ -228,6 +232,8 @@ Create a live query using configuration object
 Configuration object with query and options
 
 ### Returns
+
+`Accessor`\<`InferResultType`\<`TContext`\>\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -278,7 +284,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:256](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L256)
+Defined in: [useLiveQuery.ts:241](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L241)
 
 Subscribe to an existing live query collection
 
@@ -305,6 +311,8 @@ Subscribe to an existing live query collection
 Pre-created live query collection to subscribe to
 
 ### Returns
+
+`Accessor`\<`TResult`[]\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -350,7 +358,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
 ```
 
-Defined in: [useLiveQuery.ts:284](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L284)
+Defined in: [useLiveQuery.ts:264](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L264)
 
 Create a live query using a query function
 
@@ -375,6 +383,8 @@ Create a live query using a query function
 `Accessor`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`\>
 
 ### Returns
+
+`Accessor`\<`TResult` \| `undefined`\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 

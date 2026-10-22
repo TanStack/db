@@ -9,7 +9,7 @@ function resolveLiveQueryValue(value, __namedParameters):
   | null;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L229)
+Defined in: [packages/db/src/live-query-options.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L241)
 
 ## Parameters
 

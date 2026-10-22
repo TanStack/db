@@ -100,7 +100,7 @@ for (const [kind, effects] of Object.entries(grammars)) {
                   : c.insert({ ...effect.row })
                 : c.delete(effect.key)
               outcomes.push(
-                tx.isPersisted.promise.then(
+                tx.when(`settled`).then(
                   () => {
                     succeeded.add(index)
                     return true
@@ -124,11 +124,12 @@ for (const [kind, effects] of Object.entries(grammars)) {
                     ? [peerRow, initial[1]!]
                     : initial
             if (peerAction === 'update')
-              await peer.update(1, (row) => {
-                row.name = 'peer'
-              }).isPersisted.promise
-            if (peerAction === 'delete')
-              await peer.delete(1).isPersisted.promise
+              await peer
+                .update(1, (row) => {
+                  row.name = 'peer'
+                })
+                .when(`settled`)
+            if (peerAction === 'delete') await peer.delete(1).when(`settled`)
             if (peerAction === 'replace') await peer.utils.importData([peerRow])
             await Channel.deliver()
             assertRows(
@@ -214,13 +215,13 @@ it('holds a later accepted update until the earlier handler settles', async () =
     const a = c.update(1, (row) => {
         row.name = 'A'
       }),
-      aOutcome = a.isPersisted.promise
+      aOutcome = a.when(`settled`)
     await entered.promise
     const b = c.update(1, (row) => {
       row.name = 'B'
     })
     let settled = false
-    const bOutcome = b.isPersisted.promise.then(() => {
+    const bOutcome = b.when(`settled`).then(() => {
       settled = true
     })
     await later.promise
@@ -251,9 +252,11 @@ it('reserves mutation order before a handler authors another update', async () =
       onUpdate: async () => {
         if (!reentered) {
           reentered = true
-          later = c.update(1, (row) => {
-            row.name = 'B'
-          }).isPersisted.promise
+          later = c
+            .update(1, (row) => {
+              row.name = 'B'
+            })
+            .when(`settled`)
           return gate.promise
         }
         return undefined
@@ -264,7 +267,7 @@ it('reserves mutation order before a handler authors another update', async () =
     })
     const held = await readStore<Row>(h.db, 'items')
     gate.resolve()
-    await Promise.all([first.isPersisted.promise, later])
+    await Promise.all([first.when(`settled`), later])
     expect(reentered).toBe(true)
     assertRows(held.rows, initial, 'reentered handler held')
     assertRows(
@@ -285,7 +288,7 @@ for (const sameKey of [false, true]) {
       const c = await h.open()
       const peer = await h.open('items', { db: await h.connect() })
       const first = c.insert({ id: 1, name: 'invalid', unsupported: () => {} })
-      const rejected = first.isPersisted.promise.then(
+      const rejected = first.when(`settled`).then(
         () => false,
         () => true,
       )
@@ -295,7 +298,7 @@ for (const sameKey of [false, true]) {
             delete row.unsupported
           })
         : c.insert({ id: 2, name: 'valid' })
-      await next.isPersisted.promise
+      await next.when(`settled`)
       expect(await rejected, 'native failure reaches the earlier caller').toBe(
         true,
       )

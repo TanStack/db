@@ -54,8 +54,8 @@ for (const reverse of [false, true]) {
           { id: '0', name: 'typed key' },
         ]
         await Promise.all([
-          left.insert([rows[0]!, rows[2]!]).isPersisted.promise,
-          right.insert(rows[1]!).isPersisted.promise,
+          left.insert([rows[0]!, rows[2]!]).when(`settled`),
+          right.insert(rows[1]!).when(`settled`),
         ])
         expect(Channel.pending.length).toBe(2)
         // Redelivery retains the original messages, making duplicate output
@@ -65,13 +65,14 @@ for (const reverse of [false, true]) {
         expect(await Channel.deliver()).toBe(4)
         for (const subject of [left, right, await h.open()])
           assertRows(subject.values(), rows, 'disjoint writer convergence')
-        await left.update(rows[0]!.id, (row) => {
-          delete row.optional
-        }).isPersisted.promise
-        await left.delete(rows[2]!.id).isPersisted.promise
-        await left.insert({ id: 'temporary', name: 'removed' }).isPersisted
-          .promise
-        await left.delete('temporary').isPersisted.promise
+        await left
+          .update(rows[0]!.id, (row) => {
+            delete row.optional
+          })
+          .when(`settled`)
+        await left.delete(rows[2]!.id).when(`settled`)
+        await left.insert({ id: 'temporary', name: 'removed' }).when(`settled`)
+        await left.delete('temporary').when(`settled`)
         await Channel.deliver()
         const expected = [{ id: rows[0]!.id, name: 'left' }, rows[1]!]
         for (const subject of [left, right, await h.open()])
@@ -88,7 +89,7 @@ for (const reverse of [false, true]) {
 it('ignores self, foreign database and foreign store notifications', async () => {
   await withHarness(async (h) => {
     const collection = await h.open()
-    await collection.insert({ id: 1, name: 'kept' }).isPersisted.promise
+    await collection.insert({ id: 1, name: 'kept' }).when(`settled`)
     const original = Channel.sent[0] as {
       tabId: string
       database: string
@@ -181,7 +182,7 @@ for (const replacement of ['clear', 'import'] as const) {
           if (replacement === 'clear') await source.utils.clearObjectStore()
           else await source.utils.importData([imported])
           const inserted = { id: 'later', name: 'accepted after replacement' }
-          await receiver.insert(inserted).isPersisted.promise
+          await receiver.insert(inserted).when(`settled`)
           const expected =
             replacement === 'clear' ? [inserted] : [imported, inserted]
           const pending = Channel.pending.length
@@ -277,7 +278,7 @@ it('publishes manual acceptance after the writer sync run is cleaned up', async 
       'cleaned-up',
     )
     await transaction.commit()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     const delivered = await Channel.deliver()
     assertRows(
       (await readStore<Row>(h.db, 'items')).rows,
@@ -669,8 +670,8 @@ for (const count of [2, 3]) {
                 name: 'written through new descriptor',
               }
               const addedRow = { id: 'added', name: 'written in new store' }
-              await restored.insert({ ...suffix }).isPersisted.promise
-              await added.insert({ ...addedRow }).isPersisted.promise
+              await restored.insert({ ...suffix }).when(`settled`)
+              await added.insert({ ...addedRow }).when(`settled`)
               await Channel.deliver()
               assertRows(
                 restored.values(),
@@ -735,10 +736,12 @@ for (const metadata of ['none', 'mixed', 'all'] as const) {
           const receiver = await h.open()
           const sender = await h.open('items', { db: await h.connect() })
           if (action === 'update')
-            await sender.update(key, (row) => {
-              row.name = 'new'
-            }).isPersisted.promise
-          else await sender.delete(key).isPersisted.promise
+            await sender
+              .update(key, (row) => {
+                row.name = 'new'
+              })
+              .when(`settled`)
+          else await sender.delete(key).when(`settled`)
           // Repeat delivery: missing versions cannot turn an update into a second
           // insert, and repeated deletes must leave the independent anchor intact.
           Channel.pending.push(...Channel.pending)
@@ -845,7 +848,7 @@ it('ignores an old native deletion receipt after database recreation', async () 
     })
     h.descriptors.push(recreated)
     const fresh = await h.open('items', { db: recreated })
-    await fresh.insert({ id: 1, name: 'new incarnation' }).isPersisted.promise
+    await fresh.insert({ id: 1, name: 'new incarnation' }).when(`settled`)
     Channel.pending = []
     receipt.resolve()
     await deletion
@@ -881,7 +884,7 @@ it('reports connection closure immediately and supports fresh Collections', asyn
     expect(old.status).toBe('error')
     expect(live.status).toBe('error')
     const fresh = await h.open('items', { db: upgraded })
-    await fresh.insert({ id: 1, name: 'new' }).isPersisted.promise
+    await fresh.insert({ id: 1, name: 'new' }).when(`settled`)
     await Channel.deliver()
     expect(old.status).toBe('error')
     expect(live.status).toBe('error')
@@ -911,12 +914,13 @@ for (const present of [false, true]) {
           const receiver = await h.open()
           const sender = await h.open('items', { db: await h.connect() })
           if (present)
-            await sender.update(key, (row) => {
-              row.name = 'notified'
-            }).isPersisted.promise
+            await sender
+              .update(key, (row) => {
+                row.name = 'notified'
+              })
+              .when(`settled`)
           else
-            await sender.insert({ id: key, name: 'notified' }).isPersisted
-              .promise
+            await sender.insert({ id: key, name: 'notified' }).when(`settled`)
           const current = { id: key, name: 'current' }
           await executeTransaction(
             h.db.db,
@@ -946,9 +950,11 @@ for (const present of [false, true]) {
           )
           const fresh = await h.open()
           assertRows(fresh.values(), expected, 'current restore')
-          await fresh.update(key, (row) => {
-            row.name = 'suffix'
-          }).isPersisted.promise
+          await fresh
+            .update(key, (row) => {
+              row.name = 'suffix'
+            })
+            .when(`settled`)
           await Channel.deliver()
           assertRows(
             receiver.values(),
@@ -1001,7 +1007,7 @@ it('preserves a recreated peer while a newer deletion is blocked', async () => {
     const fresh = await h.open('items', { db: freshDb })
     const peer = await h.open('items', { db: peerDb })
     const expected = [{ id: 1, name: 'recreated' }]
-    await fresh.insert(expected[0]!).isPersisted.promise
+    await fresh.insert(expected[0]!).when(`settled`)
     await Channel.deliver()
     const blockerRequest = indexedDB.open(h.db.name, 1)
     const blocker = await request(blockerRequest)

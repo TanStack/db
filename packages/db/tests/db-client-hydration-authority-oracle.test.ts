@@ -422,7 +422,7 @@ describe(`DbClient hydration interleaving oracle`, () => {
           void Promise.resolve(receipt).catch(() => undefined)
         }
         release()
-        await mutation?.isPersisted.promise.catch(() => undefined)
+        await mutation?.when(`settled`).catch(() => undefined)
         expect(
           observedRows(collection.values()).filter((row) => row.id !== `local`),
         ).toEqual(expectedRows(history))

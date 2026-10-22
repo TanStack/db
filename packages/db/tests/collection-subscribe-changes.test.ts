@@ -464,9 +464,9 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
-    // Sync confirmation should only change virtual props ($synced/$origin)
+    // Sync confirmation should only change virtual props ($hasPendingWrites/$origin)
     expect(callback).toHaveBeenCalledTimes(1)
     expect(
       normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
@@ -502,9 +502,9 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    await updateTx.isPersisted.promise
+    await updateTx.when(`settled`)
 
-    // Sync confirmation should only change virtual props ($synced/$origin)
+    // Sync confirmation should only change virtual props ($hasPendingWrites/$origin)
     expect(callback).toHaveBeenCalledTimes(1)
     expect(
       normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
@@ -624,7 +624,7 @@ describe(`Collection.subscribeChanges`, () => {
     // Wait for changes to propagate
     await waitForChanges()
 
-    // Sync confirmation should only change virtual props ($synced/$origin)
+    // Sync confirmation should only change virtual props ($hasPendingWrites/$origin)
     expect(callback).toHaveBeenCalledTimes(1)
     expect(
       normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
@@ -851,10 +851,10 @@ describe(`Collection.subscribeChanges`, () => {
     // Keep the immediate optimistic assertions isolated above, then prove that
     // every auto-commit also completes through applied-receipt settlement.
     await Promise.all([
-      tx1.isPersisted.promise,
-      tx2.isPersisted.promise,
-      tx3.isPersisted.promise,
-      tx4.isPersisted.promise,
+      tx1.when(`settled`),
+      tx2.when(`settled`),
+      tx3.when(`settled`),
+      tx4.when(`settled`),
     ])
 
     // Clean up
@@ -1057,7 +1057,7 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Wait for transactions to complete
-    await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+    await Promise.all([tx1.when(`settled`), tx2.when(`settled`)])
   })
 
   it(`should emit insert events for new data after truncate`, async () => {
@@ -1357,7 +1357,7 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockClear()
 
     const tx = collection.delete(1, { optimistic: false })
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     expect(callback).toHaveBeenCalledTimes(1)
     const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
@@ -2263,7 +2263,7 @@ describe(`Virtual properties`, () => {
     expect(insertChange).toBeDefined()
 
     const value = insertChange!.value as Record<string, any>
-    expect(value.$synced).toBe(true)
+    expect(value.$hasPendingWrites).toBe(false)
     expect(value.$origin).toBe(`remote`)
     expect(value.$key).toBe(`row-1`)
     expect(value.$collectionId).toBe(`virtual-props-change-test`)
@@ -2271,7 +2271,7 @@ describe(`Virtual properties`, () => {
     subscription.unsubscribe()
   })
 
-  it(`should set $synced false and $origin local for optimistic inserts`, async () => {
+  it(`should set pending writes and local origin for optimistic inserts`, async () => {
     const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
 
     const collection = createCollection<{ id: string; value: string }, string>({
@@ -2299,13 +2299,13 @@ describe(`Virtual properties`, () => {
     expect(insertChange).toBeDefined()
 
     const value = insertChange!.value as Record<string, any>
-    expect(value.$synced).toBe(false)
+    expect(value.$hasPendingWrites).toBe(true)
     expect(value.$origin).toBe(`local`)
 
     subscription.unsubscribe()
   })
 
-  it(`should emit an update when $synced flips on confirmation`, async () => {
+  it(`should emit an update when pending writes clear on confirmation`, async () => {
     const changes: Array<
       ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
     > = []
@@ -2356,7 +2356,7 @@ describe(`Virtual properties`, () => {
       (change) => change.type === `insert` && change.key === `row-1`,
     )
     expect(optimisticInsert).toBeDefined()
-    expect(optimisticInsert!.value.$synced).toBe(false)
+    expect(optimisticInsert!.value.$hasPendingWrites).toBe(true)
 
     changes.length = 0
 
@@ -2377,8 +2377,8 @@ describe(`Virtual properties`, () => {
       (change) => change.type === `update` && change.key === `row-1`,
     )
     expect(confirmedUpdate).toBeDefined()
-    expect(confirmedUpdate!.value.$synced).toBe(true)
-    expect(confirmedUpdate!.previousValue?.$synced).toBe(false)
+    expect(confirmedUpdate!.value.$hasPendingWrites).toBe(false)
+    expect(confirmedUpdate!.previousValue?.$hasPendingWrites).toBe(true)
 
     subscription.unsubscribe()
   })
@@ -2424,9 +2424,9 @@ describe(`Virtual properties`, () => {
     )
 
     expect(updateChange).toBeDefined()
-    expect(updateChange!.value.$synced).toBe(false)
+    expect(updateChange!.value.$hasPendingWrites).toBe(true)
     expect(updateChange!.value.$origin).toBe(`local`)
-    expect(updateChange!.previousValue?.$synced).toBe(true)
+    expect(updateChange!.previousValue?.$hasPendingWrites).toBe(false)
     expect(updateChange!.previousValue?.$origin).toBe(`remote`)
 
     subscription.unsubscribe()
@@ -2486,7 +2486,7 @@ describe(`Virtual properties`, () => {
     expect(insertChange).toBeDefined()
 
     const value = insertChange!.value as Record<string, any>
-    expect(value.$synced).toBe(true)
+    expect(value.$hasPendingWrites).toBe(false)
     expect(value.$origin).toBe(`local`)
 
     subscription.unsubscribe()
@@ -2528,7 +2528,7 @@ describe(`Virtual properties`, () => {
 
     const tx = collection.insert({ id: `row-1`, value: `optimistic` })
     try {
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
     } catch {
       // Expected failure
     }
@@ -2552,7 +2552,7 @@ describe(`Virtual properties`, () => {
 
     expect(latestChange).toBeDefined()
     const value = latestChange!.value as Record<string, any>
-    expect(value.$synced).toBe(true)
+    expect(value.$hasPendingWrites).toBe(false)
     expect(value.$origin).toBe(`remote`)
 
     subscription.unsubscribe()
@@ -2593,7 +2593,7 @@ describe(`Virtual properties`, () => {
       { id: `row-1`, value: `local` },
       { optimistic: false },
     )
-    await expect(tx.isPersisted.promise).rejects.toThrow(`insert failed`)
+    await expect(tx.when(`settled`)).rejects.toThrow(`insert failed`)
 
     if (!syncFns) {
       throw new Error(`Sync not ready`)
@@ -2608,7 +2608,7 @@ describe(`Virtual properties`, () => {
 
     await waitForChanges()
 
-    expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+    expect(collection.state.get(`row-1`)?.$hasPendingWrites).toBe(false)
     expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
   })
 
@@ -2664,7 +2664,7 @@ describe(`Virtual properties`, () => {
       { id: `row-1`, value: `local` },
       { optimistic: false },
     )
-    await insertTx.isPersisted.promise
+    await insertTx.when(`settled`)
     await waitForChanges()
 
     expect(collection.state.get(`row-1`)?.$origin).toBe(`local`)
@@ -2716,14 +2716,15 @@ describe(`Virtual properties`, () => {
         onInsert: () => Promise.resolve(),
       })
       try {
-        await collection.delete(`row`).isPersisted.promise
+        await collection.delete(`row`).when(`settled`)
         // The delete settled without its echo, so the synced row returns.
         expect(collection.get(`row`)?.value).toBe(`original`)
         if (deleteEchoed) echoDelete()
         expect(collection.has(`row`)).toBe(!deleteEchoed)
         if (deleteEchoed) {
-          await collection.insert({ id: `row`, value: `replacement` })
-            .isPersisted.promise
+          await collection
+            .insert({ id: `row`, value: `replacement` })
+            .when(`settled`)
           expect(collection.has(`row`)).toBe(false)
         }
       } finally {
@@ -2771,7 +2772,7 @@ describe(`Virtual properties`, () => {
       const transaction = collection.insert({ id: `row-1`, value: `client` })
       if (settlement === `before`) {
         finishMutation()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
       }
       // A settled insert without a confirmation has dropped.
       if (settlement === `before`)
@@ -2795,8 +2796,8 @@ describe(`Virtual properties`, () => {
         // acknowledged insertion completes; it must not erase that evidence.
         const peer = collection.insert({ id: `other`, value: `peer` })
         finishMutation()
-        await transaction.isPersisted.promise
-        await peer.isPersisted.promise
+        await transaction.when(`settled`)
+        await peer.when(`settled`)
       }
       if (applied !== true) await applied
       await waitForChanges()
@@ -2805,7 +2806,7 @@ describe(`Virtual properties`, () => {
         id: `row-1`,
         value: `server`,
       })
-      expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+      expect(collection.state.get(`row-1`)?.$hasPendingWrites).toBe(false)
       // A same-key sync during the active mutation is a local acknowledgement;
       // after completion, truncate is an independent remote replacement.
       expect(collection.state.get(`row-1`)?.$origin).toBe(
@@ -2866,24 +2867,32 @@ describe(`Virtual properties`, () => {
       { id: `row-1`, value: `local` },
       { optimistic: false },
     )
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
     await waitForChanges()
 
-    expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+    expect(collection.state.get(`row-1`)?.$hasPendingWrites).toBe(false)
     expect(collection.state.get(`row-1`)?.$origin).toBe(`local`)
   })
 
-  it(`hasVirtualProps recognizes the legacy four-field shape`, () => {
+  it(`hasVirtualProps requires the pending-write field`, () => {
     expect(
       hasVirtualProps({
-        $synced: true,
+        $hasPendingWrites: false,
         $origin: `remote`,
       }),
     ).toBe(false)
 
     expect(
       hasVirtualProps({
-        $synced: true,
+        $origin: `remote`,
+        $key: `row-1`,
+        $collectionId: `collection-1`,
+      }),
+    ).toBe(false)
+
+    expect(
+      hasVirtualProps({
+        $hasPendingWrites: false,
         $origin: `remote`,
         $key: `row-1`,
         $collectionId: `collection-1`,
@@ -2923,7 +2932,7 @@ describe(`Virtual properties`, () => {
     await waitForChanges()
 
     const liveRow = liveChanges[0]?.value as Record<string, any>
-    expect(liveRow.$synced).toBe(true)
+    expect(liveRow.$hasPendingWrites).toBe(false)
     expect(liveRow.$origin).toBe(`remote`)
     expect(liveRow.$collectionId).toBe(`virtual-props-source`)
 
@@ -2932,7 +2941,7 @@ describe(`Virtual properties`, () => {
     await live.cleanup()
   })
 
-  it(`should allow filtering on $synced in live queries`, async () => {
+  it(`should allow filtering on pending writes in live queries`, async () => {
     const source = createCollection<{ id: string; value: string }, string>({
       id: `virtual-props-filter-source`,
       getKey: (item) => item.id,
@@ -2955,7 +2964,9 @@ describe(`Virtual properties`, () => {
     const syncedOnly = createLiveQueryCollection({
       id: `virtual-props-filter-live`,
       query: (q) =>
-        q.from({ item: source }).where(({ item }) => eq(item.$synced, true)),
+        q
+          .from({ item: source })
+          .where(({ item }) => eq(item.$hasPendingWrites, false)),
     })
 
     const liveChanges: Array<ChangeMessage<any>> = []
@@ -3046,7 +3057,6 @@ describe(`Virtual properties`, () => {
     const groupRow = grouped.toArray.find((row) => row.group === `g1`)
     expect(groupRow).toBeDefined()
     expect(groupRow!.$hasPendingWrites).toBe(true)
-    expect(groupRow!.$synced).toBe(false)
     expect(groupRow!.$origin).toBe(`local`)
     expect(groupRow!.$collectionId).toBe(`virtual-props-aggregate-source`)
 
@@ -3081,7 +3091,7 @@ describe(`Virtual properties`, () => {
 
     const value = insertChange!.value as Record<string, any>
     expect(value.$hasPendingWrites).toBe(false)
-    expect(value.$synced).toBe(true)
+    expect(value.$hasPendingWrites).toBe(false)
     expect(value.$origin).toBe(`local`)
 
     subscription.unsubscribe()

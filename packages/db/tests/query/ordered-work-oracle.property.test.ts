@@ -251,13 +251,7 @@ function requestFingerprint(options: LoadSubsetOptions): string {
 
 function copiedRow(row: Row): Row {
   const copy: Record<string, unknown> = { ...row }
-  for (const field of [
-    `$key`,
-    `$collectionId`,
-    `$origin`,
-    `$hasPendingWrites`,
-    `$synced`,
-  ])
+  for (const field of [`$key`, `$collectionId`, `$origin`, `$hasPendingWrites`])
     delete copy[field]
   return copy as Row
 }
@@ -5460,7 +5454,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       matched
         ? markers.insert(marker(rowId))
         : markers.delete(current.map(({ key }) => key))
-    ).isPersisted.promise
+    ).when(`settled`)
   }
   const markersOf = (rowId: number) =>
     [...markerModel.values()].filter((entry) => entry.rowId === rowId)
@@ -5945,7 +5939,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(`delete`, before)
         } else {
-          await source.delete(command.id).isPersisted.promise
+          await source.delete(command.id).when(`settled`)
         }
         // A full join keeps the marker, which becomes a rootless row. An
         // anti-join's deleted row needs no marker change.
@@ -5964,18 +5958,19 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(`update`, next)
         } else {
-          await source.update(command.id, (draft) => {
-            draft.eligible = next.eligible
-            draft.link = next.link
-          }).isPersisted.promise
+          await source
+            .update(command.id, (draft) => {
+              draft.eligible = next.eligible
+              draft.link = next.link
+            })
+            .when(`settled`)
         }
         await setMarker(command.id, eligible)
       } else if (command.type === `dup`) {
         if (!(joined || fullJoin) || viaLink || !before) continue
         if (markersOf(before.link ?? before.id).length === 0) continue
         if (ledgerHasRoot(before.link ?? before.id)) noteChange()
-        await markers.insert(marker(before.link ?? before.id)).isPersisted
-          .promise
+        await markers.insert(marker(before.link ?? before.id)).when(`settled`)
       } else if (command.type === `touch`) {
         if (!before) continue
         const next = { ...before, label: `touched-${step}` }
@@ -5983,9 +5978,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(`update`, next)
         } else {
-          await source.update(command.id, (draft) => {
-            draft.label = next.label
-          }).isPersisted.promise
+          await source
+            .update(command.id, (draft) => {
+              draft.label = next.label
+            })
+            .when(`settled`)
         }
       } else {
         const next = {
@@ -5999,13 +5996,15 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(before ? `update` : `insert`, next)
         } else if (before) {
-          await source.update(command.id, (draft) => {
-            draft.rank = next.rank
-            draft.eligible = next.eligible
-            draft.link = next.link
-          }).isPersisted.promise
+          await source
+            .update(command.id, (draft) => {
+              draft.rank = next.rank
+              draft.eligible = next.eligible
+              draft.link = next.link
+            })
+            .when(`settled`)
         } else {
-          await source.insert(next).isPersisted.promise
+          await source.insert(next).when(`settled`)
         }
         await setMarker(command.id, next.eligible)
       }
@@ -6687,7 +6686,7 @@ async function checkOptimisticWindow(
                 else if (shape !== `source`) draft.link = -draft.id
               })
       let settlementOutcome: `fulfilled` | `rejected` = `fulfilled`
-      settled = transaction.isPersisted.promise.then(
+      settled = transaction.when(`settled`).then(
         () => undefined,
         () => {
           settlementOutcome = `rejected`
@@ -6783,7 +6782,7 @@ async function checkOptimisticWindow(
           .map(copyOptimisticWindowPublication)
         await awaitOptimisticCheckpoint(
           `marker restoration`,
-          restoration.isPersisted.promise,
+          restoration.when(`settled`),
         )
       }
 
@@ -7774,7 +7773,7 @@ describe(`eager indexed ordered windows`, () => {
         ])
         if (outcome === `acknowledge`) persistence.resolve()
         else persistence.reject(new Error(`rollback`))
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         expect(ids(), `settled installed rows`).toEqual(
           outcome === `acknowledge` ? expected : initial,
         )

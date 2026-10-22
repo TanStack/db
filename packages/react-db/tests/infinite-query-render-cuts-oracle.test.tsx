@@ -256,7 +256,10 @@ describe(`on-demand sources match useLiveQuery`, () => {
             .orderBy(({ items }: any) => items.rank, `desc`)
         const result: any =
           hook === `live`
-            ? useLiveQuery((q: any) => query(q).limit(PAGE_SIZE + 1), [fail])
+            ? useLiveQuery({
+                query: (q: any) => query(q).limit(PAGE_SIZE + 1),
+                queryKey: [fail],
+              })
             : useLiveInfiniteQuery(query, {
                 pageSize: PAGE_SIZE,
                 queryKey: [`startup-error`, fail],
@@ -377,8 +380,7 @@ describe(`retries after GC`, () => {
             .from({ items: source })
             .where(({ items }) => gt(items.rank, minimum))
             .orderBy(({ items }) => items.rank, `desc`),
-        { pageSize: 3 },
-        [minimum],
+        { ...{ pageSize: 3 }, queryKey: [minimum] },
       )
       useLayoutEffect(() => {
         commits.push({

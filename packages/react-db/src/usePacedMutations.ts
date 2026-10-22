@@ -36,7 +36,7 @@ import type { PacedMutationsConfig, Transaction } from '@tanstack/db'
  *
  *     // Optional: await persistence or handle errors
  *     try {
- *       await tx.isPersisted.promise
+ *       await tx.when('settled')
  *       console.log('Saved!')
  *     } catch (error) {
  *       console.error('Save failed:', error)

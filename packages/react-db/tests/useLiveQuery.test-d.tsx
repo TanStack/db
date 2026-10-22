@@ -151,7 +151,7 @@ describe(`useLiveQuery type assertions`, () => {
     >()
   })
 
-  it(`types a conditional config with deprecated dependencies`, () => {
+  it(`types a conditional config with an explicit query key`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-conditional-config-deps`,
@@ -162,13 +162,10 @@ describe(`useLiveQuery type assertions`, () => {
     const enabled = null as unknown as boolean
 
     const { result } = renderHook(() =>
-      useLiveQuery(
-        {
-          query: (q) =>
-            enabled ? q.from({ collection }).findOne() : undefined,
-        },
-        [enabled],
-      ),
+      useLiveQuery({
+        query: (q) => (enabled ? q.from({ collection }).findOne() : undefined),
+        queryKey: [enabled],
+      }),
     )
 
     expectTypeOf(result.current.data).toMatchTypeOf<
@@ -286,13 +283,13 @@ describe(`useLiveQuery type assertions`, () => {
     )
 
     const { result } = renderHook(() =>
-      useLiveQuery(
-        (q) =>
+      useLiveQuery({
+        query: (q) =>
           q
             .from({ person: collection })
             .where(({ person }) => eq(person.team, `team-1`)),
-        [`team-1`],
-      ),
+        queryKey: [`team-1`],
+      }),
     )
 
     expectTypeOf(result.current.data).toMatchTypeOf<

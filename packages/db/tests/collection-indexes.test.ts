@@ -451,7 +451,7 @@ describe(`Collection Indexes`, () => {
 
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert(newItem))
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Item should be in collection state
       expect(collection.size).toBe(6)
@@ -488,7 +488,7 @@ describe(`Collection Indexes`, () => {
           draft.age = 26
         }),
       )
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Updated item should be in collection state
       const updatedItem = collection.get(`1`)
@@ -518,7 +518,7 @@ describe(`Collection Indexes`, () => {
           draft.age = 26
         }),
       )
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Updated item should be in collection state
       const updatedItem = collection.get(`1`)
@@ -551,7 +551,7 @@ describe(`Collection Indexes`, () => {
 
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`1`))
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Item should be removed from collection state
       expect(collection.size).toBe(4)
@@ -580,7 +580,7 @@ describe(`Collection Indexes`, () => {
 
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`1`))
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Item should be removed from collection state
       expect(collection.size).toBe(4)
@@ -615,7 +615,7 @@ describe(`Collection Indexes`, () => {
           draft.status = `active`
         }),
       )
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       const dataChanges = stripVirtualOnlyUpdates(activeChanges)
       expect(dataChanges).toHaveLength(1)
@@ -629,7 +629,7 @@ describe(`Collection Indexes`, () => {
           draft.status = `inactive`
         }),
       )
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       // Should trigger delete event for item that no longer matches filter
       const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
@@ -660,7 +660,7 @@ describe(`Collection Indexes`, () => {
           draft.status = `active`
         }),
       )
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       const dataChanges = stripVirtualOnlyUpdates(activeChanges)
       expect(dataChanges).toHaveLength(1)
@@ -674,7 +674,7 @@ describe(`Collection Indexes`, () => {
           draft.status = `inactive`
         }),
       )
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       // Subscriber shoiuld not receive any changes
       // because it is not aware of that key
@@ -2160,7 +2160,7 @@ describe(`Collection Indexes`, () => {
             createdAt: new Date(),
           }),
         )
-        await tx1.isPersisted.promise
+        await tx1.when(`settled`)
 
         const dataChanges = stripVirtualOnlyUpdates(changes)
         expect(dataChanges).toHaveLength(1)
@@ -2178,7 +2178,7 @@ describe(`Collection Indexes`, () => {
             createdAt: new Date(),
           }),
         )
-        await tx2.isPersisted.promise
+        await tx2.when(`settled`)
 
         expect(changes).toHaveLength(0)
 
@@ -2190,7 +2190,7 @@ describe(`Collection Indexes`, () => {
             draft.status = `inactive`
           }),
         )
-        await tx3.isPersisted.promise
+        await tx3.when(`settled`)
 
         expect(changes).toHaveLength(1) // Should emit delete event for item leaving filter
         expect(changes[0]?.type).toBe(`delete`)
@@ -2237,7 +2237,7 @@ describe(`Collection Indexes`, () => {
             draft.age = 32
           }),
         )
-        await tx.isPersisted.promise
+        await tx.when(`settled`)
 
         const dataChanges = stripVirtualOnlyUpdates(changes)
         expect(dataChanges).toHaveLength(1)
@@ -2413,9 +2413,9 @@ describe(`Collection Indexes`, () => {
       tx3.mutate(() => collection.delete(`2`))
 
       await Promise.all([
-        tx1.isPersisted.promise,
-        tx2.isPersisted.promise,
-        tx3.isPersisted.promise,
+        tx1.when(`settled`),
+        tx2.when(`settled`),
+        tx3.when(`settled`),
       ])
 
       // Wait a bit for sync to complete and indexes to update

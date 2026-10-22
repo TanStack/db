@@ -634,7 +634,6 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     $key: number
     $origin: `local` | `remote`
     $hasPendingWrites: boolean
-    $synced: boolean
   }
   type ObservedChange = {
     type: string
@@ -649,7 +648,6 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     $key: row.$key,
     $origin: row.$origin,
     $hasPendingWrites: row.$hasPendingWrites,
-    $synced: row.$synced,
   })
   const publications: Array<{
     changes: Array<ObservedChange>
@@ -695,7 +693,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       })
       readMutationState = () => transaction.state
       rollbackMutation = () => transaction.rollback()
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       transaction.mutate(() => collection.insert({ id: 2, value: 2 }))
       mutationCommit = transaction.commit()
 
@@ -718,7 +716,6 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       $key: id,
       $origin: `remote`,
       $hasPendingWrites: false,
-      $synced: true,
     })
     const localRow = (id: number): ObservedRow => ({
       id,
@@ -727,7 +724,6 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       $key: id,
       $origin: `local`,
       $hasPendingWrites: true,
-      $synced: false,
     })
     const expectedPublications = [
       {
@@ -1519,7 +1515,7 @@ it(`snapshots a buffered delete before its row object is reused`, async () => {
       type: string
       value: LivePreviousRow[`value`]
       previousValue: LivePreviousRow[`value`]
-      previousSynced: boolean | undefined
+      previousHasPendingWrites: boolean | undefined
       previousOrigin: string | undefined
     }>
   > = []
@@ -1528,13 +1524,16 @@ it(`snapshots a buffered delete before its row object is reused`, async () => {
       publications.push(
         changes.map((change) => {
           const previous = change.previousValue as
-            | (LivePreviousRow & { $synced: boolean; $origin: string })
+            | (LivePreviousRow & {
+                $hasPendingWrites: boolean
+                $origin: string
+              })
             | undefined
           return {
             type: change.type,
             value: change.value.value,
             previousValue: previous?.value,
-            previousSynced: previous?.$synced,
+            previousHasPendingWrites: previous?.$hasPendingWrites,
             previousOrigin: previous?.$origin,
           }
         }),
@@ -1566,7 +1565,7 @@ it(`snapshots a buffered delete before its row object is reused`, async () => {
           type: `update`,
           value: 1,
           previousValue: 0,
-          previousSynced: true,
+          previousHasPendingWrites: false,
           previousOrigin: `remote`,
         },
       ],
@@ -1999,7 +1998,7 @@ it(`does not carry previous-value state across a failed sync run`, async () => {
         throw optimisticFailure
       },
     })
-    const persistence = optimistic.isPersisted.promise.catch((error) => error)
+    const persistence = optimistic.when(`settled`).catch((error) => error)
     optimistic.mutate(() => collection.insert({ id: 3, value: 30 }))
     expect(collection.has(3), `failed-sync optimistic overlay appears`).toBe(
       true,
@@ -2566,7 +2565,7 @@ it(`rejects a partial update applied as a full replacement`, async () => {
     ),
     // A row observation must reject the replaced row, not the mutant checkpoint.
   ).rejects.toThrow(
-    /whole forward publication|: reads .* expected |rows visible when isPersisted settled/,
+    /whole forward publication|: reads .* expected |rows visible when settlement completed/,
   )
 })
 it(`rejects a default lost only after settlement`, async () => {
@@ -2678,9 +2677,9 @@ it(`drops a completed direct insert whose handler wrote no sync row`, async () =
     await collection.stateWhenReady()
     sync.begin()
     sync.truncate()
-    await collection.insert({ id: 1, value: 1 }).isPersisted.promise
+    await collection.insert({ id: 1, value: 1 }).when(`settled`)
     expect(sync.commit()).toBe(true)
-    await collection.insert({ id: 2, value: 2 }).isPersisted.promise
+    await collection.insert({ id: 2, value: 2 }).when(`settled`)
 
     expect(events).toEqual([`insert:1`, `delete:1`, `insert:2`, `delete:2`])
     expect([...collection.state.keys()]).toEqual([])

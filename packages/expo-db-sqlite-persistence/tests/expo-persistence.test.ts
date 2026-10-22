@@ -154,7 +154,7 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
     title: `Before background`,
     score: 1,
   })
-  await initialInsert.isPersisted.promise
+  await initialInsert.when(`settled`)
   expect(collection.get(`1`)?.title).toBe(`Before background`)
 
   await collection.cleanup()
@@ -166,7 +166,7 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
     title: `Post resume write`,
     score: 2,
   })
-  await postResumeInsert.isPersisted.promise
+  await postResumeInsert.when(`settled`)
   expect(collection.get(`2`)?.title).toBe(`Post resume write`)
 
   const persistedRows = await persistence.adapter.loadSubset(

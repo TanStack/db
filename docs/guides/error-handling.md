@@ -268,7 +268,6 @@ const todoCollection = createCollection({
       throw new Error(`HTTP Error: ${response.status}`)
     }
     
-    return response.json()
   },
 })
 
@@ -518,8 +517,7 @@ const todoCollection = createCollection(
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.status}`)
       }
-      return response.json()
-    },
+      },
     queryClient,
     getKey: (item) => item.id,
     schema: todoSchema,
@@ -851,7 +849,6 @@ const todoCollection = createCollection({
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
     }
 
-    return response.json()
   },
   sync: {
     sync: ({ begin, write, commit, markReady }) => {

@@ -170,17 +170,17 @@ async function runHistory(steps: Array<Step>) {
       }
       switch (action.kind) {
         case 'write':
-          await write(slot, row).isPersisted.promise
+          await write(slot, row).when(`settled`)
           remember(slot, row)
           break
         case 'delete': {
           if (!model[slot]!.length) {
-            await collection.insert({ ...row }).isPersisted.promise
+            await collection.insert({ ...row }).when(`settled`)
             remember(slot, row)
             await Channel.deliver()
           }
           const removed = model[slot]![action.key % model[slot]!.length]!
-          await collection.delete(removed.id).isPersisted.promise
+          await collection.delete(removed.id).when(`settled`)
           model[slot] = model[slot]!.filter((item) => item.id !== removed.id)
           touched.add(JSON.stringify([names[slot], removed.id]))
           break
@@ -213,7 +213,7 @@ async function runHistory(steps: Array<Step>) {
             write(0, row)
             write(1, other)
           })
-          await tx.isPersisted.promise
+          await tx.when(`settled`)
           remember(0, row)
           remember(1, other)
           break
@@ -436,7 +436,7 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
           }
         },
       })
-      const outcome = tx.isPersisted.promise
+      const outcome = tx.when(`settled`)
       void outcome.catch(() => undefined)
       tx.mutate(() => {
         for (const [index, collection] of collections.entries()) {
@@ -488,9 +488,11 @@ for (const timestamp of [undefined, -1, Number.MAX_SAFE_INTEGER]) {
       const source = await h.open()
       const peer = await h.open('items', { db: await h.connect() })
       assertRows(source.values(), initial, 'legacy restore')
-      await source.update(1, (row) => {
-        row.name = 'after'
-      }).isPersisted.promise
+      await source
+        .update(1, (row) => {
+          row.name = 'after'
+        })
+        .when(`settled`)
       await Channel.deliver()
       const after = [{ id: 1, name: 'after' }, initial[1]!]
       assertRows(

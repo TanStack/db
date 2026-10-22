@@ -113,11 +113,6 @@ type InferConditionalResultType<TContext extends Context> =
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
@@ -137,11 +132,6 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
 ): Accessor<InferConditionalResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferConditionalResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
@@ -199,11 +189,6 @@ export function useLiveQuery<TContext extends Context>(
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
@@ -262,11 +247,6 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
 ): Accessor<Array<TResult>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: Array<TResult>
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus
@@ -290,11 +270,6 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & SingleResult
   >,
 ): Accessor<TResult | undefined> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: TResult | undefined
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus
@@ -587,11 +562,6 @@ export function useLiveQuery(
   }
 
   Object.defineProperties(getData, {
-    data: {
-      get() {
-        return getData()
-      },
-    },
     status: {
       get() {
         return status()

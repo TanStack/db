@@ -1,5 +1,5 @@
 import { D2, output } from '@tanstack/db-ivm'
-import { compileQuery } from '../compiler/index.js'
+import { compileCollectionQuery } from '../compiler/index.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
@@ -891,7 +891,7 @@ export class CollectionConfigBuilder<
     }
     this.inputsCache = inputs
 
-    const compilation = compileQuery(
+    const compilation = compileCollectionQuery(
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,

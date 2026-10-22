@@ -118,23 +118,26 @@ const todoCollection = collectionOptions('todos', (client) =>
     },
     getKey: (item) => item.id,
     // Handle all CRUD operations
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { modified: newTodo } = transaction.mutations[0]
       await fetch('/api/todos', {
         method: 'POST',
         body: JSON.stringify(newTodo),
       })
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { original, modified } = transaction.mutations[0]
       await fetch(`/api/todos/${original.id}`, {
         method: 'PUT', 
         body: JSON.stringify(modified),
       })
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       const { original } = transaction.mutations[0]
       await fetch(`/api/todos/${original.id}`, { method: 'DELETE' })
+      await collection.utils.refetch()
     },
   })
 )

@@ -185,12 +185,13 @@ const todosCollection = createCollection(
     queryClient,
     getKey: (item) => item.id,
     schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const todo = transaction.mutations[0].modified
       await api.todos.create({
         ...todo,
         created_at: todo.created_at.toISOString(),
       })
+      await collection.utils.refetch()
     },
   }),
 )

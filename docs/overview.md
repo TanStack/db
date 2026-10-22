@@ -32,6 +32,7 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 
 ## Contents
 
+- [Migrating to the 1.0 RC](./guides/migrate-to-1-0-rc.md) — update apps from pre-1.0 releases
 - [How it works](#how-it-works) — understand the TanStack DB development model and how the pieces fit together
 - [SSR and hydration](./guides/ssr.md) — use `DbClient` to transport explicit collection rows or live-query result snapshots
 - [SQLite persistence](./guides/sqlite-persistence.md) — retain Collection rows across restarts and save sync metadata for supported adapters
@@ -462,8 +463,6 @@ const todoCollection = collectionOptions("todos", (client) =>
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
-      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -483,8 +482,6 @@ const listCollection = collectionOptions("todo-lists", (client) =>
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
-      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })

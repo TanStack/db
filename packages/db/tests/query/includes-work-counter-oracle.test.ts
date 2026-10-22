@@ -1088,7 +1088,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
       }
       await (
         type === `insert` ? childSource.insert(row) : childSource.delete(row.id)
-      ).isPersisted.promise
+      ).when(`settled`)
     }
 
     const live = createLiveQueryCollection((q) => {
@@ -1310,9 +1310,11 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
         if (!source) {
           const added = addChildren(group, testCase.childrenPerGroup)
           for (const child of added) await changeChild(`insert`, child)
-          await grandchildSource.insert(
-            added.map((child) => grandchildren.get(`grand-${child.id}`)!),
-          ).isPersisted.promise
+          await grandchildSource
+            .insert(
+              added.map((child) => grandchildren.get(`grand-${child.id}`)!),
+            )
+            .when(`settled`)
         }
         const parent = {
           id: `parent-new-${step}`,
@@ -1320,12 +1322,12 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
           group,
         }
         parents.set(parent.id, parent)
-        await parentSource.insert(parent).isPersisted.promise
+        await parentSource.insert(parent).when(`settled`)
       } else if (command.type === `delete-parent`) {
         if (ids.length === 0) continue
         const id = ids[command.pick % ids.length]!
         parents.delete(id)
-        await parentSource.delete(id).isPersisted.promise
+        await parentSource.delete(id).when(`settled`)
       } else if (command.type === `rank`) {
         if (ids.length === 0) continue
         const id = ids[command.pick % ids.length]!
@@ -1335,9 +1337,11 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
           ? Math.max(...ranks) + 1
           : Math.min(...ranks) - 1
         parents.set(id, { ...parents.get(id)!, rank })
-        await parentSource.update(id, (draft) => {
-          draft.rank = rank
-        }).isPersisted.promise
+        await parentSource
+          .update(id, (draft) => {
+            draft.rank = rank
+          })
+          .when(`settled`)
       } else if (command.type === `insert-child`) {
         const groups = [...new Set([...parents.values()].map((p) => p.group))]
         if (groups.length === 0) continue

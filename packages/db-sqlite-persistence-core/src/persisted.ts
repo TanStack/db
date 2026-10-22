@@ -6915,54 +6915,42 @@ export function persistedCollectionOptions<
     params: InsertMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
   ) => {
     const lifecycleGeneration = runtime.getLifecycleGeneration()
-    const handlerResult = localOnlyOptions.onInsert
-      ? await localOnlyOptions.onInsert(
-          params as unknown as InsertMutationFnParams<T, TKey, TUtils>,
-        )
-      : undefined
+    await localOnlyOptions.onInsert?.(
+      params as unknown as InsertMutationFnParams<T, TKey, TUtils>,
+    )
 
     await runtime.persistAndConfirmCollectionMutations(
       params.transaction.mutations as Array<PendingMutation<T>>,
       lifecycleGeneration,
     )
-
-    return handlerResult ?? {}
   }
 
   const wrappedOnUpdate = async (
     params: UpdateMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
   ) => {
     const lifecycleGeneration = runtime.getLifecycleGeneration()
-    const handlerResult = localOnlyOptions.onUpdate
-      ? await localOnlyOptions.onUpdate(
-          params as unknown as UpdateMutationFnParams<T, TKey, TUtils>,
-        )
-      : undefined
+    await localOnlyOptions.onUpdate?.(
+      params as unknown as UpdateMutationFnParams<T, TKey, TUtils>,
+    )
 
     await runtime.persistAndConfirmCollectionMutations(
       params.transaction.mutations as Array<PendingMutation<T>>,
       lifecycleGeneration,
     )
-
-    return handlerResult ?? {}
   }
 
   const wrappedOnDelete = async (
     params: DeleteMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
   ) => {
     const lifecycleGeneration = runtime.getLifecycleGeneration()
-    const handlerResult = localOnlyOptions.onDelete
-      ? await localOnlyOptions.onDelete(
-          params as unknown as DeleteMutationFnParams<T, TKey, TUtils>,
-        )
-      : undefined
+    await localOnlyOptions.onDelete?.(
+      params as unknown as DeleteMutationFnParams<T, TKey, TUtils>,
+    )
 
     await runtime.persistAndConfirmCollectionMutations(
       params.transaction.mutations as Array<PendingMutation<T>>,
       lifecycleGeneration,
     )
-
-    return handlerResult ?? {}
   }
 
   const acceptMutations = async (transaction: {

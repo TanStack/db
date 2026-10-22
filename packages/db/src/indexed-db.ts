@@ -818,21 +818,20 @@ export function indexedDBCollectionOptions(
   // is held. Each rejected decision releases its place without persisting.
   function persistInOrder(
     transaction: { mutations: Array<PendingMutation<Item>> },
-    handler: () => unknown,
-  ): Promise<unknown> {
+    handler: () => void | Promise<void>,
+  ): Promise<void> {
     const result = acceptance.then(async () => {
       const outcome = await decision
       if (!outcome.accepted) throw outcome.error
       await acceptMutations(transaction)
-      return outcome.value
     })
     acceptance = result.then(
       () => undefined,
       () => undefined,
     )
     // Reserve the position before application code can author another write.
-    const decision = new Promise<unknown>((resolve) => resolve(handler())).then(
-      (value) => ({ accepted: true as const, value }),
+    const decision = new Promise<void>((resolve) => resolve(handler())).then(
+      () => ({ accepted: true as const }),
       (error: unknown) => ({ accepted: false as const, error }),
     )
     return result

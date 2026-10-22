@@ -10,10 +10,7 @@ import type {
   Value,
 } from '../ir.js'
 import type { InitialQueryBuilder, QueryBuilder } from './index.js'
-import type {
-  PublishedVirtualRowProps,
-  WithVirtualProps,
-} from '../../virtual-props.js'
+import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
 import type {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
@@ -856,9 +853,7 @@ type NonNull<T> = T extends null ? never : T
  * ```
  */
 type VirtualPropsRef<TKey extends string | number = string | number> = {
-  readonly [K in keyof PublishedVirtualRowProps<TKey>]: RefLeaf<
-    PublishedVirtualRowProps<TKey>[K]
-  >
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
 /**

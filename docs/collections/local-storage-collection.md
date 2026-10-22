@@ -138,7 +138,7 @@ localStorage before the mutation method returns. A later handler failure rejects
 its transaction promptly, even if an earlier handler is still pending.
 
 A handler can start another mutation on the same Collection, then return without
-awaiting that mutation's `isPersisted` promise. Do not await that promise or a
+awaiting that mutation's `when('settled')` promise. Do not await that promise or a
 later `acceptMutations()` call inside the earlier handler. Those writes wait for
 the earlier handler to return, so awaiting them would leave both pending.
 

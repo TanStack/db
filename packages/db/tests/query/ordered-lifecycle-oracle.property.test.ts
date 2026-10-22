@@ -1845,7 +1845,7 @@ async function observeLaterFallback(
   let markerSync!: MarkerSync
   let markerCommitImmediate = false
   let blockerStarted = false
-  let blockerPersistence: Promise<unknown> | undefined
+  let blockerSettlement: Promise<unknown> | undefined
   let receiptPending = false
   let fallbackEntry:
     { rows: Array<LaterFallbackRow>; status: string } | undefined
@@ -1943,10 +1943,13 @@ async function observeLaterFallback(
               ) {
                 // The page's own receipt applied. Only the later full-source
                 // transaction waits behind this unrelated optimistic update.
-                blockerPersistence = rootCollection.update(1, (draft) => {
-                  draft.note = `pending`
-                }).isPersisted.promise
-                void blockerPersistence.catch(() => {})
+                const blocker = rootCollection
+                  .update(1, (draft) => {
+                    draft.note = `pending`
+                  })
+                  .when(`settled`)
+                blockerSettlement = blocker
+                void blocker.catch(() => {})
               }
             }
             if (isFullSource) {
@@ -2223,14 +2226,14 @@ async function observeLaterFallback(
   blockerGate.resolve()
   providerGate.resolve()
   childGate.resolve()
-  // A persistence failure is a distinct cleanup diagnostic if the public
+  // A settlement failure is a distinct cleanup diagnostic if the public
   // comparison already failed. Bound the wait so cleanup still reports it.
-  const awaitBlockerPersistence = async () => {
-    if (!blockerPersistence) return
+  const awaitBlockerSettlement = async () => {
+    if (!blockerSettlement) return
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
-        blockerPersistence,
+        blockerSettlement,
         new Promise<never>((_, reject) => {
           timeout = setTimeout(
             () =>
@@ -2246,7 +2249,7 @@ async function observeLaterFallback(
   await finishOracleCleanup(
     primaryFailure,
     [
-      awaitBlockerPersistence,
+      awaitBlockerSettlement,
       () => observer?.unsubscribe(),
       () => unsubscribeRootLoading?.(),
       () => unsubscribeLiveLoading?.(),

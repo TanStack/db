@@ -3109,12 +3109,12 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         void acquired.catch(() => {})
         trace.subscriber([change(`update`, 1, `partial`), upToDate])
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         await acquired
         expect(trace.collection.has(1)).toBe(false)
       } finally {
         persistence.resolve()
-        await transaction?.isPersisted.promise
+        await transaction?.when(`settled`)
         await trace.collection.cleanup()
         await acquired
       }
@@ -5136,7 +5136,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     expect(trace.collection.has(2)).toBe(false)
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     await trace.collection.cleanup()
   })
 
@@ -5167,7 +5167,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     expect(trace.collection.has(1)).toBe(false)
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     await trace.collection.stateWhenReady()
 
     expect(trace.collection.status).toBe(`ready`)
@@ -5234,7 +5234,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           `pending`,
         )
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         await atCheckpoint(loading!, `full recovery applied settlement`)
         expect(outcome).toBe(`fulfilled`)
         expect(trace.collection.get(1)).toMatchObject({
@@ -5585,7 +5585,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             break
           case `release`:
             persistence.resolve()
-            await transaction!.isPersisted.promise
+            await transaction!.when(`settled`)
             break
           case `hold-acceptance`:
             armAcceptance = true
@@ -6199,7 +6199,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       expect(trace.collection.has(1), `applied receipt is held`).toBe(false)
       external.abort()
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await expect(
         atCheckpoint(first, `externally aborted held subset`),
       ).rejects.toMatchObject({ name: `AbortError` })
@@ -6270,7 +6270,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       expect(firstOutcome).toBe(`rejected`)
       expect(firstError).toMatchObject({ name: `AbortError` })
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await observedFirst
       expect(trace.collection.has(1)).toBe(true)
     }, [
@@ -6397,7 +6397,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
 
     await trace.collection.cleanup()
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     await Promise.resolve()
 
     expect(trace.collection.status).toBe(`cleaned-up`)

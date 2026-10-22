@@ -43,7 +43,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * settlement, even if a peer supplied it. Every same-key write in that atomic
  * transaction keeps that attribution. A later transaction is `'remote'`
  * without another local owner. A failed mutation gives queued source writes no
- * local attribution. `isPersisted` settles after that publication.
+ * local attribution. `when('settled')` settles after that publication.
  * A truncate applies at once, with every queued sync transaction before it.
  * Its same-key source row can receive local attribution while a mutation still
  * persists, even if that mutation later fails. Still-persisting transactions
@@ -77,7 +77,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * starts. Source writes on its key apply at once and receive local attribution;
  * rolling it back exposes that source row with the same origin. A pending
  * manual transaction starts its mutation function at commit. If that function
- * rejects, the transaction rolls back and `isPersisted` rejects with its
+ * rejects, the transaction rolls back and `when('settled')` rejects with its
  * reason. A later edit cannot determine the earlier manual request's outcome.
  * The model keeps pending distinct from persisting because the same source
  * commit publishes immediately in the former state and waits in the latter.
@@ -124,7 +124,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * each optimistic mutation call, before any await, the driver checks that the
  * row is already visible. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, the rows visible
- * when `isPersisted` fulfills, downstream query state, and complete
+ * when the settlement waiter fulfills, downstream query state, and complete
  * publication cuts. A second subscriber starts without initial state, so no
  * sent-key filter can hide an invalid message. Each of its batches must be
  * valid for its replica: an insert names an absent key, and an update or
@@ -220,7 +220,6 @@ type ModelTransaction = {
 type ObservedRow = HistoryRow & {
   $origin: `local` | `remote`
   $hasPendingWrites: boolean
-  $synced: boolean
 }
 
 /** Pure event-history model. It never reads production caches or callbacks. */
@@ -285,7 +284,6 @@ class HistoryModel {
           ...row,
           $origin: this.origins.get(key)!,
           $hasPendingWrites: false,
-          $synced: true,
         },
       ]),
     )
@@ -305,7 +303,6 @@ class HistoryModel {
         ...transaction.row,
         $origin: `local`,
         $hasPendingWrites: true,
-        $synced: false,
       })
     }
     return result
@@ -511,7 +508,6 @@ const observed = (
   row: HistoryRow & {
     $origin: `local` | `remote`
     $hasPendingWrites: boolean
-    $synced: boolean
   },
 ): ObservedRow => ({
   ...Object.fromEntries(
@@ -525,7 +521,6 @@ const observed = (
   c: row.c,
   $origin: row.$origin,
   $hasPendingWrites: row.$hasPendingWrites,
-  $synced: row.$synced,
 })
 const sorted = <T extends HistoryRow>(rows: Iterable<T>) =>
   [...rows].sort((a, b) => a.id - b.id)
@@ -969,7 +964,7 @@ export async function runOptimisticHistory(
       | ReturnType<typeof createTransaction<HistoryRow>>
     done: ReturnType<typeof createDeferred<void>>
     outcome: ReturnType<typeof observeHistoryPromise<unknown>>
-    // Rows visible when `isPersisted` fulfilled or rejected.
+    // Rows visible when `when('settled')` fulfilled or rejected.
     settledRows?: Array<ObservedRow>
     expected: HistoryOutcome<unknown>
     changes: object
@@ -1450,7 +1445,7 @@ export async function runOptimisticHistory(
             tx,
             done,
             outcome: observeHistoryPromise<unknown>(
-              tx.isPersisted.promise.finally(() => {
+              tx.when(`settled`).finally(() => {
                 operation.settledRows = sorted(
                   [...collection.values()].map(observed),
                 )
@@ -1527,7 +1522,7 @@ export async function runOptimisticHistory(
           await Promise.resolve()
           expect(
             op.settledRows,
-            `${position}: rows visible when isPersisted settled`,
+            `${position}: rows visible when settlement completed`,
           ).toEqual(cuts[0])
           counts.settlements++
           if (!step.success) counts.failures++

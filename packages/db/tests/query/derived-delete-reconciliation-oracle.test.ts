@@ -53,7 +53,7 @@ async function runFlushHistory(
   })
   const done = createDeferred<void>()
   const tx = createTransaction({ mutationFn: () => done.promise })
-  const settled = tx.isPersisted.promise.catch((error: unknown) => error)
+  const settled = tx.when(`settled`).catch((error: unknown) => error)
   const lookup = vi.spyOn(derived._state, `createSyncedKeyLookup`)
   try {
     await derived.preload()
@@ -221,7 +221,7 @@ describe(`derived updates beneath optimistic deletes`, () => {
       })
       const done = createDeferred<void>()
       const tx = createTransaction({ mutationFn: () => done.promise })
-      const settled = tx.isPersisted.promise.catch(() => {})
+      const settled = tx.when(`settled`).catch(() => {})
       try {
         await derived.preload()
         tx.mutate(() => derived.delete(0))
@@ -296,7 +296,7 @@ describe(`derived updates beneath optimistic deletes`, () => {
       })
       const done = createDeferred<void>()
       const tx = createTransaction({ mutationFn: () => done.promise })
-      const settled = tx.isPersisted.promise.catch((error: unknown) => error)
+      const settled = tx.when(`settled`).catch((error: unknown) => error)
       const read = (collection: { values: () => Iterable<Row> }) =>
         [...collection.values()]
           .map((row) => ({ id: row.id, value: row.value }))

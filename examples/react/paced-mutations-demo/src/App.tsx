@@ -188,7 +188,7 @@ export function App() {
     })
 
     // Listen for completion
-    tx.isPersisted.promise
+    tx.when(`settled`)
       .then(() => {
         setTransactions((prev) =>
           prev.map((t) => {

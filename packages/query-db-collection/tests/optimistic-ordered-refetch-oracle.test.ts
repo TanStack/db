@@ -107,7 +107,6 @@ async function checkOptimisticOrderedRefetch(
         moved.folder = `archive`
         providerPhase = `handler-refetch`
         await collection.utils.refetch()
-        return { refetch: false }
       },
     }),
   )
@@ -206,7 +205,7 @@ async function checkOptimisticOrderedRefetch(
     }
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     if (!reportDuringHold) {
       expect(
         requests.some(

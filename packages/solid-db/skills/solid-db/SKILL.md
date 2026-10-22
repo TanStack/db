@@ -59,7 +59,6 @@ Returns an `Accessor<Array<T>>` (or `Accessor<T | undefined>` with `findOne`) wi
 // Query function — call result as function for data
 const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query()        → Array<T> (data)  — or T | undefined when using findOne()
-// query.data     → DEPRECATED — use query() instead. Migrate any existing code.
 // query.status   → CollectionStatus
 // query.isLoading, query.isReady, query.isError
 // query.state    → ReactiveMap<TKey, T>
@@ -232,7 +231,7 @@ Solid's reactivity tracks signal reads inside reactive contexts. Reading outside
 
 Source: docs/framework/solid/overview.md
 
-### MEDIUM Using deprecated query.data instead of query()
+### MEDIUM Reading query.data instead of calling query()
 
 Wrong:
 
@@ -246,7 +245,7 @@ Correct:
 <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
 ```
 
-`query.data` is deprecated. Always use `query()` to access data. If you encounter existing code using `.data`, migrate it to the function call form.
+`query.data` has been removed. Call `query()` to access data.
 
 See also: db-core/live-queries/SKILL.md — for query builder API.
 

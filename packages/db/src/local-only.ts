@@ -200,16 +200,10 @@ export function localOnlyCollectionOptions<
   const wrappedOnInsert = async (
     params: InsertMutationFnParams<T, TKey, LocalOnlyCollectionUtils>,
   ) => {
-    // Call user handler first if provided
-    let handlerResult
-    if (onInsert) {
-      handlerResult = (await onInsert(params)) ?? {}
-    }
+    if (onInsert) await onInsert(params)
 
     // Then synchronously confirm the transaction by looping through mutations
     syncResult.confirmOperationsSync(params.transaction.mutations)
-
-    return handlerResult
   }
 
   /**
@@ -218,16 +212,10 @@ export function localOnlyCollectionOptions<
   const wrappedOnUpdate = async (
     params: UpdateMutationFnParams<T, TKey, LocalOnlyCollectionUtils>,
   ) => {
-    // Call user handler first if provided
-    let handlerResult
-    if (onUpdate) {
-      handlerResult = (await onUpdate(params)) ?? {}
-    }
+    if (onUpdate) await onUpdate(params)
 
     // Then synchronously confirm the transaction by looping through mutations
     syncResult.confirmOperationsSync(params.transaction.mutations)
-
-    return handlerResult
   }
 
   /**
@@ -236,16 +224,10 @@ export function localOnlyCollectionOptions<
   const wrappedOnDelete = async (
     params: DeleteMutationFnParams<T, TKey, LocalOnlyCollectionUtils>,
   ) => {
-    // Call user handler first if provided
-    let handlerResult
-    if (onDelete) {
-      handlerResult = (await onDelete(params)) ?? {}
-    }
+    if (onDelete) await onDelete(params)
 
     // Then synchronously confirm the transaction by looping through mutations
     syncResult.confirmOperationsSync(params.transaction.mutations)
-
-    return handlerResult
   }
 
   /**

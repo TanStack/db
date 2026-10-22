@@ -112,7 +112,6 @@ export function userRow(value: Row): Row {
     $key: _key,
     $origin: _origin,
     $hasPendingWrites: _pending,
-    $synced: _synced,
     $collectionId: _collectionId,
     ...row
   } = value as Row & Record<string, unknown>

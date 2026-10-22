@@ -64,7 +64,7 @@ describe(`Transaction Types`, () => {
       mutations: [],
       metadata: {},
       mutationFn: mockMutationFn,
-      isPersisted: false,
+      when: async () => Promise.resolve(),
       autoCommit: false,
       setState: () => {},
       commit: async () => Promise.resolve(),

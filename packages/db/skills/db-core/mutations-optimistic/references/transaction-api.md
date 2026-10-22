@@ -26,13 +26,6 @@ interface Transaction<T> {
   metadata: Record<string, unknown>
   error?: { message: string; error: Error }
 
-  // Deprecated alias for the settlement promise; retained until the 1.0 RC
-  isPersisted: {
-    promise: Promise<Transaction<T>>
-    resolve: (value: Transaction<T>) => void
-    reject: (reason?: any) => void
-  }
-
   // Resolves when the transaction settles; rejects on failure or rollback
   when(state: 'settled'): Promise<Transaction<T>>
 
@@ -228,6 +221,3 @@ For a non-empty commit, `mutationFn` is the normal success boundary.
 `when('settled')` does not by itself prove that a backend uploaded,
 confirmed, or read back the write. It proves those stronger guarantees only
 when `mutationFn` waits for them before returning.
-
-The old `isPersisted.promise` remains available until the 1.0 RC but is
-deprecated. Replace it with `when('settled')`.

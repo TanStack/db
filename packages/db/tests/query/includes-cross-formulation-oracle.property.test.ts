@@ -194,7 +194,6 @@ type ReferenceContextChild = {
 // this projection.
 const virtualKeys = new Set<string>([
   `$hasPendingWrites`,
-  `$synced`,
   `$origin`,
   `$key`,
   `$collectionId`,
@@ -1327,7 +1326,6 @@ describe(`includes cross-formulation oracle`, () => {
       const rows = captureOrderedNested(expected)
       Object.assign(rows[0]!, {
         $hasPendingWrites: false,
-        $synced: true,
         $origin: `remote`,
         $key: 0,
         $collectionId: `source`,

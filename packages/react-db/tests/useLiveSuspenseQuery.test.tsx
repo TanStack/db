@@ -591,7 +591,6 @@ describe(`useLiveSuspenseQuery`, () => {
   })
 
   it(`requires queryKey for an opaque query during SSR streaming`, () => {
-    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const descriptor = collectionOptions(`streamed-people`, () => ({
       id: `streamed-people`,
       getKey: (person: Person) => person.id,
@@ -620,11 +619,7 @@ describe(`useLiveSuspenseQuery`, () => {
           }),
         { wrapper },
       ),
-    ).toThrow(/Provide an explicit serializable queryKey/)
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(`cannot derive a stable identity`),
-    )
-    warn.mockRestore()
+    ).toThrow(/Provide a serializable queryKey/)
   })
 
   it(`throws the original streamed query error`, async () => {
@@ -1218,13 +1213,13 @@ describe(`useLiveSuspenseQuery`, () => {
 
     const { result, rerender } = renderHook(
       ({ minAge }) =>
-        useLiveSuspenseQuery(
-          (q) =>
+        useLiveSuspenseQuery({
+          query: (q) =>
             q
               .from({ persons: collection })
               .where(({ persons }) => gt(persons.age, minAge)),
-          [minAge],
-        ),
+          queryKey: [minAge],
+        }),
       {
         wrapper: SuspenseWrapper,
         initialProps: { minAge: 20 },

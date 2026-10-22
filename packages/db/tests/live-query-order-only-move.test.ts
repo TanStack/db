@@ -167,7 +167,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     expect(lq._layoutRevision).toBe(collectionLayoutRevisionBefore)
 
     persist.resolve()
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     await flush()
 
     const after = observer.getSnapshot()

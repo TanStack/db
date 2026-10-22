@@ -385,7 +385,7 @@ async function observeMetadata(
     if (lane === `rebuilt`) {
       expect(earlierReceipt).not.toBe(true)
       release()
-      await blocker!.isPersisted.promise
+      await blocker!.when(`settled`)
       await earlierReceipt
     }
     const receipt = sync.commit()
@@ -396,7 +396,7 @@ async function observeMetadata(
         expect(receipt).toBe(true)
       else expect(receipt).not.toBe(true)
       release()
-      await blocker!.isPersisted.promise
+      await blocker!.when(`settled`)
     }
     await receipt
     return sync.metadata!.row.get(1)

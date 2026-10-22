@@ -3866,7 +3866,7 @@ describe(`SQLite resume snapshots`, () => {
       let managedPersistence: Promise<unknown> | undefined
       let managedPersistenceSettled = false
       if (history.transition === `managed-insert`) {
-        managedPersistence = collection.insert(managedRow).isPersisted.promise
+        managedPersistence = collection.insert(managedRow).when(`settled`)
         void managedPersistence.then(
           () => {
             managedPersistenceSettled = true

@@ -71,12 +71,13 @@ const todoCollection = createCollection(
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
     schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
           api.todos.create(mutation.modified)
         )
       )
+      await collection.utils.refetch()
     },
   })
 )
@@ -271,9 +272,7 @@ with the transaction on success and rejects with the original error on failure
 (or `undefined` for a rollback without an error). It does not by itself prove
 that a server uploaded, confirmed, or returned the write. It proves those
 stronger guarantees only when the handler waits for that backend observation
-before returning. The old `tx.isPersisted.promise` remains available for the
-pre-RC releases but is deprecated and will be removed in the 1.0 RC; replace
-each use with `tx.when('settled')`.
+before returning.
 
 ### Concurrent Optimistic Transactions
 
@@ -528,9 +527,6 @@ onUpdate: async ({ transaction, collection }) => {
   )
   // Trigger refetch to sync server state
   await collection.utils.refetch()
-  // Prevent the current pre-1.0 wrapper from refetching a second time.
-  // Remove this return in v1.0.
-  return { refetch: false }
 }
 ```
 
@@ -1002,8 +998,9 @@ const userProfile = createCollection(
     queryKey: ["profile"],
     queryFn: async () => api.profile.get(),
     getKey: (item) => item.id,
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       await api.profile.update(transaction.mutations[0].modified)
+      await collection.utils.refetch()
     },
   })
 )

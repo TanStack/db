@@ -63,7 +63,7 @@ describe(`Transactions`, () => {
       if (batch.some((change) => change.value.value === `server`)) throw failure
     })
     let persisted = false
-    const receipt = tx.isPersisted.promise.then(
+    const receipt = tx.when(`settled`).then(
       () => {
         persisted = true
       },
@@ -119,9 +119,9 @@ describe(`Transactions`, () => {
         autoCommit: false,
         mutationFn: () => Promise.reject(reason),
       })
-      const persisted = transaction.isPersisted.promise.catch(
-        (error: unknown) => error,
-      )
+      const persisted = transaction
+        .when(`settled`)
+        .catch((error: unknown) => error)
       try {
         transaction.mutate(() => collection.insert({ id: 1 }))
         await expect(transaction.commit()).rejects.toThrow(message)
@@ -209,7 +209,7 @@ describe(`Transactions`, () => {
 
     transaction.commit()
     expect(transaction.state).toBe(`completed`)
-    await expect(transaction.isPersisted.promise).resolves.toBeDefined()
+    await expect(transaction.when(`settled`)).resolves.toBeDefined()
   })
   it(`thows an error if you don't pass in mutationFn`, () => {
     // @ts-expect-error missing argument on purpose
@@ -239,7 +239,7 @@ describe(`Transactions`, () => {
       autoCommit: false,
     })
     failed.rollback({ error: first })
-    await expect(failed.isPersisted.promise).rejects.toBe(first)
+    await expect(failed.when(`settled`)).rejects.toBe(first)
     failed.rollback({ error: new Error(`second`) })
     expect(failed.error?.error).toBe(first)
 
@@ -360,7 +360,7 @@ describe(`Transactions`, () => {
 
     transaction.rollback()
 
-    transaction.isPersisted.promise.catch(() => {})
+    transaction.when(`settled`).catch(() => {})
     expect(transaction.state).toBe(`failed`)
   })
   it(`keeps a persisting transaction failed when rollback wins`, async () => {
@@ -380,7 +380,7 @@ describe(`Transactions`, () => {
 
     try {
       transaction.mutate(() => collection.insert({ id: 1 }))
-      const persisted = transaction.isPersisted.promise.then(
+      const persisted = transaction.when(`settled`).then(
         (value) => ({ status: `fulfilled` as const, value }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -446,7 +446,7 @@ describe(`Transactions`, () => {
       })
 
       try {
-        const persisted = first.isPersisted.promise.then(
+        const persisted = first.when(`settled`).then(
           (value) => ({ status: `fulfilled` as const, value }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         )
@@ -479,7 +479,6 @@ describe(`Transactions`, () => {
           $key: 1,
           $origin: `local`,
           $hasPendingWrites: true,
-          $synced: false,
         })
         expect(batches).toEqual([
           [{ type: `insert`, key: 1 }],
@@ -513,7 +512,7 @@ describe(`Transactions`, () => {
     })
 
     try {
-      void first.isPersisted.promise.catch(() => undefined)
+      void first.when(`settled`).catch(() => undefined)
       first.mutate(() => collection.insert({ id: 1, owner: `first` }))
       first.rollback()
 
@@ -561,8 +560,8 @@ describe(`Transactions`, () => {
 
     await expect(transaction.commit()).rejects.toThrow(`bad`)
 
-    await expect(transaction.isPersisted.promise).rejects.toThrow(`bad`)
-    transaction.isPersisted.promise.catch(() => {})
+    await expect(transaction.when(`settled`)).rejects.toThrow(`bad`)
+    transaction.when(`settled`).catch(() => {})
     expect(transaction.state).toBe(`failed`)
     expect(transaction.error?.message).toBe(`bad`)
     expect(transaction.error?.error).toBeInstanceOf(Error)
@@ -597,8 +596,8 @@ describe(`Transactions`, () => {
 
     await expect(transaction.commit()).rejects.toThrow(`bad`)
 
-    await expect(transaction.isPersisted.promise).rejects.toThrow(`bad`)
-    transaction.isPersisted.promise.catch(() => {})
+    await expect(transaction.when(`settled`)).rejects.toThrow(`bad`)
+    transaction.when(`settled`).catch(() => {})
     expect(transaction.state).toBe(`failed`)
     expect(transaction.error?.message).toBe(`bad`)
     expect(transaction.error?.error).toBeInstanceOf(Error)
@@ -638,7 +637,7 @@ describe(`Transactions`, () => {
     }
   })
 
-  it(`commit() and isPersisted.promise should reject with the same error instance`, async () => {
+  it(`commit() and when('settled') should reject with the same error instance`, async () => {
     const originalError = new Error(`Original API error`)
     const tx = createTransaction({
       mutationFn: () => {
@@ -672,9 +671,9 @@ describe(`Transactions`, () => {
       commitError = error
     }
 
-    // Capture error from isPersisted.promise
+    // Capture error from when('settled')
     try {
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
     } catch (error) {
       persistedError = error
     }
@@ -716,9 +715,9 @@ describe(`Transactions`, () => {
       expect((error as Error).message).toBe(`string error`)
     }
 
-    // Same error from isPersisted.promise
+    // Same error from when('settled')
     try {
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
     } catch (error) {
       expect(error).toBeInstanceOf(Error)
       expect((error as Error).message).toBe(`string error`)
@@ -861,8 +860,8 @@ describe(`Transactions`, () => {
     // tx1 should throw the original error
     expect(tx1CommitError).toBe(originalError)
 
-    // tx2's isPersisted.promise should also be rejected (but with undefined since it's a cascading rollback)
-    await expect(tx2.isPersisted.promise).rejects.toBeUndefined()
+    // tx2's when('settled') should also be rejected (but with undefined since it's a cascading rollback)
+    await expect(tx2.when(`settled`)).rejects.toBeUndefined()
   })
 
   it(`should, when rolling back, find any other pending transactions w/ overlapping mutations and roll them back as well`, async () => {
@@ -911,7 +910,7 @@ describe(`Transactions`, () => {
     })
 
     transaction2.commit()
-    await transaction2.isPersisted.promise
+    await transaction2.when(`settled`)
 
     transaction3.mutate(() => {
       collection.state.forEach((object) => {
@@ -930,9 +929,9 @@ describe(`Transactions`, () => {
     })
 
     transaction1.rollback()
-    transaction1.isPersisted.promise.catch(() => {})
-    transaction3.isPersisted.promise.catch(() => {})
-    transaction4.isPersisted.promise.catch(() => {})
+    transaction1.when(`settled`).catch(() => {})
+    transaction3.when(`settled`).catch(() => {})
+    transaction4.when(`settled`).catch(() => {})
 
     expect(transaction1.state).toBe(`failed`)
     expect(transaction2.state).toBe(`completed`)

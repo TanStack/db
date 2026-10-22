@@ -406,6 +406,12 @@ export function compileQuery(...args: CompileQueryArgs): CompilationResult {
   return compileQueryInternal(args, false)
 }
 
+export function compileCollectionQuery(
+  ...args: CompileQueryArgs
+): CompilationResult {
+  return compileQueryInternal(args, false, true)
+}
+
 function compileQueryInternal(
   [
     rawQuery,
@@ -423,6 +429,7 @@ function compileQueryInternal(
     ancestorHasTopK = false,
   ]: CompileQueryArgs,
   scopeValidated: boolean,
+  publishCollectionRoot = false,
 ): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult =
@@ -907,6 +914,7 @@ function compileQueryInternal(
             ancestorHasTopK || parentHasTopK,
           ],
           true,
+          subquery.materialization === `collection`,
         )
 
         // Each include retains its own compilation result and lexical aliases.
@@ -1188,6 +1196,10 @@ function compileQueryInternal(
     pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
   }
 
+  const metadataSource = getWholeRowSourceAlias(query.select) ?? mainSource
+  const functionalSourceAliases = query.fnSelect
+    ? [...sourceBindings.keys()]
+    : undefined
   const finalizeRow = (
     key: unknown,
     row: Record<string, any>,
@@ -1196,6 +1208,9 @@ function compileQueryInternal(
     const finalResults = attachVirtualPropsToSelected(
       unwrapValue(row.$selected),
       row,
+      publishCollectionRoot,
+      metadataSource,
+      functionalSourceAliases,
     )
     // When in includes mode, embed the correlation key and parentContext
     if (parentKeyStream) {
@@ -2035,9 +2050,59 @@ function unwrapValue(value: any): any {
   return value instanceof ValClass ? value.value : value
 }
 
+function getWholeRowSourceAlias(select: unknown): string | undefined {
+  if (select instanceof PropRef && select.path.length === 1) {
+    return select.path[0]
+  }
+  if (!isPlainObject(select)) return undefined
+  let sourceAlias: string | undefined
+  for (const [name, value] of Object.entries(select)) {
+    if (
+      name.startsWith(`__SPREAD_SENTINEL__`) &&
+      value instanceof PropRef &&
+      value.path.length === 1
+    ) {
+      // Later spreads replace earlier virtual fields in a selected object.
+      sourceAlias = value.path[0]
+    }
+  }
+  return sourceAlias
+}
+
+function copySelectedRow(selected: Record<PropertyKey, any>) {
+  return Array.isArray(selected) ? [...selected] : { ...selected }
+}
+
+function findMatchingSelectedSource(
+  selected: Record<PropertyKey, any>,
+  row: Record<string, any>,
+  sourceAliases: ReadonlyArray<string> | undefined,
+): Record<PropertyKey, any> | undefined {
+  if (!sourceAliases) return undefined
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (!(prop in selected)) return undefined
+  }
+  for (const alias of sourceAliases) {
+    const source = row[alias]
+    if (!source || typeof source !== `object`) continue
+    let matches = true
+    for (const prop of VIRTUAL_PROP_NAMES) {
+      if (!(prop in source) || !Object.is(selected[prop], source[prop])) {
+        matches = false
+        break
+      }
+    }
+    if (matches) return source as Record<PropertyKey, any>
+  }
+  return undefined
+}
+
 function attachVirtualPropsToSelected(
   selected: any,
   row: Record<string, any>,
+  isCollectionRoot: boolean,
+  metadataSource: string,
+  functionalSourceAliases?: ReadonlyArray<string>,
 ): any {
   if (
     !selected ||
@@ -2048,23 +2113,40 @@ function attachVirtualPropsToSelected(
   }
 
   const selectedRecord = selected as Record<PropertyKey, any>
-  let needsMerge = false
+  const matchingSource = isCollectionRoot
+    ? findMatchingSelectedSource(selectedRecord, row, functionalSourceAliases)
+    : undefined
+  const source = matchingSource ?? row[metadataSource]
+  const sourceRecord =
+    isCollectionRoot && source !== null && typeof source === `object`
+      ? (source as Record<PropertyKey, any>)
+      : undefined
+  let result = selectedRecord
   for (const prop of VIRTUAL_PROP_NAMES) {
-    if (selectedRecord[prop] == null && prop in row) {
-      needsMerge = true
-      break
-    }
-  }
-
-  if (!needsMerge) {
-    return selected
-  }
-
-  const result = (
-    Array.isArray(selected) ? [...selected] : { ...selected }
-  ) as Record<PropertyKey, any>
-  for (const prop of VIRTUAL_PROP_NAMES) {
-    if (selectedRecord[prop] == null && prop in row) {
+    if (isCollectionRoot && prop in selectedRecord) {
+      // An explicit virtual name in a root projection cannot replace source
+      // metadata. Ordinary projections acquire their own Collection metadata.
+      const owner =
+        matchingSource && prop in matchingSource
+          ? matchingSource
+          : prop in row
+            ? row
+            : sourceRecord && prop in sourceRecord
+              ? sourceRecord
+              : undefined
+      if (owner) {
+        const value = owner[prop]
+        if (selectedRecord[prop] !== value) {
+          if (result === selectedRecord)
+            result = copySelectedRow(selectedRecord)
+          result[prop] = value
+        }
+      } else {
+        if (result === selectedRecord) result = copySelectedRow(selectedRecord)
+        delete result[prop]
+      }
+    } else if (selectedRecord[prop] == null && prop in row) {
+      if (result === selectedRecord) result = copySelectedRow(selectedRecord)
       result[prop] = row[prop]
     }
   }
