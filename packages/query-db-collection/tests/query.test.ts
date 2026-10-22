@@ -1,14 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  QueryClient,
-  QueryObserver,
-  dehydrate,
-  focusManager,
-  hashKey,
-  onlineManager,
-} from '@tanstack/query-core'
-import {
-  BTreeIndex,
+import { BTreeIndex,
   DbClient,
   IR,
   collectionOptions,
@@ -18,9 +8,18 @@ import {
   eq,
   ilike,
   inArray,
+  include,
   or,
-  resetWarnings,
-} from '@tanstack/db'
+  resetWarnings } from '@tanstack/db'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  QueryClient,
+  QueryObserver,
+  dehydrate,
+  focusManager,
+  hashKey,
+  onlineManager,
+} from '@tanstack/query-core'
 import {
   mockSyncCollectionOptions,
   stripVirtualProps,
@@ -1385,14 +1384,14 @@ describe(`QueryCollection`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
         id: lineItem.id,
-        product: q
+        product: include(q
           .from({ product: products })
           .where(({ product }) => eq(product.id, lineItem.productId))
           .select(({ product }) => ({
             id: product.id,
             categoryId: product.categoryId,
             name: product.name,
-          })),
+          }))),
       })),
     )
 
@@ -1465,13 +1464,13 @@ describe(`QueryCollection`, () => {
     const live = createLiveQueryCollection((q) =>
       q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
         id: lineItem.id,
-        product: q
+        product: include(q
           .from({ product: products })
           .where(({ product }) => eq(product.id, lineItem.productId))
           .select(({ product }) => ({
             id: product.id,
             name: product.name,
-          })),
+          }))),
       })),
     )
 

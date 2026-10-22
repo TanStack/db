@@ -1,3 +1,13 @@
+import { DbClient, Query, collectionOptions,
+  createCollection,
+  eq,
+  getStableQueryBuilderHash,
+  innerJoin,
+  isUndefined,
+  joinOf,
+  leftJoin,
+  prepareLiveQueryValue,
+  toArray } from '@tanstack/db'
 /**
  * A Query assembled with a Collection descriptor is a reusable query plan.
  * Its source Collection belongs to the DbClient that later consumes it, so
@@ -83,17 +93,6 @@
  * histories do not cover arbitrary concurrent render schedules.
  */
 import { act, render, renderHook, waitFor } from '@testing-library/react'
-import {
-  DbClient,
-  Query,
-  collectionOptions,
-  createCollection,
-  eq,
-  getStableQueryBuilderHash,
-  isUndefined,
-  prepareLiveQueryValue,
-  toArray,
-} from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
@@ -187,7 +186,7 @@ describe(`standalone descriptor query binding`, () => {
     firstRenderDeferrals.clear()
 
     const continued = prepared
-      .join({ late: lateDescriptor }, ({ base, late }) => eq(base.id, late.id))
+      .join(leftJoin({ late: lateDescriptor }, ({ base, late }) => eq(base.id, late.id)))
       .select(({ base, late }) => ({ id: base.id, value: late.value }))
     expect(lateStarts).toBe(0)
 
@@ -235,9 +234,8 @@ describe(`standalone descriptor query binding`, () => {
         client,
         deferrals,
       ) as typeof original
-      prepared.join({ late: lateDescriptor }, ({ base, late }) =>
-        eq(base.id, late.id),
-      )
+      prepared.join(leftJoin({ late: lateDescriptor }, ({ base, late }) =>
+        eq(base.id, late.id)))
       throw never
     }
 
@@ -857,9 +855,8 @@ describe(`standalone descriptor query binding`, () => {
       const joined = () =>
         new Query()
           .from({ parent: parentDescriptor })
-          .innerJoin({ child: childDescriptor }, ({ parent, child }) =>
-            eq(parent.id, child.parentId),
-          )
+          .join(innerJoin({ child: childDescriptor }, ({ parent, child }) =>
+            eq(parent.id, child.parentId)))
           .select(({ parent, child }) => ({
             id: parent.id,
             value: parent.value,
@@ -1343,15 +1340,12 @@ describe(`standalone descriptor query binding`, () => {
                   : anchors
               const child = new Query()
                 .from({ [alias]: mains })
-                .join(
-                  { anchor: joinedSource },
+                .join(joinOf(kind, { anchor: joinedSource },
                   (context: Record<string, unknown>) =>
                     eq(
                       (context[alias] as Main).anchorId,
                       (context.anchor as Anchor).id,
-                    ),
-                  kind,
-                )
+                    )))
                 .where((context: Record<string, unknown>) =>
                   correlation === `joined`
                     ? eq((context.anchor as Anchor).parentId, parent.id)

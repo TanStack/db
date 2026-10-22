@@ -29,6 +29,7 @@ import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type { RenderHookResult } from '@testing-library/react'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -137,7 +138,10 @@ function mountCollection(collection: any) {
   return makeHandle(hook)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const hook = renderHook(() => useLiveQuery({ query: build as any, ...opts }))
   return makeHandle(hook)
 }

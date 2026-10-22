@@ -255,9 +255,17 @@ export function resolveLiveQueryValue(
     )
   }
   if (typeof value === `object`) {
-    const { pool: configPool, ...config } =
+    const { pool: configPool, ...given } =
       value as LiveQueryCollectionConfig<any>
     const pooling = pool === false ? undefined : (configPool ?? pool)
+    // A pooled view needs the built query. Build a query function once and
+    // compile the same builder if the partition cannot serve it.
+    const built =
+      pooling && typeof given.query === `function`
+        ? given.query(createInitialQueryBuilder())
+        : undefined
+    const config =
+      built instanceof BaseQueryBuilder ? { ...given, query: built } : given
     return (
       (pooling ? poolConfig(config, gcTime, pooling) : undefined) ??
       createLiveQueryCollection({

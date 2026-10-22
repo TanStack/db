@@ -37,8 +37,12 @@ import { describe, expect, it } from 'vitest'
  * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
  */
-import { leftJoin, waitForPersistedInitialRender } from '@tanstack/db'
-import { include } from '../../src/query/index.js'
+import {
+  include,
+  leftJoin,
+  pooledLiveQueries,
+  waitForPersistedInitialRender,
+} from '@tanstack/db'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
@@ -207,8 +211,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const h = driver.mount((q) =>
           q
             .from({ left: left.collection })
-            .join(leftJoin({ right: right.collection }, ({ left: a, right: b }: any) =>
-              ops.eq(a.id, b.id))),
+            .join(
+              leftJoin(
+                { right: right.collection },
+                ({ left: a, right: b }: any) => ops.eq(a.id, b.id),
+              ),
+            ),
         )
         await h.flush()
         expect(h.current()).toMatchObject({
@@ -247,8 +255,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const h = driver.mount((q) =>
           q
             .from({ opted: opted.collection })
-            .join(leftJoin({ ordinary: ordinary.collection },
-              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id))),
+            .join(
+              leftJoin(
+                { ordinary: ordinary.collection },
+                ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
+              ),
+            ),
         )
         await h.apply(settle)
         await h.flush()
@@ -346,10 +358,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           q
             .from({ items: source.collection })
             .where(({ items }: any) => ops.eq(items.team, team))
-        const teamA = driver.mount(query(`a`))
-        const teamB = driver.mount(query(`b`))
-        const olderA = driver.mount((q) =>
-          query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
+        // The config opts into pooling; without it each query compiles.
+        const pool = { pool: pooledLiveQueries }
+        const teamA = driver.mountConfig(query(`a`), pool)
+        const teamB = driver.mountConfig(query(`b`), pool)
+        const olderA = driver.mountConfig(
+          (q) => query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
+          pool,
         )
         for (const h of [teamA, teamB, olderA]) await h.flush()
         // Pooling shares one subscription between the two team queries.
@@ -635,8 +650,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       const h = driver.mount((q) =>
         q
           .from({ issues: issues.collection })
-          .join(leftJoin({ persons: people.collection }, ({ issues: i, persons }: any) =>
-            ops.eq(i.userId, persons.id)))
+          .join(
+            leftJoin(
+              { persons: people.collection },
+              ({ issues: i, persons }: any) => ops.eq(i.userId, persons.id),
+            ),
+          )
           .select(({ issues: i, persons }: any) => ({
             id: i.id,
             title: i.title,
@@ -699,8 +718,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             }))
           return q
             .from({ persons: people.collection })
-            .join(leftJoin({ ic: issueCounts }, ({ persons, ic }: any) =>
-              ops.eq(persons.id, ic.userId)))
+            .join(
+              leftJoin({ ic: issueCounts }, ({ persons, ic }: any) =>
+                ops.eq(persons.id, ic.userId),
+              ),
+            )
             .select(({ persons, ic }: any) => ({
               name: persons.name,
               issueCount: ic.issueCount,
@@ -733,10 +755,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           q.from({ persons: people.collection }).select(({ persons }: any) => ({
             id: persons.id,
             name: persons.name,
-            issues: include(q
-              .from({ issues: issues.collection })
-              .where(({ issues: i }: any) => ops.eq(i.userId, persons.id))
-              .select(({ issues: i }: any) => ({ id: i.id, title: i.title }))),
+            issues: include(
+              q
+                .from({ issues: issues.collection })
+                .where(({ issues: i }: any) => ops.eq(i.userId, persons.id))
+                .select(({ issues: i }: any) => ({ id: i.id, title: i.title })),
+            ),
           })),
         )
         await h.flush()

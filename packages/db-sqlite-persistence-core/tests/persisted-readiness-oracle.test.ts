@@ -1,14 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
-import {
-  DbClient,
+import { DbClient,
   PERSISTED_READINESS,
   createCollection,
   createLiveQueryCollection,
   createLiveQueryObserver,
   eq,
   getPersistedReadinessSource,
-  waitForPersistedInitialRender,
-} from '@tanstack/db'
+  leftJoin,
+  waitForPersistedInitialRender } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'
 
@@ -263,7 +262,7 @@ describe(`persisted-readiness oracle`, () => {
               query: (q) =>
                 q
                   .from({ left })
-                  .join({ right }, ({ left: a, right: b }) => eq(a.id, b.id)),
+                  .join(leftJoin({ right }, ({ left: a, right: b }) => eq(a.id, b.id))),
             })
             const observer = createLiveQueryObserver(query)
             await checkWithCleanup(() => {
@@ -342,7 +341,7 @@ describe(`persisted-readiness oracle`, () => {
       query: (q) =>
         q
           .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
+          .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
     })
     const observer = createLiveQueryObserver(query)
     const unsubscribe = observer.subscribe(() => {})
@@ -403,7 +402,7 @@ describe(`persisted-readiness oracle`, () => {
       query: (q) =>
         q
           .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
+          .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
     })
     const observer = createLiveQueryObserver(query)
     const unsubscribe = observer.subscribe(() => {})
@@ -666,7 +665,7 @@ describe(`persisted-readiness oracle`, () => {
         query: (q) =>
           q
             .from({ a: sourceA })
-            .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
+            .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
       })
       observer = createLiveQueryObserver(query)
       unsubscribe = observer.subscribe(() => {})
@@ -1145,7 +1144,7 @@ describe(`persisted-readiness oracle`, () => {
       query: (q) =>
         q
           .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
+          .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
     })
     const observer = createLiveQueryObserver(query)
     const unsubscribe = observer.subscribe(() => {})

@@ -1,6 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import {
-  BaseQueryBuilder,
+import { BaseQueryBuilder,
   DbClient,
   count,
   createCollection,
@@ -9,7 +7,8 @@ import {
   getLiveQueryHash,
   getStableValueHash,
   gt,
-} from '@tanstack/db'
+  leftJoin } from '@tanstack/db'
+import { afterEach, describe, expect, it } from 'vitest'
 import { flushSync } from 'svelte'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -489,9 +488,8 @@ describe(`Query Collections`, () => {
       const query = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id),
-          )
+          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)))
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -775,9 +773,8 @@ describe(`Query Collections`, () => {
       const queryResult = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id),
-          )
+          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)))
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -1290,9 +1287,8 @@ describe(`Query Collections`, () => {
         const query = useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            )
+            .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id)))
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
@@ -1842,9 +1838,8 @@ describe(`Query Collections`, () => {
         const query = useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            )
+            .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id)))
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
