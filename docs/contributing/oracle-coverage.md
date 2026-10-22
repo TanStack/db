@@ -137,13 +137,16 @@ hydrate and checks full logical persist FIFO order. Its Node and Chromium
 production drivers apply one comparison,
 `findSharedDriverFairnessLawViolations`. It checks hydrate admission and
 completion, public rows rebuilt from the scenario seeds, persist FIFO order,
-and the K=1 cut at each hydrate. The
+the non-preemptible running persist, and the K=1 cut at each hydrate. The K=1
+reference bounds completed persists only from above, so a synthetic preempted
+running persist passes it and fails only the non-preemptible law. The
 [Chromium OPFS receiving spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness-oracle.opfs.spec.ts)
-states no expected results of its own. It adds a cold SQL read and the
-already-running persist premise during one held-BEGIN storm through the real
-worker. The persist-first scheduling fault fails that spec at the shared
-comparison. This closes the
-bounded real-OPFS handoff at logical adapter completion for that history. It
+states no expected results of its own and adds a cold SQL read. It runs a
+neutral history, a held-BEGIN storm with every persist before the hydrates, and
+an interleaved storm with hydrates queued ahead of later persists. The
+persist-first scheduling fault fails both storms at the shared comparison. This
+closes the bounded real-OPFS handoff at logical adapter completion for those
+histories. It
 does not establish durable write order after reopen, naturally occurring
 contention, a browser matrix, multi-context coordination, elapsed-time
 latency, or unbounded eventuality.

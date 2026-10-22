@@ -568,6 +568,34 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
         findSharedDriverFairnessViolation(k2WrongAnswer, 2),
       ).toBeUndefined()
 
+      // A hydrate that preempts the running persist stays under every K=1
+      // ceiling. Only the non-preemptible law rejects it.
+      const firstHydrate = observation.hydrationCompletions[0]!
+      const preemptedWrongAnswer = {
+        ...observation,
+        hydrationCompletions: [
+          {
+            ...firstHydrate,
+            completedPersistIds: [],
+            pendingPersistCount: firstHydrate.pendingPersistCount + 1,
+          },
+          ...observation.hydrationCompletions.slice(1),
+        ],
+      }
+      expect(
+        findSharedDriverFairnessViolation(preemptedWrongAnswer),
+      ).toBeUndefined()
+      expect(
+        findSharedDriverFairnessLawViolations(preemptedWrongAnswer).map(
+          ({ law, checkpoint }) => ({ law, checkpoint }),
+        ),
+      ).toEqual([
+        {
+          law: `non-preemptible running persist`,
+          checkpoint: `hydrate completion 0`,
+        },
+      ])
+
       const swappedPersistOrder = observation.logicalCompletionOrder.map(
         (entry) => {
           if (entry === `persist:${completedPersistIds[1]}`) {

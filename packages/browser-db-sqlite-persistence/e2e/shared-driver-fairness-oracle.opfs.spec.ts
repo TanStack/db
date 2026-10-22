@@ -2,8 +2,7 @@
  * Browser checkpoint assertions for the OPFS refinement. The page applies the
  * shared comparison `findSharedDriverFairnessLawViolations`, which the Node
  * driver also applies, so this spec states no expected rows or completion
- * order of its own. It adds reach and premise checks: the neutral case proves
- * cold-query reach, and the storm case proves the already-running persist. This is the
+ * order of its own. It adds a reach check: both cases prove a cold SQL read. This is the
  * receiving witness for the Node fixture's held-BEGIN, cold-hydrate premise:
  * the same public preload/core-adapter/driver path reaches a Chromium OPFS
  * worker, then public rows and logical completions are checked after all work
@@ -17,7 +16,7 @@ import type { OPFSOracleResult } from './shared-driver-fairness.opfs'
 
 async function readOracleResult(
   page: Page,
-  mode: `neutral` | `storm`,
+  mode: `neutral` | `storm` | `interleaved`,
 ): Promise<OPFSOracleResult> {
   let rejectPageError!: (error: Error) => void
   const pageError = new Promise<never>((_resolve, reject) => {
@@ -75,14 +74,11 @@ test(`real Chromium OPFS fixture reaches and cleans up cold hydration`, async ({
 test(`real Chromium OPFS fixture bounds cold hydration and completes persists in FIFO order`, async ({
   page,
 }) => {
-  const result = await readOracleResult(page, `storm`)
-  expectLawsHold(result)
-  if (result.status !== `complete`) return
-  // Premise: the storm began with one persist already running. That persist is
-  // non-preemptible, so it completes before the first hydrate.
-  const { scenario } = result.observation
-  const runningPersist = scenario.work.find((work) => work.kind === `persist`)
-  expect(
-    result.observation.hydrationCompletions[0]?.completedPersistIds,
-  ).toEqual([`${scenario.id}-${runningPersist?.id}`])
+  expectLawsHold(await readOracleResult(page, `storm`))
+})
+
+test(`real Chromium OPFS fixture bounds hydrates queued ahead of later persists`, async ({
+  page,
+}) => {
+  expectLawsHold(await readOracleResult(page, `interleaved`))
 })

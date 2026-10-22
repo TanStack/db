@@ -89,6 +89,36 @@ function scenarioFromLocation(): SharedDriverFairnessScenario {
       })),
     }
   }
+  if (mode === `interleaved`) {
+    // A backlog beyond K=1 before the first hydrate, then hydrates queued ahead
+    // of later persists: the hydrate-before-later-persist cell.
+    const persist = (index: number) => ({
+      kind: `persist` as const,
+      id: `persist-${index}`,
+      mutationsPerPersist: 2,
+    })
+    const hydrate = (index: number) => ({
+      kind: `hydrate` as const,
+      id: `hydrate-${index}`,
+      seededRows: [
+        { id: `row-${index}-0`, value: index * 10 },
+        { id: `row-${index}-1`, value: index * 10 + 1 },
+      ],
+    })
+    return {
+      id: `opfs-fixed-interleaved`,
+      work: [
+        persist(0),
+        persist(1),
+        persist(2),
+        hydrate(0),
+        persist(3),
+        hydrate(1),
+        persist(4),
+        hydrate(2),
+      ],
+    }
+  }
   return {
     id: `opfs-fixed-persist-storm`,
     work: [
