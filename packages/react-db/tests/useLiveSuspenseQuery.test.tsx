@@ -13,6 +13,7 @@ import {
   eq,
   getStableValueHash,
   gt,
+  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { Component, StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -94,6 +95,7 @@ describe(`useLiveSuspenseQuery`, () => {
       {
         value: {
           networkTimeoutMs: 60_000,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -159,6 +161,7 @@ describe(`useLiveSuspenseQuery`, () => {
         {
           value: {
             networkTimeoutMs: 60_000,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: `ready` }),
             subscribe: () => () => {},
@@ -311,6 +314,7 @@ describe(`useLiveSuspenseQuery`, () => {
       {
         value: {
           networkTimeoutMs: 60_000,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -419,6 +423,7 @@ describe(`useLiveSuspenseQuery`, () => {
         {
           value: {
             networkTimeoutMs,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () =>
               (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
             getSnapshot: () => ({ status: persistedStatus }),
