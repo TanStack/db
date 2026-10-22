@@ -4135,6 +4135,8 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       // loaded children until the replay loads them again.
       for (const { serial, keys } of model.pending)
         model.retiredInFlight.set(serial, keys)
+      // A replay this reload discards reports nothing.
+      model.replayFailedKeys = new Set()
       model.pending = []
       model.obsolete = new Map()
       model.loaded = new Set()
@@ -4638,6 +4640,17 @@ describe(`lazy join demand grammar`, () => {
       { kind: `unparent`, key: 3 },
       { kind: `unparent`, key: 2 },
     ]))
+  it(`a second reload replaces a load that failed during the first replay`, () =>
+    runLazyHistory(
+      [
+        { kind: `reload` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `reload` },
+        { kind: `settle-ok` },
+      ],
+      { honorsAbort: false },
+    ))
   it(`a first load waits for a source reload's whole replay`, () =>
     runLazyHistory(
       [

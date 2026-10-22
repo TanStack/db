@@ -365,18 +365,19 @@ function followReplay(
   ready: Promise<unknown>,
 ): Promise<void> {
   const replacements = subscription.replacementCount
-  return ready.then(undefined, (error: unknown) => {
+  const decide = (error: unknown): Promise<void> | undefined => {
     const replay = subscription.pendingTruncateReplacement
-    const replaced = replacements !== subscription.replacementCount
-    if (replaced) return replay && followReplay(subscription, replay)
+    if (replacements !== subscription.replacementCount)
+      return replay && followReplay(subscription, replay)
     if (!replay) throw error
     // The load joined the replay: its own failure stands once the replay
-    // settles.
-    const fail = () => {
-      throw error
-    }
-    return replay.then(fail, fail)
-  })
+    // settles, unless a newer replay replaced it meanwhile.
+    return replay.then(
+      () => decide(error),
+      () => decide(error),
+    )
+  }
+  return ready.then(undefined, decide)
 }
 
 function releaseSegment(
