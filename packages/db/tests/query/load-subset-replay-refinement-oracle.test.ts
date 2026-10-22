@@ -1110,6 +1110,10 @@ describe(`loadSubset replay refinement`, () => {
  *   recovery failed, or a load failed while the query was still loading.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
+ * - **Initial readiness:** when the history starts during the initial
+ *   preload, that preload has resolved or rejected once loading is quiet. A
+ *   failure before the first ready ends the query, so the preload cannot wait
+ *   for a later truncate.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
  *   thrown release, a window move rejected by a load failure, or an error the
  *   subscription rethrows from a microtask. A window move whose load a
@@ -1117,8 +1121,13 @@ describe(`loadSubset replay refinement`, () => {
  *   window move. No other error may escape.
  *
  * History grammar: rank moves, holding the next loads, settling the oldest
- * held load with success or failure, truncates (optionally arming the next
- * unload once the replay has started), and arming the next unload to throw. The driver uses a real on-demand Collection with an index and an
+ * or newest held load with success or failure (optionally keeping later
+ * loads held),
+ * truncates (optionally arming the next unload once the replay has started),
+ * and arming the next unload to throw. A history may start while the initial
+ * preload's loads are held. A marker load whose request was aborted either
+ * resolves without writing or rejects with `AbortError`, as the source
+ * contract asks; an `AbortError` is not a failed load. The driver uses a real on-demand Collection with an index and an
  * ordered live query. At the end, every held load succeeds in order.
  *
  * The joined scenarios cross a LEFT join that keeps marked or unmarked rows
@@ -1137,7 +1146,11 @@ type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
   | { type: `move`; id: number; rank: number }
   | { type: `hold` }
-  | { type: `settle`; ok: boolean }
+  // `keepHolding` leaves later loads held, so a history can settle one load
+  // while the next stays pending. `newest` settles the most recently held
+  // load instead of the oldest, so a later load can settle before an earlier
+  // one, as independent provider requests may.
+  | { type: `settle`; ok: boolean; keepHolding?: boolean; newest?: boolean }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
@@ -1161,6 +1174,12 @@ type OrderedScenario = {
   markerMode: `eager` | `on-demand`
   // Whether each shown row includes its markers as a `toArray` child.
   includes: boolean
+  // How a marker load whose request was aborted settles. The source contract
+  // asks a source to reject it with `AbortError` once its accepted rows apply;
+  // a source that cannot cancel may also resolve it without writing.
+  abortedMarkerLoads: `resolve` | `reject`
+  // Whether the history starts while the initial preload is still held.
+  historyDuringPreload: boolean
 }
 
 const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
@@ -1177,6 +1196,8 @@ const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
   ),
   markerMode: fc.constantFrom(`eager` as const, `on-demand` as const),
   includes: fc.boolean(),
+  abortedMarkerLoads: fc.constantFrom(`resolve` as const, `reject` as const),
+  historyDuringPreload: fc.boolean(),
 })
 
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
@@ -1197,6 +1218,8 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
         { weight: 3, arbitrary: fc.constant(true) },
         { weight: 1, arbitrary: fc.constant(false) },
       ),
+      keepHolding: fc.boolean(),
+      newest: fc.boolean(),
     }),
   },
   {
@@ -1252,6 +1275,8 @@ type OrderedReach = {
   abortedMoves: number
   terminalErrors: number
   replayLoads: number
+  abortRejections: number
+  preloadChecks: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1263,6 +1288,8 @@ const ordinaryOrderedScenario: OrderedScenario = {
   joined: false,
   markerMode: `eager`,
   includes: false,
+  abortedMarkerLoads: `resolve`,
+  historyDuringPreload: false,
 }
 
 async function checkOrderedReplay(
@@ -1386,7 +1413,7 @@ async function checkOrderedReplay(
     // The campaigns require replay loads, so production that rebuilt request
     // data for a replay fails this witness instead of making every replay
     // load look like new demand.
-    if (replay) reach.replayLoads++
+    if (replay && isDemand(options)) reach.replayLoads++
     return committing || replay
   }
   let violation: string | undefined
@@ -1428,6 +1455,8 @@ async function checkOrderedReplay(
     abortedMoves: 0,
     terminalErrors: 0,
     replayLoads: 0,
+    abortRejections: 0,
+    preloadChecks: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -1483,7 +1512,13 @@ async function checkOrderedReplay(
             } else await Promise.resolve()
             if (options.signal?.aborted) {
               load.outcome = `ok`
-              return
+              if (scenario.abortedMarkerLoads === `resolve`) return
+              reach.abortRejections++
+              throw inject(
+                Object.assign(new Error(`marker load aborted`), {
+                  name: `AbortError`,
+                }),
+              )
             }
             operations.begin()
             for (const id of marked) {
@@ -1666,6 +1701,9 @@ async function checkOrderedReplay(
   if (peer) queries.push(peer)
   // A subscriber keeps each live query from garbage collection while a
   // history waits on held loads.
+  // A history during preload starts with every load held, including the
+  // loads that the first subscriber starts.
+  holding = scenario.historyDuringPreload
   const subscriptions = [live, peer].flatMap((collection) =>
     collection ? [collection.subscribeChanges(() => {})] : [],
   )
@@ -1735,9 +1773,13 @@ async function checkOrderedReplay(
     }
     if (receipt !== true) await receipt
   }
+  // The history's commands can interleave with the initial loads.
+  let preloadSettled = false
+  const preload = Promise.allSettled([live.preload(), peer?.preload()]).then(
+    () => (preloadSettled = true),
+  )
   try {
-    await live.preload()
-    await peer?.preload()
+    if (!scenario.historyDuringPreload) await preload
     for (const command of history) {
       try {
         switch (command.type) {
@@ -1769,8 +1811,8 @@ async function checkOrderedReplay(
             holding = true
             break
           case `settle`: {
-            holding = false
-            held.shift()?.(command.ok)
+            holding = command.keepHolding === true && holding
+            ;(command.newest === true ? held.pop() : held.shift())?.(command.ok)
             break
           }
           case `truncate`:
@@ -1864,6 +1906,13 @@ async function checkOrderedReplay(
     await Promise.all(pendingMoves.splice(0))
     await settleAll()
     await flushPromises()
+    // Initial readiness: once loading is quiet, the initial preload has
+    // settled. It resolves when the first window is covered and rejects when
+    // an initial load fails; it does not wait for a later truncate.
+    if (scenario.historyDuringPreload) {
+      reach.preloadChecks++
+      expect(preloadSettled, `initial preload settles`).toBe(true)
+    }
     if (violation) throw new Error(`adapter release: ${violation}`)
     if (moveOrderViolation) {
       throw new Error(`newest move wins: ${moveOrderViolation}`)
@@ -2152,11 +2201,84 @@ describe(`Ordered windows across truncate replays`, () => {
       },
       reaches: `failedLoads`,
     },
+    {
+      name: `a failed include replay before the first ready`,
+      history: [
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        markerMode: `on-demand`,
+        includes: true,
+        abortedMarkerLoads: `reject`,
+        historyDuringPreload: true,
+      },
+      reaches: `abortRejections`,
+    },
+    {
+      name: `an aborted marker load that rejects after its replay succeeds`,
+      history: [
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: true, keepHolding: false },
+        { type: `truncateMarkers` },
+        { type: `unloadThrows` },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        peer: true,
+        joined: `some`,
+        markerMode: `on-demand`,
+        abortedMarkerLoads: `reject`,
+        historyDuringPreload: true,
+      },
+      reaches: `abortRejections`,
+    },
+    {
+      name: `a replaced include segment whose aborted load rejects`,
+      history: [
+        { type: `hold` },
+        { type: `truncate`, armAfterStart: false },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `move`, id: 2, rank: 31 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        markerMode: `on-demand`,
+        includes: true,
+        abortedMarkerLoads: `reject`,
+      },
+      reaches: `abortRejections`,
+    },
+    {
+      name: `an include demand that fails while its replay still loads`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `move`, id: 3, rank: 1 },
+        { type: `settle`, ok: false, newest: true },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+      recovers: true,
+    },
   ] satisfies Array<{
     name: string
     history: Array<OrderedCommand>
     scenario?: OrderedScenario
     reaches?: keyof OrderedReach
+    // A replay whose history the law places in a recovery, where the model's
+    // own classification is permissive (see the terminal-error law).
+    recovers?: true
   }>)(
     `keeps the ordered window for $name (generated replay)`,
     async ({ history, scenario, ...replay }) => {
@@ -2164,6 +2286,9 @@ describe(`Ordered windows across truncate replays`, () => {
       const reaches: keyof OrderedReach | undefined =
         `reaches` in replay ? replay.reaches : undefined
       if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
+      if (`recovers` in replay) {
+        expect(reach.terminalErrors, `recovery failure ends the query`).toBe(0)
+      }
     },
   )
 
@@ -2191,6 +2316,8 @@ describe(`Ordered windows across truncate replays`, () => {
         abortedMoves: 0,
         terminalErrors: 0,
         replayLoads: 0,
+        abortRejections: 0,
+        preloadChecks: 0,
       }
       await fc.assert(
         fc.asyncProperty(

@@ -405,14 +405,12 @@ export class CollectionSubscription
     const demandsToReload = acquires ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
-    // A query subscription that acquires opens the replay without demand too:
+    const recovers =
+      demandsToReload.length > 0 || this.stalePublishedRows.size > 0
+    // A query subscription that acquires opens a replay without demand too:
     // the commit's private deletes can make its graph start demand, and that
-    // demand belongs to this replay.
-    if (
-      demandsToReload.length === 0 &&
-      this.stalePublishedRows.size === 0 &&
-      !(acquires && this.options.truncateReplayPublication)
-    ) {
+    // demand belongs to the replay. Such a replay starts no recovery work.
+    if (!recovers && !(acquires && this.options.truncateReplayPublication)) {
       this.resetSnapshotTracking()
       return
     }
@@ -437,13 +435,13 @@ export class CollectionSubscription
       this.truncateReplayState = replayState
     }
     const attempt = replayState.currentAttempt
-    this.setStatus(`loadingSubset`)
+    if (recovers) this.setStatus(`loadingSubset`)
 
     if (this.truncateReplayState !== replayState) return
 
     if (this.options.truncateReplayPublication) {
       this.truncateReplacementPending = true
-      this.options.truncateReplayPublication.start()
+      if (recovers) this.options.truncateReplayPublication.start()
     }
 
     // A newer replay replaces every prior acquisition for these demands. Abort

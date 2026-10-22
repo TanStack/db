@@ -273,9 +273,24 @@ function startSegment(
     signal: segment.abortController.signal,
     trackLoadSubsetPromise: false,
     onUnoptimized,
-    onLoadSubsetResult: (result) => {
+    onLoadSubsetResult: (result, options) => {
       observed = true
-      segment.ready = result
+      // An aborted request is obsolete demand, not a load failure, as for the
+      // subscription. A truncate replay decides a segment whose acquisition
+      // it superseded, even when the replay settled first. Otherwise newer
+      // coverage replaced the segment, and it settles.
+      segment.ready =
+        result instanceof Promise
+          ? result.catch((error: unknown) => {
+              if (!options.signal?.aborted) throw error
+              return (
+                subscription.pendingTruncateReplacement ??
+                (subscription.hasFailedTruncateReplacement
+                  ? Promise.reject(subscription.lastError)
+                  : undefined)
+              )
+            })
+          : result
       segment.state = result instanceof Promise ? `pending` : `settled`
     },
   })

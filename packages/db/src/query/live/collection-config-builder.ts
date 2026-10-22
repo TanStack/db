@@ -489,9 +489,11 @@ export class CollectionConfigBuilder<
 
   /**
    * A lazy demand load failure ends the query unless it failed a truncate
-   * replay: that replay keeps the last publication until a later replay of
-   * the source reacquires the demand. A failed demand is settled either way,
-   * so it holds no ordered loading.
+   * replay after the query first became ready: that replay keeps the last
+   * publication until a later replay of the source reacquires the demand.
+   * Before the first ready there is no publication to keep, so the failure
+   * is an initial load failure. A failed demand is settled either way, so it
+   * holds no ordered loading.
    */
   failDemand(
     planId: string,
@@ -504,7 +506,7 @@ export class CollectionConfigBuilder<
     demand.settled = true
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    if (fatal)
+    if (fatal || this.liveQueryCollection?.status === `loading`)
       this.transitionToError(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Subset demand '${planId}' failed: ${normalized.message}`

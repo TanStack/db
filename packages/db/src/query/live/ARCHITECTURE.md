@@ -1441,13 +1441,23 @@ that replay expose the same `Error` object.
 A truncate's commit deletes the source's rows privately, so the graph can
 demand keys that the query never published. A query subscription that acquires
 from an on-demand source therefore opens a replay at every truncate, even when
-it holds no demand. Lazy demand that the graph starts while that replay is open
-belongs to it. A lazy demand load whose failure fails its subscription's replay
-does not end the live query. The query records the error and keeps its last
-complete publication until a later truncate replay of that source succeeds,
-which reacquires the retained demand. A lazy demand load that fails outside a
-replay ends the query (error 228): the parent rows it serves may already be
-public, and no barrier keeps their incomplete join side or bucket private.
+it holds no demand. A replay without demand starts no recovery work and reports
+no loading state. Lazy demand that the graph starts while that replay is open
+belongs to it, including demand started after the replay failed while it still
+holds publication. A rejection of an aborted lazy demand request is obsolete demand,
+not a load failure, as for the subscription. When a truncate supersedes the
+acquisition, its replay decides the demand, even if the replay settles before
+the aborted request rejects. A segment that newer coverage replaced settles. A
+lazy demand load whose failure fails its subscription's replay
+does not end the live query once it has first become ready. The query records
+the error and keeps its last complete publication until a later truncate
+replay of that source succeeds, which reacquires the retained demand. Before
+the first ready there is no complete publication to keep, so the failure is an
+initial load failure and ends the query. A lazy demand load that fails outside
+a replay ends the query (error 228): the parent rows it serves may already be
+public, and no barrier keeps their incomplete join side or bucket private. A
+synchronous `loadSubset` throw rolls its logical owner back, so it fails no
+replay that could reacquire the demand, and it ends the query too.
 
 ### Mutation boundaries and initial readiness
 
