@@ -7,7 +7,7 @@
  * checkpoint stays distinct from a law violation.
  */
 import { spawn } from 'node:child_process'
-import { copyFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,6 +22,7 @@ const fixture = join(
 )
 const packages = resolve(fixture, `../../../..`)
 const RESULT_PREFIX = `__TANSTACK_DB_RELOAD_CLASS__:`
+const APP_TIMEOUT_MS = 540_000
 
 type Result = {
   expected: Array<string>
@@ -69,9 +70,26 @@ async function bundle(out: string) {
 
 function runApp(out: string, databases: string): Promise<Result> {
   return new Promise((resolveResult, reject) => {
+    // Launch as the runtime bridge e2e does: Linux CI has no display and no
+    // configured setuid sandbox.
+    const electronArgs = [
+      `--disable-gpu`,
+      `--disable-dev-shm-usage`,
+      `--no-sandbox`,
+      join(out, `main.mjs`),
+    ]
+    const xvfbRun = `/usr/bin/xvfb-run`
+    const useXvfb = existsSync(xvfbRun)
     const child = spawn(
-      electronPath as unknown as string,
-      [join(out, `main.mjs`)],
+      useXvfb ? xvfbRun : (electronPath as unknown as string),
+      useXvfb
+        ? [
+            `-a`,
+            `--server-args=-screen 0 1280x720x24`,
+            electronPath as unknown as string,
+            ...electronArgs,
+          ]
+        : electronArgs,
       {
         env: {
           ...process.env,
@@ -86,7 +104,17 @@ function runApp(out: string, databases: string): Promise<Result> {
     let stderr = ``
     child.stdout.on(`data`, (chunk) => (stdout += String(chunk)))
     child.stderr.on(`data`, (chunk) => (stderr += String(chunk)))
+    // A hung app is reported with its stderr before the test times out.
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error(`no result in time: ${stderr.slice(-2_000)}`))
+    }, APP_TIMEOUT_MS)
+    child.on(`error`, (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
     child.on(`exit`, (code) => {
+      clearTimeout(timer)
       const line = stdout.split(`\n`).find((l) => l.startsWith(RESULT_PREFIX))
       if (!line) {
         reject(new Error(`no result (exit ${code}): ${stderr.slice(-2_000)}`))

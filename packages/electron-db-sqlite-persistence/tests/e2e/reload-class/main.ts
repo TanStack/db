@@ -135,8 +135,8 @@ ipcMain.handle(
 ipcMain.handle(`reload:release`, (_event, token: string) => {
   holds.get(token)?.release()
 })
-ipcMain.handle(`reload:restore`, (_event, token: string) => {
-  holds.get(token)?.restore()
+ipcMain.handle(`reload:uninstall`, (_event, token: string) => {
+  holds.get(token)?.uninstall()
   holds.delete(token)
 })
 ipcMain.handle(`reload:result`, (_event, result: string) => {

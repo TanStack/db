@@ -2100,7 +2100,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       // ahead of the caller.
       afterQueuedWork: (): Promise<void> =>
         this.resolveScheduler()?.afterQueuedWork() ??
-        settled(Promise.all(this.activeUnscheduledHydrations)),
+        settled(
+          Promise.all([...this.activeUnscheduledHydrations].map(settled)),
+        ),
     },
   )
 

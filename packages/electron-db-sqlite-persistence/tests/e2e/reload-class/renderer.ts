@@ -61,9 +61,9 @@ function remoteHold(seam: keyof ReloadSeams, storageId: string): HeldCall {
       released = true
       void bridge.invoke(`reload:release`, token)
     },
-    restore: () => {
+    uninstall: () => {
       released = true
-      void bridge.invoke(`reload:restore`, token)
+      void bridge.invoke(`reload:uninstall`, token)
     },
   }
 }

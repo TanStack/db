@@ -504,6 +504,31 @@ describe(`shared logical scheduling`, () => {
       },
     )
 
+    it(`keeps waiting for an unscheduled hydrate after another one fails`, async () => {
+      const adapter = createSQLiteCorePersistenceAdapter({
+        driver: new UnbrandedPromiseLookupDriver(),
+      })
+      const failGate = createDeferred()
+      const heldGate = createDeferred()
+      const failing = adapter.runInHydrationScope!(async () => {
+        await failGate.promise
+        throw new Error(`unscheduled hydrate failed`)
+      })
+      const failingSettled = failing.then(
+        () => undefined,
+        () => undefined,
+      )
+      const held = adapter.runInHydrationScope!(() => heldGate.promise)
+      const barrier = adapter.runInRegularScope!.afterQueuedWork()
+      failGate.resolve()
+      await failingSettled
+      // The failed hydrate has settled, but the held one has not.
+      expect(await settlesNow(barrier)).toBe(false)
+      heldGate.resolve()
+      await held
+      expect(await settlesNow(barrier)).toBe(true)
+    })
+
     // A second wrapper over the same key discovers it only from a promise.
     // Its unscheduled hydrate is adopted while the scheduler already runs
     // the first wrapper's held regular read.

@@ -183,7 +183,7 @@ export type ReloadTab = {
 export type HeldCall = {
   isHeld: () => boolean
   release: () => void
-  restore: () => void
+  uninstall: () => void
 }
 
 /**
@@ -443,7 +443,7 @@ function holdFirstCall(
   return {
     isHeld: () => state.held,
     release: () => release(),
-    restore: () => {
+    uninstall: () => {
       release()
       seam[method] = original
     },
@@ -609,7 +609,7 @@ export async function observeReload(
             hold: host.seams.holdFirstWrite(ids[0]!),
           }
         : undefined
-    if (queuedWrite) cleanups.push(queuedWrite.hold.restore)
+    if (queuedWrite) cleanups.push(queuedWrite.hold.uninstall)
     let openGate!: () => void
     const gate = new Promise<void>((resolve) => {
       openGate = resolve
@@ -646,7 +646,7 @@ export async function observeReload(
       heldId === undefined
         ? undefined
         : host.seams.holdFirstRowSnapshot(ids[heldId]!)
-    if (hold) cleanups.push(hold.restore)
+    if (hold) cleanups.push(hold.uninstall)
 
     const leader = await host.openTab(dbName)
     const leaderCapabilities = new Map<number, RecoveryCapability>()
@@ -852,7 +852,7 @@ export async function observeReload(
         const held = host.seams.holdFirstRowSnapshot(
           storageIds[ids[restarted]!]!,
         )
-        cleanups.push(held.restore)
+        cleanups.push(held.uninstall)
         await followerCollections[restarted]!.cleanup()
         const restart = followerCollections[restarted]!.preload()
         await waitFor(held.isHeld, `held follower read`)
@@ -895,7 +895,7 @@ export async function observeReload(
           throw new Error(`timed out waiting for the follower's first commit`)
         }
         const held = host.seams.holdFirstSubsetLoad(storageId)
-        cleanups.push(held.restore)
+        cleanups.push(held.uninstall)
         const query = createLiveQueryCollection({
           query: (q) => q.from({ row: followerCollections[sourced]! }),
         })
@@ -912,7 +912,7 @@ export async function observeReload(
           // answer. Closing a tab releases its locks, so its held write
           // ends with its connection.
           const leaderWrite = host.seams.holdFirstWrite(storageId)
-          cleanups.push(leaderWrite.restore)
+          cleanups.push(leaderWrite.uninstall)
           held.release()
           released = Date.now()
           await waitFor(leaderWrite.isHeld, `leader holding the commit`)
@@ -1262,33 +1262,32 @@ export function reloadViolations(
       if ((scans[1] ?? Infinity) > (terms[1] ?? -1)) {
         violations.push(`${id}: restart term before its startup read`)
       }
-      // (b) order, on the first tab's reload
-      if (want.terms === 0 || expected.writerExemptFromOrder === index) return
-      const term = reloadLog.findIndex((e) => isTermFor(e, storageId))
-      const mustPrecede: Array<[string, (e: Logged) => boolean]> = []
-      history.collections.forEach((other, otherIndex) => {
-        const otherId = ids[otherIndex]!
-        const otherStorage = storageIds[otherId]!
-        if (other.kind === `eager`) {
-          mustPrecede.push([
-            `${otherId} read`,
-            (e) => isRowScanFor(e, otherStorage),
-          ])
-        } else {
-          mustPrecede.push([`${otherId} claim`, (e) => isClaimFor(e, otherId)])
-        }
-      })
-      if (collection.kind === `managed`) {
+    }
+    // (b) order, on the first tab's reload
+    if (want.terms === 0 || expected.writerExemptFromOrder === index) return
+    const term = reloadLog.findIndex((e) => isTermFor(e, storageId))
+    const mustPrecede: Array<[string, (e: Logged) => boolean]> = []
+    history.collections.forEach((other, otherIndex) => {
+      const otherId = ids[otherIndex]!
+      const otherStorage = storageIds[otherId]!
+      if (other.kind === `eager`) {
         mustPrecede.push([
-          `${id} metadata read`,
-          (e) => isMetadataReadFor(e, storageId),
+          `${otherId} read`,
+          (e) => isRowScanFor(e, otherStorage),
         ])
+      } else {
+        mustPrecede.push([`${otherId} claim`, (e) => isClaimFor(e, otherId)])
       }
-      for (const [label, test] of mustPrecede) {
-        const at = reloadLog.findIndex(test)
-        if (at === -1 || at > term)
-          violations.push(`${id} term before ${label}`)
-      }
+    })
+    if (collection.kind === `managed`) {
+      mustPrecede.push([
+        `${id} metadata read`,
+        (e) => isMetadataReadFor(e, storageId),
+      ])
+    }
+    for (const [label, test] of mustPrecede) {
+      const at = reloadLog.findIndex(test)
+      if (at === -1 || at > term) violations.push(`${id} term before ${label}`)
     }
   })
   // (b) order: a write queued at a grant precedes that grant's term
