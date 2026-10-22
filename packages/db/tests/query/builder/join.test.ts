@@ -3,6 +3,7 @@ import { fullJoin, innerJoin, leftJoin, rightJoin } from '@tanstack/db'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { and, eq, gt } from '../../../src/query/builder/functions.js'
+import { JoinOperatorRequiredError } from '../../../src/errors.js'
 
 // Test schema
 interface Employee {
@@ -358,5 +359,15 @@ describe(`QueryBuilder.join`, () => {
       expect(builtQuery.select).toBeDefined()
       expect(builtQuery.select).toHaveProperty(`department_name`)
     })
+  })
+})
+
+describe(`join operator values`, () => {
+  it(`rejects the removed source-and-callback call shape with a coded error`, () => {
+    const builder = new Query().from({ employees: employeesCollection }) as any
+    expect(() =>
+      builder.join({ departments: departmentsCollection }, () => true),
+    ).toThrow(JoinOperatorRequiredError)
+    expect(() => builder.join(undefined)).toThrow(/Got: undefined/)
   })
 })

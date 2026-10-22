@@ -129,7 +129,7 @@
   ],
   "InvalidSourceTypeError": [
     "Invalid source for from clause: Expected an object with a single key-value pair like { alias: collection }. For example: .from({ todos: todosCollection }). Got: string",
-    "Invalid source for join clause: Expected an object with a single key-value pair like { alias: collection }. For example: .join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id)). Got: number",
+    "Invalid source for join clause: Expected an object with a single key-value pair like { alias: collection }. For example: .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Got: number",
     "Invalid source for unionAll clause: Expected an object with one or more key-value pairs like { alias: collection }. For example: .unionAll({ todos: todosCollection, events: eventsCollection }). Got: undefined"
   ],
   "JoinConditionMustBeEqualityError": [
@@ -260,5 +260,8 @@
   ],
   "SetWindowFindOneLimitError": [
     "setWindow() cannot change the limit of a findOne() query."
+  ],
+  "JoinOperatorRequiredError": [
+    ".join() takes a join operator, such as .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Import leftJoin, innerJoin, rightJoin, fullJoin, or joinOf from @tanstack/db. Got: object"
   ]
 }

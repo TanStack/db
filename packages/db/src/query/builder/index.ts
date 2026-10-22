@@ -21,6 +21,7 @@ import {
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
+  JoinOperatorRequiredError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
@@ -338,6 +339,16 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>
   > {
+    // Untyped callers can still pass the removed (source, on, type) shape.
+    const value: unknown = operator
+    if (
+      typeof value !== `object` ||
+      value === null ||
+      typeof (value as { compile?: unknown }).compile !== `function`
+    )
+      throw new JoinOperatorRequiredError(
+        value === null ? `null` : typeof value,
+      )
     const [alias, from] = this._createRefForSource(
       operator.source,
       `join clause`,
