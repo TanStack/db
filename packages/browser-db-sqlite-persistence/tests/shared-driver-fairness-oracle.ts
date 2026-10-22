@@ -3,7 +3,7 @@
  *
  * Contract and source: RFC #1659 accepts K=1 complete-logical-cold-hydrate
  * scheduling. The persist already executing when the storm begins is
- * non-preemptible. After that, at most one additional persist may complete
+ * non-preemptible, so it completes before the first hydrate. After that, at most one additional persist may complete
  * between consecutive hydrate completions, with FIFO identity preserved
  * inside the hydrate and persist lanes.
  *
@@ -28,7 +28,11 @@
  *
  * Observed public facts: admitted and completed logical IDs, completed and
  * pending persists at every hydrate checkpoint, independently seeded public
- * collection rows, raw SQL dequeue reach, and cleanup diagnostics. Known
+ * collection rows, raw SQL dequeue reach, and cleanup diagnostics.
+ * `findSharedDriverFairnessLawViolations` is the comparison that the Node and
+ * Chromium production drivers both apply. It checks hydrate admission and
+ * completion, public rows, persist FIFO order, the non-preemptible running
+ * persist, and the K=1 cut at each hydrate. Known
  * omissions: the oracle does not establish elapsed-time latency, unbounded
  * eventuality, multi-process coordination, or a browser matrix; the Chromium
  * OPFS fixture separately refines the provider boundary.
@@ -502,6 +506,135 @@ export function findSharedDriverFairnessViolation(
     }
   }
   return undefined
+}
+
+export type SharedDriverFairnessLawViolation = {
+  law: string
+  checkpoint: string
+  expected: unknown
+  actual: unknown
+}
+
+/** Public rows each cold hydrate must expose, rebuilt from the scenario seeds. */
+export function expectedHydratedCollections(
+  scenario: SharedDriverFairnessScenario,
+): Array<HydratedCollectionRows> {
+  return scenario.work.flatMap((work) =>
+    work.kind === `hydrate`
+      ? [
+          {
+            collectionId: collectionIdFor(scenario, work),
+            rows: work.seededRows.map((row) => ({ ...row })),
+          },
+        ]
+      : [],
+  )
+}
+
+/**
+ * The complete refinement check that every driver applies. Expected values
+ * come from the scenario and the K=1 reference, never from production. Reach
+ * laws come first so that a missing hydrate is not reported as a K=1 cut.
+ */
+export function findSharedDriverFairnessLawViolations(
+  observation: SharedDriverFairnessObservation,
+  fairnessBound = SHARED_DRIVER_FAIRNESS_BOUND,
+): Array<SharedDriverFairnessLawViolation> {
+  const { scenario } = observation
+  const expectedHydrates = expectedHydratedCollections(scenario)
+  const expectedPersistIds = scenario.work
+    .filter((work) => work.kind === `persist`)
+    .map((work) => collectionIdFor(scenario, work))
+  const violations: Array<SharedDriverFairnessLawViolation> = []
+  const compare = (
+    law: string,
+    checkpoint: string,
+    expected: unknown,
+    actual: unknown,
+  ) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      violations.push({ law, checkpoint, expected, actual })
+    }
+  }
+
+  compare(
+    `hydrate admission IDs`,
+    `after all preload requests`,
+    expectedHydrates.map(({ collectionId }) => collectionId),
+    observation.admittedHydrateIds,
+  )
+  compare(
+    `hydrate completion count`,
+    `after all preloads`,
+    expectedHydrates.length,
+    observation.hydrationCompletions.length,
+  )
+  compare(
+    `hydrated public rows`,
+    `after all preloads`,
+    expectedHydrates,
+    observation.hydratedCollections,
+  )
+  compare(
+    `persist FIFO completion order`,
+    `after all work settled`,
+    expectedPersistIds,
+    observation.logicalCompletionOrder
+      .filter((entry) => entry.startsWith(`persist:`))
+      .map((entry) => entry.slice(`persist:`.length)),
+  )
+
+  // The persist already running when the storm begins is non-preemptible, so
+  // it completes before the first hydrate. The K=1 reference bounds completed
+  // persists only from above, so it cannot see a preempted running persist.
+  const runningPersistId = expectedPersistIds[0]
+  const firstHydrate = observation.hydrationCompletions[0]
+  if (
+    runningPersistId !== undefined &&
+    firstHydrate !== undefined &&
+    !firstHydrate.completedPersistIds.includes(runningPersistId)
+  ) {
+    violations.push({
+      law: `non-preemptible running persist`,
+      checkpoint: `hydrate completion 0`,
+      expected: [runningPersistId],
+      actual: firstHydrate.completedPersistIds,
+    })
+  }
+
+  const cut = findSharedDriverFairnessViolation(observation, fairnessBound)
+  if (cut) {
+    const laws: Array<string> = []
+    if (cut.checkpoint.collectionId !== cut.expectedCollectionId) {
+      laws.push(`hydrate FIFO identity`)
+    }
+    if (
+      cut.checkpoint.completedPersistIds.length >
+      cut.expectedMaximumCompletedPersists
+    ) {
+      laws.push(`K=1 completed-persist bound`)
+    }
+    if (
+      cut.checkpoint.pendingPersistCount < cut.expectedMinimumPendingPersists
+    ) {
+      laws.push(`K=1 pending-persist backlog`)
+    }
+    if (cut.unexpectedCompletedPersistIds.length > 0) {
+      laws.push(`completed persist outside permitted prefix`)
+    }
+    violations.push({
+      law: laws.join(`; `),
+      checkpoint: `hydrate completion ${observation.hydrationCompletions.indexOf(cut.checkpoint)}`,
+      expected: {
+        collectionId: cut.expectedCollectionId,
+        maximumCompletedPersists: cut.expectedMaximumCompletedPersists,
+        minimumPendingPersists: cut.expectedMinimumPendingPersists,
+        permittedCompletedPersistIds: cut.permittedCompletedPersistIds,
+      },
+      actual: cut.checkpoint,
+    })
+  }
+  return violations
 }
 
 /** Checker calibration only; the executable hostile control uses the fixture. */
