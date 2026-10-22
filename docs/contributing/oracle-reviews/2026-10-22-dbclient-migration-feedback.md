@@ -1,6 +1,7 @@
 # DbClient migration feedback evaluation
 
-Evaluation date: 2026-10-22. Source: `/Users/kyle.mathews/Downloads/Feedback.txt`.
+Evaluation date: 2026-10-22. Source artifact: `Feedback.txt`, identified by its
+SHA-256 under [Content identifiers](#content-identifiers).
 The report describes db 0.15.1, react-db 0.5.11, electric-db-collection 0.6.2,
 react-router-with-db 0.1.0, and Start 1.169, without a reviewed commit or an
 application fixture. This evaluation uses fresh `origin/main`
@@ -77,9 +78,10 @@ observable synchronous result for transport, or initially render empty/loading
 unless a result or normalized source snapshot was explicitly supplied. The
 former needs capture and transport semantics; the latter changes observable
 server behavior. Merely refusing new source starts does not solve reads from an
-already warm source. Capturing only ready eager rows fixes one trace while
-missing partial nonready rows and status flags. Suppressing all unregistered
-rows would conflict with documented reuse of explicitly normalized sources.
+already warm source. Capturing only rows from eager source Collections with
+status `ready` fixes one trace. It misses partial nonready rows and status flags.
+Suppressing all unregistered rows would conflict with documented reuse of
+explicitly normalized sources.
 
 The failing diagnostic and passing control are preserved in task scratch as
 `dbclient-hydration-feedback.probe.test.tsx` and `react-hydration-red.log`.
@@ -451,6 +453,57 @@ A focused independent follow-up reviewed the accepted R01 repair and changed
 judgment/drivers after calibration. It found no residual actionable defect:
 request-before-release removes the trailing restart; the shared judgment is
 independent; both drivers check entries, cleanup calls, full status traces at
-admission return/settlement, and fresh-demand restart. It verified the 24 core
-and 24 React case counts and the loading/held-cleanup distinctions. This was a
-read-only source review, not a new broad test run or whole-PR readiness verdict.
+admission return/settlement, and fresh-demand restart. It verified the counts
+for 24 core cases and 24 React cases, including loading cleanup and held cleanup.
+This was a read-only source review, not a new broad test run or whole-PR
+readiness verdict.
+
+## Subsequent CodeRabbit evaluation
+
+[Review 5618234197](https://github.com/TanStack/db/pull/2229#pullrequestreview-5618234197)
+covers `2975790568cab6c4834db575fe22904693f669e3`. The next head
+`75a7d043fee10f50f34ecd4b1f13df918b2bf373` changes only skill instructions;
+all six reviewed executable hashes still match. The inline comment's newer
+commit metadata does not change the review body's stated coverage.
+
+| ID | Claim or contextual assessment | Disposition |
+| --- | --- | --- |
+| C01 | LGTM shared cleanup judgment | accepted-design |
+| C02 | LGTM ordinary subscriber production order | accepted-design |
+| C03 | LGTM db-only patch changeset | accepted-design |
+| C04 | LGTM core lifecycle changes and cleanup histories | accepted-design |
+| C05 | LGTM subscription driver deferral changes | accepted-design |
+| C06 | LGTM client test driver changes | accepted-design |
+| C07 | LGTM React receiving grammar | accepted-design |
+| C08 | LGTM coverage-map limits | accepted-design |
+| C09 | LGTM SSR guide identity, indexes, lifetime | accepted-design |
+| C10 | Rewrite 24 core and 24 React case counts | fixed-now |
+| C11 | Clarify ready eager rows | fixed-now |
+| C12 | Replace machine-local Feedback.txt source path with stable identifier | fixed-now |
+| C13 | Mutable summary warns 0% docstring coverage against 80% threshold | accepted-design |
+| C14 | Mutable summary says mergeable with documentation follow-up | accepted-design |
+| C15 | Mutable summary title check passes | accepted-design |
+| C16 | Mutable summary description check passes | accepted-design |
+| C17 | Mutable summary linked-issue check skipped | accepted-design |
+| C18 | Mutable summary out-of-scope check skipped | accepted-design |
+
+The three corrections change prose only. The source reference now uses the
+existing immutable artifact identifier, whose SHA-256 matches the archived raw
+feedback. Counts and Collection status wording retain the original meaning.
+Direct source and link checks, plus whitespace validation, are sufficient for
+these findings. No production or oracle behavior changed, so no new runtime
+RED/GREEN claim is made.
+
+The docstring warning names no functions and supplies no repository authority
+for its 80% threshold. The admission method has JSDoc, and the shared judgment
+has adjacent literate contract prose. Preserve that approved documentation
+form rather than add redundant comments for an unverified external metric.
+
+Loss audit: 18 items = 3 fixed-now + 15 accepted-design contextual assessments.
+No CodeRabbit finding is deferred or confirmed open. Raw review, inline data,
+mutable summary and the detailed ledger are retained in task scratch. Related
+PR #2060 is a useful navigation pointer, not new proof of current behavior.
+Reviewer recommendation: hire, with low confidence from this review alone.
+It supplies three useful documentation corrections and no new runtime
+counterexample. The original open hydration decision and typing fixture gap
+remain separate; pending CI and a mergeable flag do not establish PR readiness.
