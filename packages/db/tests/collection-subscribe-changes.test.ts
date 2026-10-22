@@ -2220,8 +2220,11 @@ describe(`Collection.subscribeChanges`, () => {
         },
       }),
     ).toThrow(loadFailure)
-    await flushPromises()
-    uncaught.restore()
+    try {
+      await flushPromises()
+    } finally {
+      uncaught.restore()
+    }
     expect(uncaught.errors).toEqual([unloadFailure])
     expect(collection.subscriberCount).toBe(0)
   })

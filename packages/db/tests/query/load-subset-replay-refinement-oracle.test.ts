@@ -1082,6 +1082,9 @@ describe(`loadSubset replay refinement`, () => {
  * - **Convergence:** after a final truncate with no faults, and an explicit
  *   window move that revalidates a window whose own move failed, the window
  *   equals the model.
+ * - **Newest move wins:** a superseded window move resolves only after the
+ *   newest move has settled, so an awaited move reflects the window that
+ *   won. A superseded move that fails still rejects with its own error.
  * - **Include children:** wherever the window law holds, each shown row's
  *   included markers equal the model's: its own marker if it is marked, and
  *   none otherwise. A windowed query routes child demand only from the rows
@@ -1093,8 +1096,11 @@ describe(`loadSubset replay refinement`, () => {
  *   loads an inner join's root by key when the marker source is eager. A
  *   demand load asks for keys (a `where` with no `orderBy`). A failed load
  *   that a truncate's replay issued is not fatal: it keeps the last
- *   publication until the next replay. So a query may end in `error` only
- *   after a demand load issued outside a replay failed.
+ *   publication until the next replay. A load that fails before the query
+ *   first becomes ready is fatal too (an initial load failure), except on
+ *   a lazy join source, which owns its demand. So a query may end in
+ *   `error` only after a demand load issued outside a replay failed, or a
+ *   load failed while the query was still loading.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
@@ -1260,6 +1266,26 @@ async function checkOrderedReplay(
   // The newest window move wins: an older move that settles later does not
   // restore its window.
   let latestMove = 0
+  // The newest call wins, so a superseded move resolves only after the
+  // newest move settles: it then reflects the window that won. A superseded
+  // move that fails still rejects with its own error.
+  const settledMoves = new Set<number>([0])
+  // A failed move leaves the window where it was, so the newest move that
+  // resolved sets it.
+  const failedMoves = new Set<number>()
+  const newerMoveResolved = (move: number) => {
+    for (let newer = move + 1; newer <= latestMove; newer++) {
+      if (settledMoves.has(newer) && !failedMoves.has(newer)) return true
+    }
+    return false
+  }
+  let moveOrderViolation: string | undefined
+  const settleMove = (move: number) => {
+    if (move !== latestMove && !settledMoves.has(latestMove)) {
+      moveOrderViolation ??= `window move ${move} settled before the newest move ${latestMove}`
+    }
+    settledMoves.add(move)
+  }
   const peerWindow = { offset: scenario.offset, limit: scenario.limit }
   const truth = new Map<number, OrderedRow>(
     [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id * 10 }]),
@@ -1322,6 +1348,12 @@ async function checkOrderedReplay(
   // A marker truncate's commit starts its replay loads synchronously.
   let markerReplaying = false
   let demandFailed = false
+  // A failed initial load is fatal too (error 229). The queries are created
+  // below; a load can only fail after they start.
+  const queries: Array<{ status: string }> = []
+  let failedWhileLoading = false
+  // Adapter callbacks set these flags, so read them through a call.
+  const fatalLoadFailed = () => demandFailed || failedWhileLoading
   // Lazy join demand asks for keys; ordered and full-source loads do not.
   const isDemand = (options: LoadSubsetOptions) =>
     options.where !== undefined && options.orderBy === undefined
@@ -1407,6 +1439,9 @@ async function checkOrderedReplay(
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
+                if (queries.some(({ status }) => status === `loading`)) {
+                  failedWhileLoading = true
+                }
                 reach.failedLoads++
                 throw inject(new Error(`marker load failed`))
               }
@@ -1468,6 +1503,9 @@ async function checkOrderedReplay(
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
+                if (queries.some(({ status }) => status === `loading`)) {
+                  failedWhileLoading = true
+                }
                 reach.failedLoads++
                 throw inject(new Error(`load failed`))
               }
@@ -1584,9 +1622,11 @@ async function checkOrderedReplay(
         )
     })
   const live = query()
+  queries.push(live)
   // A peer reads the same source; its leases must survive the first
   // query's retirements, so its window obeys the same law.
   const peer = scenario.peer ? query() : undefined
+  if (peer) queries.push(peer)
   // A subscriber keeps each live query from garbage collection while a
   // history waits on held loads.
   const subscriptions = [live, peer].flatMap((collection) =>
@@ -1743,14 +1783,18 @@ async function checkOrderedReplay(
             const move = ++latestMove
             const settled = live.utils.setWindow(requested)
             if (settled === true) {
+              settleMove(move)
               window = requested
               break
             }
             const applied = settled.then(
               () => {
-                if (move === latestMove) window = requested
+                settleMove(move)
+                if (!newerMoveResolved(move)) window = requested
               },
               (error: unknown) => {
+                settledMoves.add(move)
+                failedMoves.add(move)
                 // A release failure does not fail the move, so it must not
                 // reject it either.
                 if (error instanceof Error && cleanupFaults.has(error)) {
@@ -1783,6 +1827,9 @@ async function checkOrderedReplay(
     await settleAll()
     await flushPromises()
     if (violation) throw new Error(`adapter release: ${violation}`)
+    if (moveOrderViolation) {
+      throw new Error(`newest move wins: ${moveOrderViolation}`)
+    }
     if (escapedError() !== undefined) {
       throw new Error(`escaped error: only injected faults may surface`, {
         cause: escapedError(),
@@ -1820,14 +1867,14 @@ async function checkOrderedReplay(
     const revalidated = live.utils.setWindow(window)
     if (revalidated !== true) await revalidated.catch(swallow)
     await settleAll()
-    for (const [query, label, expected] of [
+    for (const [shown, label, expected] of [
       [live, `convergence`, window],
       ...(peer ? [[peer, `peer convergence`, peerWindow] as const] : []),
     ] as const) {
-      if (query.status === `error`) {
-        expect(demandFailed, `${label}: terminal error`).toBe(true)
+      if (shown.status === `error`) {
+        expect(fatalLoadFailed(), `${label}: terminal error`).toBe(true)
         reach.terminalErrors++
-      } else checkWindow(label, query.toArray, expected)
+      } else checkWindow(label, shown.toArray, expected)
     }
   } finally {
     holding = false
@@ -1879,6 +1926,9 @@ describe(`Ordered windows across truncate replays`, () => {
   //   which settled later, restore its window; the newest move wins);
   // - an inner join whose lazy root demand load fails (the model allowed a
   //   terminal error only for marker loads; either side can be lazy);
+  // - a window move that a deferred newer move supersedes (it resolved when
+  //   its own load settled, before the newer move resumed, so awaiting it
+  //   showed neither window);
   // - two window moves that a pending source recovery defers (both resumed
   //   after recovery, the older one last, so it replaced the newer window).
   it.each([
@@ -2001,6 +2051,17 @@ describe(`Ordered windows across truncate replays`, () => {
       ],
       scenario: { ...ordinaryOrderedScenario, limit: 1, joined: `inner` },
       reaches: `terminalErrors`,
+    },
+    {
+      name: `a window move that a deferred newer move supersedes`,
+      history: [
+        { type: `hold` },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncate`, armAfterStart: false },
+        { type: `window`, offset: 0, limit: 1 },
+      ],
+      scenario: { ...ordinaryOrderedScenario, limit: 1 },
     },
     {
       name: `two window moves that a pending source recovery defers`,

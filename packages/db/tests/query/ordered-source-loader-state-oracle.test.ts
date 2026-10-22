@@ -109,6 +109,68 @@ function fakeSubscription(
 }
 
 describe(`Ordered source request ownership`, () => {
+  // A request from before a cursor reset that fails raises the debt to a
+  // full-source read but keeps the work staged after the reset. A finite step
+  // staged there must not run first: its boundary would come from rows the
+  // failed request may have written only in part. The failure clears that
+  // boundary, so the staged tie issues nothing and the owed read comes next.
+  it(`starts the owed full-source read before a finite step staged after a reset`, async () => {
+    const requests: Array<{
+      options: RequestOptions
+      deferred: ReturnType<typeof createDeferred>
+    }> = []
+    let revision = 0
+    let answerAtOnce = false
+    const request = (options: RequestOptions) => {
+      const acquisition: LoadSubsetOptions = {
+        orderBy: options.orderBy,
+        limit: options.limit,
+        where: options.where,
+      }
+      const deferred = createDeferred()
+      requests.push({ options, deferred })
+      if (answerAtOnce) {
+        // The answer writes rows, so the graph has input it has not run.
+        revision++
+        options.onLoadSubsetResult?.(true, acquisition, () => {})
+      } else {
+        options.onLoadSubsetResult?.(deferred.promise, acquisition, () => {})
+      }
+    }
+    const subscription = {
+      readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
+      setOrderByIndex: () => {},
+      requestLimitedSnapshot: request,
+      requestSnapshot: request,
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription,
+      `row`,
+      undefined,
+      undefined,
+      () => revision,
+    )
+    try {
+      loader.start()
+      const dead = requests[0]!
+      loader.resetCursor()
+      answerAtOnce = true
+      loader.loadMore()
+      expect(requests).toHaveLength(2)
+      answerAtOnce = false
+      dead.deferred.reject(new Error(`page from before the reset failed`))
+      await flushPromises()
+      loader.loadMore()
+      const next = requests[2]!.options
+      expect(next.where, `a tie from the staged step`).toBeUndefined()
+      expect(next.orderBy, `the owed full-source read`).toBeUndefined()
+    } finally {
+      loader.dispose()
+      for (const { deferred } of requests) deferred.resolve()
+    }
+  })
+
   it(`retains an explicit failed-request retry blocked by joined demand`, async () => {
     const requests: Array<Observed> = []
     const releases: Array<LoadSubsetOptions> = []

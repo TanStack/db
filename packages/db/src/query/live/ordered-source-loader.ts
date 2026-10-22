@@ -58,6 +58,13 @@ const workState = (work: AuthoritativeWork): WorkState =>
 /** The loader's work slot or debt reached a state its rules forbid. */
 export class OrderedLoaderInvariantError extends Error {}
 
+// A release that throws is an adapter bug and is reported uncaught. An
+// invariant violation raised by code that the release reentered still fails.
+function reportReleaseError(error: unknown): void {
+  if (error instanceof OrderedLoaderInvariantError) throw error
+  reportUncaught(error)
+}
+
 class OrderedPostSettlementError {
   constructor(readonly cause: unknown) {}
 }
@@ -298,9 +305,11 @@ export class OrderedSourceLoader {
       return this.pending
     }
     this.blockedLoadMore = undefined
-    // Ordering debt never leaves a finite continuation staged: an
-    // invalidation or failure clears it, and a finite request that settles
-    // after its own delivery invalidated ordering is stale and stages nothing.
+    // A finite step staged under ordering debt cannot run ahead of the owed
+    // read. An invalidation drops it. A failure, even one from before a
+    // cursor reset that keeps the work staged after it, clears the boundary,
+    // so a staged tie has nothing to read from, and a staged `more` step
+    // runs this method, which follows the debt.
     if (this.stagedContinuation) {
       this.consumeStagedContinuation(windowOperationGeneration)
       // The consumed continuation can synchronously dispose this loader.
@@ -609,7 +618,7 @@ export class OrderedSourceLoader {
           try {
             release()
           } catch (error) {
-            reportUncaught(error)
+            reportReleaseError(error)
           }
         }),
       )
@@ -1149,7 +1158,7 @@ export class OrderedSourceLoader {
                 try {
                   release()
                 } catch (error) {
-                  reportUncaught(error)
+                  reportReleaseError(error)
                 } finally {
                   this.retiringSupersededAcquisitions = false
                 }
@@ -1264,7 +1273,11 @@ export class OrderedSourceLoader {
             // reports its error.
             try {
               this.loadFullSource(windowOperationGeneration)
-            } catch {}
+            } catch (startError) {
+              if (startError instanceof OrderedLoaderInvariantError) {
+                throw startError
+              }
+            }
           }
           throw error
         }
@@ -1347,7 +1360,7 @@ export class OrderedSourceLoader {
         try {
           observed?.release({ error: failure })
         } catch (releaseError) {
-          reportUncaught(releaseError)
+          reportReleaseError(releaseError)
         }
         if (isAuthoritativeRequest && this.hasSettledSourceRequest) {
           if (windowOperationGeneration === undefined) {

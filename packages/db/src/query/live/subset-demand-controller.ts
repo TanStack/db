@@ -2,6 +2,7 @@ import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type {
@@ -78,7 +79,11 @@ export class SubsetDemandController {
     const state: DemandState = { keys: nextKeys, segments }
     this.states.set(plan.id, state)
 
-    for (const segment of retired) releaseSegment(subscription, segment)
+    // Release every retired segment even if subscriber code that a release
+    // runs throws, then report the first error.
+    runAllCallbacks(
+      retired.map((segment) => () => releaseSegment(subscription, segment)),
+    )
     if (this.states.get(plan.id) !== state) {
       return { changed: false, empty: false, ready: true }
     }
@@ -175,7 +180,9 @@ export class SubsetDemandController {
     const replaced = replacement.replaces ?? []
     replacement.replaces = undefined
     state.segments = [replacement]
-    for (const segment of replaced) releaseSegment(subscription, segment)
+    runAllCallbacks(
+      replaced.map((segment) => () => releaseSegment(subscription, segment)),
+    )
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {

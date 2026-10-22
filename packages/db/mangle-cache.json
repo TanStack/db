@@ -413,5 +413,7 @@
   "isDeferredSyncKey": "bf",
   "overlayHeldAndActive": "c7",
   "cancelRepairRetry": "cG",
-  "coverSource": "fN"
+  "coverSource": "fN",
+  "windowRequestGeneration": "av",
+  "latestWindowRequest": "gE"
 }
