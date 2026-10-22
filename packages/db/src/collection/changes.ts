@@ -447,7 +447,9 @@ export class CollectionChangesManager<
       if (!defersAcquisition) {
         // Mark first, so a sync run that starts now builds non-deferred demand.
         this.markSubscriberOrPreload()
+        // Request before release so cleanup during startup cannot trigger a retry.
         this.startSyncIfStopped()
+        this.sync.resumeStart()
       } else if (getBuilderFromConfig(this.collection.config)) {
         this.startSyncIfStopped()
       }

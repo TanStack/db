@@ -14,6 +14,10 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from './oracle-config.js'
+import {
+  modelSubscriberStartCleanup,
+  subscriberStartCleanupHistories,
+} from './collection-subscription-lifecycle-grammar-oracle.js'
 import type { CollectionSubscription } from '../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
@@ -2588,6 +2592,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  // Resuming a query-owned acquisition does not release the renderer's
+  // separate sync-start gate. An ordinary new subscriber does release it;
+  // descriptor-query-binding-oracle checks that independent-reader boundary.
   acquisitionCase(
     [`deferred:request`, `deferred:resume`],
     `owns deferred-start acquisition only when it reaches the adapter`,
@@ -2615,7 +2622,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(collection._deferSyncStart()).toBe(true)
         const subscription = collection.subscribeChanges(() => {}, {
           includeInitialState: false,
+          deferAcquisition: true,
         })
+        subscription.resumeDeferredAcquisition()
         subscription.requestSnapshot({ where })
         reach(`deferred:request`)
         expect(loads).toEqual([])
@@ -2660,7 +2669,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
+      subscription.resumeDeferredAcquisition()
       subscription.requestSnapshot({
         where,
         onLoadSubsetResult: (result) => observed.push(result),
@@ -3408,7 +3419,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
+      subscription.resumeDeferredAcquisition()
       const removeReadyListener = collection.on(`status:${phase}`, () => {
         if (!cancelOnEntry) return
         cancelOnEntry = false
@@ -3436,6 +3449,107 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       } finally {
         removeReadyListener()
         subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // The grammar's independent judgment treats cleanup as retiring this start,
+  // not permission to retry it. This driver crosses no render gate, a held
+  // gate with no request, and a held requested start with both source modes.
+  // It records the complete public status trace at subscribeChanges return
+  // and cleanup settlement. A later ordinary reader is fresh restart demand.
+  it.each(
+    subscriberStartCleanupHistories.flatMap((history) =>
+      ([`none`, `unrequested`, `requested`] as const).flatMap((gate) =>
+        ([`eager`, `on-demand`] as const).map((syncMode) => ({
+          ...history,
+          gate,
+          syncMode,
+        })),
+      ),
+    ),
+  )(
+    `ordinary admission preserves $cleanupAt cleanup (pending=$cleanupPending, $gate start, $syncMode)`,
+    async (history) => {
+      const expected = modelSubscriberStartCleanup(history)
+      const pendingCleanup = createDeferred<void>()
+      let starts = 0
+      let cleanups = 0
+      let cleanupRequested = false
+      let cleanup: Promise<void> | undefined
+      const statuses: Array<string> = []
+      const collection = createCollection({
+        id: `ordinary-admission-cleanup`,
+        startSync: false,
+        syncMode: history.syncMode,
+        getKey: (row: { id: string }) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return {
+              loadSubset: () => true,
+              cleanup: () => {
+                cleanups++
+                return history.cleanupPending
+                  ? pendingCleanup.promise
+                  : undefined
+              },
+            }
+          },
+        },
+      })
+      if (history.gate !== `none`) {
+        expect(collection._deferSyncStart()).toBe(true)
+        if (history.gate === `requested`) collection.startSyncImmediate()
+      }
+      const removeStatusListener = collection.on(
+        `status:change`,
+        ({ status }) => {
+          statuses.push(status)
+          if (!cleanupRequested && status === history.cleanupAt) {
+            cleanupRequested = true
+            cleanup = collection.cleanup()
+          }
+        },
+      )
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let peer: ReturnType<typeof collection.subscribeChanges> | undefined
+      try {
+        subscription = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        expect(starts, `adapter entries at admission return`).toBe(
+          expected.starts,
+        )
+        expect(cleanups).toBe(expected.cleanups)
+        expect(collection.status).toBe(expected.statusOnReturn)
+        expect(statuses).toEqual(expected.statusesOnReturn)
+
+        pendingCleanup.resolve()
+        await cleanup
+        expect(starts, `cleanup settlement must not restart`).toBe(
+          expected.starts,
+        )
+        expect(collection.status).toBe(expected.statusAfterCleanup)
+        expect(statuses).toEqual(expected.statusesAfterCleanup)
+
+        removeStatusListener()
+        peer = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        expect(starts, `later demand may restart a retired run`).toBe(
+          expected.starts + (history.cleanupAt === `none` ? 0 : 1),
+        )
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        removeStatusListener()
+        pendingCleanup.resolve()
+        await cleanup
+        peer?.unsubscribe()
+        subscription?.unsubscribe()
         await collection.cleanup()
       }
     },

@@ -484,9 +484,32 @@ appears in `DbClient.dehydrate()` after the first enter event. A separate
 same-hash transition from a concrete query to an unbound descriptor query
 checks that the hook reports the missing client before reusing prior rows.
 The same React owner checks that a descriptor render suspended before commit
-starts no source work, while a later direct `Collection.preload()` starts that
-source once and reaches ready. This is one abandoned-render/direct-reader cut,
-not a general concurrent-render schedule.
+starts no source work. Its finite 24-cell grammar crosses later reader intent,
+startSync true/false and eager/on-demand sources. Ordinary subscription admission
+also crosses no cleanup, loading callback cleanup, ready callback cleanup, and
+held ready cleanup. Preload and deferring readers retain no-cleanup controls.
+The shared independent judgment in
+`collection-subscription-lifecycle-grammar-oracle.ts` predicts adapter entries
+and the complete public status trace at admission return and cleanup settlement.
+A second ordinary subscriber reuses a live run or restarts a retired source.
+Public rows without cleanup distinguish on-demand source preload, which does
+not acquire rows, from ordinary subscriptions. The core lifecycle owner adds
+24 cases crossing the four cleanup histories, no/unrequested/requested start
+gates and eager/on-demand modes. The erroneous release-before-request repair
+fails four core and four React cells at admission return. The final expanded
+React grammar also rejects the original no-release implementation. Historical
+calibration of a previously-requested-start mutant predates the final call
+reorder and is not evidence against that mutant on the current path.
+This does not establish arbitrary concurrent-render schedules, failed-provider
+histories, or Electric txid delivery. The [migration feedback review](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
+records calibration and the still-open SSR hydration law: a warm server source
+lets a second unregistered plain hook render rows absent from result-only
+transport. A task-local real React hydrateRoot witness recovers for that query
+and passes when it is explicitly preloaded. The descriptor owner is the next
+receiving owner once the product chooses automatic result capture or an initial
+empty/loading policy; partial nonready rows, status flags, normalized-source
+transport, mixed Suspense/plain schedules, and the real Start/Electric path
+remain needed witnesses. This diagnostic is not claimed as repaired coverage.
 Its no-client diagnostic also covers explicit `queryKey` and legacy dependency
 identity for both `useLiveQuery` and `useLiveSuspenseQuery` at first consumption.
 A local hook-first SSR stream over a concrete

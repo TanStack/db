@@ -78,9 +78,17 @@
  * neighboring Suspense history extends a query during a render that is never
  * committed. The sync callback count and public rows are checked at those
  * cuts. Another suspended render leaves a source shared with a later direct
- * reader. That reader's preload is an independent demand for data: it may
- * start the source even though the earlier render never committed. These
- * histories do not cover arbitrary concurrent render schedules.
+ * reader. An ordinary subscription or preload is independent demand for data:
+ * it starts the source even though the earlier render never committed. A
+ * deferring subscription retains the zero-start cut. The finite grammar crosses
+ * all three readers with startSync true/false and eager/on-demand sources. It
+ * extends ordinary admission with loading/ready callback cleanup, including
+ * held resource cleanup. The shared lifecycle judgment predicts adapter entries
+ * and the complete status trace at admission return and cleanup settlement.
+ * Later demand restarts a retired source or reuses its existing run. Rows are
+ * checked only without callback cleanup; on-demand source preload alone does
+ * not request rows. These histories do not cover arbitrary concurrent render
+ * schedules or Electric transaction evidence.
  */
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
@@ -101,6 +109,11 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import { createDeferred } from '../../db/src/deferred'
+import {
+  modelSubscriberStartCleanup,
+  subscriberStartCleanupHistories,
+} from '../../db/tests/collection-subscription-lifecycle-grammar-oracle'
 import type {
   Context,
   DeferredLiveQueryCollections,
@@ -253,52 +266,159 @@ describe(`standalone descriptor query binding`, () => {
     mounted.unmount()
   })
 
-  it(`lets a direct reader start a source after a descriptor render suspends`, async () => {
-    const client = new DbClient()
-    let starts = 0
-    const descriptor = collectionOptions(`suspended-direct-reader`, () => ({
-      id: `suspended-direct-reader`,
-      getKey: (row: Row) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
+  // A suspended render owns no provider demand. A later independent reader
+  // does: ordinary subscriptions and preloads start exactly one sync run,
+  // while a deferring subscription preserves the zero-start cut. Ordinary
+  // admission also crosses startup cleanup: cleanup retires this start, and
+  // only fresh later demand can restart it. Both startSync settings must work.
+  it.each(
+    (
+      [
+        { reader: `preload`, startSync: true },
+        { reader: `preload`, startSync: false },
+        { reader: `subscriber`, startSync: true },
+        { reader: `subscriber`, startSync: false },
+        { reader: `deferring subscriber`, startSync: true },
+        { reader: `deferring subscriber`, startSync: false },
+      ] as const
+    ).flatMap((history) =>
+      ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+        (history.reader === `subscriber`
+          ? subscriberStartCleanupHistories
+          : [subscriberStartCleanupHistories[0]]
+        ).map((cleanupHistory) => ({
+          ...history,
+          syncMode,
+          ...cleanupHistory,
+        })),
+      ),
+    ),
+  )(
+    `$reader after an abandoned render (startSync=$startSync, $syncMode, cleanup=$cleanupAt, pending=$cleanupPending)`,
+    async (history) => {
+      const { reader, startSync, syncMode, cleanupAt, cleanupPending } = history
+      const expected = modelSubscriberStartCleanup(history)
+      const pendingCleanup = createDeferred<void>()
+      const client = new DbClient()
+      let starts = 0
+      let cleanups = 0
+      const descriptor = collectionOptions(`suspended-direct-reader`, () => ({
+        id: `suspended-direct-reader`,
+        getKey: (row: Row) => row.id,
+        startSync,
+        syncMode,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            starts++
+            const publish = () => {
+              begin()
+              write({ type: `insert`, value: { id: `one`, value: `live` } })
+              commit()
+              return true as const
+            }
+            if (syncMode === `eager`) publish()
+            markReady()
+            return {
+              loadSubset: publish,
+              cleanup: () => {
+                cleanups++
+                return cleanupPending ? pendingCleanup.promise : undefined
+              },
+            }
+          },
         },
-      },
-    }))
-    const query = new Query().from({ item: descriptor })
-    const never = new Promise<void>(() => {})
+      }))
+      const query = new Query().from({ item: descriptor })
+      const never = new Promise<void>(() => {})
 
-    function Suspended(): ReactNode {
-      useLiveQuery({ query })
-      throw never
-    }
+      function Suspended(): ReactNode {
+        useLiveQuery({ query })
+        throw never
+      }
 
-    const mounted = render(
-      <DbProvider client={client}>
-        <Suspense fallback={<div>Waiting</div>}>
-          <Suspended />
-        </Suspense>
-      </DbProvider>,
-    )
-    const source = client.collection(descriptor)
-    let directRead: Promise<void> | undefined
-    try {
-      expect(mounted.getByText(`Waiting`)).toBeDefined()
-      expect(starts, `before commit or direct demand`).toBe(0)
+      const mounted = render(
+        <DbProvider client={client}>
+          <Suspense fallback={<div>Waiting</div>}>
+            <Suspended />
+          </Suspense>
+        </DbProvider>,
+      )
+      const source = client.collection(descriptor)
+      const statuses: Array<string> = []
+      let cleanup: Promise<void> | undefined
+      let cleanupRequested = false
+      const removeStatusListener = source.on(`status:change`, ({ status }) => {
+        statuses.push(status)
+        if (!cleanupRequested && status === cleanupAt) {
+          cleanupRequested = true
+          cleanup = source.cleanup()
+        }
+      })
+      let directRead: Promise<void> | undefined
+      let subscription: ReturnType<typeof source.subscribeChanges> | undefined
+      let peer: ReturnType<typeof source.subscribeChanges> | undefined
+      try {
+        expect(mounted.getByText(`Waiting`)).toBeDefined()
+        expect(starts, `before commit or direct demand`).toBe(0)
 
-      directRead = source.preload()
-      void directRead.catch(() => {})
-      expect(starts, `direct demand starts the source`).toBe(1)
-      await directRead
-      expect(source.status).toBe(`ready`)
-    } finally {
-      mounted.unmount()
-      await client.cleanup()
-      await directRead?.catch(() => {})
-    }
-  })
+        if (reader === `preload`) {
+          directRead = source.preload()
+          void directRead.catch(() => {})
+        } else {
+          subscription = source.subscribeChanges(() => {}, {
+            deferAcquisition: reader === `deferring subscriber`,
+            includeInitialState: true,
+          })
+        }
+        expect(starts, `direct demand starts the source`).toBe(
+          reader === `deferring subscriber` ? 0 : expected.starts,
+        )
+        expect(cleanups).toBe(expected.cleanups)
+        expect(source.status).toBe(
+          reader === `deferring subscriber` ? `idle` : expected.statusOnReturn,
+        )
+        expect(statuses).toEqual(
+          reader === `deferring subscriber` ? [] : expected.statusesOnReturn,
+        )
+        pendingCleanup.resolve()
+        await cleanup
+        await directRead
+        expect(source.status).toBe(
+          reader === `deferring subscriber`
+            ? `idle`
+            : expected.statusAfterCleanup,
+        )
+        expect(statuses).toEqual(
+          reader === `deferring subscriber`
+            ? []
+            : expected.statusesAfterCleanup,
+        )
+        if (cleanupAt === `none`) {
+          const expectsRow =
+            reader !== `deferring subscriber` &&
+            (syncMode === `eager` || reader === `subscriber`)
+          expect(source.get(`one`)?.value).toBe(expectsRow ? `live` : undefined)
+        }
+        removeStatusListener()
+        if (reader !== `deferring subscriber`) {
+          peer = source.subscribeChanges(() => {})
+          expect(starts, `later demand reuses or restarts the source`).toBe(
+            expected.starts + (cleanupAt === `none` ? 0 : 1),
+          )
+          expect(source.status).toBe(`ready`)
+        }
+      } finally {
+        removeStatusListener()
+        pendingCleanup.resolve()
+        await cleanup
+        peer?.unsubscribe()
+        subscription?.unsubscribe()
+        mounted.unmount()
+        await client.cleanup()
+        await directRead?.catch(() => {})
+      }
+    },
+  )
 
   it(`rejects an unbound descriptor after a same-hash concrete query`, async () => {
     const id = `standalone-descriptor-unbound-transition`

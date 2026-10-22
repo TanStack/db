@@ -292,6 +292,61 @@ const state = dbClient.dehydrate()
 This payload contains the projected query result and no source collection rows
 unless that collection was also materialized explicitly.
 
+Use the config object form in both the loader and the hook when they share a
+preloaded result:
+
+```tsx
+const openTodos = {
+  query: (q: InitialQueryBuilder) =>
+    q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.status, 'open')),
+}
+
+await dbClient.preloadLiveQuery(openTodos)
+// In the component:
+const { data } = useLiveQuery(openTodos)
+```
+
+The function form `useLiveQuery(openTodos.query)` currently derives a different
+identity from `useLiveQuery(openTodos)`. It will not reuse the loader's result.
+Sharing the query callback alone is insufficient. To use an explicit `queryKey`,
+pass config objects with the same `queryKey` to both `preloadLiveQuery` and
+`useLiveQuery`. Their sources and result configuration must still describe the
+same query.
+
+### Indexes before query compilation
+
+Create manual indexes when initializing each request or browser client, before
+preloading or rendering queries that use them:
+
+```tsx
+function createDbClient() {
+  const client = new DbClient()
+  client.collection(todoCollection).createIndex((todo) => todo.id, {
+    indexType: BasicIndex,
+  })
+  return client
+}
+```
+
+Collection materialization does not start sync unless its config requests it.
+An index installed inside the sync callback can arrive after the ordered query
+has compiled. `autoIndex: 'eager'` with `defaultIndexType: BasicIndex` is an
+alternative when indexes should be created as queries compile. Descriptors
+currently have no `indexes` or `onCreate` option.
+
+### Preload lifetime
+
+`preloadLiveQuery()` has no built-in deadline or `AbortSignal` option. A source
+that keeps retrying without becoming ready can keep its preload pending. Apply
+an application deadline to request work and clean up its request-scoped client
+when abandoning it; a timer race alone does not stop the underlying sync.
+
+Preloaded results belong to the client. There is no public method to release
+one preloaded query. `cleanup()` releases the entire client and its Collections.
+Avoid accumulating route-specific preloads in a browser client without an
+application lifetime policy. A separately owned `createLiveQueryCollection()`
+can be preloaded and cleaned up explicitly when per-query ownership is needed.
+
 ### Browser
 
 Hydrate the browser client before rendering components that read from DB.

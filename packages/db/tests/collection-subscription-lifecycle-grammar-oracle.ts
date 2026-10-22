@@ -41,6 +41,51 @@ import { fc } from '@fast-check/vitest'
 export type DemandName = `a` | `b`
 
 /**
+ * Ordinary subscription admission may start one sync run. Cleanup from its
+ * loading or ready callback retires that start; admission must not retry it.
+ * A loading callback runs before the adapter enters, so it can prevent even
+ * that first adapter invocation. A pending adapter cleanup retains the ready
+ * public status until cleanup settles, as specified in the glossary.
+ *
+ * These finite histories and their independent judgment are shared by the core
+ * admission driver and the real React abandoned-render receiving driver. A
+ * pending cleanup is legal only after ready, when an adapter resource exists.
+ */
+export const subscriberStartCleanupHistories = [
+  { cleanupAt: `none`, cleanupPending: false },
+  { cleanupAt: `loading`, cleanupPending: false },
+  { cleanupAt: `ready`, cleanupPending: false },
+  { cleanupAt: `ready`, cleanupPending: true },
+] as const
+
+export function modelSubscriberStartCleanup({
+  cleanupAt,
+  cleanupPending,
+}: (typeof subscriberStartCleanupHistories)[number]) {
+  const starts = cleanupAt === `loading` ? 0 : 1
+  const cleanups = cleanupAt === `ready` ? 1 : 0
+  const statusOnReturn =
+    cleanupAt === `none` || cleanupPending ? `ready` : `cleaned-up`
+  const statusAfterCleanup = cleanupAt === `none` ? `ready` : `cleaned-up`
+  const statusesOnReturn: Array<`loading` | `ready` | `cleaned-up`> = [
+    `loading`,
+  ]
+  if (starts) statusesOnReturn.push(`ready`)
+  if (statusOnReturn === `cleaned-up`) statusesOnReturn.push(`cleaned-up`)
+  const statusesAfterCleanup = cleanupPending
+    ? [...statusesOnReturn, `cleaned-up`]
+    : statusesOnReturn
+  return {
+    starts,
+    cleanups,
+    statusOnReturn,
+    statusAfterCleanup,
+    statusesOnReturn,
+    statusesAfterCleanup,
+  }
+}
+
+/**
  * A bounded callback-reentry grammar for direct snapshots. The callback phase
  * is an observation cut, not a second subscription state machine. A released
  * or unsubscribed request has no authority to publish its local snapshot.
