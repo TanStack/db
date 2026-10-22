@@ -1500,6 +1500,36 @@ describe(`BrowserCollectionCoordinator`, () => {
       await expect(ensured).resolves.toBeUndefined()
     })
 
+    // A request that first waits for a route keeps the retry budget it had
+    // without that wait. A lock holder that never announces a route stands in
+    // for a slow election: once it lets go, this tab leads and the request is
+    // still within its retries.
+    it(`keeps an RPC's retry budget when the first route wait times out`, async () => {
+      const lockName = `tsdb:leader:test-db:todos`
+      let releaseHolder!: () => void
+      const holding = new Promise<void>((acquired) => {
+        void navigator.locks.request(lockName, () => {
+          acquired()
+          return new Promise<void>((resolve) => {
+            releaseHolder = resolve
+          })
+        })
+      })
+      await holding
+      const follower = createCoordinator()
+      follower.subscribe(`todos`, () => {})
+      await flush(20)
+      expect(follower.isLeader(`todos`)).toBe(false)
+
+      const pulled = follower.pullSince(`todos`, 0)
+      void pulled.catch(() => undefined)
+      // Past the route wait's 10 s bound, then the holder lets go.
+      await new Promise((resolve) => setTimeout(resolve, 10_500))
+      releaseHolder()
+      await expect(pulled).resolves.toMatchObject({ ok: true })
+      expect(follower.isLeader(`todos`)).toBe(true)
+    }, 40_000)
+
     it(`rejects a pending wait when its coordinator is disposed`, async () => {
       const leader = createCoordinator()
       const waiting = createCoordinator()

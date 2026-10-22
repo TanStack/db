@@ -1058,33 +1058,8 @@ export function reloadViolations(
     }
     const terms = count(log, (e) => isTermFor(e, storageId))
     if (terms !== want.terms) violations.push(`${id}: ${terms} term writes`)
-    // (b) order, on the first tab's reload
-    if (want.terms === 0 || expected.writerExemptFromOrder === index) return
-    const term = reloadLog.findIndex((e) => isTermFor(e, storageId))
-    const mustPrecede: Array<[string, (e: Logged) => boolean]> = []
-    history.collections.forEach((other, otherIndex) => {
-      const otherId = ids[otherIndex]!
-      const otherStorage = storageIds[otherId]!
-      if (other.kind === `eager`) {
-        mustPrecede.push([
-          `${otherId} read`,
-          (e) => isRowScanFor(e, otherStorage),
-        ])
-      } else {
-        mustPrecede.push([`${otherId} claim`, (e) => isClaimFor(e, otherId)])
-      }
-    })
-    if (collection.kind === `managed`) {
-      mustPrecede.push([
-        `${id} metadata read`,
-        (e) => isMetadataReadFor(e, storageId),
-      ])
-    }
-    for (const [label, test] of mustPrecede) {
-      const at = reloadLog.findIndex(test)
-      if (at === -1 || at > term) violations.push(`${id} term before ${label}`)
-    }
-    // A restart's term follows its own second startup read.
+    // A restart's term follows its own second startup read, even for a
+    // Collection that needed a leader before: that need is already served.
     if (history.lifecycle === `restart` && index === 0) {
       const scans = reloadLog.flatMap((e, at) =>
         isRowScanFor(e, storageId) ? [at] : [],
@@ -1094,6 +1069,33 @@ export function reloadViolations(
       )
       if ((scans[1] ?? Infinity) > (terms[1] ?? -1)) {
         violations.push(`${id}: restart term before its startup read`)
+      }
+      // (b) order, on the first tab's reload
+      if (want.terms === 0 || expected.writerExemptFromOrder === index) return
+      const term = reloadLog.findIndex((e) => isTermFor(e, storageId))
+      const mustPrecede: Array<[string, (e: Logged) => boolean]> = []
+      history.collections.forEach((other, otherIndex) => {
+        const otherId = ids[otherIndex]!
+        const otherStorage = storageIds[otherId]!
+        if (other.kind === `eager`) {
+          mustPrecede.push([
+            `${otherId} read`,
+            (e) => isRowScanFor(e, otherStorage),
+          ])
+        } else {
+          mustPrecede.push([`${otherId} claim`, (e) => isClaimFor(e, otherId)])
+        }
+      })
+      if (collection.kind === `managed`) {
+        mustPrecede.push([
+          `${id} metadata read`,
+          (e) => isMetadataReadFor(e, storageId),
+        ])
+      }
+      for (const [label, test] of mustPrecede) {
+        const at = reloadLog.findIndex(test)
+        if (at === -1 || at > term)
+          violations.push(`${id} term before ${label}`)
       }
     }
   })
@@ -1381,6 +1383,15 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
     { ...base, lifecycle: `rotate`, collections: [eager, managed] },
   ],
   [`restart`, { ...base, lifecycle: `restart`, collections: [eager, eager] }],
+  [
+    `local write, then restart`,
+    {
+      ...base,
+      need: `local-write`,
+      lifecycle: `restart`,
+      collections: [eager, eager],
+    },
+  ],
   [
     `close while terms wait`,
     {

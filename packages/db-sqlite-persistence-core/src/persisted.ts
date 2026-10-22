@@ -2227,32 +2227,15 @@ class PersistedCollectionRuntime<
           if (startup && lifecycleGeneration === this.lifecycleGeneration) {
             await this.flushQueuedTxCommittedUnsafe()
           }
-        } else {
-          if (await loadStartupMetadata(this.persistence.adapter)) {
-            if (this.persistence.adapter.isHydrationScopeScheduled?.()) {
-              startup = await this.applyMutex.run(async () => {
-                const result = await this.runInHydrationScope((adapter) =>
-                  this.startInternal(
-                    lifecycleGeneration,
-                    adapter,
-                    resolveStartupMetadata,
-                  ),
-                )
-                if (lifecycleGeneration === this.lifecycleGeneration) {
-                  await this.flushQueuedTxCommittedUnsafe()
-                }
-                return result
-              })
-            } else {
-              startup = await this.startInternal(
-                lifecycleGeneration,
-                this.persistence.adapter,
-                resolveStartupMetadata,
-              )
-              if (lifecycleGeneration === this.lifecycleGeneration) {
-                await this.flushQueuedTxCommittedUnsafe()
-              }
-            }
+        } else if (await loadStartupMetadata(this.persistence.adapter)) {
+          // An adapter without a hydration scope reads directly.
+          startup = await this.startInternal(
+            lifecycleGeneration,
+            this.persistence.adapter,
+            resolveStartupMetadata,
+          )
+          if (lifecycleGeneration === this.lifecycleGeneration) {
+            await this.flushQueuedTxCommittedUnsafe()
           }
         }
         if (

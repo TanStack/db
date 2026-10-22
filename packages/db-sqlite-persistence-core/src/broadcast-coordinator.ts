@@ -955,7 +955,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           if (
             this.isDisposed() ||
             !this.participatesInLeadership(state) ||
-            this.collections.get(collectionId) !== state
+            this.collections.get(collectionId) !== state ||
+            state.lockAbortController !== abortController
           ) {
             return
           }
@@ -1436,9 +1437,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   ): Promise<T> {
     if (this.isDisposed()) throw new Error(`coordinator disposed`)
     // A lock holder may still be waiting to reserve its term. Ask for the
-    // route first instead of spending a full RPC timeout on no receiver.
+    // route first instead of spending a full RPC timeout on no receiver. If
+    // no route comes, the retries below still run. A known route adds no
+    // tick, so the request is posted in this turn.
     const initialRoute = this.waitForInitialRoute(collectionId)
-    if (initialRoute) await initialRoute
+    if (initialRoute) await initialRoute.catch(() => undefined)
     let lastError: Error | undefined
     let firstTransportCause: unknown
     const mutationRequestType = isMutatingRPCRequest(request)
