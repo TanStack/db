@@ -235,3 +235,21 @@ invariant that holds vacuously under `unifiedMin`, are closed in run 2 by
 ```sh
 ~/.claude/skills/field-lab/scripts/tlc . -config run3-safe.cfg LoaderTable
 ```
+
+## Later changes the model does not cover
+
+The loader changed after run 3 in ways that these models do not express. The
+production oracles own them, and the coverage map's "Ordered acquisition" row
+records their evidence:
+
+- A throwing `unloadSubset` is an adapter bug. Core and the loader report it
+  uncaught and continue as if the release succeeded. The models have no
+  release faults, so their rules are unchanged.
+- A report that served pages may have shifted issues no authoritative read
+  before any request settled, or while the window is inside the loader's own
+  first page. The models have no reports; the request-authority oracle's
+  ignored-report law owns this.
+- Two compression passes and a differential mutant instrument deleted six
+  guards that other loader code makes redundant. None of them is a model
+  action; the transition table and the request stamps are unchanged, so run
+  3's receipts still apply to them.
