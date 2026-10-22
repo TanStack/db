@@ -9,6 +9,7 @@ import {
   compileSingleRowExpression,
   deepEquals,
   getLoadSubsetDemandKey,
+  makeComparator,
   toBooleanPredicate,
   validateSyncPersistenceCapability,
   warnOnce,
@@ -979,6 +980,14 @@ export function queryCollectionOptions(
   // queryKey → Set<RowKey>. Entry presence means ownership is resolved;
   // an empty set represents a resolved query that currently owns no rows.
   const queryToRows = new Map<string, Set<string | number>>()
+  // A released query keeps an empty entry until its release publishes, so
+  // unpublished metadata cannot restore it as an owner. That entry is not a
+  // result applied by a later acquisition of the same query.
+  const releasedOwnership = new WeakSet<Set<string | number>>()
+  const hasAppliedOwnership = (hashedQueryKey: string) => {
+    const ownedRows = queryToRows.get(hashedQueryKey)
+    return ownedRows !== undefined && !releasedOwnership.has(ownedRows)
+  }
 
   // RowKey → Set<queryKey>
   const rowToQueries = new Map<string | number, Set<string>>()
@@ -1109,21 +1118,17 @@ export function queryCollectionOptions(
   const removeQueryOwnership = (hashedQueryKey: string) => {
     const nextOwnersByRow = new Map<string | number, Set<string>>()
 
-    const rowKeys =
-      queryToRows.get(hashedQueryKey) ?? new Set<string | number>()
-
-    rowKeys.forEach((rowKey) => {
-      const owners = rowToQueries.get(rowKey)
-
-      if (!owners) {
-        return
-      }
-
-      const nextOwners = new Set(owners)
+    queryToRows.get(hashedQueryKey)?.forEach((rowKey) => {
+      const nextOwners = new Set(rowToQueries.get(rowKey))
       nextOwners.delete(hashedQueryKey)
       nextOwnersByRow.set(rowKey, nextOwners)
+      if (nextOwners.size === 0) rowToQueries.delete(rowKey)
+      else rowToQueries.set(rowKey, nextOwners)
     })
 
+    const released = new Set<string | number>()
+    releasedOwnership.add(released)
+    queryToRows.set(hashedQueryKey, released)
     return nextOwnersByRow
   }
 
@@ -1147,8 +1152,117 @@ export function queryCollectionOptions(
         )
       }
     }
-    const { begin, write, commit, markReady, markError, collection, metadata } =
-      params
+    const {
+      begin,
+      write,
+      commit,
+      markReady,
+      markError,
+      invalidateLoadedSubsets,
+      collection,
+      metadata,
+    } = params
+
+    /**
+     * The LoadSubset contract: a sync adapter that refetches loaded subsets on
+     * its own either keeps served prefixes whole, or reports that they may
+     * have shifted. Query DB refetches each ordered page alone, so after a
+     * refetch a row can sort between two served pages and be in neither
+     * result (#2136). It reports the shift; the ordered loader then
+     * re-establishes the window with a bounded repair.
+     *
+     * A gap needs a page whose keys change, and one of two shapes:
+     * - the page has a later page after it, which still starts where the page
+     *   used to end; or
+     * - the page's end moves earlier in the order. Rows that arrive ahead push
+     *   its old last row out, and if another answer such as a tie request
+     *   still holds that row, the loader sees no delete and still treats rows
+     *   through the old boundary as loaded.
+     * A change that keeps every page's keys cannot open one: a value change
+     * reaches the loader through its order-change path. A loader's own
+     * acquisition (`refetch: true`) never reports, so its repair cannot loop.
+     */
+    const orderedPageResults = new WeakMap<
+      AnyQuery,
+      {
+        readKey: string
+        leadingValue: ReturnType<typeof compileSingleRowExpression>
+        compare: (a: unknown, b: unknown) => number
+        // The page's keys as a set, and the leading order value of the row
+        // that sorts last. An empty page has no last row. Neither depends on
+        // the order in which the provider returned the rows.
+        keys: string
+        last: { value: unknown } | undefined
+      }
+    >()
+    // Each running `refetch: true` acquisition on a Query hash.
+    const acquisitionRefetches = new Map<string, number>()
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined
+    const recordOrderedPageResult = (
+      query: AnyQuery,
+      hashedQueryKey: string,
+      rows: Array<Record<string, unknown>>,
+    ): void => {
+      const options = query.meta?.loadSubsetOptions
+      if (
+        syncMode !== `on-demand` ||
+        !isStoredLoadSubsetOptions(options) ||
+        !options.orderBy?.length
+      )
+        return
+      const previous = orderedPageResults.get(query)
+      const { where, orderBy } = options
+      const next = {
+        readKey:
+          previous?.readKey ?? getLoadSubsetDemandKey({ where, orderBy })!,
+        leadingValue:
+          previous?.leadingValue ??
+          compileSingleRowExpression(orderBy[0]!.expression),
+        compare:
+          previous?.compare ?? makeComparator(orderBy[0]!.compareOptions),
+        keys: JSON.stringify(
+          rows.map((row) => JSON.stringify(getKey(row))).sort(),
+        ),
+        last: undefined as { value: unknown } | undefined,
+      }
+      for (const row of rows) {
+        const value: unknown = next.leadingValue(row)
+        if (next.last === undefined || next.compare(value, next.last.value) > 0)
+          next.last = { value }
+      }
+      orderedPageResults.set(query, next)
+      if (
+        invalidationTimer !== undefined ||
+        acquisitionRefetches.has(hashedQueryKey) ||
+        previous?.last === undefined ||
+        previous.keys === next.keys
+      )
+        return
+      const end = previous.last.value
+      const endMovedEarlier =
+        next.last === undefined || next.compare(next.last.value, end) < 0
+      // The page has a later page when another page with its predicate and
+      // order ends deeper in the order. An empty page counts: it continues
+      // from where an earlier page ended.
+      const hasLaterPage = () =>
+        [...state.observers.values()].some((observer) => {
+          const other = orderedPageResults.get(observer.getCurrentQuery())
+          return (
+            other !== undefined &&
+            other !== next &&
+            other.readKey === next.readKey &&
+            (other.last === undefined ||
+              next.compare(other.last.value, end) > 0)
+          )
+        })
+      // One report per burst of refetched pages, after their rows apply.
+      if (endMovedEarlier || hasLaterPage()) {
+        invalidationTimer = setTimeout(() => {
+          invalidationTimer = undefined
+          if (activeSyncSession === syncSession) invalidateLoadedSubsets()
+        }, 0)
+      }
+    }
     const persistence =
       metadata === undefined
         ? null
@@ -1394,26 +1508,34 @@ export function queryCollectionOptions(
         Record<string, unknown> | undefined
     }
 
-    const getOwnersFromMetadata = (rowMetadata: unknown) => {
-      if (!rowMetadata || typeof rowMetadata !== `object`) {
+    const getOwnersFromMetadata = (
+      rowMetadata: unknown,
+      rowKey?: string | number,
+    ) => {
+      if (!rowMetadata || typeof rowMetadata !== `object`)
         return new Set<string>()
-      }
       const queryMetadata = (rowMetadata as Record<string, unknown>)
         .queryCollection
-      if (!queryMetadata || typeof queryMetadata !== `object`) {
+      if (!queryMetadata || typeof queryMetadata !== `object`)
         return new Set<string>()
-      }
 
       const owners = (queryMetadata as Record<string, unknown>).owners
-      if (!owners || typeof owners !== `object`) {
-        return new Set<string>()
-      }
+      if (!owners || typeof owners !== `object`) return new Set<string>()
 
-      return new Set(Object.keys(owners as Record<string, true>))
+      const result = new Set(Object.keys(owners as Record<string, true>))
+      if (rowKey === undefined) return result
+      // Resolved Queries supersede stale persisted edges; accepted in-memory
+      // edges supplement owners whose metadata has not published yet.
+      result.forEach((owner) => {
+        const rows = queryToRows.get(owner)
+        if (rows && !rows.has(rowKey)) result.delete(owner)
+      })
+      rowToQueries.get(rowKey)?.forEach((owner) => result.add(owner))
+      return result
     }
 
     const getPersistedOwners = (rowKey: string | number) =>
-      getOwnersFromMetadata(getRowMetadata(rowKey))
+      getOwnersFromMetadata(getRowMetadata(rowKey), rowKey)
 
     const setPersistedOwners = (
       rowKey: string | number,
@@ -1502,8 +1624,11 @@ export function queryCollectionOptions(
       }
 
       const ownedRows = new Set<string | number>()
-      for (const [rowKey] of collection._state.syncedData.entries()) {
-        const owners = getPersistedOwners(rowKey)
+      const hydratedOwners = Array.from(
+        collection._state.syncedData.keys(),
+        (rowKey) => [rowKey, getPersistedOwners(rowKey)] as const,
+      )
+      for (const [rowKey, owners] of hydratedOwners) {
         if (owners.size === 0) {
           continue
         }
@@ -1585,19 +1710,13 @@ export function queryCollectionOptions(
         return baseline
       }
 
-      scannedRows.forEach((row) => {
-        const rowMetadata = row.metadata as Record<string, unknown> | undefined
-        const queryMetadata = rowMetadata?.queryCollection
-        if (!queryMetadata || typeof queryMetadata !== `object`) {
-          return
-        }
-
-        const owners = (queryMetadata as Record<string, unknown>).owners
-        if (!owners || typeof owners !== `object`) {
-          return
-        }
-
-        const ownerSet = new Set(Object.keys(owners as Record<string, true>))
+      // Project the whole scan before adding any reconstructed edges, so one
+      // row cannot make a persisted owner look resolved for the next row.
+      const scannedOwners = scannedRows.map((row) =>
+        getOwnersFromMetadata(row.metadata, row.key),
+      )
+      scannedRows.forEach((row, index) => {
+        const ownerSet = scannedOwners[index]!
         if (ownerSet.size === 0) {
           return
         }
@@ -1783,6 +1902,9 @@ export function queryCollectionOptions(
         const finish = (settle: () => void) => {
           if (!active) return
           active = false
+          const refetches = acquisitionRefetches.get(hashedQueryKey)! - 1
+          if (refetches === 0) acquisitionRefetches.delete(hashedQueryKey)
+          else acquisitionRefetches.set(hashedQueryKey, refetches)
           pending.delete(cancel)
           if (pending.size === 0) {
             pendingReadyUnsubscribes.delete(hashedQueryKey)
@@ -1794,6 +1916,11 @@ export function queryCollectionOptions(
         }
         pending.add(cancel)
         pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+        // This acquisition's result answers the loader; it reports no shift.
+        acquisitionRefetches.set(
+          hashedQueryKey,
+          (acquisitionRefetches.get(hashedQueryKey) ?? 0) + 1,
+        )
 
         const refetch = async () => {
           const waitsForDeferredApplication = !!collection.deferDataRefresh
@@ -2452,9 +2579,8 @@ export function queryCollectionOptions(
       const settledDirectPositions = new Map<string | number, number>()
       const removedRows = new Set<string | number>()
 
-      const previousOwnedRows = queryToRows.has(hashedQueryKey)
-        ? new Set(queryToRows.get(hashedQueryKey))
-        : undefined
+      // Application replaces this entry rather than mutating it.
+      const previousOwnedRows = queryToRows.get(hashedQueryKey)
       const affectedRowKeys = new Set([
         ...previouslyOwnedRows,
         ...newItemsMap.keys(),
@@ -2534,10 +2660,7 @@ export function queryCollectionOptions(
       try {
         // From this point onward the result, including an empty result, is the
         // authoritative ownership baseline until this query is cleaned up.
-        queryToRows.set(
-          hashedQueryKey,
-          queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
-        )
+        queryToRows.set(hashedQueryKey, new Set(previouslyOwnedRows))
 
         begin()
         transactionActive = true
@@ -2636,6 +2759,11 @@ export function queryCollectionOptions(
         // Readiness counts accepted rows; the application, which settles a
         // subset load, waits for them to be visible.
         const finishApplication = () => {
+          // Record the page only once its rows are accepted. A failed
+          // application keeps the previous page, so a retry still reports.
+          if (currentQuery) {
+            recordOrderedPageResult(currentQuery, hashedQueryKey, newItemsArray)
+          }
           removedRows.forEach((key) => {
             if (collection._state.getAcceptedSyncedRow(key) === undefined)
               acceptedRowPositions.delete(key)
@@ -2884,7 +3012,7 @@ export function queryCollectionOptions(
             if (
               result.isFetching &&
               !collection.deferDataRefresh &&
-              queryToRows.has(hashedQueryKey) &&
+              hasAppliedOwnership(hashedQueryKey) &&
               queryCollectionSuccessfulFetchData.get(observedQuery) ===
                 observedQuery.state.data
             ) {
@@ -3309,6 +3437,11 @@ export function queryCollectionOptions(
       invalidatePendingResultApplication(hashedQueryKey)
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
+      const ownershipTombstone = queryToRows.get(hashedQueryKey)
+      const retireOwnership = () => {
+        if (queryToRows.get(hashedQueryKey) === ownershipTombstone)
+          queryToRows.delete(hashedQueryKey)
+      }
       const rowsToDelete: Array<any> = []
 
       nextOwnersByRow.forEach((nextOwners, rowKey) => {
@@ -3330,12 +3463,6 @@ export function queryCollectionOptions(
       }
 
       nextOwnersByRow.forEach((owners, rowKey) => {
-        if (owners.size === 0) {
-          rowToQueries.delete(rowKey)
-        } else {
-          rowToQueries.set(rowKey, owners)
-        }
-
         if (shouldWriteMetadata) {
           setPersistedOwners(rowKey, owners)
         }
@@ -3351,24 +3478,23 @@ export function queryCollectionOptions(
         metadata.collection.delete(retentionKey)
       }
 
-      if (needsTransaction) {
-        const applied = commit()
-        const retireDeletedPositions = () => {
-          rowsToDelete.forEach((row) => {
-            const key = getKey(row)
-            if (collection._state.getAcceptedSyncedRow(key) === undefined)
-              acceptedRowPositions.delete(key)
-          })
-        }
-        const accepted = whenSyncAccepted(applied)
-        if (accepted === true) retireDeletedPositions()
-        else void accepted.then(retireDeletedPositions, () => undefined)
+      const applied = needsTransaction ? commit() : true
+      const retireDeletedPositions = () => {
+        rowsToDelete.forEach((row) => {
+          const key = getKey(row)
+          if (collection._state.getAcceptedSyncedRow(key) === undefined)
+            acceptedRowPositions.delete(key)
+        })
       }
+      const accepted = whenSyncAccepted(applied)
+      if (accepted === true) retireDeletedPositions()
+      else void accepted.then(retireDeletedPositions, () => undefined)
+      if (applied === true) retireOwnership()
+      else void applied.then(retireOwnership, () => undefined)
 
       state.observers.delete(hashedQueryKey)
       if (query?.state.fetchStatus !== `fetching`)
         fetchStartGenerations.delete(hashedQueryKey)
-      queryToRows.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
@@ -3584,6 +3710,8 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
+      clearTimeout(invalidationTimer)
+      invalidationTimer = undefined
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
       ensureEagerSubscription = () => {}
@@ -4152,7 +4280,7 @@ export function queryCollectionOptions(
         // cached rows, so inspect those entries before their owner is known.
         if (
           !affectedOwners.has(hashedQueryKey) &&
-          queryToRows.has(hashedQueryKey) &&
+          hasAppliedOwnership(hashedQueryKey) &&
           query.state.fetchStatus !== `fetching` &&
           !pendingResultApplications.has(hashedQueryKey)
         )

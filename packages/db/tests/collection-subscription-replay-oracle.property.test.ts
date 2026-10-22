@@ -9,7 +9,7 @@ import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
 import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
-import { flushPromises } from './utils.js'
+import { captureMicrotaskErrors, flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
 import type { CollectionSubscription } from '../src/collection/subscription.js'
 import type {
@@ -26,7 +26,10 @@ import type { Scheduler } from 'fast-check'
  * optimistic state, callbacks, and cleanup may still be in flight. The public
  * snapshot must change only when the newest complete replay earns authority.
  * Older, failed, aborted, or released work may settle and release resources,
- * but it must not leak rows or overwrite a newer snapshot.
+ * but it must not leak rows or overwrite a newer snapshot. An `unloadSubset`
+ * that throws is an adapter bug: the subscription reports it uncaught once,
+ * and it is not a replay failure, so the replay continues as if the release
+ * had succeeded.
  * A direct snapshot can select source rows while replay keeps publication
  * private. A later ordered local snapshot must continue after those selected
  * rows, including during subscriber callback reentry.
@@ -2822,12 +2825,13 @@ describe(`CollectionSubscription replay oracle`, () => {
   // Law 9 at retirement: a failure in the current attempt keeps the replay
   // private even after the last owner is released. Each site writes a row
   // before it fails, so publishing the private rows would show that row.
+  // A throwing release is not such a failure; the next test owns that site.
   it.each([
     `replay load throws`,
     `old lease unload throws`,
     `new request throws`,
   ])(
-    `keeps a replay private at retirement after a synchronous failure: %s`,
+    `keeps a replay private at retirement after a synchronous failure, except a throwing release: %s`,
     async (site) => {
       let begin!: () => void
       let write!: (message: {
@@ -2883,6 +2887,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         },
       })
       const visible = new Map<string | number, ReplayRow>()
+      const uncaught = captureMicrotaskErrors()
       const subscription = collection.subscribeChanges((changes) => {
         recordPublishedChanges(visible, changes)
       })
@@ -2908,8 +2913,19 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
 
         expect(subscription.pendingTruncateReplacement).toBeUndefined()
-        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
+        // A release error fails no replay, so the retired replay publishes
+        // the rows it holds: the truncate removed `one`, and the adapter
+        // wrote `two` before it threw.
+        expect(sortedRows(visible)).toEqual(
+          site === `old lease unload throws`
+            ? [{ id: `two`, value: 2 }]
+            : [{ id: `one`, value: 1 }],
+        )
+        expect(
+          uncaught.errors.map((error) => (error as Error).message),
+        ).toEqual(site === `old lease unload throws` ? [`unload failed`] : [])
       } finally {
+        uncaught.restore()
         subscription.unsubscribe()
         await collection.cleanup()
       }
@@ -3875,6 +3891,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
+      const uncaught = captureMicrotaskErrors()
 
       try {
         subscription.requestSnapshot({ where, optimizedOnly: false })
@@ -3883,18 +3900,22 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
 
-        const reacquires = !releaseDemand && !failRelease
+        // A failed release is reported uncaught and still counts as released,
+        // so only a retired logical demand stops the reacquisition.
+        const reacquires = !releaseDemand
         expect(loads).toHaveLength(reacquires ? 2 : 1)
         // indexOf checks the exact options object, not a structurally equal copy.
         expect(unloads.map((options) => loads.indexOf(options))).toEqual([0])
         if (reacquires) expect(loads[1]!.signal?.aborted).toBe(false)
-        if (failRelease) expect(subscription.lastError).toBe(releaseFailure)
+        expect(subscription.lastError).toBe(undefined)
+        expect(uncaught.errors).toEqual(failRelease ? [releaseFailure] : [])
         subscription.unsubscribe()
-        // A failed release or retired logical demand never starts a replacement.
+        // A retired logical demand never starts a replacement.
         expect(unloads.map((options) => loads.indexOf(options))).toEqual(
           reacquires ? [0, 1] : [0],
         )
       } finally {
+        uncaught.restore()
         subscription.unsubscribe()
         await collection.cleanup()
       }
@@ -4453,6 +4474,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const unloaded: Array<LoadSubsetOptions> = []
     let failRelease = false
     const succeeded = vi.fn()
+    const uncaught = captureMicrotaskErrors()
     const collection = createCollection<ReplayRow>({
       id: `replay-error-ownership`,
       getKey: ({ id }) => id,
@@ -4504,9 +4526,10 @@ describe(`CollectionSubscription replay oracle`, () => {
       failed.reject(replayFailure)
       await flushPromises()
       failRelease = true
-      expect(() => subscription.releaseSnapshot(peerWhere)).toThrow(
-        releaseFailure,
-      )
+      // The release error goes uncaught; the replay keeps its own failure.
+      expect(() => subscription.releaseSnapshot(peerWhere)).not.toThrow()
+      await Promise.resolve()
+      expect(uncaught.errors).toEqual([releaseFailure])
       expect(succeeded).not.toHaveBeenCalled()
       await expect(observed).resolves.toEqual({
         status: `rejected`,
@@ -4521,6 +4544,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         error: replayFailure,
       })
     } finally {
+      uncaught.restore()
       failed.resolve()
       peer.resolve()
       failRelease = false

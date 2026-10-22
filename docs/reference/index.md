@@ -93,6 +93,7 @@ title: "@tanstack/db"
 - [SchemaMustBeSynchronousError](classes/SchemaMustBeSynchronousError.md)
 - [SchemaValidationError](classes/SchemaValidationError.md)
 - [SerializationError](classes/SerializationError.md)
+- [SetWindowFindOneLimitError](classes/SetWindowFindOneLimitError.md)
 - [SetWindowReentrancyError](classes/SetWindowReentrancyError.md)
 - [SetWindowRequiresOrderByError](classes/SetWindowRequiresOrderByError.md)
 - [SortedMap](classes/SortedMap.md)
@@ -130,8 +131,6 @@ title: "@tanstack/db"
 
 - [BaseCollectionConfig](interfaces/BaseCollectionConfig.md)
 - [BaseStrategy](interfaces/BaseStrategy.md)
-- [BasicIndexOptions](interfaces/BasicIndexOptions.md)
-- [BTreeRangeQueryOptions](interfaces/BTreeRangeQueryOptions.md)
 - [ChangeMessage](interfaces/ChangeMessage.md)
 - [Collection](interfaces/Collection.md)
 - [CollectionConfig](interfaces/CollectionConfig.md)
@@ -197,6 +196,7 @@ title: "@tanstack/db"
 ## Type Aliases
 
 - [ApplyJoinOptionalityToMergedSchema](type-aliases/ApplyJoinOptionalityToMergedSchema.md)
+- [BasicIndexOptions](type-aliases/BasicIndexOptions.md)
 - [ChangeListener](type-aliases/ChangeListener.md)
 - [ChangeMessageOrDeleteKeyMessage](type-aliases/ChangeMessageOrDeleteKeyMessage.md)
 - [ChangesPayload](type-aliases/ChangesPayload.md)
@@ -325,6 +325,7 @@ title: "@tanstack/db"
 
 ## Variables
 
+- [collectionOptionsClaim](variables/collectionOptionsClaim.md)
 - [operators](variables/operators.md)
 - [PERSISTED\_READINESS](variables/PERSISTED_READINESS.md)
 - [Query](variables/Query.md)
@@ -388,6 +389,7 @@ title: "@tanstack/db"
 - [getLoadSubsetDemandKey](functions/getLoadSubsetDemandKey.md)
 - [getPersistedReadinessSource](functions/getPersistedReadinessSource.md)
 - [getPreparedLiveQueryIdentity](functions/getPreparedLiveQueryIdentity.md)
+- [getPreparedLiveQuerySources](functions/getPreparedLiveQuerySources.md)
 - [getPublicCollection](functions/getPublicCollection.md)
 - [getQueryIdentity](functions/getQueryIdentity.md)
 - [getQueryPatterns](functions/getQueryPatterns.md)
@@ -417,6 +419,7 @@ title: "@tanstack/db"
 - [lower](functions/lower.md)
 - [lt](functions/lt.md)
 - [lte](functions/lte.md)
+- [makeComparator](functions/makeComparator.md)
 - [materialize](functions/materialize.md)
 - [max](functions/max.md)
 - [min](functions/min.md)
@@ -436,6 +439,7 @@ title: "@tanstack/db"
 - [resetWarnings](functions/resetWarnings.md)
 - [resolveLiveQueryValue](functions/resolveLiveQueryValue.md)
 - [resolveLiveQueryWindowInput](functions/resolveLiveQueryWindowInput.md)
+- [resumeDeferredLiveQueryCollections](functions/resumeDeferredLiveQueryCollections.md)
 - [safeRandomUUID](functions/safeRandomUUID.md)
 - [shouldPreserveLiveQueryWindowPageCount](functions/shouldPreserveLiveQueryWindowPageCount.md)
 - [subtract](functions/subtract.md)
@@ -456,3 +460,9 @@ title: "@tanstack/db"
 - [withCollectionSyncConfigCleanup](functions/withCollectionSyncConfigCleanup.md)
 - [withCollectionSyncConfigFactory](functions/withCollectionSyncConfigFactory.md)
 - [withFlatChangeTracking](functions/withFlatChangeTracking.md)
+
+## References
+
+### BTreeRangeQueryOptions
+
+Renames and re-exports [RangeQueryOptions](interfaces/RangeQueryOptions.md)

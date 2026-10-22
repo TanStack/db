@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useInsertionEffect, useMemo, useRef } from 'react'
 import { createPacedMutations } from '@tanstack/db'
 import type { PacedMutationsConfig, Transaction } from '@tanstack/db'
 
@@ -8,6 +8,8 @@ import type { PacedMutationsConfig, Transaction } from '@tanstack/db'
  * Provides optimistic mutations with pluggable strategies like debouncing,
  * queuing, or throttling. The optimistic updates are applied immediately via
  * `onMutate`, and the actual persistence is controlled by the strategy.
+ * Callbacks follow the latest committed render, so a suspended render cannot
+ * replace the callbacks used by active mutations.
  *
  * @param config - Configuration including onMutate, mutationFn and strategy
  * @returns A mutate function that accepts variables and returns Transaction objects
@@ -96,12 +98,15 @@ export function usePacedMutations<
 >(
   config: PacedMutationsConfig<TVariables, T>,
 ): (variables: TVariables) => Transaction<T> {
-  // Keep refs to the latest callbacks so we can call them without recreating the instance
+  // Publish callbacks only for committed renders, before descendant layout
+  // effects can mutate. Updating during render leaks suspended callbacks.
   const onMutateRef = useRef(config.onMutate)
-  onMutateRef.current = config.onMutate
-
   const mutationFnRef = useRef(config.mutationFn)
-  mutationFnRef.current = config.mutationFn
+
+  useInsertionEffect(() => {
+    onMutateRef.current = config.onMutate
+    mutationFnRef.current = config.mutationFn
+  }, [config.onMutate, config.mutationFn])
 
   // Create stable wrappers that always call the latest version
   const stableOnMutate = useCallback<typeof config.onMutate>((variables) => {

@@ -5196,17 +5196,45 @@ describe(`pagination recomputation oracle`, () => {
         const widened = live.utils.setWindow({ offset: 0, limit: 3 })
         await flushPromises()
         if (mutation.type !== `insert`) {
+          // When an SSE update or delete arrives during boundary refinement, after the
+          // boundary settles, the loader uses a bounded prefix repair instead of
+          // full-source: orderBy is defined, limit is defined (= offset + limit),
+          // and cursor/offset/where are undefined.
           expect(
             pending.some(
               ({ options }) =>
-                options.limit === undefined &&
+                options.orderBy !== undefined &&
+                options.limit !== undefined &&
                 options.where === undefined &&
-                options.cursor === undefined,
+                options.cursor === undefined &&
+                options.offset === undefined,
             ),
           ).toBe(true)
         }
-        expect(widened).toBe(true)
-        expect(pending).toHaveLength(pendingBeforeWiden)
+        if (mutation.type === `insert`) {
+          expect(widened).toBe(true)
+          expect(pending).toHaveLength(pendingBeforeWiden)
+        } else {
+          // The bounded repair proves coverage only through its own prefix,
+          // so widening continues with finite requests. None reads the full
+          // source.
+          for (
+            let index = pendingBeforeWiden;
+            index < pending.length;
+            index++
+          ) {
+            await settle(pending[index]!)
+          }
+          await widened
+          const widening = pending.slice(pendingBeforeWiden)
+          expect(widening.length).toBeGreaterThan(0)
+          expect(
+            widening.every(
+              ({ options }) =>
+                options.orderBy !== undefined || options.where !== undefined,
+            ),
+          ).toBe(true)
+        }
         expect(Array.from(live.values(), ({ id }) => id)).toEqual(
           expectedWideIds,
         )

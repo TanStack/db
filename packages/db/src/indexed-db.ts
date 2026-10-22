@@ -5,7 +5,11 @@
  * compatible with TanStack DB's collection system.
  */
 
-import { SchemaMustBeSynchronousError, SchemaValidationError } from './errors'
+import {
+  SchemaMustBeSynchronousError,
+  SchemaValidationError,
+  SerializationError,
+} from './errors'
 import { safeRandomUUID } from './utils/uuid'
 import { withCollectionConfigFactory } from './client.js'
 import {
@@ -381,6 +385,18 @@ export async function createIndexedDB(
   })
 }
 
+// Structured clone rejects values IndexedDB cannot store. Report that as the
+// shared storage error so callers can handle both persisted adapters alike.
+function cloneOrReject<T>(operation: string, clone: () => T): T {
+  try {
+    return clone()
+  } catch (error) {
+    if ((error as { name?: unknown } | null)?.name !== 'DataCloneError')
+      throw error
+    throw new SerializationError(operation, (error as Error).message)
+  }
+}
+
 /**
  * Creates IndexedDB collection options for use with a standard Collection.
  * This provides persistent local storage with cross-tab synchronization.
@@ -605,7 +621,9 @@ export function indexedDBCollectionOptions(
             stores[VERSIONS_STORE_NAME]!.delete([name, key])
           } else {
             const versionKey = safeRandomUUID()
-            stores[name]!.put(mutation.modified, key)
+            cloneOrReject(mutation.type, () =>
+              stores[name]!.put(mutation.modified, key),
+            )
             stores[VERSIONS_STORE_NAME]!.put(
               {
                 versionKey,
@@ -881,7 +899,8 @@ export function indexedDBCollectionOptions(
             : codedMessage(199, { key }),
         )
       keys.add(key)
-      return { type: 'insert' as const, key, modified: structuredClone(item) }
+      const modified = cloneOrReject('import', () => structuredClone(item))
+      return { type: 'insert' as const, key, modified }
     })
     await persist(mutations, true)
     confirm(mutations, true)

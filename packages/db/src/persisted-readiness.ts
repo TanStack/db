@@ -1,3 +1,5 @@
+import { LiveQueryObserverDisposedError } from './errors.js'
+
 /** The local-restore boundary of one opted-in persisted Collection. */
 export type PersistedReadinessSnapshot =
   | { status: `loading`; error?: never }
@@ -12,6 +14,144 @@ export interface PersistedReadinessSource {
   getOrStartNetworkDeadline: () => number
   getSnapshot: () => PersistedReadinessSnapshot
   subscribe: (listener: () => void) => () => void
+  /**
+   * The network-first initial-render wait, normally
+   * `waitForPersistedInitialRender`. A persistence adapter supplies it with
+   * its readiness, so an app with no persisted Collection does not ship it.
+   */
+  waitForInitialRender: typeof waitForPersistedInitialRender
+}
+
+/** A client query stream, as the initial-render wait reads it. */
+interface InitialRenderClientQuery {
+  status: string
+  error?: unknown
+  promise?: Promise<unknown>
+}
+
+/** @internal What a live query observer passes to the initial-render wait. */
+export interface PersistedInitialRenderInput {
+  sources: ReadonlyArray<{
+    collection: { status: string }
+    readiness: PersistedReadinessSource
+  }>
+  /** The network preload that this render prefers. */
+  network: Promise<void>
+  /** The client query stream at the start of the wait, if any. */
+  clientQuery: InitialRenderClientQuery | undefined
+  /** The client query stream now, for a failed stream's identity. */
+  currentClientQuery: () => unknown
+  /** The live query Collection's status now. */
+  collectionStatus: () => string | undefined
+  readPersisted: () => { status: string; error: unknown }
+  /** Runs once the render may proceed, before the promise resolves. */
+  onReady: () => void
+}
+
+/**
+ * Resolve when network data is ready, or when the network deadline passes or
+ * the network fails while every persisted source has restored. Reject with
+ * the network error when no persisted fallback may render.
+ */
+export function waitForPersistedInitialRender({
+  sources,
+  network,
+  clientQuery,
+  currentClientQuery,
+  collectionStatus,
+  readPersisted,
+  onReady,
+}: PersistedInitialRenderInput): {
+  promise: Promise<void>
+  cancel: () => void
+} {
+  const clientStream =
+    clientQuery?.promise === network ? clientQuery : undefined
+  const unsubscribers: Array<() => void> = []
+  let cancel!: () => void
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const initialRender = new Promise<void>((resolve, reject) => {
+    let networkReady = false
+    // React can start a new observer after the client stream has failed.
+    let failedClientStream =
+      clientQuery?.status === `error` ? clientQuery : undefined
+    let networkFailed = failedClientStream !== undefined
+    let networkError: unknown = failedClientStream?.error
+    let settled = false
+    const finish = (failure?: { error: unknown }) => {
+      if (settled) return
+      settled = true
+      if (failure) reject(failure.error)
+      else {
+        onReady()
+        resolve()
+      }
+    }
+    cancel = () => finish({ error: new LiveQueryObserverDisposedError() })
+    const check = () => {
+      if (settled) return
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      if (networkReady) {
+        finish()
+        return
+      }
+      const persisted = readPersisted()
+      const networkDeadlineAt = Math.max(
+        ...sources.map((source) =>
+          source.readiness.getOrStartNetworkDeadline(),
+        ),
+      )
+      const remainingNetworkMs = Math.max(0, networkDeadlineAt - Date.now())
+      const deadlinePassed = remainingNetworkMs === 0
+      const sourceFailed = sources.some(
+        (source) => source.collection.status === `error`,
+      )
+      const clientStreamFailed =
+        failedClientStream !== undefined &&
+        currentClientQuery() === failedClientStream
+      if (
+        networkFailed &&
+        !sourceFailed &&
+        (collectionStatus() === `error` || !clientStreamFailed)
+      ) {
+        finish({ error: networkError })
+      } else if (
+        (deadlinePassed || networkFailed) &&
+        persisted.status === `ready`
+      ) {
+        finish()
+      } else if (networkFailed && persisted.status === `error`) {
+        finish({ error: networkError ?? persisted.error })
+      } else if (!deadlinePassed && !networkFailed) {
+        timer = setTimeout(check, remainingNetworkMs)
+      }
+    }
+    for (const source of sources) {
+      unsubscribers.push(source.readiness.subscribe(check))
+    }
+    void network.then(
+      () => {
+        networkReady = true
+        check()
+      },
+      (error) => {
+        networkFailed = true
+        networkError = error
+        failedClientStream =
+          clientStream?.status === `error` ? clientStream : undefined
+        check()
+      },
+    )
+    check()
+  })
+  const promise = initialRender.finally(() => {
+    unsubscribers.forEach((unsubscribe) => unsubscribe())
+    if (timer !== undefined) clearTimeout(timer)
+  })
+  return { promise, cancel }
 }
 
 /** @internal Config capability shared with first-party persistence adapters. */

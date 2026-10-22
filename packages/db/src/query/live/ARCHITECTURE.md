@@ -750,14 +750,19 @@ rolls the tentative owner back without calling `unloadSubset`. Logical demand
 retires even when `unloadSubset` fails. Each physical acquisition gets one release
 attempt, marked before calling adapter or error-listener code. Reentrant and
 repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
-and a cleanup failure cannot replace an earlier request failure. Core reports
-the error but retains no retry debt: a broken adapter can leak external resources
-if it throws before freeing them. Adapters must make their own cleanup reliable.
+and a cleanup failure cannot replace an earlier request failure. An
+`unloadSubset` that throws is an adapter bug. Core reports its error uncaught,
+once, from a microtask, and continues as if the release had succeeded: the
+error is not a load error, so it sets no `lastError`, emits no
+`loadSubset:error`, fails no replay, window move, or Effect, and no
+`releaseSnapshot()`, `unsubscribe()`, or `dispose()` call throws or rejects
+with it. Core retains no retry debt: a broken adapter can leak external
+resources if it throws before freeing them. Adapters must make their own
+cleanup reliable.
 Replay replaces acquisition leases sequentially: detach and release the old lease,
 then acquire a fresh one only if the logical demand and replay are still current.
-A release failure fails that replay without starting a replacement. A load
-throw leaves the logical demand detached; a later authoritative replay can
-reacquire it. Neither path restores an already released lease. A sole adapter
+A load throw leaves the logical demand detached; a later authoritative replay
+can reacquire it. Neither path restores an already released lease. A sole adapter
 resource may stop and restart in this gap; adapters must not tear down resources
 held by another owner. The public replacement barrier remains closed throughout
 the gap and through failed startup, so visible results do not flicker. Once a
@@ -950,7 +955,10 @@ logical demand so a later truncate replay can retry one authoritative
 replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
-a later truncate replays one logical demand rather than both attempts. A
+a later truncate replays one logical demand rather than both attempts. The
+failed read stops being the loader's source demand before its lease is
+released. A replay that settles during or after a throwing release therefore
+cannot count the released read as complete source coverage. A
 successful authoritative replay clears its source-recovery gate, but it does
 not clear an unrelated failed window operation. A later explicit window move
 revalidates that physical window before publishing it.
@@ -968,13 +976,34 @@ Successful authoritative full-source recovery also retires settled successful
 page and tie demands. Later replay therefore reacquires the full source without
 repeating those finite requests. Retirement waits for each original request to
 settle and for any active replay to finish; it does not cancel unfinished work
-merely because the full-source request finished first. Failed finite demands
-still follow the explicit-retry rule above. Release callbacks retire ownership
+merely because the full-source request finished first. A failed finite demand
+that authoritative work superseded also retires then, or at once if it fails
+after full-source coverage completed: the full-source read covers its partial
+writes. Other failed finite demands still follow the explicit-retry rule above,
+and a full-source replay does not retire them. Release callbacks retire ownership
 before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
 A visible delete or source-order change after an otherwise settled,
-expressible window uses a narrower authoritative path. Core reissues the
+expressible window uses a narrower authoritative path. So does a sync adapter's
+`invalidateLoadedSubsets()` report: after a refetch that the adapter started on
+its own has applied, served pages may have shifted so that a row now sorts
+between two of them and is in neither result. The adapter reports that instead
+of keeping each served prefix whole (the `LoadSubsetFn` rule). Core emits
+`loadedSubsets:invalidated` once per turn, and each ordered loader on the
+Collection runs this repair. A loader whose coverage is one full-source
+acquisition, or a `requiresFullSource` plan, ignores the report: the refetch
+has already re-read that acquisition, and it has no page boundary to repair.
+A loader whose coverage is still its own first ordered request, of at least
+`offset + limit` rows with no continuation past it, also ignores the report
+when its window is inside that page: every window row sorts at or before the
+`offset + limit`-th source row, and the next source row sorts strictly after
+it in the leading term. The refetched page holds every row from the start
+through its end, and any row it left out sorts after that end, so the window
+is proven. A window that needs a row past the page, such as one whose page
+holds rows a joined filter rejects, still repairs. So does any loader while
+its source holds accepted sync rows back, as behind a persisting optimistic
+transaction: the visible rows then predate the refetch. Core reissues the
 ordered prefix from the start with the query predicate, order terms, and
 `limit = offset + limit`; the transport `offset` is omitted because this
 acquisition starts at the provider's source prefix. It then reacquires the
@@ -988,10 +1017,99 @@ before the obsolete chain can issue another tie or refill. A repeated prefix or
 page fixed point ends the repair when no more data is needed; it cannot leave a
 held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
-replacement chain succeeds.
-An invalidation that overlaps unfinished non-repair source work, a failed
-or canceled request, or a boundary that cannot be expressed still requires the
-full-source recovery above. A bounded repair failure likewise upgrades its
+replacement chain succeeds. That retirement can make the adapter remove rows
+only the replaced acquisitions held. The chain holds every row through its
+boundary, so such a removal is not a source-order change, and the repair keeps
+its boundary. A loader that discarded it would restart paging from the start
+of the order with a smaller first page that cannot retire the repair's prefix.
+Full-source reads can be very expensive, so a repair avoids one whenever a
+bounded read is available. An invalidation that overlaps unfinished page or tie
+work after the source has settled once does not force one: the bounded repair
+starts at once, and that work's later result is ignored for its boundary.
+Such a prefix also cannot retire the repair's acquisitions: it was issued before
+the invalidation, so it proves no current coverage. The repair supersedes any
+such request, so one that settles after the repair finished is released at
+once, like the acquisitions the repair retires. A request is superseded when
+authoritative work (a bounded repair or a full-source read) started after it was
+issued. Its failure is not the loader's own failure and blocks no refills: its
+partial writes only raise the repair debt to the full-source read that the
+overlap replaced. A running repair restarts as that read. Otherwise the loader
+starts it at once, unless its own recorded failure is waiting for an explicit
+retry. This holds even when the repair finished and a newer invalidation's
+reaction is still deferred. A request belongs to the ordering epoch it was
+issued in, even when its own synchronous delivery invalidates ordering before it
+returns, so its result and continuation do not count as current coverage. An
+authoritative read also stops waiting on the superseded request: a repair that
+answers at once continues without it. A superseded failure cannot drop the
+repair's staged continuation, and a repair-chain step does not release failed
+acquisitions; the explicit retry that resumed it does. A repair request belongs
+to the chain it was issued in. When a truncate replay finishes a chain whose
+prefix is still in flight and a newer invalidation starts the replacement, that
+prefix settles outside the replacement's chain, and the replacement retires it.
+A repair chain is superseded once a newer repair or full-source read starts.
+A request of the superseded chain proves no current coverage: it issues no
+tie or refill, and its failure is not the loader's own. A chain that finished
+still owns a request that settles late. Once a full-source read covers the source, any
+finite or repair request that settles later is retired at once. Every lease
+release pass, including the explicit and backoff retries' release of failed
+acquisitions, stops when a release resets the cursor or disposes the loader.
+The replay that follows owns the leases the pass did not reach. A release
+can deliver deletes that run the graph synchronously, so ordered refinement
+stays blocked until the pass unwinds. No second pass can then reach the same
+leases within one generation, so a lease missing from its map during a pass is
+an invariant violation, not a case to skip.
+
+The loader's authoritative work is a small state machine. Its work slot is
+idle, a repair chain, or a full-source read that is held, complete, or failed;
+its repair debt is none, bounded, or full. Every move names the states it may
+leave, and the loader throws `OrderedLoaderInvariantError` for any other move:
+
+| Move                                           | From                   | To                   |
+| ---------------------------------------------- | ---------------------- | -------------------- |
+| Start a bounded repair or a full-source read   | idle                   | repair, held         |
+| A chain finishes, is replaced, or is abandoned | repair                 | idle                 |
+| A chain request fails as the loader's own      | repair                 | idle                 |
+| A full-source read succeeds                    | held, complete         | complete (debt none) |
+| A truncate replay settles                      | held, failed, complete | complete (debt none) |
+| A full-source read fails as the loader's own   | held                   | failed               |
+| A cursor reset                                 | complete               | held                 |
+| An explicit or backoff retry                   | failed (or idle)       | idle                 |
+
+Three work and debt pairs are coherent only one way: complete coverage owes no
+debt, a repair runs only to pay a debt, and a failed full-source read owes a
+full-source read. So full coverage absorbs what would otherwise raise debt: a
+failure or an invalidation under complete coverage owes nothing, and a
+full-source transport that fails after a replay reacquired its demand leaves
+the coverage and its lease in place. A replay that settles is the full-source
+read's success: it pays the debt and retires the settled finite leases and the
+superseded failed leases, as a full-source success does. A chain request owns authority only while its
+chain runs: when a replay finished the chain first, the request's later failure
+is superseded by that replay.
+
+Each request carries one stamp from issue: the ordered-load generation, the
+authority generation, the ordering generation, and its role (finite, repair,
+or full-source). A request is dead after a cursor reset. A repair-chain request
+is stale once a newer authoritative start supersedes it; a finite request is
+stale once the ordering epoch moves; a full-source read stays current. A
+request that fails reports its own error. When the full-source read that a
+superseded failure starts throws while it starts, that read is the loader's
+own failure and is reported on its own; the superseded request still reports
+its error. Dispose
+resets the cursor, so a disposed loader's requests are dead and it issues and
+releases nothing more.
+
+A truncate replay owns every request the loader issued before the truncate:
+their results and failures change no loader state beyond the debt a failure
+raises, and the replay settles their demands. The loader has no request
+timeout. A request the provider never answers keeps its work slot, so an
+authoritative read that never settles holds its repair or recovery until the
+subscription ends; recovery from a provider that stops answering belongs to the
+adapter or the subscription lifecycle.
+A request issued before a cursor reset that later fails still raises the repair
+debt, but it cannot drop work staged after the reset.
+A failed or canceled request, an invalidation before any request has
+settled, or a boundary that cannot be expressed still requires the full-source
+recovery above. A bounded repair failure likewise upgrades its
 next attempt to full-source recovery because partial writes cannot establish
 finite coverage.
 
@@ -1014,9 +1132,10 @@ repair (an eager source, an index, one order term, no joined filter) returns
 literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
-that consumes the repair still publishes once. A full-source repair keeps its
-asynchronous settlement. An initial full-source load follows the initial
-synchronous cut described under initial readiness. The
+that consumes the repair still publishes once. A full-source repair keeps
+asynchronous settlement; its scheduling is not part of the initial synchronous
+cut. An initial
+full-source load follows that cut as described under initial readiness. The
 ordered graph's top-K operator owns the local result window. Provider transfer
 remains bounded by `orderBy` and `limit`; local delivery cardinality is a
 separate observation.
@@ -1034,7 +1153,8 @@ LEFT join to a Collection is an exception for a cross-alias filter when every or
 term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root
 page, core waits for the current lazy join demand and any joined subset load to
-settle, then reruns the graph. Joined-side changes also recheck ordered demand
+settle, then reruns the graph. A joined load can settle without delivering a
+row, so the joined source becoming ready schedules that run itself. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. An empty joined replay still
 releases held Effect callbacks.
 
@@ -1081,7 +1201,11 @@ provider capability negotiation, comparator exception policy, and backend
 collation fidelity are outside this contract.
 
 An ordered request cannot start another ordered request through its own
-synchronous writes. If the adapter then throws, graph callbacks scheduled by
+synchronous writes. A graph turn that those writes run inside the request may
+ask for more data; the loader ignores that call, stages its continuation, and
+resumes it once the request returns, because that turn has already processed
+the writes and no later turn will ask again. A continuation staged with input
+the graph has not yet processed waits for the graph turn that processes it. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
 A public `setWindow()` call made from inside that synchronous operation throws
 `SetWindowReentrancyError`; it must not claim that a nested window settled after
@@ -1128,9 +1252,12 @@ A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
 retire cursor suffixes, ties, unfinished work, or another subscription's leases.
 Adapter eviction must still preserve rows owned by the replacement or peers.
-If an older prefix's release throws, the successful replacement still finishes
-its boundary and continuation bookkeeping before surfacing the cleanup error.
-Cleanup failure does not turn the successful acquisition into a failed load.
+A lease release reports an adapter's throwing `unloadSubset` uncaught, as
+described for subscription cleanup, and does not throw. The ordered loader
+also reports any error a release callback still throws uncaught, from a
+microtask, and continues as if the release had succeeded. The error changes no load result,
+window move, publication, or loader state: the successful replacement finishes
+its boundary and continuation bookkeeping and publishes.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting
@@ -1205,6 +1332,23 @@ restart. Queued ordered-repair startup joins this barrier before invoking the
 adapter, so a synchronous throw cannot publish a partial replacement merely
 because it returned no acquisition promise. The queued task belongs to the
 loader that scheduled it, not a replacement created after cleanup.
+
+An optimistic overlay departure is not an authoritative loss of provider
+coverage. When an optimistic update removes query membership, or an optimistic
+delete removes a row from an ordered window, live-query Collections and Effects
+publish that departure immediately, even when provider work that could refill
+the window is pending. The intermediate result may be shorter than the
+requested window. The loader starts any needed acquisition while the optimistic
+transaction persists. A provider row stays private while its accepted sync
+transaction is queued behind that mutation; application may publish the
+recomputed window before the receipt promise resolves. If the provider answers
+later, acknowledgement can retain the short window until application. Rollback
+removes this overlay and recomputes from the then-current applied base and any
+remaining overlays; it restores the prior window only when that base is
+unchanged and no other overlay remains. This exception does not define a rank
+move or let a partially applied provider page or authoritative repair bypass
+the complete-window barrier.
+
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 
@@ -1367,8 +1511,11 @@ view built during a render defers it until a view has a subscriber or a
 preload.
 
 An initial ordered load also has a synchronous observation cut. The initial
-load is an ordinary ordered request or, for a plan that requires the full
-source, its first filtered full-source request. The cut holds when the first
+load is the request chain needed to complete the first ordered window. It may
+start with an ordinary ordered request or, for a plan that requires the full
+source, a filtered full-source request. A full-source fallback after an
+inexpressible boundary is still part of that initial chain while the window
+remains unpublished. The cut holds when the first
 subscriber or preload starts the live-query Collection's sync run, or when its
 source Collections are eager. A sync run that started earlier resumes deferred
 on-demand acquisition through the subscription's restart path, which settles
@@ -1377,10 +1524,14 @@ returns literal `true` after its establishing applied receipts are visible,
 core drains the remaining synchronous ordered continuations and graph work
 before the initiating call stack returns. The live-query Collection rows and
 initial-query readiness are observable at that cut. A Promise result keeps that
-acquisition asynchronous. This cut does not apply to explicit window moves, a
-later full-source fallback, repair other than a bounded prefix repair, truncate
-replay, or framework render timing, and it proves neither source exhaustion nor
-broader source coverage.
+acquisition asynchronous. This cut does not apply to explicit window moves,
+full-source work started after the initial window publishes, repair other than
+a bounded prefix repair, truncate replay, or framework render timing, and it
+proves neither source exhaustion nor broader source coverage.
+The first-publication boundary limits this guarantee; it does not require
+later full-source work to wait for a microtask. A later literal `true`
+full-source fallback without ordering-repair debt may finish in the current
+graph turn.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
@@ -1512,6 +1663,29 @@ demands, materialization cells, and public facades are the relevant space
 units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
+
+A windowed query has an `orderBy`; its window is the ordered view, by offset
+and limit, that `setWindow` moves. A `findOne` is bounded by a top-K too: it
+keeps its compiled limit (1, or 0 for `.limit(0).findOne()`), and `setWindow`
+throws `SetWindowFindOneLimitError` for any other limit. An ordered `findOne`
+has a movable window. An unordered `findOne` is a fixed one-row result that
+accepts only its compiled limit at offset 0; a nonzero offset throws
+`SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does. A query
+that is neither windowed nor an ordered `findOne` rejects offset moves, and one
+that is neither windowed nor a `findOne` rejects `setWindow`. Only the query's
+own top-K answers `setWindow`; a top-K inside a `from` or joined subquery or an
+include child never does. A windowed query or a `findOne` adds route relations
+for the includes in its own `select` only from the rows it shows, so a row it
+drops activates no bucket and creates no demand. A static filter creates static
+child demand before the query runs only when no enclosing query is windowed or
+a `findOne`, and either the query is neither windowed nor a `findOne`, or it is
+a `findOne` that shows one row for one named correlation value, with no
+`offset`, and offset 0 at start if a window was requested before start. Within
+one graph run, an index-backed top-K can briefly hold a row outside the rows it
+shows once its ordered acquisition completes, and that row's children may load
+(a recorded limit, #2151; the public snapshot stays correct). Includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the top-K (a recorded limit).
 
 ## Normative laws
 

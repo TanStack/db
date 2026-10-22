@@ -3,7 +3,7 @@ id: JoinClause
 title: JoinClause
 ---
 
-Defined in: [packages/db/src/query/ir.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L44)
+Defined in: [packages/db/src/query/ir.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L48)
 
 ## Properties
 
@@ -11,11 +11,11 @@ Defined in: [packages/db/src/query/ir.ts:44](https://github.com/TanStack/db/blob
 
 ```ts
 from: 
-  | CollectionRef
+  | CollectionSourceRef
   | QueryRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L45)
+Defined in: [packages/db/src/query/ir.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L49)
 
 ***
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/ir.ts:45](https://github.com/TanStack/db/blob
 on: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L47)
+Defined in: [packages/db/src/query/ir.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L51)
 
 ***
 
@@ -35,4 +35,4 @@ Defined in: [packages/db/src/query/ir.ts:47](https://github.com/TanStack/db/blob
 type: "inner" | "left" | "right" | "full" | "outer" | "cross";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L46)
+Defined in: [packages/db/src/query/ir.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L50)

@@ -7,7 +7,7 @@ title: DehydratedCollectionChunk
 type DehydratedCollectionChunk<T, TKey> = object;
 ```
 
-Defined in: [packages/db/src/client.ts:109](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L109)
+Defined in: [packages/db/src/client.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L129)
 
 ## Type Parameters
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/client.ts:109](https://github.com/TanStack/db/blob/
 collectionId: string;
 ```
 
-Defined in: [packages/db/src/client.ts:113](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L113)
+Defined in: [packages/db/src/client.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L133)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/client.ts:113](https://github.com/TanStack/db/blob/
 rows: DehydratedCollectionRow<T, TKey>[];
 ```
 
-Defined in: [packages/db/src/client.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L114)
+Defined in: [packages/db/src/client.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L134)
 
 ***
 
@@ -47,4 +47,4 @@ Defined in: [packages/db/src/client.ts:114](https://github.com/TanStack/db/blob/
 optional syncMeta: unknown;
 ```
 
-Defined in: [packages/db/src/client.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L115)
+Defined in: [packages/db/src/client.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L135)

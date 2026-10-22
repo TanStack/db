@@ -211,6 +211,21 @@ caller aborted after the page was accepted, the rows still apply, but reject the
 load with `AbortError` once its receipt resolves. Do not attach one request's
 signal to a shared stream transaction.
 
+An ordered request (one with `orderBy`) serves a prefix: every matching row
+from the start of the order through its boundary, the leading order value of
+the last row it returned, ties included. The ordered loader treats that whole prefix as loaded,
+so keep it whole when you refresh data the loader already holds. If your
+adapter refetches loaded subsets on its own, deliver every row that now sorts
+within a served prefix, even when it now falls between two served pages.
+Refetching each page alone can leave such a row in no result, and the loader
+receives no change that would request it. Either read each prefix again from
+the start of its order, or call `invalidateLoadedSubsets()` from the sync
+params once the refetched rows apply. Each ordered live query then repairs its
+window with a bounded read from the start of its order. Call it only when a
+refetch changed which rows a page holds, because every paging ordered live
+query on the Collection repairs. Do not call it for results that answer a
+`loadSubset` call.
+
 If an adapter supplies `unloadSubset`, release only the acquisition belonging to
 the supplied options. Release must be idempotent and non-throwing; the adapter
 owns any remote unsubscribe retry. A synchronous `loadSubset` throw must clean

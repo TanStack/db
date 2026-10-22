@@ -9,7 +9,6 @@ import {
 import { ReactiveMap } from '@solid-primitives/map'
 import {
   BaseQueryBuilder,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
@@ -33,6 +32,8 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+const DEFAULT_GC_TIME_MS = 1
 
 type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
@@ -323,7 +324,7 @@ export function useLiveQuery(
           return null
         }
 
-        return resolveLiveQueryValue(result)
+        return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
       }
 
       const innerCollection = configOrQueryOrCollection()
@@ -338,9 +339,8 @@ export function useLiveQuery(
         return innerCollection as Collection
       }
 
-      return createLiveQueryCollection({
-        ...innerCollection,
-        startSync: true,
+      return resolveLiveQueryValue(innerCollection, {
+        gcTime: DEFAULT_GC_TIME_MS,
       })
     },
     undefined,
@@ -409,28 +409,63 @@ export function useLiveQuery(
   // into hook-scoped state and would still run — resurrecting rows/status from
   // a collection that has already been replaced.
   let resourceGeneration = 0
-  let localWaitObserver: LiveQueryObserver<any, any> | undefined
-  onCleanup(() => localWaitObserver?.dispose())
+  let localWait:
+    | {
+        observer: LiveQueryObserver<any, any>
+        collection: Collection<any, any, any>
+        ready: boolean
+      }
+    | undefined
+  let subscribedCollection: Collection<any, any, any> | undefined
+  const releaseLocalWait = () => {
+    localWait?.observer.dispose()
+    localWait = undefined
+  }
+  onCleanup(() => {
+    resourceGeneration++
+    releaseLocalWait()
+  })
 
   const [getDataResource] = createResource(
     () => ({ currentCollection: collection() }),
     async ({ currentCollection }) => {
       const generation = ++resourceGeneration
-      localWaitObserver?.dispose()
-      localWaitObserver = undefined
+      releaseLocalWait()
       if (!currentCollection) {
         return []
       }
       setStatus(currentCollection.status)
       try {
         const observer = createLiveQueryObserver(currentCollection)
-        localWaitObserver = observer
+        localWait = {
+          observer,
+          collection: currentCollection,
+          ready: false,
+        }
         try {
           await observer.preloadForInitialRender()
-        } finally {
-          observer.dispose()
-          if (localWaitObserver === observer) localWaitObserver = undefined
+        } catch (error) {
+          if (generation === resourceGeneration) releaseLocalWait()
+          throw error
         }
+        if (generation !== resourceGeneration) return data
+        localWait.ready = true
+        // `preloadForInitialRender` waits for readiness but does not itself
+        // retain the Collection after it settles. Hold one observer
+        // subscription across Solid's ready-before-commit Suspense gap.
+        observer.subscribe(() => {})
+        // Solid disposes a provisional effect only after the resource settles
+        // and Suspense re-evaluates the branch. Check on the next turn: a real
+        // commit still owns the Collection, while a suspended branch keeps the
+        // preload observer until its later commit or root cleanup.
+        setTimeout(() => {
+          if (
+            localWait?.observer === observer &&
+            subscribedCollection === currentCollection
+          ) {
+            releaseLocalWait()
+          }
+        }, 0)
       } catch (error) {
         if (generation !== resourceGeneration) return data
         setStatus(`error`)
@@ -514,6 +549,10 @@ export function useLiveQuery(
         })
       },
     )
+    subscribedCollection = currentCollection
+    if (localWait?.ready && localWait.collection === currentCollection) {
+      releaseLocalWait()
+    }
     // An already-ready empty collection produces no initial row batch. Bring
     // ordered data and status in line synchronously instead of waiting for the
     // resource continuation to correct the previous collection's rows.
@@ -526,6 +565,9 @@ export function useLiveQuery(
     })
 
     onCleanup(() => {
+      if (subscribedCollection === currentCollection) {
+        subscribedCollection = undefined
+      }
       unsubscribe()
       observer.dispose()
     })

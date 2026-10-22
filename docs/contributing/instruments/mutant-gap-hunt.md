@@ -58,14 +58,14 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
    rejecting a legal alternative. For a bug on the baseline, demonstrate the
    production RED before its repair. Update the coverage map when the owner's
    reach or limits change. For a claimed oracle repair, follow
-   [ORC-012](../oracle-tests.md#orc-012-review-evidence): at closeout,
+   [ORC-012](../oracle-rubric.md#orc-012-review-evidence): at closeout,
    verdict-critical evidence outside the executable oracle belongs in a
    versioned review record tied to the exact reviewed head. This card also asks
    the record to name the executable revision of every campaign, witness, and
    review-fix run behind its claims.
 
 **Return:** each chosen mutant's pinned revision, exact edit, observed run
-outcome using [ORC-006's categories](../oracle-tests.md#orc-006-checker-calibration),
+outcome using [ORC-006's categories](../oracle-rubric.md#orc-006-checker-calibration),
 public distinction or scoped equivalence argument, and disposition: oracle gap,
 product bug, permitted difference, equivalence at a stated grade, or unresolved.
 Keep raw run logs and result tables task-local unless the task explicitly asks

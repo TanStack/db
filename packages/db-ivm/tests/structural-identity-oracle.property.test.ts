@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 
 /**
  * # Does a structural identity agree with D2 value identity?
@@ -17,39 +20,49 @@ import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
  *    contributions merge.
  *
  * Model: values are built from generated specs, and two values are equal
- * exactly when their specs are equal after normalization: -0 as 0, every
- * NaN as one value, object entries in key order, and holes kept. A RegExp
- * whose lastIndex is NaN equals nothing, because D2 compares headers with
- * ===. The model shares no code with the hashing module; a sanity check also
- * compares it with `equalHashValues`.
+ * exactly when their specs denote equal values after normalization: -0 as 0,
+ * every NaN as one value, object entries in key order, and holes kept.
+ * `deep` and explicit one-element `array` nodes denote the same nested arrays.
+ * Symbol leaf indices denote stable symbol instances, not their descriptions.
+ * Distinct RegExp objects whose lastIndex is NaN compare unequal because D2
+ * compares headers with ===. The model shares no code with the hashing module;
+ * a sanity check also compares it with `equalHashValues`.
  *
- * Histories: pairs built from one spec, once directly and once with
- * representations D2 identity ignores (an array subclass for an array, a
- * class instance or null-prototype object for a plain object, reversed key
- * order, a non-enumerable symbol), and pairs built from two specs. Strings
- * and keys include every separator the identity uses and digits, so an
- * encoding that loses where one part ends fails law 2. Values include
- * enumerable symbol keys, Dates (also invalid), RegExps, Maps, Sets, small
- * binary values, holes, and nesting deeper than the identity's depth cap.
- * Pinned pairs cover the joins a random short string cannot build. The depth
- * cap bounds work and recursion, including on a cyclic value; it does not
- * decide equality, so raising it changes no law here.
+ * Histories: equal pairs use one comparable spec or two spellings of the same
+ * nested arrays. Their builds vary array subclasses, object prototypes, key order,
+ * and non-enumerable symbols; D2 identity ignores those differences.
+ * Independent pairs use two specs. Strings and keys include every separator
+ * the identity uses and digits, so an encoding that loses where one part
+ * ends fails law 2. Values include distinct symbols with the same description,
+ * enumerable symbol keys, Dates (also invalid), RegExps with numeric
+ * `lastIndex`, Maps and Sets with zero to two entries, arrays with an
+ * enumerable non-index field, small binary values, holes, and nesting deeper
+ * than the identity's depth cap.
+ * Pinned pairs cover joins a random short string cannot build, distinct
+ * symbols with the same description, and different object kinds with the same
+ * body. Fixed representation witnesses verify that the driver reaches each
+ * prototype, key-order, and hidden-symbol variant it claims. The depth cap
+ * bounds work and recursion, including on a cyclic value;
+ * it does not decide equality, so raising it changes no law here.
+ * Both generated pair grammars run fixed and fresh-seed campaigns. A replay
+ * seed and path select the requested property without running the fixed one.
  */
 
 type Spec =
   | { k: `leaf`; i: number }
   | { k: `text`; s: string }
-  | { k: `array`; items: Array<Spec | null> }
+  | { k: `array`; items: Array<Spec | null>; extra?: Spec }
   | { k: `object`; entries: Array<[string, Spec]>; symbol?: Spec }
   | { k: `date`; t: number }
   | { k: `regexp`; flags: string; lastIndex: number }
-  | { k: `map`; v: Spec }
-  | { k: `set`; v: Spec }
+  | { k: `map`; values: Array<Spec> }
+  | { k: `set`; values: Array<Spec> }
   | { k: `binary`; bytes: Array<number> }
   | { k: `deep`; depth: number; v: Spec }
 
 const SYMBOL = Symbol(`s`)
 const ENUMERABLE_SYMBOL = Symbol(`enumerable`)
+const { replayProperty } = readOracleRunConfig()
 const LEAVES: ReadonlyArray<unknown> = [
   0,
   -0,
@@ -62,10 +75,11 @@ const LEAVES: ReadonlyArray<unknown> = [
   null,
   undefined,
   SYMBOL,
+  Symbol(`s`),
 ]
 // Every separator and tag the identity uses, plus digits.
 const textArbitrary = fc.string({
-  unit: fc.constantFrom(`a`, `|`, `=`, `:`, `"`, `#`, `[`, `{`, `1`, `2`),
+  unit: fc.constantFrom(`a`, `|`, `=`, `:`, `"`, `#`, `[`, `{`, `0`, `1`, `2`),
   maxLength: 4,
 })
 
@@ -89,13 +103,17 @@ const specArbitrary = fc.letrec<{ spec: Spec }>((tie) => ({
         s: textArbitrary,
       }),
     },
-    fc.record({
-      k: fc.constant(`array` as const),
-      // null marks a hole.
-      items: fc.array(fc.option(tie(`spec`), { nil: null, freq: 5 }), {
-        maxLength: 3,
-      }),
-    }),
+    fc.record(
+      {
+        k: fc.constant(`array` as const),
+        // null marks a hole.
+        items: fc.array(fc.option(tie(`spec`), { nil: null, freq: 5 }), {
+          maxLength: 3,
+        }),
+        extra: tie(`spec`),
+      },
+      { requiredKeys: [`k`, `items`] },
+    ),
     fc.record(
       {
         k: fc.constant(`object` as const),
@@ -116,8 +134,14 @@ const specArbitrary = fc.letrec<{ spec: Spec }>((tie) => ({
       flags: fc.constantFrom(``, `g`),
       lastIndex: fc.constantFrom(0, 1, Number.NaN),
     }),
-    fc.record({ k: fc.constant(`map` as const), v: tie(`spec`) }),
-    fc.record({ k: fc.constant(`set` as const), v: tie(`spec`) }),
+    fc.record({
+      k: fc.constant(`map` as const),
+      values: fc.array(tie(`spec`), { maxLength: 2 }),
+    }),
+    fc.record({
+      k: fc.constant(`set` as const),
+      values: fc.array(tie(`spec`), { maxLength: 2 }),
+    }),
     fc.record({
       k: fc.constant(`binary` as const),
       bytes: fc.array(fc.nat(2), { maxLength: 3 }),
@@ -129,6 +153,46 @@ const specArbitrary = fc.letrec<{ spec: Spec }>((tie) => ({
     }),
   ),
 })).spec
+
+// Distinct RegExp instances with a NaN lastIndex are not equal, even when
+// built from one spec. This grammar check does not consult the normal-form
+// model; the independent-pair grammar still generates those RegExps.
+function containsNaNRegExp(spec: Spec): boolean {
+  switch (spec.k) {
+    case `regexp`:
+      return Number.isNaN(spec.lastIndex)
+    case `array`:
+      return (
+        spec.items.some((item) => item !== null && containsNaNRegExp(item)) ||
+        (spec.extra !== undefined && containsNaNRegExp(spec.extra))
+      )
+    case `object`:
+      return (
+        spec.entries.some(([, value]) => containsNaNRegExp(value)) ||
+        (spec.symbol !== undefined && containsNaNRegExp(spec.symbol))
+      )
+    case `map`:
+    case `set`:
+      return spec.values.some(containsNaNRegExp)
+    case `deep`:
+      return containsNaNRegExp(spec.v)
+    default:
+      return false
+  }
+}
+const comparableSpecArbitrary = specArbitrary.filter(
+  (spec) => !containsNaNRegExp(spec),
+)
+
+const equalSpecPairArbitrary = fc.oneof(
+  comparableSpecArbitrary.map((spec): [Spec, Spec] => [spec, spec]),
+  fc
+    .tuple(comparableSpecArbitrary, fc.integer({ min: 3, max: 5 }))
+    .map(([spec, depth]): [Spec, Spec] => [
+      { k: `array`, items: [{ k: `deep`, depth, v: spec }] },
+      { k: `deep`, depth: depth + 1, v: spec },
+    ]),
+)
 
 /** Build a value; `vary` picks representations that D2 identity ignores. */
 function build(spec: Spec, vary: () => boolean): unknown {
@@ -143,6 +207,9 @@ function build(spec: Spec, vary: () => boolean): unknown {
       spec.items.forEach((item, index) => {
         if (item !== null) array[index] = build(item, vary)
       })
+      if (spec.extra !== undefined) {
+        Object.assign(array, { note: build(spec.extra, vary) })
+      }
       if (vary()) Object.defineProperty(array, Symbol(`hidden`), { value: 1 })
       return array
     }
@@ -172,9 +239,20 @@ function build(spec: Spec, vary: () => boolean): unknown {
       return regexp
     }
     case `map`:
-      return new Map([[`k`, build(spec.v, vary)]])
+      return new Map<string, unknown>(
+        spec.values.map((value, index): [string, unknown] => [
+          index === 0 ? `k` : `x`,
+          build(value, vary),
+        ]),
+      )
     case `set`:
-      return new Set([build(spec.v, vary)])
+      // Wrap the second value so JS Set never deduplicates two primitive values
+      // before D2 can compare their ordered entries.
+      return new Set<unknown>(
+        spec.values.map((value, index) =>
+          index === 0 ? build(value, vary) : [index, build(value, vary)],
+        ),
+      )
     case `binary`:
       return new Uint8Array(spec.bytes)
     case `deep`: {
@@ -207,7 +285,7 @@ function normal(spec: Spec): string | undefined {
         return Number.isNaN(value)
           ? `number:NaN`
           : `number:${value === 0 ? 0 : value}`
-      if (typeof value === `symbol`) return `symbol:s`
+      if (typeof value === `symbol`) return `symbol:${spec.i}`
       if (typeof value === `string`) return `string:${JSON.stringify(value)}`
       return `${typeof value}:${String(value)}`
     }
@@ -215,7 +293,13 @@ function normal(spec: Spec): string | undefined {
       return `string:${JSON.stringify(spec.s)}`
     case `array`: {
       const items = parts(spec.items)
-      return items && `array:${JSON.stringify(items)}`
+      if (items === undefined) return undefined
+      const base = `array:${JSON.stringify(items)}`
+      if (spec.extra === undefined) return base
+      const extra = normal(spec.extra)
+      return extra === undefined
+        ? undefined
+        : `${base}:note:${JSON.stringify(extra)}`
     }
     case `object`: {
       const entries: Array<[string, string]> = []
@@ -237,25 +321,28 @@ function normal(spec: Spec): string | undefined {
         ? undefined
         : `regexp:${spec.flags}:${spec.lastIndex}`
     case `map`: {
-      const v = normal(spec.v)
-      return v && `map:${v}`
+      const values = parts(spec.values)
+      return values && `map:${JSON.stringify(values)}`
     }
     case `set`: {
-      const v = normal(spec.v)
-      return v && `set:${v}`
+      const values = parts(spec.values)
+      if (values === undefined) return undefined
+      // The second Set member is a fresh [index, value] array in build().
+      if (values.length === 2) {
+        values[1] = `array:${JSON.stringify([`number:1`, values[1]])}`
+      }
+      return `set:${JSON.stringify(values)}`
     }
     case `binary`:
       return `binary:${spec.bytes.join(`,`)}`
     case `deep`: {
-      // Collapse nested deep nodes by summing their depths
-      let innerSpec = spec.v
-      let totalDepth = spec.depth
-      while (innerSpec.k === `deep`) {
-        totalDepth += innerSpec.depth
-        innerSpec = innerSpec.v
+      // `deep` is model shorthand for repeated single-element arrays.
+      let value = normal(spec.v)
+      if (value === undefined) return undefined
+      for (let level = 0; level < spec.depth; level++) {
+        value = `array:${JSON.stringify([value])}`
       }
-      const v = normal(innerSpec)
-      return v && `deep:${totalDepth}:${v}`
+      return value
     }
   }
 }
@@ -289,7 +376,48 @@ const collisionPairs: Array<[string, unknown, unknown]> = [
   [`header spans the body`, [`#1`], [1]],
 ]
 
+function decisions(...values: Array<boolean>): () => boolean {
+  let index = 0
+  return () => values[index++] ?? false
+}
+
 describe(`structuralIdentity`, () => {
+  it(`ignores array subclass and hidden symbol representations`, () => {
+    const spec: Spec = { k: `array`, items: [{ k: `leaf`, i: 3 }] }
+    const plain = build(spec, () => false)
+    const variant = build(spec, decisions(true, true)) as Sub
+    expect(variant).toBeInstanceOf(Sub)
+    const [hidden] = Object.getOwnPropertySymbols(variant)
+    expect(hidden).toBeDefined()
+    expect(Object.getOwnPropertyDescriptor(variant, hidden!)?.enumerable).toBe(
+      false,
+    )
+    expectAgreement(spec, spec, plain, variant)
+  })
+
+  it(`ignores object prototype, key order, and hidden symbol representations`, () => {
+    const spec: Spec = {
+      k: `object`,
+      entries: [
+        [`a`, { k: `leaf`, i: 0 }],
+        [`b`, { k: `leaf`, i: 3 }],
+      ],
+    }
+    const plain = build(spec, () => false)
+    const classVariant = build(spec, decisions(true, true, true, true))
+    const nullPrototype = build(spec, decisions(true, false, false, false))
+    expect(classVariant).toBeInstanceOf(Instance)
+    expect(Object.keys(classVariant as object)).toEqual([`b`, `a`])
+    const [hidden] = Object.getOwnPropertySymbols(classVariant as object)
+    expect(hidden).toBeDefined()
+    expect(
+      Object.getOwnPropertyDescriptor(classVariant, hidden!)?.enumerable,
+    ).toBe(false)
+    expect(Object.getPrototypeOf(nullPrototype)).toBeNull()
+    expectAgreement(spec, spec, plain, classVariant)
+    expectAgreement(spec, spec, plain, nullPrototype)
+  })
+
   it.each(collisionPairs)(
     `gives different values different identities: %s`,
     (_, left, right) => {
@@ -306,23 +434,37 @@ describe(`structuralIdentity`, () => {
     expect(structuralIdentity(cyclic)).toBeUndefined()
   })
 
-  it(`agrees with D2 value identity for equal representations`, () => {
-    fc.assert(
-      fc.property(
-        specArbitrary,
-        fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
-        (spec, coins) => {
-          let index = 0
-          const vary = () => coins[index++ % coins.length]!
-          expectAgreement(
-            spec,
-            spec,
-            build(spec, () => false),
-            build(spec, vary),
-          )
-        },
-      ),
-      { numRuns: 2000 },
+  it(`agrees with D2 value identity for equal representations`, async () => {
+    if (
+      replayProperty !== undefined &&
+      replayProperty !== `structural-identity.equal-representations`
+    )
+      return
+    // The guarded replay records completed runs through an async reporter.
+    const property = fc.asyncProperty(
+      equalSpecPairArbitrary,
+      fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
+      ([leftSpec, rightSpec], coins) => {
+        let index = 0
+        const vary = () => coins[index++ % coins.length]!
+        expectAgreement(
+          leftSpec,
+          rightSpec,
+          build(leftSpec, () => false),
+          build(rightSpec, vary),
+        )
+        return Promise.resolve()
+      },
+    )
+    const options = oraclePropertyOptions(
+      2000,
+      `structural-identity.equal-representations`,
+    )
+    if (options.seed === undefined)
+      await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
+    await fc.assert(
+      property,
+      options.path === undefined ? options : { ...options, numRuns: 1 },
     )
   })
 
@@ -341,8 +483,110 @@ describe(`structuralIdentity`, () => {
     ],
     [
       `an empty string in a set`,
-      { k: `set`, v: { k: `text`, s: `` } },
-      { k: `set`, v: { k: `leaf`, i: 5 } },
+      { k: `set`, values: [{ k: `text`, s: `` }] },
+      { k: `set`, values: [{ k: `leaf`, i: 5 }] },
+    ],
+    [
+      `a deep node and an explicit array`,
+      { k: `array`, items: [{ k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } }] },
+      { k: `deep`, depth: 6, v: { k: `leaf`, i: 3 } },
+    ],
+    [
+      `adjacent nesting depths`,
+      { k: `array`, items: [{ k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } }] },
+      { k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } },
+    ],
+    [
+      `distinct symbols with the same description`,
+      { k: `leaf`, i: 10 },
+      { k: `leaf`, i: 11 },
+    ],
+    [
+      `a Map and Set with the same entry body`,
+      { k: `map`, values: [{ k: `leaf`, i: 0 }] },
+      {
+        k: `set`,
+        values: [
+          {
+            k: `array`,
+            items: [
+              { k: `text`, s: `k` },
+              { k: `leaf`, i: 0 },
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      `a Map and object with the same entry body`,
+      { k: `map`, values: [{ k: `leaf`, i: 0 }] },
+      {
+        k: `object`,
+        entries: [
+          [
+            `0`,
+            {
+              k: `array`,
+              items: [
+                { k: `text`, s: `k` },
+                { k: `leaf`, i: 0 },
+              ],
+            },
+          ],
+        ],
+      },
+    ],
+    [
+      `a Set and object with the same entry body`,
+      { k: `set`, values: [{ k: `leaf`, i: 0 }] },
+      { k: `object`, entries: [[`0`, { k: `leaf`, i: 0 }]] },
+    ],
+    [
+      `Maps that differ at the second entry`,
+      {
+        k: `map`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 0 },
+        ],
+      },
+      {
+        k: `map`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 3 },
+        ],
+      },
+    ],
+    [
+      `Sets that differ at the second entry`,
+      {
+        k: `set`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 0 },
+        ],
+      },
+      {
+        k: `set`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 3 },
+        ],
+      },
+    ],
+    [
+      `arrays that differ at an enumerable non-index field`,
+      {
+        k: `array`,
+        items: [{ k: `leaf`, i: 0 }],
+        extra: { k: `leaf`, i: 0 },
+      },
+      {
+        k: `array`,
+        items: [{ k: `leaf`, i: 0 }],
+        extra: { k: `leaf`, i: 3 },
+      },
     ],
   ] as Array<[string, Spec, Spec]>)(
     `agrees with D2 value identity for %s`,
@@ -356,17 +600,34 @@ describe(`structuralIdentity`, () => {
     },
   )
 
-  it(`agrees with D2 value identity for independent values`, () => {
-    fc.assert(
-      fc.property(specArbitrary, specArbitrary, (left, right) => {
+  it(`agrees with D2 value identity for independent values`, async () => {
+    if (
+      replayProperty !== undefined &&
+      replayProperty !== `structural-identity.independent-values`
+    )
+      return
+    const property = fc.asyncProperty(
+      specArbitrary,
+      specArbitrary,
+      (left, right) => {
         expectAgreement(
           left,
           right,
           build(left, () => false),
           build(right, () => false),
         )
-      }),
-      oraclePropertyOptions(2000, `structural-identity.independent-values`),
+        return Promise.resolve()
+      },
+    )
+    const options = oraclePropertyOptions(
+      2000,
+      `structural-identity.independent-values`,
+    )
+    if (options.seed === undefined)
+      await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
+    await fc.assert(
+      property,
+      options.path === undefined ? options : { ...options, numRuns: 1 },
     )
   })
 })

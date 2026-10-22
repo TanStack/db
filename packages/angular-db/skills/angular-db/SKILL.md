@@ -101,7 +101,7 @@ const query = injectLiveQuery({
 })
 ```
 
-A bare `{ query }` config defaults to `startSync: true` and `gcTime: 0`, like
+A bare `{ query }` config defaults to `startSync: true` and `gcTime: 1`, like
 the query-function overload. Explicit values in the config override those
 defaults.
 

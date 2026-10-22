@@ -94,10 +94,14 @@ function makeDeferredSource<
   }
 }
 
-function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
+function makePrecreated(
+  build: QueryBuild,
+  opts?: { startSync?: boolean; gcTime?: number },
+) {
   const collection = createLiveQueryCollection({
     query: build as any,
     startSync: opts?.startSync ?? true,
+    gcTime: opts?.gcTime,
   })
   return { collection }
 }
@@ -134,6 +138,7 @@ function makeHandle(
   dispose: () => void,
 ): LiveQueryHandle {
   return {
+    collection: () => getResult()?.collection ?? null,
     current(): ConformanceResult {
       const result = getResult()
       return expectResultSurface({
@@ -185,10 +190,10 @@ function mountCollection(collection: any) {
   return makeHandle(getResult, dispose)
 }
 
-function mountConfig(build: QueryBuild) {
+function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
   // Solid accepts the config-object form via an accessor.
   const { getResult, dispose } = inRoot(() =>
-    useLiveQuery(() => ({ query: build })),
+    useLiveQuery(() => ({ query: build, ...opts })),
   )
   return makeHandle(getResult, dispose)
 }

@@ -10,6 +10,7 @@ import {
 } from './protocol'
 import type {
   CommittedTxAnchor,
+  HydrationPersistenceAdapter,
   PersistedCacheGenerationClaim,
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
@@ -192,6 +193,28 @@ function createRendererRequestExecutor(options: {
   }
 }
 
+// The renderer has no shared driver scheduler. Its queued reads are its
+// hydration scopes; its writes take the writer Web Lock, which also orders
+// them against an election term.
+class RendererQueuedWork {
+  private readonly unsettled = new Set<Promise<void>>()
+
+  track<T>(work: Promise<T>): Promise<T> {
+    const done = work.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.unsettled.add(done)
+    void done.then(() => this.unsettled.delete(done))
+    return work
+  }
+
+  // Settles once every hydration scope outstanding at the call settles.
+  afterQueuedWork(): Promise<void> {
+    return Promise.all(this.unsettled).then(() => undefined)
+  }
+}
+
 type ElectronRendererResolvedAdapter =
   PersistedCollectionPersistence[`adapter`] & {
     loadCollectionMetadata: (
@@ -237,6 +260,7 @@ function createResolvedRendererAdapter(
   executeRequest: RendererRequestExecutor,
   claimCollections: Map<string, string>,
   managedCacheGenerations: boolean,
+  queuedWork: RendererQueuedWork,
   resolution?: ElectronPersistenceResolution,
 ): ElectronRendererResolvedAdapter {
   const adapter: ElectronRendererResolvedAdapter = {
@@ -518,6 +542,16 @@ function createResolvedRendererAdapter(
         resolution,
       )
     },
+    runInHydrationScope: <T>(
+      task: (scopedAdapter: HydrationPersistenceAdapter) => Promise<T>,
+    ) => queuedWork.track(Promise.resolve().then(() => task(adapter))),
+    isHydrationScopeScheduled: () => false,
+    // Work runs directly; the main process serializes it.
+    runInRegularScope: Object.assign(
+      <T>(task: (scopedAdapter: HydrationPersistenceAdapter) => Promise<T>) =>
+        task(adapter),
+      { afterQueuedWork: () => queuedWork.afterQueuedWork() },
+    ),
   }
   if (!managedCacheGenerations) {
     adapter.claimCacheGeneration = undefined
@@ -564,6 +598,7 @@ function resolveInvoke(
 export function createElectronSQLitePersistence(
   options: ElectronSQLitePersistenceOptions,
 ): PersistedCollectionPersistence {
+  const queuedWork = new RendererQueuedWork()
   const invoke = resolveInvoke(options)
   const coordinator = options.coordinator ?? new SingleProcessCoordinator()
   const claimCollections = new Map<string, string>()
@@ -590,6 +625,7 @@ export function createElectronSQLitePersistence(
       executeRequest,
       claimCollections,
       options.managedCacheGenerations ?? true,
+      queuedWork,
       { mode, schemaVersion, logicalCollectionId: collectionId },
     )
     adapterCache.set(cacheKey, adapter)

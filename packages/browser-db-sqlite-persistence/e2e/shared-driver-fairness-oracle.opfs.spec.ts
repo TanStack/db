@@ -1,8 +1,8 @@
 /**
- * Browser checkpoint assertions for the OPFS refinement. Expected public rows
- * are rebuilt from the scenario IDs rather than from production output. The
- * neutral case proves cold-query reach; the storm case checks K=1 at each
- * hydrate completion and full FIFO completion of logical persists. This is the
+ * Browser checkpoint assertions for the OPFS refinement. The page applies the
+ * shared comparison `findSharedDriverFairnessLawViolations`, which the Node
+ * driver also applies, so this spec states no expected rows or completion
+ * order of its own. It adds a reach check: both cases prove a cold SQL read. This is the
  * receiving witness for the Node fixture's held-BEGIN, cold-hydrate premise:
  * the same public preload/core-adapter/driver path reaches a Chromium OPFS
  * worker, then public rows and logical completions are checked after all work
@@ -16,7 +16,7 @@ import type { OPFSOracleResult } from './shared-driver-fairness.opfs'
 
 async function readOracleResult(
   page: Page,
-  mode: `neutral` | `storm`,
+  mode: `neutral` | `storm` | `interleaved`,
 ): Promise<OPFSOracleResult> {
   let rejectPageError!: (error: Error) => void
   const pageError = new Promise<never>((_resolve, reject) => {
@@ -46,95 +46,39 @@ async function readOracleResult(
   }
 }
 
-function expectedHydratedCollections(scenarioId: string, count: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    collectionId: `${scenarioId}-hydrate-${index}`,
-    rows: [
-      { id: `row-${index}-0`, value: index * 10 },
-      { id: `row-${index}-1`, value: index * 10 + 1 },
-    ],
-  }))
+function expectLawsHold(result: OPFSOracleResult): void {
+  if (result.status !== `complete`) throw new Error(result.primaryFailure)
+  expect(result.provider).toBe(`Chromium OPFSCoopSyncVFS worker`)
+  // Reach: a cold hydrate read real rows through the OPFS worker.
+  expect(
+    result.observation.rawDequeues.some((entry) =>
+      entry.sql.startsWith(`SELECT key, value, metadata, row_version FROM`),
+    ),
+  ).toBe(true)
+  // This is the semantic RED checkpoint: the shared comparison that the Node
+  // driver also applies. Setup, wall time, and cleanup are reported apart.
+  expect(
+    result.lawViolations,
+    `logical completion order: ${JSON.stringify(result.observation.logicalCompletionOrder)}`,
+  ).toEqual([])
+  expect(result.observation.cleanupFailures).toEqual([])
+  expect(result.opfsCleanupFailures).toEqual([])
 }
 
 test(`real Chromium OPFS fixture reaches and cleans up cold hydration`, async ({
   page,
 }) => {
-  const result = await readOracleResult(page, `neutral`)
-
-  if (result.status !== `complete`) throw new Error(result.primaryFailure)
-  expect(result.provider).toBe(`Chromium OPFSCoopSyncVFS worker`)
-  expect(result.observation.admittedHydrateIds).toHaveLength(2)
-  // These are actual public Collection rows captured after preload, compared
-  // with seed values built independently by this browser assertion.
-  expect(result.observation.hydratedCollections).toEqual(
-    expectedHydratedCollections(`opfs-neutral-reach`, 2),
-  )
-  expect(
-    result.observation.rawDequeues.some((entry) =>
-      entry.sql.startsWith(`SELECT key, value, metadata, row_version FROM`),
-    ),
-  ).toBe(true)
-  expect(result.observation.cleanupFailures).toEqual([])
-  expect(result.opfsCleanupFailures).toEqual([])
+  expectLawsHold(await readOracleResult(page, `neutral`))
 })
 
 test(`real Chromium OPFS fixture bounds cold hydration and completes persists in FIFO order`, async ({
   page,
 }) => {
-  const result = await readOracleResult(page, `storm`)
+  expectLawsHold(await readOracleResult(page, `storm`))
+})
 
-  if (result.status !== `complete`) throw new Error(result.primaryFailure)
-  expect(result.provider).toBe(`Chromium OPFSCoopSyncVFS worker`)
-  expect(result.observation.admittedHydrateIds).toHaveLength(4)
-  expect(result.observation.hydratedCollections).toEqual(
-    expectedHydratedCollections(`opfs-fixed-persist-storm`, 4),
-  )
-  expect(
-    result.observation.rawDequeues.some((entry) =>
-      entry.sql.startsWith(`SELECT key, value, metadata, row_version FROM`),
-    ),
-  ).toBe(true)
-  expect(
-    result.observation.hydrationCompletions.map(
-      (checkpoint) => checkpoint.collectionId,
-    ),
-  ).toEqual(
-    Array.from(
-      { length: 4 },
-      (_, index) => `opfs-fixed-persist-storm-hydrate-${index}`,
-    ),
-  )
-  expect(
-    result.observation.hydrationCompletions[0]?.completedPersistIds,
-  ).toEqual([`opfs-fixed-persist-storm-persist-0`])
-  expect(
-    result.observation.hydrationCompletions[1]?.pendingPersistCount,
-  ).toBeGreaterThanOrEqual(3)
-  // This is the semantic RED checkpoint. Setup, wall time, and cleanup are
-  // reported independently and cannot satisfy this assertion.
-  if (result.violation !== undefined) {
-    throw new Error(
-      `real OPFS fairness mismatch: ${JSON.stringify(result.violation)}; ` +
-        `logical completion order: ${JSON.stringify(result.observation.logicalCompletionOrder)}; ` +
-        `driver admissions: ${result.observation.driverAdmissions.length}; ` +
-        `raw dequeues: ${result.observation.rawDequeues.length}; ` +
-        `driver cleanup diagnostics: ${JSON.stringify(result.observation.cleanupFailures)}; ` +
-        `OPFS cleanup diagnostics: ${JSON.stringify(result.opfsCleanupFailures)}`,
-    )
-  }
-  // The Node oracle rejects a swapped second/third completion. At this real
-  // provider boundary, the public adapter's logical persist promises must
-  // complete in the admitted persist-lane order after all work settles.
-  expect(
-    result.observation.logicalCompletionOrder.filter((entry) =>
-      entry.startsWith(`persist:`),
-    ),
-  ).toEqual(
-    Array.from(
-      { length: 5 },
-      (_, index) => `persist:opfs-fixed-persist-storm-persist-${index}`,
-    ),
-  )
-  expect(result.observation.cleanupFailures).toEqual([])
-  expect(result.opfsCleanupFailures).toEqual([])
+test(`real Chromium OPFS fixture bounds hydrates queued ahead of later persists`, async ({
+  page,
+}) => {
+  expectLawsHold(await readOracleResult(page, `interleaved`))
 })

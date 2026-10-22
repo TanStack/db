@@ -7,7 +7,7 @@ title: DehydratedLiveQueryResult
 type DehydratedLiveQueryResult<T, TKey> = object;
 ```
 
-Defined in: [packages/db/src/client.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L125)
+Defined in: [packages/db/src/client.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L145)
 
 ## Type Parameters
 
@@ -27,4 +27,4 @@ Defined in: [packages/db/src/client.ts:125](https://github.com/TanStack/db/blob/
 rows: DehydratedCollectionRow<T, TKey>[];
 ```
 
-Defined in: [packages/db/src/client.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L129)
+Defined in: [packages/db/src/client.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L149)

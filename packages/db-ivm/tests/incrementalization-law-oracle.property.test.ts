@@ -81,7 +81,7 @@ function withoutPromotion<T>(): PipedOperator<T, T> {
  * D2 operators keep state and emit only changes. A wrong delta can leave the
  * final rows looking right after a later batch, so final-state examples are not
  * enough. The package README defines MultiSet data as signed changes. The DBSP
- * accumulation/difference law in docs/contributing/oracle-tests.md authorizes
+ * accumulation/difference law in docs/contributing/oracle-rubric.md authorizes
  * comparison of the net emitted delta and retained relation with a direct
  * recomputation after each logical batch. It does not specify message order,
  * client publication, or readiness.

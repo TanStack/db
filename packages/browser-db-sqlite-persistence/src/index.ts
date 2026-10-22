@@ -15,6 +15,7 @@ export {
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   RemoteSubsetWireValueError,
+  SQLiteConnectionClosedError,
   persistedCollectionOptions,
 } from '@tanstack/db-sqlite-persistence-core'
 export type {

@@ -11,7 +11,12 @@ import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import { whenSyncAccepted } from '../src/sync-receipt.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
-import { runOptimisticHistory } from './optimistic-history-oracle.js'
+import {
+  historyRow,
+  optimisticHistory,
+  optimisticStep,
+  runOptimisticHistory,
+} from './optimistic-history-oracle.js'
 import type { OptimisticStep } from './optimistic-history-oracle.js'
 import type { CollectionChangesManager } from '../src/collection/changes.js'
 import type { Collection } from '../src/collection/index.js'
@@ -2046,106 +2051,6 @@ fcTest.prop(
   },
 )
 
-const historyRow = fc.record({
-  id: fc.integer({ min: 1, max: 3 }),
-  a: fc.integer({ min: -2, max: 2 }),
-  b: fc.integer({ min: -2, max: 2 }),
-  c: fc.integer({ min: -2, max: 2 }),
-})
-const sourceBatch = fc.record({
-  type: fc.constant(`sync` as const),
-  rows: fc.uniqueArray(historyRow, {
-    selector: (row) => row.id,
-    maxLength: 3,
-  }),
-  // The source may also delete keys, including keys it does not hold.
-  deletes: fc.oneof(
-    { weight: 3, arbitrary: fc.constant([]) },
-    {
-      weight: 1,
-      arbitrary: fc.uniqueArray(fc.integer({ min: 1, max: 3 }), {
-        minLength: 1,
-        maxLength: 2,
-      }),
-    },
-  ),
-  truncate: fc.boolean(),
-  copies: fc.integer({ min: 1, max: 2 }),
-})
-// A mutation handler may write a source batch before it returns, and may
-// await that batch's commit receipt.
-const handlerBatch = fc.oneof(
-  { weight: 3, arbitrary: fc.constant(undefined) },
-  {
-    weight: 1,
-    arbitrary: fc
-      .tuple(sourceBatch, fc.boolean())
-      .map(([batch, awaitReceipt]) => ({ ...batch, awaitReceipt })),
-  },
-)
-const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
-  {
-    weight: 2,
-    arbitrary: fc.record({
-      type: fc.constant(`delete` as const),
-      key: fc.integer({ min: 1, max: 3 }),
-      optimistic: fc.boolean(),
-      inHandler: handlerBatch,
-    }),
-  },
-  {
-    weight: 4,
-    arbitrary: fc.record({
-      type: fc.constant(`edit` as const),
-      key: fc.integer({ min: 1, max: 3 }),
-      fields: fc
-        .record(
-          {
-            a: fc.integer({ min: -2, max: 2 }),
-            b: fc.integer({ min: -2, max: 2 }),
-            c: fc.integer({ min: -2, max: 2 }),
-          },
-          { requiredKeys: [] },
-        )
-        .filter((fields) => Object.keys(fields).length > 0),
-      optimistic: fc.boolean(),
-      inHandler: handlerBatch,
-    }),
-  },
-  {
-    weight: 4,
-    arbitrary: fc.record({
-      type: fc.constant(`settle` as const),
-      slot: fc.nat(5),
-      success: fc.boolean(),
-      cascade: fc.boolean(),
-    }),
-  },
-  { weight: 3, arbitrary: sourceBatch },
-  // A sync transaction can still be open when an optimistic transaction
-  // settles, then commit or abort later.
-  {
-    weight: 1,
-    arbitrary: fc.record({
-      type: fc.constant(`open` as const),
-      batch: sourceBatch,
-    }),
-  },
-  {
-    weight: 1,
-    arbitrary: fc.record({
-      type: fc.constant(`close` as const),
-      commit: fc.boolean(),
-    }),
-  },
-)
-const optimisticHistory = fc.record({
-  initial: fc.uniqueArray(historyRow, {
-    selector: (row) => row.id,
-    maxLength: 3,
-  }),
-  steps: fc.array(optimisticStep, { minLength: 2, maxLength: 24 }),
-})
 // The partial-update lane reuses those histories and marks source batches
 // partial from a separate stream, so the full-mode campaigns keep their
 // seeded histories. It runs with the default `partial` row update mode.

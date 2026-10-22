@@ -3,7 +3,7 @@ id: CollectionImpl
 title: CollectionImpl
 ---
 
-Defined in: [packages/db/src/collection/index.ts:380](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L380)
+Defined in: [packages/db/src/collection/index.ts:394](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L394)
 
 ## Extended by
 
@@ -40,7 +40,7 @@ Defined in: [packages/db/src/collection/index.ts:380](https://github.com/TanStac
 new CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>(config): CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L426)
+Defined in: [packages/db/src/collection/index.ts:440](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L440)
 
 Creates a new Collection instance
 
@@ -68,7 +68,7 @@ Error if sync config is missing
 _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L397)
+Defined in: [packages/db/src/collection/index.ts:411](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L411)
 
 ***
 
@@ -78,7 +78,7 @@ Defined in: [packages/db/src/collection/index.ts:397](https://github.com/TanStac
 _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L409)
+Defined in: [packages/db/src/collection/index.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L423)
 
 ***
 
@@ -88,7 +88,7 @@ Defined in: [packages/db/src/collection/index.ts:409](https://github.com/TanStac
 _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:398](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L398)
+Defined in: [packages/db/src/collection/index.ts:412](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L412)
 
 ***
 
@@ -98,7 +98,7 @@ Defined in: [packages/db/src/collection/index.ts:398](https://github.com/TanStac
 config: CollectionConfig<TOutput, TKey, TSchema, TUtils>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:388](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L388)
+Defined in: [packages/db/src/collection/index.ts:402](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L402)
 
 ***
 
@@ -108,7 +108,7 @@ Defined in: [packages/db/src/collection/index.ts:388](https://github.com/TanStac
 deferDataRefresh: Promise<void> | null = null;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:416](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L416)
+Defined in: [packages/db/src/collection/index.ts:430](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L430)
 
 When set, collection consumers should defer processing incoming data
 refreshes until this promise resolves. This prevents stale data from
@@ -122,7 +122,7 @@ overwriting optimistic state while pending writes are being applied.
 id: string;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:387](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L387)
+Defined in: [packages/db/src/collection/index.ts:401](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L401)
 
 ***
 
@@ -132,7 +132,7 @@ Defined in: [packages/db/src/collection/index.ts:387](https://github.com/TanStac
 utils: TUtils;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:392](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L392)
+Defined in: [packages/db/src/collection/index.ts:406](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L406)
 
 ## Accessors
 
@@ -144,7 +144,7 @@ Defined in: [packages/db/src/collection/index.ts:392](https://github.com/TanStac
 get _layoutRevision(): number;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:564](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L564)
+Defined in: [packages/db/src/collection/index.ts:578](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L578)
 
 Monotonic revision of explicit layout-only publications.
 Internal — used to distinguish them from empty ready events.
@@ -163,7 +163,7 @@ Internal — used to distinguish them from empty ready events.
 get _stateRevision(): number;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:556](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L556)
+Defined in: [packages/db/src/collection/index.ts:570](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L570)
 
 Monotonic revision of the collection's visible state; advances once per
 committed batch of changes and cleanup, even while nothing is subscribed.
@@ -183,7 +183,7 @@ Internal — used by the live-query observer's snapshot cache.
 get base(): CollectionBase<TKey, TOutput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:704](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L704)
+Defined in: [packages/db/src/collection/index.ts:718](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L718)
 
 The exposed authoritative base rows, before optimistic writes are applied.
 Queued sync writes are excluded. Reading does not start sync.
@@ -203,7 +203,7 @@ Do not mutate the backing map or its rows: that bypasses publication.
 get compareOptions(): StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:884](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L884)
+Defined in: [packages/db/src/collection/index.ts:918](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L918)
 
 ##### Returns
 
@@ -219,7 +219,7 @@ Defined in: [packages/db/src/collection/index.ts:884](https://github.com/TanStac
 get indexes(): Map<number, BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:869](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L869)
+Defined in: [packages/db/src/collection/index.ts:903](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L903)
 
 Get resolved indexes for query optimization
 
@@ -237,7 +237,7 @@ Get resolved indexes for query optimization
 get isLoadingSubset(): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:622](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L622)
+Defined in: [packages/db/src/collection/index.ts:636](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L636)
 
 Check if the collection is currently loading more data
 
@@ -257,7 +257,7 @@ true if the collection has pending load more operations, false otherwise
 get size(): number;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:734](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L734)
+Defined in: [packages/db/src/collection/index.ts:768](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L768)
 
 Get the current size of the collection (cached)
 
@@ -275,7 +275,7 @@ Get the current size of the collection (cached)
 get state(): Map<TKey, WithVirtualProps<TOutput, TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1061](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1061)
+Defined in: [packages/db/src/collection/index.ts:1095](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1095)
 
 Gets the current state of the collection as a Map
 
@@ -311,7 +311,7 @@ Map containing all items in the collection, with keys as identifiers
 get status(): CollectionStatus;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L539)
+Defined in: [packages/db/src/collection/index.ts:553](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L553)
 
 Gets the current status of the collection
 
@@ -329,7 +329,7 @@ Gets the current status of the collection
 get subscriberCount(): number;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:547](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L547)
+Defined in: [packages/db/src/collection/index.ts:561](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L561)
 
 Get the number of subscribers that ask for this collection's data. A live
 query that has no subscriber or preload of its own does not count.
@@ -348,7 +348,7 @@ query that has no subscriber or preload of its own does not count.
 get toArray(): WithVirtualProps<TOutput, TKey>[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1091](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1091)
+Defined in: [packages/db/src/collection/index.ts:1119](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1119)
 
 Gets the current state of the collection as an Array
 
@@ -366,7 +366,7 @@ An Array containing all items in the collection
 _deferPublication(): PublicationDeferral;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:579](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L579)
+Defined in: [packages/db/src/collection/index.ts:593](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L593)
 
 Defer subscriber events until a coherent multi-Collection commit ends.
 
@@ -382,9 +382,25 @@ Defer subscriber events until a coherent multi-Collection commit ends.
 _deferSyncStart(): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:651](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L651)
+Defined in: [packages/db/src/collection/index.ts:665](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L665)
 
 **`Internal`**
+
+#### Returns
+
+`boolean`
+
+***
+
+### \_hasHeldSyncTransaction()
+
+```ts
+_hasHeldSyncTransaction(): boolean;
+```
+
+Defined in: [packages/db/src/collection/index.ts:761](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L761)
+
+Whether an accepted sync transaction is not yet visible.
 
 #### Returns
 
@@ -398,9 +414,31 @@ Defined in: [packages/db/src/collection/index.ts:651](https://github.com/TanStac
 _hasHydratedKey(key): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:646](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L646)
+Defined in: [packages/db/src/collection/index.ts:660](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L660)
 
 **`Internal`**
+
+#### Parameters
+
+##### key
+
+`TKey`
+
+#### Returns
+
+`boolean`
+
+***
+
+### \_hasOptimisticOverlay()
+
+```ts
+_hasOptimisticOverlay(key): boolean;
+```
+
+Defined in: [packages/db/src/collection/index.ts:753](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L753)
+
+Whether a local write obscures this key's authoritative source row.
 
 #### Parameters
 
@@ -420,7 +458,7 @@ Defined in: [packages/db/src/collection/index.ts:646](https://github.com/TanStac
 _hasSubscriberOrPreload(): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:690](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L690)
+Defined in: [packages/db/src/collection/index.ts:704](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L704)
 
 **`Internal`**
 
@@ -438,7 +476,7 @@ Whether this Collection had a subscriber or a preload in this sync run.
 _markLayoutChange(): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:574](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L574)
+Defined in: [packages/db/src/collection/index.ts:588](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L588)
 
 Mark the active sync transaction as layout-changing. Internal.
 
@@ -454,7 +492,7 @@ Mark the active sync transaction as layout-changing. Internal.
 _markPreload(): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:685](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L685)
+Defined in: [packages/db/src/collection/index.ts:699](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L699)
 
 **`Internal`**
 
@@ -474,7 +512,7 @@ query. The request still counts: deferred acquisition may now resume.
 _onCleanupStart(callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:636](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L636)
+Defined in: [packages/db/src/collection/index.ts:650](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L650)
 
 **`Internal`**
 
@@ -504,7 +542,7 @@ Subscribe to the synchronous cleanup-start boundary.
 _onFirstSubscriberOrPreload(listener): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:695](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L695)
+Defined in: [packages/db/src/collection/index.ts:709](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L709)
 
 **`Internal`**
 
@@ -528,13 +566,29 @@ Listen for the first subscriber or preload in this sync run.
 
 ***
 
+### \_optimisticOverlaySize()
+
+```ts
+_optimisticOverlaySize(): number;
+```
+
+Defined in: [packages/db/src/collection/index.ts:746](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L746)
+
+Maximum number of source rows whose visible projection a local write can hide.
+
+#### Returns
+
+`number`
+
+***
+
 ### \_resumeSyncStart()
 
 ```ts
 _resumeSyncStart(): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:656](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L656)
+Defined in: [packages/db/src/collection/index.ts:670](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L670)
 
 **`Internal`**
 
@@ -550,7 +604,7 @@ Defined in: [packages/db/src/collection/index.ts:656](https://github.com/TanStac
 _setTransactionScope(transactionScope): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:641](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L641)
+Defined in: [packages/db/src/collection/index.ts:655](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L655)
 
 **`Internal`**
 
@@ -572,7 +626,7 @@ Defined in: [packages/db/src/collection/index.ts:641](https://github.com/TanStac
 _subscribeLayoutChanges(listener): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:569](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L569)
+Defined in: [packages/db/src/collection/index.ts:583](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L583)
 
 Subscribe to layout-only publications. Internal observer channel.
 
@@ -600,7 +654,7 @@ Subscribe to layout-only publications. Internal observer channel.
 _syncedRowMetadataKeysOutsideBase(): TKey[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:709](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L709)
+Defined in: [packages/db/src/collection/index.ts:723](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L723)
 
 **`Internal`**
 
@@ -618,7 +672,7 @@ Applied metadata keys without a source row.
 iterator: IterableIterator<[TKey, WithVirtualProps<TOutput, TKey>]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:772](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L772)
+Defined in: [packages/db/src/collection/index.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L806)
 
 Get all entries (virtual derived state)
 
@@ -634,7 +688,7 @@ Get all entries (virtual derived state)
 cleanup(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1264](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1264)
+Defined in: [packages/db/src/collection/index.ts:1286](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1286)
 
 Clean up the collection by stopping sync and clearing data
 This can be called manually or automatically by garbage collection
@@ -655,7 +709,7 @@ final cleaned-up state.
 createIndex<TIndexType>(indexCallback, config): BaseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:838](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L838)
+Defined in: [packages/db/src/collection/index.ts:872](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L872)
 
 Creates an index on a collection for faster queries.
 Indexes significantly improve query performance by allowing constant time lookups
@@ -711,7 +765,7 @@ currentStateAsChanges(options):
   | ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1130](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1130)
+Defined in: [packages/db/src/collection/index.ts:1152](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1152)
 
 Returns the current state of the collection as an array of changes
 
@@ -755,7 +809,7 @@ const activeChanges = collection.currentStateAsChanges({
 delete(keys, config?): Transaction<any>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1038](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1038)
+Defined in: [packages/db/src/collection/index.ts:1072](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1072)
 
 Deletes one or more items from the collection
 
@@ -818,7 +872,7 @@ try {
 entries(): IterableIterator<[TKey, WithVirtualProps<TOutput, TKey>]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:760](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L760)
+Defined in: [packages/db/src/collection/index.ts:794](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L794)
 
 Get all entries (virtual derived state)
 
@@ -834,7 +888,7 @@ Get all entries (virtual derived state)
 forEach(callbackfn): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:781](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L781)
+Defined in: [packages/db/src/collection/index.ts:815](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L815)
 
 Execute a callback for each entry in the collection
 
@@ -858,7 +912,7 @@ get(key):
   | undefined;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:720](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L720)
+Defined in: [packages/db/src/collection/index.ts:734](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L734)
 
 Get the current value for a key (virtual derived state)
 
@@ -881,7 +935,7 @@ Get the current value for a key (virtual derived state)
 getIndexMetadata(): CollectionIndexMetadata[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:862](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L862)
+Defined in: [packages/db/src/collection/index.ts:896](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L896)
 
 Returns a snapshot of current index metadata sorted by indexId.
 Persistence wrappers can use this to bootstrap index state if indexes were
@@ -899,7 +953,7 @@ created before event listeners were attached.
 getKeyFromItem(item): TKey;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:812](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L812)
+Defined in: [packages/db/src/collection/index.ts:846](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L846)
 
 #### Parameters
 
@@ -919,7 +973,7 @@ Defined in: [packages/db/src/collection/index.ts:812](https://github.com/TanStac
 has(key): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:727](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L727)
+Defined in: [packages/db/src/collection/index.ts:741](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L741)
 
 Check if a key exists in the collection (virtual derived state)
 
@@ -943,7 +997,7 @@ insert(data, config?):
 | Transaction<TOutput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:925](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L925)
+Defined in: [packages/db/src/collection/index.ts:959](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L959)
 
 Inserts one or more items into the collection
 
@@ -1014,7 +1068,7 @@ try {
 isReady(): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:614](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L614)
+Defined in: [packages/db/src/collection/index.ts:628](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L628)
 
 Check if the collection is ready for use
 Returns true if the collection has been marked as ready by its sync implementation
@@ -1044,7 +1098,7 @@ if (collection.isReady()) {
 keys(): IterableIterator<TKey>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:741](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L741)
+Defined in: [packages/db/src/collection/index.ts:775](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L775)
 
 Get all keys (virtual derived state)
 
@@ -1060,7 +1114,7 @@ Get all keys (virtual derived state)
 map<U>(callbackfn): U[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L797)
+Defined in: [packages/db/src/collection/index.ts:831](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L831)
 
 Create a new array with the results of calling a function for each entry in the collection
 
@@ -1088,7 +1142,7 @@ Create a new array with the results of calling a function for each entry in the 
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1239](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1239)
+Defined in: [packages/db/src/collection/index.ts:1261](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1261)
 
 Unsubscribe from a collection event
 
@@ -1106,6 +1160,7 @@ Unsubscribe from a collection event
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
   \| `"truncate"`
+  \| `"loadedSubsets:invalidated"`
   \| `"index:added"`
   \| `"index:removed"`
 
@@ -1131,7 +1186,7 @@ Unsubscribe from a collection event
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1219](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1219)
+Defined in: [packages/db/src/collection/index.ts:1241](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1241)
 
 Subscribe to a collection event
 
@@ -1149,6 +1204,7 @@ Subscribe to a collection event
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
   \| `"truncate"`
+  \| `"loadedSubsets:invalidated"`
   \| `"index:added"`
   \| `"index:removed"`
 
@@ -1180,7 +1236,7 @@ Subscribe to a collection event
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1229](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1229)
+Defined in: [packages/db/src/collection/index.ts:1251](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1251)
 
 Subscribe to a collection event once
 
@@ -1198,6 +1254,7 @@ Subscribe to a collection event once
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
   \| `"truncate"`
+  \| `"loadedSubsets:invalidated"`
   \| `"index:added"`
   \| `"index:removed"`
 
@@ -1229,7 +1286,7 @@ Subscribe to a collection event once
 onFirstReady(callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:598](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L598)
+Defined in: [packages/db/src/collection/index.ts:612](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L612)
 
 Register a callback to be executed when the collection first becomes ready
 Useful for preloading collections
@@ -1274,7 +1331,7 @@ collection.onFirstReady(() => {
 preload(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L664)
+Defined in: [packages/db/src/collection/index.ts:678](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L678)
 
 Preload the collection data by starting sync if not already started
 Multiple concurrent calls will share the same promise
@@ -1291,7 +1348,7 @@ Multiple concurrent calls will share the same promise
 removeIndex(indexOrId): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:853](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L853)
+Defined in: [packages/db/src/collection/index.ts:887](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L887)
 
 Removes an index created with createIndex.
 Returns true when an index existed and was removed.
@@ -1318,7 +1375,7 @@ as invalid after removal.
 startSyncImmediate(): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:631](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L631)
+Defined in: [packages/db/src/collection/index.ts:645](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L645)
 
 Start sync immediately - internal method for compiled queries
 This bypasses lazy loading for special cases like live query results
@@ -1336,10 +1393,11 @@ Throws during active cleanup; restart after cleanup completes instead.
 stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1075](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1075)
+Defined in: [packages/db/src/collection/index.ts:1110](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1110)
 
-Gets the current state of the collection as a Map, but only resolves when data is available
-Waits for the first sync commit to complete before resolving
+Gets the current state of the collection as a Map once the collection is ready
+Resolves when `preload()` does. For a live query, that is initial-query
+readiness, so visible rows alone do not resolve it.
 
 #### Returns
 
@@ -1357,7 +1415,7 @@ Promise that resolves to a Map containing all items in the collection
 subscribeChanges(callback, options?): CollectionSubscription;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1182](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1182)
+Defined in: [packages/db/src/collection/index.ts:1204](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1204)
 
 Subscribe to changes in the collection
 Changes to the same key retain their causal order within a callback.
@@ -1432,7 +1490,7 @@ const subscription = collection.subscribeChanges((changes) => {
 subscribeChanges(callback, options?): CollectionSubscription;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1190](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1190)
+Defined in: [packages/db/src/collection/index.ts:1212](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1212)
 
 Subscribe to changes in the collection
 Changes to the same key retain their causal order within a callback.
@@ -1509,10 +1567,11 @@ const subscription = collection.subscribeChanges((changes) => {
 toArrayWhenReady(): Promise<WithVirtualProps<TOutput, TKey>[]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1101](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1101)
+Defined in: [packages/db/src/collection/index.ts:1130](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1130)
 
-Gets the current state of the collection as an Array, but only resolves when data is available
-Waits for the first sync commit to complete before resolving
+Gets the current state of the collection as an Array once the collection is ready
+Resolves when `preload()` does. For a live query, that is initial-query
+readiness, so visible rows alone do not resolve it.
 
 #### Returns
 
@@ -1530,7 +1589,7 @@ Promise that resolves to an Array containing all items in the collection
 update(key, callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:970](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L970)
+Defined in: [packages/db/src/collection/index.ts:1004](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1004)
 
 Updates one or more items in the collection using a callback function
 
@@ -1601,7 +1660,7 @@ update(
    callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:976](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L976)
+Defined in: [packages/db/src/collection/index.ts:1010](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1010)
 
 Updates one or more items in the collection using a callback function
 
@@ -1675,7 +1734,7 @@ try {
 update(id, callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:983](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L983)
+Defined in: [packages/db/src/collection/index.ts:1017](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1017)
 
 Updates one or more items in the collection using a callback function
 
@@ -1746,7 +1805,7 @@ update(
    callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:989](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L989)
+Defined in: [packages/db/src/collection/index.ts:1023](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1023)
 
 Updates one or more items in the collection using a callback function
 
@@ -1823,7 +1882,7 @@ validateData(
    key?): TOutput;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:876](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L876)
+Defined in: [packages/db/src/collection/index.ts:910](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L910)
 
 Validates the data against the schema
 
@@ -1853,7 +1912,7 @@ Validates the data against the schema
 values(): IterableIterator<WithVirtualProps<TOutput, TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:748](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L748)
+Defined in: [packages/db/src/collection/index.ts:782](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L782)
 
 Get all values (virtual derived state)
 
@@ -1869,7 +1928,7 @@ Get all values (virtual derived state)
 waitFor<T>(event, timeout?): Promise<AllCollectionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1249](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1249)
+Defined in: [packages/db/src/collection/index.ts:1271](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1271)
 
 Wait for a collection event
 
@@ -1887,6 +1946,7 @@ Wait for a collection event
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
   \| `"truncate"`
+  \| `"loadedSubsets:invalidated"`
   \| `"index:added"`
   \| `"index:removed"`
 

@@ -20,6 +20,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   ],
   [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
   [
+    `db-ivm/tests/structural-identity-oracle.property.test.ts`,
+    `structural-identity`,
+    `equal-representations independent-values`,
+  ],
+  [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `sqlite-persistence`,
     `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
@@ -192,7 +197,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity`,
+    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -261,7 +266,15 @@ export type OracleReplayManifestEntry = {
 // These patterns name the random/replay lane, never its fixed-seed sibling.
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
-const indexReplayTestNames = new Map([
+const replayTestNames = new Map([
+  [
+    `structural-identity.equal-representations`,
+    `agrees with D2 value identity for equal representations`,
+  ],
+  [
+    `structural-identity.independent-values`,
+    `agrees with D2 value identity for independent values`,
+  ],
   [
     `index-update.reference-model`,
     `matches a reference model across valid operation sequences \\(seed undefined\\)`,
@@ -287,7 +300,7 @@ function directReplayTestName(property: string): string | undefined {
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))
     return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
-  return indexReplayTestNames.get(property)
+  return replayTestNames.get(property)
 }
 
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [

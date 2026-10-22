@@ -40,6 +40,7 @@ import type {
   PersistedTx,
   PersistenceAdapter,
   ReconciledCommittedTx,
+  RegularScope,
   ReplayableTxDelta,
   SQLiteDriver,
 } from './persisted'
@@ -115,6 +116,7 @@ class SharedPersistenceScheduler {
   private readonly hydrateQueue: Array<ScheduledOperation<unknown>> = []
   private running = false
   private lastCompletedKind: ScheduledOperationKind | undefined
+  private readonly unsettled = new Set<Promise<void>>()
 
   runRegular<T>(task: () => Promise<T>): Promise<T> {
     return this.enqueue(`regular`, task)
@@ -124,7 +126,14 @@ class SharedPersistenceScheduler {
     return this.enqueue(`hydrate`, task)
   }
 
+  // Settles once every operation queued or running at the call has settled.
+  // Waiting takes no turn, so the K=1 alternation is unchanged.
+  afterQueuedWork(): Promise<void> {
+    return settled(Promise.all(this.unsettled))
+  }
+
   adoptRunningHydrate(completion: Promise<unknown>): void {
+    this.track(completion)
     if (this.running) return
     this.running = true
     const finish = () => {
@@ -149,8 +158,15 @@ class SharedPersistenceScheduler {
       const queue = kind === `hydrate` ? this.hydrateQueue : this.regularQueue
       queue.push(operation as ScheduledOperation<unknown>)
     })
+    this.track(result)
     this.drain()
     return result
+  }
+
+  private track(completion: Promise<unknown>): void {
+    const done = settled(completion)
+    this.unsettled.add(done)
+    void done.then(() => this.unsettled.delete(done))
   }
 
   private drain(): void {
@@ -190,6 +206,13 @@ class SharedPersistenceScheduler {
     }
     return this.regularQueue.shift()
   }
+}
+
+function settled(promise: Promise<unknown>): Promise<void> {
+  return promise.then(
+    () => undefined,
+    () => undefined,
+  )
 }
 
 const sharedPersistenceSchedulers = new WeakMap<
@@ -1633,7 +1656,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
   private readonly schedulingIdentitySource: SQLiteDriver
   private scheduler: SharedPersistenceScheduler | undefined
-  private activeUnscheduledHydration: Promise<unknown> | undefined
+  private readonly activeUnscheduledHydrations = new Set<Promise<unknown>>()
   private readonly hydrationAdapter: HydrationPersistenceAdapter
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
@@ -2016,8 +2039,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           observedDriverSchedulingKeys.set(options.driver, key)
           const scheduler = getSharedPersistenceScheduler(key)
           this.scheduler ??= scheduler
-          if (this.activeUnscheduledHydration) {
-            scheduler.adoptRunningHydrate(this.activeUnscheduledHydration)
+          for (const hydration of this.activeUnscheduledHydrations) {
+            scheduler.adoptRunningHydrate(hydration)
           }
         })
     this.schemaVersion = schemaVersion
@@ -2062,21 +2085,26 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
 
     const hydration = Promise.resolve().then(() => task(this.hydrationAdapter))
-    this.activeUnscheduledHydration = hydration
-    const clear = () => {
-      if (this.activeUnscheduledHydration === hydration) {
-        this.activeUnscheduledHydration = undefined
-      }
-    }
+    this.activeUnscheduledHydrations.add(hydration)
+    const clear = () => this.activeUnscheduledHydrations.delete(hydration)
     void hydration.then(clear, clear)
     return hydration
   }
 
-  runInRegularScope<T>(
-    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
-  ): Promise<T> {
-    return this.runRegular(() => task(this.hydrationAdapter))
-  }
+  runInRegularScope: RegularScope = Object.assign(
+    <T>(
+      task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+    ): Promise<T> => this.runRegular(() => task(this.hydrationAdapter)),
+    {
+      // Without a shared scheduler, only this adapter's running hydrates are
+      // ahead of the caller.
+      afterQueuedWork: (): Promise<void> =>
+        this.resolveScheduler()?.afterQueuedWork() ??
+        settled(
+          Promise.all([...this.activeUnscheduledHydrations].map(settled)),
+        ),
+    },
+  )
 
   isHydrationScopeScheduled(): boolean {
     return this.resolveScheduler() !== undefined
@@ -3788,16 +3816,35 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         table_name: string
         tombstone_table_name: string
         schema_version: number
+        setup_complete: number
       }
     | undefined
   > {
+    // setup_complete is 1 when every setup statement in
+    // ensureCollectionReadyInternal would be a no-op.
     const rows = await this.driver.query<{
       table_name: string
       tombstone_table_name: string
       schema_version: number
+      setup_complete: number
     }>(
-      `SELECT table_name, tombstone_table_name, schema_version
-       FROM collection_registry
+      `SELECT table_name, tombstone_table_name, schema_version,
+         (SELECT COUNT(*) FROM sqlite_master
+          WHERE (type = 'table'
+                 AND name IN (table_name, tombstone_table_name))
+             OR (type = 'index'
+                 AND name IN (table_name || '_row_version_idx',
+                              tombstone_table_name || '_row_version_idx'))
+             OR (type = 'trigger'
+                 AND name IN (table_name || '_key_evidence_insert',
+                              table_name || '_key_evidence_delete',
+                              table_name || '_key_evidence_update'))) = 7
+         AND EXISTS (SELECT 1 FROM collection_version
+                     WHERE collection_id = registry.collection_id)
+         AND EXISTS (SELECT 1 FROM collection_reset_epoch
+                     WHERE collection_id = registry.collection_id)
+         AS setup_complete
+       FROM collection_registry AS registry
        WHERE collection_id = ?
        LIMIT 1`,
       [collectionId],
@@ -3866,7 +3913,59 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         cacheGenerationClaimId,
       )
     }
+    // A schema reset keeps every setup object, so the check still holds.
+    if (registration.setup_complete !== 1) {
+      await this.createCollectionTables(
+        collectionId,
+        tableName,
+        tombstoneTableName,
+      )
+    }
+    if (managedAtAdmission) {
+      // Registration is outside the read/write transaction. If collection
+      // retired this generation while the DDL was in flight, remove any
+      // empty table recreated after collection instead of caching it.
+      const generation = await this.driver.query<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+        [collectionId],
+      )
+      if (!generation[0]) {
+        await this.driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`,
+        )
+        await this.driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(tombstoneTableName)}`,
+        )
+        await this.driver.run(
+          `DELETE FROM collection_registry WHERE collection_id = ?`,
+          [collectionId],
+        )
+        await this.driver.run(
+          `DELETE FROM collection_version WHERE collection_id = ?`,
+          [collectionId],
+        )
+        await this.driver.run(
+          `DELETE FROM collection_reset_epoch WHERE collection_id = ?`,
+          [collectionId],
+        )
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache generation was collected before registration finished`,
+        )
+      }
+    }
+    const mapping = {
+      tableName,
+      tombstoneTableName,
+    }
+    this.collectionTableCache.set(collectionId, mapping)
+    return mapping
+  }
 
+  private async createCollectionTables(
+    collectionId: string,
+    tableName: string,
+    tombstoneTableName: string,
+  ): Promise<void> {
     const collectionTableSql = quoteIdentifier(tableName)
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
@@ -3912,44 +4011,6 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       [collectionId],
     )
     await this.ensureCollectionKeyEvidenceTriggers(collectionId, tableName)
-    if (managedAtAdmission) {
-      // Registration is outside the read/write transaction. If collection
-      // retired this generation while the DDL was in flight, remove any
-      // empty table recreated after collection instead of caching it.
-      const generation = await this.driver.query<{ physical_id: string }>(
-        `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
-        [collectionId],
-      )
-      if (!generation[0]) {
-        await this.driver.exec(
-          `DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`,
-        )
-        await this.driver.exec(
-          `DROP TABLE IF EXISTS ${quoteIdentifier(tombstoneTableName)}`,
-        )
-        await this.driver.run(
-          `DELETE FROM collection_registry WHERE collection_id = ?`,
-          [collectionId],
-        )
-        await this.driver.run(
-          `DELETE FROM collection_version WHERE collection_id = ?`,
-          [collectionId],
-        )
-        await this.driver.run(
-          `DELETE FROM collection_reset_epoch WHERE collection_id = ?`,
-          [collectionId],
-        )
-        throw new InvalidPersistedCollectionConfigError(
-          `Persisted cache generation was collected before registration finished`,
-        )
-      }
-    }
-    const mapping = {
-      tableName,
-      tombstoneTableName,
-    }
-    this.collectionTableCache.set(collectionId, mapping)
-    return mapping
   }
 
   private async ensureCollectionKeyEvidenceTriggers(
@@ -4136,7 +4197,46 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     if (this.initialized) {
       return
     }
+    if (!(await this.databaseSetupComplete())) {
+      await this.setUpDatabase()
+    }
+    this.initialized = true
+  }
 
+  // 1 when every statement in setUpDatabase would be a no-op. Columns added
+  // by ALTER TABLE appear in sqlite_master's stored table definition.
+  private async databaseSetupComplete(): Promise<boolean> {
+    const rows = await this.driver.query<{ complete: number }>(
+      `SELECT
+         (SELECT COUNT(*) FROM sqlite_master
+          WHERE (type = 'table' AND name IN (
+                  'cache_generation', 'cache_generation_sequence',
+                  'cache_generation_claim', 'collection_registry',
+                  'persisted_index_registry', 'applied_tx',
+                  'collection_version', 'collection_expected_keys',
+                  'collection_metadata', 'leader_term',
+                  'collection_reset_epoch'))
+             OR (type = 'index' AND name IN (
+                  'cache_generation_head',
+                  'idx_applied_tx_collection_tx_id'))) = 13
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'cache_generation_claim'
+                       AND sql LIKE '%logical_id%'
+                       AND sql LIKE '%expires_at_ms%')
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'applied_tx'
+                       AND sql LIKE '%replay_json%'
+                       AND sql LIKE '%replay_requires_full_reload%')
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'collection_version'
+                       AND sql LIKE '%key_set_evidence_available%'
+                       AND sql LIKE '%key_set_evidence_incompatible%')
+         AS complete`,
+    )
+    return rows[0]?.complete === 1
+  }
+
+  private async setUpDatabase(): Promise<void> {
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS cache_generation (
          logical_id TEXT NOT NULL,
@@ -4290,29 +4390,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        )`,
     )
     await this.driver.exec(
-      `CREATE TABLE IF NOT EXISTS schema_version (
-         scope TEXT PRIMARY KEY,
-         version INTEGER NOT NULL,
-         updated_at INTEGER NOT NULL
-       )`,
-    )
-    await this.driver.run(
-      `INSERT INTO schema_version (scope, version, updated_at)
-       VALUES ('global', ?, CAST(strftime('%s', 'now') AS INTEGER))
-       ON CONFLICT(scope) DO UPDATE SET
-         version = excluded.version,
-         updated_at = excluded.updated_at`,
-      [this.schemaVersion],
-    )
-    await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_reset_epoch (
          collection_id TEXT PRIMARY KEY,
          reset_epoch INTEGER NOT NULL,
          updated_at INTEGER NOT NULL
        )`,
     )
-
-    this.initialized = true
   }
 }
 

@@ -53,11 +53,21 @@
     "file": "query/compiler/order-by.ts",
     "literals": [
       "[TanStack DB]",
-      " orderBy with limit requires an index on \"",
-      "\" for efficient lazy loading. ",
-      "Falling back to loading all data. ",
-      "Consider creating an index on the collection with collection.createIndex((row) => row.",
-      "or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType."
+      " orderBy with limit",
+      " uses a custom string comparator on \"",
+      "\". On-demand sources require a filtered full source request for local sorting. An index with the same compare function reference can sort installed rows, but cannot make provider pagination safe.",
+      " orders virtual field \"",
+      "\"; Collection indexes cannot cover virtual fields, so creating one will not enable ordered lazy loading.",
+      "requires an index on \"",
+      "\" for efficient lazy loading. Consider collection.createIndex((row) => row.",
+      ") or autoIndex: 'eager' with a defaultIndexType.",
+      "found an index on \"",
+      "\", but none uses the query's compareOptions (nulls: \"",
+      "). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.",
+      "\" } } }). Match the query's nulls and string collation, including any locale and localeOptions. The index direction may differ.",
+      "found an index on \"",
+      "\" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.",
+      " Local reads may scan or sort installed rows; an underfilled on-demand window may require a full-source request."
     ]
   },
   {

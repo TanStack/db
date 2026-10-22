@@ -7,7 +7,7 @@ title: createResidualWhere
 function createResidualWhere(expression): Where;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:363](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L363)
+Defined in: [packages/db/src/query/ir.ts:429](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L429)
 
 Create a residual Where clause from an expression
 

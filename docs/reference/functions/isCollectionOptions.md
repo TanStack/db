@@ -7,7 +7,7 @@ title: isCollectionOptions
 function isCollectionOptions(value): value is CollectionOptions<any, string | number, any, UtilsRecord>;
 ```
 
-Defined in: [packages/db/src/client.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L310)
+Defined in: [packages/db/src/client.ts:331](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L331)
 
 ## Parameters
 

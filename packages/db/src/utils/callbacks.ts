@@ -10,3 +10,13 @@ export function runAllCallbacks(callbacks: Iterable<() => void>): void {
   }
   if (firstFailure) throw firstFailure.error
 }
+
+/**
+ * Report an adapter contract breach, such as an `unloadSubset` that throws,
+ * without changing the caller's result. The error surfaces as uncaught.
+ */
+export function reportUncaught(error: unknown): void {
+  queueMicrotask(() => {
+    throw error
+  })
+}

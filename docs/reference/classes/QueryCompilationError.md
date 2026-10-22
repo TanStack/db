@@ -27,6 +27,7 @@ Defined in: [packages/db/src/errors.ts:677](https://github.com/TanStack/db/blob/
 - [`JoinCollectionNotFoundError`](JoinCollectionNotFoundError.md)
 - [`MissingAliasInputsError`](MissingAliasInputsError.md)
 - [`SetWindowRequiresOrderByError`](SetWindowRequiresOrderByError.md)
+- [`SetWindowFindOneLimitError`](SetWindowFindOneLimitError.md)
 
 ## Constructors
 

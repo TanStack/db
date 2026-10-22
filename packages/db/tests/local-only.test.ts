@@ -215,6 +215,33 @@ describe(`LocalOnly Collection`, () => {
     expect(items).toHaveLength(2)
   })
 
+  // Local-only rows stay in memory, so the guide lets them hold values that a
+  // persisted Collection cannot store. A function keeps its identity through
+  // insert and an unrelated update, and a draft can replace it.
+  it(`keeps a function property by reference across insert and update`, () => {
+    const greet = () => `hi`
+    const functions = createCollection(
+      localOnlyCollectionOptions<{
+        id: number
+        n: number
+        greet: () => string
+      }>({ getKey: (item) => item.id }),
+    )
+    functions.insert({ id: 1, n: 0, greet })
+    expect(functions.get(1)!.greet).toBe(greet)
+
+    functions.update(1, (draft) => {
+      draft.n = 1
+    })
+    expect(functions.get(1)!.greet).toBe(greet)
+
+    const bye = () => `bye`
+    functions.update(1, (draft) => {
+      draft.greet = bye
+    })
+    expect(functions.get(1)!.greet).toBe(bye)
+  })
+
   describe(`Pure optimistic behavior`, () => {
     it(`should handle insert operations optimistically`, () => {
       // Insert an item - this works purely optimistically

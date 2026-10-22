@@ -92,10 +92,14 @@ function makeDeferredSource<
   }
 }
 
-function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
+function makePrecreated(
+  build: QueryBuild,
+  opts?: { startSync?: boolean; gcTime?: number },
+) {
   const collection = createLiveQueryCollection({
     query: build as any,
     startSync: opts?.startSync ?? true,
+    gcTime: opts?.gcTime,
   })
   return { collection }
 }
@@ -131,6 +135,7 @@ async function settle() {
 
 function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
   return {
+    collection: () => getQuery()?.collection ?? null,
     current(): ConformanceResult {
       const query = getQuery()
       return expectResultSurface({
@@ -173,10 +178,10 @@ function mountCollection(collection: any) {
   return makeHandle(() => query, dispose)
 }
 
-function mountConfig(build: QueryBuild) {
+function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
   let query: any
   const dispose = $effect.root(() => {
-    query = useLiveQuery({ query: build } as any)
+    query = useLiveQuery({ query: build, ...opts } as any)
   })
   return makeHandle(() => query, dispose)
 }

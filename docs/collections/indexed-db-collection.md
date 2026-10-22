@@ -154,7 +154,9 @@ Store creation is additive. Omitting an existing store from `stores` preserves t
 
 Collection stores must use out-of-line keys (`keyPath: null`) because persistence passes the value returned by `getKey` as an explicit IndexedDB key. `createIndexedDB` creates stores this way. If you reuse an existing store, check its key mode first. The inline-key examples in the lower-level [`createObjectStore` reference](../reference/functions/createObjectStore.md) are not compatible with Collection persistence.
 
-Use values supported by IndexedDB's structured clone algorithm. Functions cannot be stored. Choose a consistent key type for each Collection.
+Use values supported by IndexedDB's [structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm). This includes dates, Maps, Sets, and binary data. A row that contains a function, a symbol, a DOM node, or another value that cannot be cloned is rejected. Its write rejects with `SerializationError`, nothing in its batch is written, and its optimistic change rolls back. An automatic write's `onInsert` or `onUpdate` handler runs before persistence, so it can run even if the row is then rejected. A class instance is stored as its own data, so a restored row is a plain object without the class's methods.
+
+Choose a consistent key type for each Collection.
 
 ## Schema Validation
 

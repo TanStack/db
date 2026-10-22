@@ -91,10 +91,14 @@ function makeDeferredSource<
   }
 }
 
-function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
+function makePrecreated(
+  build: QueryBuild,
+  opts?: { startSync?: boolean; gcTime?: number },
+) {
   const collection = createLiveQueryCollection({
     query: build as any,
     startSync: opts?.startSync ?? true,
+    gcTime: opts?.gcTime,
   })
   return { collection }
 }
@@ -133,8 +137,8 @@ function mountCollection(collection: any) {
   return makeHandle(hook)
 }
 
-function mountConfig(build: QueryBuild) {
-  const hook = renderHook(() => useLiveQuery({ query: build as any }))
+function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+  const hook = renderHook(() => useLiveQuery({ query: build as any, ...opts }))
   return makeHandle(hook)
 }
 
@@ -168,6 +172,7 @@ function mountControllable<P>(
 
 function makeHandle(hook: RenderHookResult<any, any>) {
   return {
+    collection: () => hook.result.current?.collection ?? null,
     current(): ConformanceResult {
       const r: any = hook.result.current
       return expectResultSurface({
@@ -290,6 +295,49 @@ it(`publishes a synchronous full-source ordered limit in the first layout commit
     hook.unmount()
     await liveQueryCollection.cleanup()
     await source.collection.cleanup()
+  }
+})
+
+it(`publishes a locale-string findOne fallback in the first layout commit`, async () => {
+  // A locale string cannot form a provider cursor. Both acquisitions return
+  // literal true from this eager source, so the first window is ready at the
+  // initial render's layout commit.
+  const source = createCollection(
+    mockSyncCollectionOptions({
+      id: `conformance-react-locale-fallback-${sourceSeq++}`,
+      getKey: (row: { id: string; at: string }) => row.id,
+      initialData: [
+        { id: `1`, at: `2026-10-01` },
+        { id: `2`, at: `2026-10-02` },
+      ],
+      autoIndex: `eager`,
+      defaultStringCollation: { stringSort: `locale` },
+    }),
+  )
+  const commits: Array<{ id: string | undefined; status: string }> = []
+  const hook = renderHook(() => {
+    const result = useLiveQuery((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.at, `desc`)
+        .findOne(),
+    )
+    useLayoutEffect(() => {
+      commits.push({
+        id: result.data?.id,
+        status: result.status,
+      })
+    })
+    return result
+  })
+
+  try {
+    expect(commits[0]).toEqual({ id: `2`, status: `ready` })
+  } finally {
+    const liveQueryCollection = hook.result.current.collection
+    hook.unmount()
+    await liveQueryCollection.cleanup()
+    await source.cleanup()
   }
 })
 

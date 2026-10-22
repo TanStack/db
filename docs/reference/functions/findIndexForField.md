@@ -7,12 +7,13 @@ title: findIndexForField
 function findIndexForField<TKey>(
    collection, 
    fieldPath, 
-   compareOptions?): IndexReader<TKey> | undefined;
+   compareOptions?, 
+   canUse?): IndexReader<TKey> | undefined;
 ```
 
-Defined in: [packages/db/src/utils/index-optimization.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/utils/index-optimization.ts#L45)
+Defined in: [packages/db/src/utils/index-optimization.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/utils/index-optimization.ts#L59)
 
-Finds an index that matches a given field path
+Finds the first usable index matching a field path and comparison options.
 
 ## Type Parameters
 
@@ -33,6 +34,10 @@ Finds an index that matches a given field path
 ### compareOptions?
 
 `CompareOptions`
+
+### canUse?
+
+(`index`) => `boolean`
 
 ## Returns
 

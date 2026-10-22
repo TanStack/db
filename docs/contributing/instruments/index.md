@@ -14,7 +14,7 @@ reasoning step or a fixed workflow.
 | Should these laws or concepts be merged, split, replaced, or removed? | [Law restructuring](law-restructuring.md)   | An alternative organization and a check of what it preserves or loses.        |
 
 These are reasoning aids, not additional oracle conformance requirements. The
-[oracle guide](../oracle-tests.md) owns testing requirements. Use the
+[oracle guide](../oracle-rubric.md) owns testing requirements. Use the
 [glossary](../glossary.md) and the relevant architecture and contract sources.
 The authoring and review skills route oracle work here; the cards can also help
 with architecture and other design questions.

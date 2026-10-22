@@ -1,5 +1,47 @@
 # @tanstack/db
 
+## 0.15.2
+
+### Patch Changes
+
+- Keep a settled optimistic row visible while its server row waits behind an earlier persisted write. Previously, two quick writes to one row in a persisted Collection could briefly show the row before the second write. ([#2208](https://github.com/TanStack/db/pull/2208))
+
+- LocalStorage Collections with the default JSON parser now reject an insert or update whose row a restore could not return, such as a row with a function, symbol, `NaN`, `Map`, `Set`, or `undefined` array entry. The write's `isPersisted` promise rejects with `SerializationError`, nothing is written, and the optimistic row rolls back. Previously, JSON silently dropped or replaced these values, so peers and later sessions saw a different row than the writer. ([#2207](https://github.com/TanStack/db/pull/2207))
+
+  IndexedDB Collections now report a value that structured clone cannot store as `SerializationError` instead of a raw `DataCloneError`. The `SerializationError` message no longer says "JSON".
+
+## 0.15.1
+
+### Patch Changes
+
+- Explain whether bounded `orderBy` queries lack a field index, have mismatched comparison options, or have an index that cannot support ordered lazy loading. ([#2196](https://github.com/TanStack/db/pull/2196))
+
+- Fix eager live-query preloads after collection cleanup so they wait for the restarted source snapshot and resolve with its rows. ([#2173](https://github.com/TanStack/db/pull/2173))
+
+- Publish the first window of an ordered live query synchronously when a full-source fallback returns `true` after applying its rows. This prevents an empty initial result when the first ordered request cannot fill the window. ([#2159](https://github.com/TanStack/db/pull/2159))
+
+  A later full-source fallback without ordering-repair debt can also settle in the current graph turn. Explicit window moves and full-source repairs keep their existing settlement rules.
+
+- Show the right ordered window after an on-demand Query Collection refetches. When a refetch changes a page that has a later page after it, or moves a page's end earlier, a row could sort past the page's end and be in neither result. Query DB now reports that through the new sync-adapter call `invalidateLoadedSubsets()`, and each ordered live query and Effect re-establishes its window with a bounded repair. A window that lies inside its own first page, such as a top-N list after an insert, skips the repair. This covers `utils.refetch()` and Query refetches such as `invalidateQueries`. An ordering repair that overlaps in-flight page or tie work now reads a bounded prefix instead of the full source. The SQLite persistence wrapper forwards the new call. Ordered live queries also keep paging when a source answers a request synchronously from its cache, and a finished repair no longer leaves a second first page that every later refetch re-reads. ([#2154](https://github.com/TanStack/db/pull/2154))
+
+- Retire adapter-created live-query collections after their final subscriber leaves. Treat an undefined `gcTime` as omitted, preserve explicit values and caller-supplied collections, and retain Solid projections while their Suspense boundary is pending. ([#2172](https://github.com/TanStack/db/pull/2172))
+
+- Publish optimistic membership departures from ordered live-query windows immediately, even when a provider refill is pending. Keep provider-backed rows private until their sync writes apply. ([#2177](https://github.com/TanStack/db/pull/2177))
+
+## 0.15.0
+
+### Minor Changes
+
+- Load includes only for the rows a windowed query or a `findOne` shows. A live query with an `orderBy`, or a `findOne`, no longer evaluates the includes in its own `select` (a child query, `toArray`, `materialize`, or `findOne`) for rows outside the rows it shows, whether `limit` and `offset` set the window or `setWindow` moves it. A late page now costs about the same as the first one. With `distinct`, the query no longer loads children for every source row. A `where` that names correlation values starts their child loads at once only when no enclosing query is windowed or a `findOne`, and either the query is neither windowed nor a `findOne`, or it is a `findOne` that shows one row for one named correlation value, with no `offset`, and offset 0 at start if a window was requested before start. Any other window or `findOne`, including a window that `setWindow` requests later, can drop those rows. Includes inherited from a subquery in `from`, and includes passed into `fn.select`, still load for every row before the window. ([#2156](https://github.com/TanStack/db/pull/2156))
+
+  `setWindow` now moves only the query's own window. A window inside a `from` subquery, a joined subquery, or an include child no longer answers it, so a query that is neither windowed nor a `findOne` throws `SetWindowRequiresOrderByError`, and one that is neither windowed nor an ordered `findOne` rejects offset moves.
+
+  **Breaking:** a `findOne` keeps its compiled limit, 1 (or 0 for `.limit(0).findOne()`). An ordered `findOne` has a movable window: `getWindow()` returns `{ offset, limit }` with that limit, and `setWindow` can move its offset but now throws the new `SetWindowFindOneLimitError` for any other limit; before, `setWindow({ limit: 3 })` made a `findOne` show three rows. An unordered `findOne` is a fixed one-row result that accepts only its compiled limit at offset 0: `getWindow()` returns `{ offset: 0, limit: 1 }`, and a nonzero offset throws `SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does.
+
+### Patch Changes
+
+- An ordered, limited live query over an on-demand source without an index no longer leaves its window short when a LEFT-joined filter removes rows from the loaded prefix. For example, an anti-join could show an empty window after a visible row was deleted. Such a plan now counts the rows its window still needs, and reads the full source when its prefix cannot fill the window. ([#2132](https://github.com/TanStack/db/pull/2132))
+
 ## 0.14.0
 
 ### Minor Changes

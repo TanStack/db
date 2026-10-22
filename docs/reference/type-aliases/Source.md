@@ -21,7 +21,7 @@ Example: `{ users: usersCollection }`
 
 ```ts
 [alias: string]: 
+  | CollectionOptionsIdentity<any, any, any, any, any>
   | QueryBuilder<any>
-  | CollectionImpl<any, any, any, any, any>
-| CollectionOptionsIdentity<any, any, any, any, any>
+| CollectionImpl<any, any, any, any, any>
 ```

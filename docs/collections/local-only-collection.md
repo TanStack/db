@@ -65,6 +65,30 @@ The `localOnlyCollectionOptions` function accepts the following options:
 - `onUpdate`: Optional handler function called before confirming updates
 - `onDelete`: Optional handler function called before confirming deletes
 
+## Storable Values
+
+A local-only Collection keeps rows in memory and never serializes them. A row
+can hold values that a persisted Collection cannot store, such as functions.
+The Collection returns such a value unchanged, with the same identity, after
+inserts and updates. See [Mutations](../guides/mutations.md) for how drafts
+copy plain objects and keep class instances by reference.
+
+```typescript
+const handlers = createCollection(
+  localOnlyCollectionOptions({
+    getKey: (item) => item.id,
+  }),
+)
+
+handlers.insert({ id: 'save', run: () => console.log('saved') })
+handlers.get('save')?.run() // logs "saved"
+```
+
+Nothing survives a page reload. If you might move these rows to
+[LocalStorageCollection](./local-storage-collection.md) or
+[IndexedDB](./indexed-db-collection.md) later, keep rows as plain data and look
+up behavior outside the row. Those Collections reject values they cannot store.
+
 ## Initial Data
 
 Populate the collection with initial data on creation:
@@ -317,6 +341,7 @@ LocalOnly collections are perfect for:
 | Survives page reload | No | Yes |
 | Performance | Fastest | Fast |
 | Size limits | Memory limits | ~5-10MB |
+| Row values | Any JavaScript value | Values the configured `parser` can store (JSON by default) |
 | Best for | Temporary UI state | User preferences |
 
 ## Learn More

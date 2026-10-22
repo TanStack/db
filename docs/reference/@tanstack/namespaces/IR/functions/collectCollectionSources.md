@@ -7,9 +7,9 @@ title: collectCollectionSources
 function collectCollectionSources(query): CollectionRef[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:276](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L276)
+Defined in: [packages/db/src/query/ir.ts:384](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L384)
 
-Returns each lexical Collection source in a query tree once.
+Returns concrete Collection sources after requiring client binding.
 
 ## Parameters
 

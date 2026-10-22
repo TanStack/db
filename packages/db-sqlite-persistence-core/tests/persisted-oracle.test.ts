@@ -23455,6 +23455,76 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // apply mutex, but it cannot turn the old source result into a row in the
   // new generation. The held local read fixes the ordering; the applied
   // receipt and durable write destination are the comparison checkpoint.
+  // A sync adapter reports through its own sync params that served pages
+  // may have shifted. Under a managed cache generation the wrapper gives each
+  // source session its own params, so the report must reach the public
+  // Collection from the current session and be dropped from a retired one;
+  // otherwise a stale source could start repairs on the replacement.
+  it(`forwards a loaded-subset report only from the current source session`, async () => {
+    const adapter = createRecordingAdapter()
+    let currentStorageId = `report-old-storage`
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: currentStorageId,
+      claimId: `report-claim`,
+    })
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: (currentStorageId = `report-new-storage`),
+      claimId: `report-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const sessions: Array<TodoSyncParams> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `loaded-subset-report-sessions`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sessions.push(params)
+            params.markReady()
+            // Without its own restart hook, the source is retired and
+            // re-entered with fresh params after a scoped rotation.
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let reports = 0
+    const unsubscribe = collection.on(`loadedSubsets:invalidated`, () => {
+      reports++
+    })
+    // Reports are coalesced into a microtask; a macrotask lets them land.
+    const reportsAfter = async (report: () => void) => {
+      const before = reports
+      report()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return reports - before
+    }
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      const first = sessions[0]!
+      expect(await reportsAfter(() => first.invalidateLoadedSubsets())).toBe(1)
+
+      await atPersistedOracleCheckpoint(
+        first.metadata!.persistence!.startScopedRecovery!(),
+        `scoped rotation`,
+      )
+      expect(sessions).toHaveLength(2)
+      const replacement = sessions[1]!
+      expect({
+        retired: await reportsAfter(() => first.invalidateLoadedSubsets()),
+        replacement: await reportsAfter(() =>
+          replacement.invalidateLoadedSubsets(),
+        ),
+      }).toEqual({ retired: 0, replacement: 1 })
+    } finally {
+      unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`rejects a queued old-generation source commit after scoped rotation`, async () => {
     const adapter = createRecordingAdapter()
     const loadEntered = createEventGate()

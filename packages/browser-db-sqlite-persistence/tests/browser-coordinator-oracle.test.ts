@@ -17,6 +17,7 @@ import type {
   ApplyCommittedTxResponse,
   ApplyLocalMutationsRequest,
   ApplyLocalMutationsResponse,
+  HydrationPersistenceAdapter,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   PersistedStorageTarget,
@@ -660,6 +661,20 @@ describe(`BrowserCollectionCoordinator`, () => {
     })
 
     /**
+     * An election waits for queued work through the scheduler barrier. A
+     * regular scope without it is an adapter written for an older contract;
+     * failing at construction keeps the election from retrying forever.
+     */
+    it(`rejects an adapter whose regular scope has no queued-work barrier`, () => {
+      const adapter = createStubAdapter()
+      adapter.runInRegularScope = ((task) =>
+        task(adapter)) as PersistenceAdapter[`runInRegularScope`]
+      expect(() => createCoordinator(adapter)).toThrow(
+        /runInRegularScope\.afterQueuedWork/,
+      )
+    })
+
+    /**
      * A physical cache generation and its claim are one election authority.
      * The reference records the claim registered for each physical ID before
      * election; a term reservation must receive that same pair. A reservation
@@ -780,11 +795,21 @@ describe(`BrowserCollectionCoordinator`, () => {
         const queued = createDeferred()
         const releaseQueued = createDeferred()
         const formerAdapter = createStubAdapter()
-        formerAdapter.runInRegularScope = async (task) => {
-          queued.resolve()
-          await releaseQueued.promise
-          return task(formerAdapter)
-        }
+        // Hold only the write queued after election. The election's empty
+        // read-queue barrier also enters the regular scope.
+        let holdRegularWork = false
+        formerAdapter.runInRegularScope = Object.assign(
+          async <T>(
+            task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+          ) => {
+            if (holdRegularWork) {
+              queued.resolve()
+              await releaseQueued.promise
+            }
+            return task(formerAdapter)
+          },
+          { afterQueuedWork: () => Promise.resolve() },
+        )
         const newAdapter = createStubAdapter()
         const formerLeader = createCoordinator(formerAdapter)
         const newLeader = createCoordinator(newAdapter)
@@ -799,6 +824,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           await vi.waitFor(() =>
             expect(formerLeader.isLeader(`todos`)).toBe(true),
           )
+          holdRegularWork = true
           observeBroadcastMessage = (data) => {
             if (
               (data as { payload?: { type?: string } }).payload?.type ===
@@ -1230,6 +1256,415 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       coord1.dispose()
       coord2.dispose()
+    })
+  })
+
+  /**
+   * # When may an election wait behind queued reads?
+   *
+   * Law: a Web Lock holder reserves its durable election term only after the
+   * reads already queued on its shared scheduler, unless some caller needs a
+   * leader first. A leadership need ends that wait at once: a local route
+   * wait, an outbound RPC, `ensureLeadership`, or an inbound route request or
+   * RPC from another tab. Without that rule, a hydrate that waits for its
+   * first writer route would wait for an election that waits for the hydrate.
+   * A need belongs to one election: it is still waiting at the grant, or it
+   * arrives before the term. A need that an earlier leader served, for this
+   * tab or another, does not exempt a later election. The lock is exclusive,
+   * so its holder has no route to another leader: a delayed heartbeat from
+   * the departed leader does not restore one, and a request made during the
+   * election is a need.
+   *
+   * Model: the reference is the need table below. Every listed request is a
+   * leadership need, so the term must exist while the queued read is still
+   * held. The read is a deferred hydrate: the scheduler barrier
+   * (`runInRegularScope.afterQueuedWork`) and all regular work wait for it,
+   * so it also holds the leader-side write for mutating requests. After
+   * the read is released, each request settles well before the RPC timeout.
+   * A remote request posts one RPC of its kind. Remote subset demand may also
+   * replay once when its first leader becomes known; every post carries the
+   * same acquisition ID, and the lease oracle owns exact lease accounting.
+   *
+   * Grammar: each request kind × a local requester (the lock holder itself)
+   * or a remote requester (a later tab whose lock request is queued). Remote
+   * `ensureLeadership` is excluded: the holder keeps the lock, so the remote
+   * caller has no route to its own leadership. Release of an unacquired
+   * subset sends no RPC and is not a leadership need.
+   *
+   * Checkpoints: before the request (premise: no term while the read is
+   * held), after bounded turns with the read still held (term and route), and
+   * after release (settlement and RPC count). Hostile mutants that skip any
+   * need mark fail the held-read checkpoint or the settlement deadline.
+   *
+   * Per-election cells: a follower takes over from a leader that served an
+   * earlier need, from another tab or from the follower itself, while the
+   * follower's queued read is held. The model has no term until the read is
+   * released. A third cell delivers the departed leader's heartbeat during
+   * the follower's election and then makes a request; the model has the
+   * follower's term while the read is still held.
+   */
+  describe(`leadership need under a queued read`, () => {
+    const collectionId = `needed`
+    const transaction = (txId: string): PersistedTx => ({
+      txId,
+      term: 0,
+      seq: 0,
+      rowVersion: 0,
+      mutations: [{ type: `insert`, key: txId, value: { id: txId } }],
+    })
+    const leadershipNeeds = {
+      'local mutation': {
+        request: `rpc:applyLocalMutations:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestApplyLocalMutations(collectionId, [
+            {
+              mutationId: `needed-mutation`,
+              type: `insert`,
+              key: `needed-mutation`,
+              value: { id: `needed-mutation` },
+            },
+          ]),
+      },
+      'source commit': {
+        request: `rpc:applyCommittedTx:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestApplyCommittedTx(
+            collectionId,
+            transaction(`needed-commit`),
+          ),
+      },
+      reconciliation: {
+        request: `rpc:reconcileCommittedTx:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.reconcileCommittedTx(
+            collectionId,
+            transaction(`needed-reconcile`),
+            { latestRowVersion: 0, resetEpoch: 0 },
+          ),
+      },
+      'remote subset': {
+        request: `rpc:ensureRemoteSubset:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestEnsureRemoteSubset(collectionId, { limit: 1 }),
+      },
+      pullSince: {
+        request: `rpc:pullSince:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.pullSince(collectionId, 0),
+      },
+      'persisted index': {
+        request: `rpc:ensurePersistedIndex:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestEnsurePersistedIndex(collectionId, `needed-idx`, {
+            expressionSql: [`id`],
+          }),
+      },
+      ensureLeadership: {
+        request: undefined,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.ensureLeadership(collectionId),
+      },
+    } as const
+    const cells = Object.keys(leadershipNeeds).flatMap((kind) =>
+      (kind === `ensureLeadership`
+        ? ([`local`] as const)
+        : ([`local`, `remote`] as const)
+      ).map((requester) => ({
+        kind: kind as keyof typeof leadershipNeeds,
+        requester,
+      })),
+    )
+
+    function createQueuedReadAdapter() {
+      const adapter = createStubAdapter()
+      const queuedRead = createDeferred()
+      // The queued read holds regular work and every barrier behind it.
+      adapter.runInRegularScope = Object.assign(
+        async <T>(
+          task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+        ) => {
+          await queuedRead.promise
+          return task(adapter)
+        },
+        { afterQueuedWork: () => queuedRead.promise },
+      )
+      adapter.reconcileCommittedTx = (target, tx) => {
+        adapter.appliedTxs.push({ collectionId: storageId(target), tx })
+        return Promise.resolve({
+          kind: `applied-now` as const,
+          committed: { term: tx.term, seq: tx.seq, rowVersion: tx.rowVersion },
+          latestRowVersion: tx.rowVersion,
+        })
+      }
+      return { adapter, queuedRead }
+    }
+
+    it.each(cells)(
+      `elects for a $requester $kind while a queued read holds the scheduler`,
+      async ({ kind, requester }) => {
+        const need = leadershipNeeds[kind]
+        const { adapter, queuedRead } = createQueuedReadAdapter()
+        const holder = createCoordinator(adapter)
+        holder.registerRemoteSubsetOwner(
+          collectionId,
+          withUnusedUnloadSubset(async () => {}),
+        )
+        holder.subscribe(collectionId, () => {})
+        await flush(20)
+        const caller =
+          requester === `local` ? holder : createCoordinator(adapter)
+        if (caller !== holder) caller.subscribe(collectionId, () => {})
+        await flush(20)
+        // Premise: the holder has the Web Lock, but its term waits behind
+        // the queued read because no caller has needed a leader yet.
+        expect(durableTerms.get(collectionId)).toBeUndefined()
+        expect(holder.isLeader(collectionId)).toBe(false)
+
+        const posts: Array<{ acquisitionId?: string }> = []
+        observePostedMessage = (data) => {
+          const payload = (
+            data as { payload?: { type?: string; acquisitionId?: string } }
+          ).payload
+          if (need.request !== undefined && payload?.type === need.request) {
+            posts.push({ acquisitionId: payload.acquisitionId })
+          }
+        }
+        let settled = false
+        const pending = Promise.resolve(need.run(caller)).finally(() => {
+          settled = true
+        })
+        void pending.catch(() => undefined)
+        try {
+          await flush(50)
+          // The need ended the wait before the read finished.
+          expect(durableTerms.get(collectionId)).toBe(1)
+          expect(holder.isLeader(collectionId)).toBe(true)
+          expect(caller.isLeader(collectionId)).toBe(caller === holder)
+
+          queuedRead.resolve()
+          await Promise.race([pending, flush(1_000)])
+          expect(settled).toBe(true)
+          await pending
+          if (need.request === undefined || caller === holder) {
+            expect(posts).toEqual([])
+          } else if (kind === `remote subset`) {
+            expect(posts.length).toBeGreaterThan(0)
+            expect(new Set(posts.map((post) => post.acquisitionId)).size).toBe(
+              1,
+            )
+          } else {
+            expect(posts).toHaveLength(1)
+          }
+        } finally {
+          queuedRead.resolve()
+          observePostedMessage = undefined
+          // A request stuck on an RPC timeout must not hide the assertion;
+          // disposal in afterEach rejects it.
+          await Promise.race([pending.catch(() => undefined), flush(0)])
+        }
+      },
+    )
+
+    it(`reserves the term after the queued read when no caller needs a leader`, async () => {
+      const { adapter, queuedRead } = createQueuedReadAdapter()
+      const holder = createCoordinator(adapter)
+      holder.subscribe(collectionId, () => {})
+      await flush(50)
+      expect(durableTerms.get(collectionId)).toBeUndefined()
+      expect(holder.isLeader(collectionId)).toBe(false)
+
+      queuedRead.resolve()
+      await flush(20)
+      expect(durableTerms.get(collectionId)).toBe(1)
+      expect(holder.isLeader(collectionId)).toBe(true)
+    })
+
+    /**
+     * Starts a leader, then a follower whose queued read is held, and lets
+     * `serve` make requests that the leader answers.
+     */
+    async function followerOfServedLeader(
+      serve: (follower: BrowserCollectionCoordinator) => Promise<unknown>,
+    ) {
+      const leader = createCoordinator()
+      leader.subscribe(collectionId, () => {})
+      await flush(20)
+      const { adapter, queuedRead } = createQueuedReadAdapter()
+      const follower = createCoordinator(adapter)
+      follower.subscribe(collectionId, () => {})
+      await flush(20)
+      await serve(follower)
+      expect(durableTerms.get(collectionId)).toBe(1)
+      return { leader, follower, queuedRead }
+    }
+
+    it.each([
+      {
+        served: `another tab's request`,
+        serve: async () => {
+          const other = createCoordinator()
+          other.subscribe(collectionId, () => {})
+          await other.pullSince(collectionId, 0)
+          other.dispose()
+        },
+      },
+      {
+        served: `the follower's own request`,
+        serve: (follower: BrowserCollectionCoordinator) =>
+          follower.pullSince(collectionId, 0),
+      },
+    ])(
+      `keeps a takeover term behind its queued read after $served was served`,
+      async ({ serve }) => {
+        const { leader, follower, queuedRead } =
+          await followerOfServedLeader(serve)
+        leader.dispose()
+        await flush(50)
+        expect(durableTerms.get(collectionId)).toBe(1)
+        expect(follower.isLeader(collectionId)).toBe(false)
+
+        queuedRead.resolve()
+        await flush(20)
+        expect(durableTerms.get(collectionId)).toBe(2)
+        expect(follower.isLeader(collectionId)).toBe(true)
+      },
+    )
+
+    it(`treats a request during a takeover as a need despite a delayed former heartbeat`, async () => {
+      const { leader, follower, queuedRead } = await followerOfServedLeader(
+        (follower) => follower.pullSince(collectionId, 0),
+      )
+      const formerId = leader.getNodeId()
+      leader.dispose()
+      await flush(50)
+      // The departed leader's last heartbeat arrives during the election.
+      injectBroadcastMessage(`tsdb:coord:test-db`, {
+        v: 1,
+        dbName: `test-db`,
+        collectionId,
+        senderId: formerId,
+        ts: Date.now(),
+        payload: {
+          type: `leader:heartbeat`,
+          term: 1,
+          leaderId: formerId,
+          latestSeq: 0,
+          latestRowVersion: 0,
+        },
+      })
+      await flush(0)
+      expect(durableTerms.get(collectionId)).toBe(1)
+
+      let settled = false
+      const pulled = follower.pullSince(collectionId, 0).finally(() => {
+        settled = true
+      })
+      void pulled.catch(() => undefined)
+      try {
+        await flush(50)
+        expect(durableTerms.get(collectionId)).toBe(2)
+        expect(follower.isLeader(collectionId)).toBe(true)
+        queuedRead.resolve()
+        await Promise.race([pulled, flush(1_000)])
+        expect(settled).toBe(true)
+        await expect(pulled).resolves.toMatchObject({ ok: true })
+      } finally {
+        queuedRead.resolve()
+        await Promise.race([pulled.catch(() => undefined), flush(0)])
+      }
+    })
+  })
+
+  /**
+   * # What does `ensureLeadership` promise?
+   *
+   * Law: `PersistedCollectionCoordinator.ensureLeadership` resolves when this
+   * node becomes the collection's leader, whether it already leads or its
+   * queued Web Lock is granted later. Joining keeps an existing lock request
+   * and its queue position. Disposal rejects the wait, as it rejects other
+   * route waits and pending RPCs. The model is the FIFO Web Lock queue: tabs
+   * that subscribed earlier are granted earlier. Checkpoints are the call's
+   * settlement and each tab's `isLeader` after the current leader disposes.
+   */
+  describe(`ensureLeadership`, () => {
+    it(`resolves at once for the current leader`, async () => {
+      const leader = createCoordinator()
+      leader.subscribe(`todos`, () => {})
+      await flush(20)
+      expect(leader.isLeader(`todos`)).toBe(true)
+      await expect(leader.ensureLeadership(`todos`)).resolves.toBeUndefined()
+    })
+
+    it(`resolves when a queued lock is granted later, keeping its queue position`, async () => {
+      const first = createCoordinator()
+      const second = createCoordinator()
+      const third = createCoordinator()
+      first.subscribe(`todos`, () => {})
+      await flush(20)
+      second.subscribe(`todos`, () => {})
+      third.subscribe(`todos`, () => {})
+      await flush(20)
+      expect(first.isLeader(`todos`)).toBe(true)
+
+      let settled = false
+      const ensured = second.ensureLeadership(`todos`).finally(() => {
+        settled = true
+      })
+      void ensured.catch(() => undefined)
+      await flush(20)
+      expect(settled).toBe(false)
+
+      first.dispose()
+      await flush(50)
+      expect(second.isLeader(`todos`)).toBe(true)
+      expect(third.isLeader(`todos`)).toBe(false)
+      expect(settled).toBe(true)
+      await expect(ensured).resolves.toBeUndefined()
+    })
+
+    // A request that first waits for a route keeps the retry budget it had
+    // without that wait. A lock holder that never announces a route stands in
+    // for a slow election: once it lets go, this tab leads and the request is
+    // still within its retries.
+    it(`keeps an RPC's retry budget when the first route wait times out`, async () => {
+      const lockName = `tsdb:leader:test-db:todos`
+      let releaseHolder!: () => void
+      const holding = new Promise<void>((acquired) => {
+        void navigator.locks.request(lockName, () => {
+          acquired()
+          return new Promise<void>((resolve) => {
+            releaseHolder = resolve
+          })
+        })
+      })
+      await holding
+      const follower = createCoordinator()
+      follower.subscribe(`todos`, () => {})
+      await flush(20)
+      expect(follower.isLeader(`todos`)).toBe(false)
+
+      const pulled = follower.pullSince(`todos`, 0)
+      void pulled.catch(() => undefined)
+      // Past the route wait's 10 s bound, then the holder lets go.
+      await new Promise((resolve) => setTimeout(resolve, 10_500))
+      releaseHolder()
+      await expect(pulled).resolves.toMatchObject({ ok: true })
+      expect(follower.isLeader(`todos`)).toBe(true)
+    }, 40_000)
+
+    it(`rejects a pending wait when its coordinator is disposed`, async () => {
+      const leader = createCoordinator()
+      const waiting = createCoordinator()
+      leader.subscribe(`todos`, () => {})
+      await flush(20)
+      waiting.subscribe(`todos`, () => {})
+      await flush(20)
+
+      const ensured = waiting.ensureLeadership(`todos`)
+      void ensured.catch(() => undefined)
+      waiting.dispose()
+      await expect(ensured).rejects.toThrow(/leadership route closed/)
+      expect(leader.isLeader(`todos`)).toBe(true)
     })
   })
 
@@ -2539,14 +2974,19 @@ describe(`BrowserCollectionCoordinator`, () => {
         )
 
         const events: Array<string> = []
-        adapter.runInRegularScope = async (task) => {
-          events.push(`scheduler-enter`)
-          try {
-            return await task(adapter)
-          } finally {
-            events.push(`scheduler-exit`)
-          }
-        }
+        adapter.runInRegularScope = Object.assign(
+          async <T>(
+            task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+          ) => {
+            events.push(`scheduler-enter`)
+            try {
+              return await task(adapter)
+            } finally {
+              events.push(`scheduler-exit`)
+            }
+          },
+          { afterQueuedWork: () => Promise.resolve() },
+        )
         const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
         adapter.applyCommittedTx = async (...args) => {
           events.push(`apply`)
@@ -6448,6 +6888,16 @@ describe(`BrowserCollectionCoordinator`, () => {
     })
 
     it(`ignores a lower-term Browser heartbeat without replaying to its stale leader`, async () => {
+      // Another holder keeps the leader lock, so this coordinator follows.
+      let releaseHolder!: () => void
+      await new Promise<void>((acquired) => {
+        void navigator.locks.request(`tsdb:leader:test-db:todos`, () => {
+          acquired()
+          return new Promise<void>((resolve) => {
+            releaseHolder = resolve
+          })
+        })
+      })
       const coordinator = createCoordinator()
       let forwardedHeartbeats = 0
       coordinator.subscribe(`todos`, (message) => {
@@ -6457,7 +6907,6 @@ describe(`BrowserCollectionCoordinator`, () => {
           forwardedHeartbeats++
         }
       })
-      coordinator.isLeader = () => false
       const internals = coordinator as unknown as {
         onChannelMessage: (message: unknown) => void
         collections: Map<
@@ -6503,6 +6952,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         })
       } finally {
         coordinator.dispose()
+        releaseHolder()
       }
     })
 

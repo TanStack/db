@@ -180,6 +180,13 @@ export class SQLiteBigIntOutOfRangeError extends PersistedCollectionCoreError {
   }
 }
 
+export class SQLiteConnectionClosedError extends PersistedCollectionCoreError {
+  constructor(message: string) {
+    super(message)
+    this.name = `SQLiteConnectionClosedError`
+  }
+}
+
 export class PersistenceUnavailableError extends PersistedCollectionCoreError {
   constructor(details?: string) {
     super(

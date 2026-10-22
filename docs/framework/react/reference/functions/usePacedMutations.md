@@ -7,13 +7,15 @@ title: usePacedMutations
 function usePacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```
 
-Defined in: [usePacedMutations.ts:93](https://github.com/TanStack/db/blob/main/packages/react-db/src/usePacedMutations.ts#L93)
+Defined in: [usePacedMutations.ts:95](https://github.com/TanStack/db/blob/main/packages/react-db/src/usePacedMutations.ts#L95)
 
 React hook for managing paced mutations with timing strategies.
 
 Provides optimistic mutations with pluggable strategies like debouncing,
 queuing, or throttling. The optimistic updates are applied immediately via
 `onMutate`, and the actual persistence is controlled by the strategy.
+Callbacks follow the latest committed render, so a suspended render cannot
+replace the callbacks used by active mutations.
 
 ## Type Parameters
 

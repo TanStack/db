@@ -5,6 +5,8 @@
  * acceptMutations accepts only its Collection's mutations; IndexedDB transactions
  * commit all writes or abort all writes. A rejected write must not appear after
  * a successful suffix or reopen. Clear/import replace the source snapshot.
+ * A row that structured clone cannot store rejects with SerializationError on
+ * every entry path, so callers see one storage error type for both adapters.
  *
  * The model retains only an authored "before" and "after" snapshot and an
  * application decision. Before a held handler resolves, only public optimistic
@@ -29,6 +31,7 @@
 import { z } from 'zod'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  SerializationError,
   createCollection,
   createTransaction,
   indexedDBCollectionOptions,
@@ -197,9 +200,11 @@ describe('atomic persistence and truthful settlement', () => {
           }
           const outcome = await promise.then(
             () => 'fulfilled',
-            () => 'rejected',
+            (error: unknown) => error,
           )
-          expect(outcome, 'failed write settlement').toBe('rejected')
+          expect(outcome, 'failed write settlement').toBeInstanceOf(
+            SerializationError,
+          )
           assertRows(
             (await readStore<Row>(h.db, 'items')).rows,
             before,
@@ -378,7 +383,7 @@ it('retains the previous snapshot when an imported replacement cannot be cloned'
         { id: 3, name: 'valid prefix' },
         { id: 4, name: 'invalid', unsupported: () => {} },
       ]),
-    ).rejects.toThrow()
+    ).rejects.toBeInstanceOf(SerializationError)
     assertRows(collection.values(), original, 'failed replacement public')
     assertRows(
       (await readStore<Row>(h.db, 'items')).rows,

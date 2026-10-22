@@ -9,7 +9,7 @@ function getHavingExpression(having):
 | Aggregate<any>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:341](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L341)
+Defined in: [packages/db/src/query/ir.ts:407](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L407)
 
 Extract the expression from a HAVING clause
 HAVING clauses can contain aggregates, unlike regular WHERE clauses

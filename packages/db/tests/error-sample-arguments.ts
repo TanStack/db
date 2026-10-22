@@ -163,6 +163,7 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   NameRequiredError: [[]],
   GetKeyRequiredError: [[]],
   SetWindowReentrancyError: [[]],
+  SetWindowFindOneLimitError: [[]],
 
   // Error classes with just message parameter (no special handling)
   // These inherit from base Error not TanStackDBError:

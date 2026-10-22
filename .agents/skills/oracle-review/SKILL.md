@@ -9,7 +9,7 @@ Ask both whether the oracle enforces its stated law and whether that is the
 right law to promise. A passing test can coexist with a wrong theory; a failing
 test can coexist with correct production.
 
-Read [the oracle guide](../../../docs/contributing/oracle-tests.md),
+Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
 [the glossary](../../../docs/contributing/glossary.md), and the relevant owner
 and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).
 Follow the subsystem reading requirements in AGENTS.md. Guide conformance is
@@ -55,3 +55,7 @@ correctness; a preference does not establish a contract violation.
 
 Report supported findings and remaining uncertainty. Do not invent findings,
 retire laws, or rewrite expectations to make a review come out decisive.
+
+If the review leads to oracle edits, load
+[oracle-authoring](../oracle-authoring/SKILL.md) before you edit. This also
+applies when you fix a finding during the same task.
