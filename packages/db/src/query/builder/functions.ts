@@ -4,15 +4,14 @@ import { grouping } from '../compiler/grouping.js'
 import { isRefProxy, toExpression } from './ref-proxy.js'
 import { registerWrapper } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { RefProxy } from './ref-proxy.js'
-import type { SingleResult } from '../../types.js'
 import type {
   Context,
-  GetInlineResult,
   RefLeaf,
   StringifiableScalar,
 } from './types.js'
-import type { QueryBuilder } from './index.js'
+import type { BaseQueryBuilder, QueryBuilder } from './index.js'
 
 type StringRef =
   RefLeaf<string> | RefLeaf<string | null> | RefLeaf<string | undefined>
@@ -325,7 +324,7 @@ export function concat(
           : codedMessage(110),
       )
     }
-    return new ConcatToArrayWrapper(toArrayArg.query)
+    return new ConcatToArrayWrapper(toArrayArg.query, toArrayArg.runtime)
   }
 
   return new Func(
@@ -767,7 +766,10 @@ export class ToArrayWrapper<_T = unknown> {
   readonly __brand = `ToArrayWrapper` as const
   declare readonly _type: `toArray`
   declare readonly _result: _T
-  constructor(public readonly query: QueryBuilder<any>) {
+  constructor(
+    public readonly query: QueryBuilder<any>,
+    public readonly runtime: IncludesRuntime,
+  ) {
     registerWrapper(this, `toArray()`)
   }
 }
@@ -776,7 +778,10 @@ export class ConcatToArrayWrapper<_T = unknown> {
   readonly __brand = `ConcatToArrayWrapper` as const
   declare readonly _type: `concatToArray`
   declare readonly _result: _T
-  constructor(public readonly query: QueryBuilder<any>) {
+  constructor(
+    public readonly query: QueryBuilder<any>,
+    public readonly runtime: IncludesRuntime,
+  ) {
     registerWrapper(this, `concat(toArray())`)
   }
 }
@@ -798,15 +803,12 @@ export class MaterializeWrapper<
   declare readonly _type: `materialize`
   declare readonly _result: _T
   declare readonly _isSingle: _IsSingle
-  constructor(public readonly query: QueryBuilder<any>) {
+  constructor(
+    public readonly query: QueryBuilder<any>,
+    public readonly runtime: IncludesRuntime,
+  ) {
     registerWrapper(this, `materialize()`)
   }
-}
-
-export function toArray<TContext extends Context>(
-  query: QueryBuilder<TContext>,
-): ToArrayWrapper<GetInlineResult<TContext>> {
-  return new ToArrayWrapper(query)
 }
 
 function caseWhenHasOnlyExpressionValues(args: Array<CaseWhenValue>): boolean {
@@ -850,41 +852,13 @@ function isConditionValue(value: CaseWhenValue | undefined): boolean {
   return isExpressionValue(value) && !Array.isArray(value)
 }
 
-/**
- * Materialize an includes subquery into a plain value on the parent row.
- *
- * - For multi-row subqueries, the parent receives an `Array<T>` snapshot
- *   (equivalent to `toArray()`).
- * - For `findOne()` subqueries, the parent receives a single `T | undefined`
- *   value — `undefined` when no child matches.
- *
- * The snapshot updates reactively: parent rows re-emit when the underlying
- * children change.
- *
- * @example
- * ```ts
- * // Multi-row: produces Array<Issue> on each project
- * select(({ p }) => ({
- *   ...p,
- *   issues: materialize(
- *     q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
- *   ),
- * }))
- *
- * // Singleton: produces Author | undefined on each post
- * select(({ p }) => ({
- *   ...p,
- *   author: materialize(
- *     q.from({ a: authors }).where(({ a }) => eq(a.id, p.authorId)).findOne(),
- *   ),
- * }))
- * ```
- */
-export function materialize<TContext extends Context>(
-  query: QueryBuilder<TContext>,
-): MaterializeWrapper<
-  GetInlineResult<TContext>,
-  TContext extends SingleResult ? true : false
-> {
-  return new MaterializeWrapper(query)
+export class IncludeWrapper<_TContext extends Context = any> {
+  readonly __brand = `IncludeWrapper` as const
+  declare readonly _context: _TContext
+  constructor(
+    public readonly query: BaseQueryBuilder<any>,
+    public readonly runtime: IncludesRuntime,
+  ) {
+    registerWrapper(this, `include()`)
+  }
 }

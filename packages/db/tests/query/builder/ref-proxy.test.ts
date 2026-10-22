@@ -281,9 +281,9 @@ describe(`ref-proxy`, () => {
         expect(expression).toBeInstanceOf(Value)
         expect((expression as Value).value).toBe(literal)
       }
-      expect(() => toExpression(new MaterializeWrapper({} as any))).toThrow(
-        /materialize\(\) cannot be used inside expressions/,
-      )
+      expect(() =>
+        toExpression(new MaterializeWrapper({} as any, {} as any)),
+      ).toThrow(/materialize\(\) cannot be used inside expressions/)
     })
   })
 

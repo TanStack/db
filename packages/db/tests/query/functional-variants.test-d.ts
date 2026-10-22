@@ -1,15 +1,14 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import {
-  Query,
+import { Query,
   caseWhen,
   count,
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   leftJoin,
   materialize,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -172,7 +171,7 @@ describe(`Functional Variants Types`, () => {
     createLiveQueryCollection((q) =>
       q.from({ user: usersCollection }).fn.select((row) => ({
         id: row.user.id,
-        departments: q.from({ department: departmentsCollection }),
+        departments: include(q.from({ department: departmentsCollection })),
       })),
     )
 

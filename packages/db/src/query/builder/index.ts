@@ -18,6 +18,7 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import {
+  IncludeOperatorRequiredError,
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
@@ -38,12 +39,14 @@ import {
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
 import type { CollectionResolver } from './clone-query.js'
 import type { JoinOperator, JoinType } from './join-operators.js'
 import type { GroupKeys } from './group-keys.js'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
@@ -375,6 +378,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       on: onExpression,
       compile: operator.compile,
       optimize: operator.optimize,
+      materialize: operator.materialize,
     }
 
     const existingJoins = this.query.join || []
@@ -1020,7 +1024,7 @@ function buildNestedSelect(
         )
       : toExpr(obj)
   }
-  if (obj instanceof BaseQueryBuilder) {
+  if (obj instanceof BaseQueryBuilder || obj instanceof IncludeWrapper) {
     if (!fieldName) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -1028,7 +1032,15 @@ function buildNestedSelect(
           : codedMessage(114),
       )
     }
-    return buildIncludesSubquery(obj, fieldName, parentScope, `collection`)
+    if (obj instanceof BaseQueryBuilder)
+      throw new IncludeOperatorRequiredError(fieldName)
+    return buildIncludesSubquery(
+      obj.query,
+      fieldName,
+      parentScope,
+      `collection`,
+      obj.runtime,
+    )
   }
   if (obj instanceof ToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1045,7 +1057,13 @@ function buildNestedSelect(
           : codedMessage(116),
       )
     }
-    return buildIncludesSubquery(obj.query, fieldName, parentScope, `array`)
+    return buildIncludesSubquery(
+      obj.query,
+      fieldName,
+      parentScope,
+      `array`,
+      obj.runtime,
+    )
   }
   if (obj instanceof ConcatToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1062,7 +1080,13 @@ function buildNestedSelect(
           : codedMessage(118),
       )
     }
-    return buildIncludesSubquery(obj.query, fieldName, parentScope, `concat`)
+    return buildIncludesSubquery(
+      obj.query,
+      fieldName,
+      parentScope,
+      `concat`,
+      obj.runtime,
+    )
   }
   if (obj instanceof CaseWhenWrapper) {
     return buildConditionalSelect(obj, parentScope, fieldName)
@@ -1079,8 +1103,15 @@ function buildNestedSelect(
       out[`${base}__${++spreadIndex}`] = v
       continue
     }
-    if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(v, k, parentScope, `collection`)
+    if (v instanceof BaseQueryBuilder) throw new IncludeOperatorRequiredError(k)
+    if (v instanceof IncludeWrapper) {
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        `collection`,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof ToArrayWrapper) {
@@ -1091,7 +1122,13 @@ function buildNestedSelect(
             : codedMessage(119),
         )
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentScope, `array`)
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        `array`,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof ConcatToArrayWrapper) {
@@ -1102,7 +1139,13 @@ function buildNestedSelect(
             : codedMessage(120),
         )
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentScope, `concat`)
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        `concat`,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof MaterializeWrapper) {
@@ -1117,7 +1160,13 @@ function buildNestedSelect(
       const materialization: IncludesMaterialization = childQuery.singleResult
         ? `singleton`
         : `array`
-      out[k] = buildIncludesSubquery(v.query, k, parentScope, materialization)
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        materialization,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof CaseWhenWrapper) {
@@ -1399,6 +1448,7 @@ function buildIncludesSubquery(
   fieldName: string,
   parentScope: ParentScope,
   materialization: IncludesMaterialization,
+  runtime: IncludesRuntime,
 ): IncludesSubquery {
   const sourceQuery = childBuilder._getQuery()
   if (reusesAncestorBinding(sourceQuery, parentScope.bindingIds)) {
@@ -1596,6 +1646,7 @@ function buildIncludesSubquery(
     parentRef,
     childRef,
     fieldName,
+    runtime,
     parentFilters.length > 0 ? parentFilters : undefined,
     parentProjection,
     materialization,

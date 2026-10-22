@@ -12,6 +12,8 @@ import type { NamespacedRow } from '../types'
 
 import type { processJoins } from './compiler/joins.js'
 import type { Grouping } from './compiler/grouping.js'
+import type { IncludesRuntime } from './live/includes-runtime.js'
+import type { materializeCompilation } from './live/materialized-pipeline.js'
 import type { applyOptimizations } from './optimizer-joins.js'
 
 export interface QueryIR {
@@ -59,6 +61,8 @@ export interface JoinClause {
   // so apps without joins never import it.
   compile: typeof processJoins
   optimize: typeof applyOptimizations
+  // Reduces public keys for a joined query with a custom key.
+  materialize: typeof materializeCompilation
 }
 
 export type Where =
@@ -296,6 +300,8 @@ export class IncludesSubquery extends BaseExpression {
     public correlationField: PropRef, // Parent-side ref (e.g., project.id)
     public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
     public fieldName: string, // Result field name (e.g., "issues")
+    // The include value brings the materializer that publishes it.
+    public runtime: IncludesRuntime,
     public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
     public parentProjection?: Array<PropRef>, // Parent field refs used anywhere in the child plan
     public materialization: IncludesMaterialization = `collection`,

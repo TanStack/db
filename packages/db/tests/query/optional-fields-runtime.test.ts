@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   groupKeys,
-  leftJoin } from '../../src/query/index.js'
+  leftJoin,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 

@@ -118,9 +118,13 @@ describe(`QueryBuilder.unionAll`, () => {
 
     const query = builder
       .unionAll({ employees: employeeDescriptor })
-      .join(innerJoin({ departments: departmentDescriptor },
-        ({ employees, departments }) =>
-          eq(employees.department_id, departments.id)))
+      .join(
+        innerJoin(
+          { departments: departmentDescriptor },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
+        ),
+      )
 
     expect(collectSourceRefs(getQueryIR(query)).map((ref) => ref.type)).toEqual(
       [`descriptorRef`, `descriptorRef`],
@@ -157,8 +161,12 @@ describe(`QueryBuilder.unionAll`, () => {
 
     const query = builder
       .unionAll(employeeRows, departmentRows)
-      .join(innerJoin({ departments: departmentDescriptor },
-        ({ id, departments }) => eq(id, departments.id)))
+      .join(
+        innerJoin(
+          { departments: departmentDescriptor },
+          ({ id, departments }) => eq(id, departments.id),
+        ),
+      )
 
     expect(collectSourceRefs(getQueryIR(query)).map((ref) => ref.type)).toEqual(
       [`descriptorRef`, `descriptorRef`, `descriptorRef`],

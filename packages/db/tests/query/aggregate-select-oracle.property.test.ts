@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { add,
+import {
+  add,
   caseWhen,
   coalesce,
   count,
@@ -11,7 +12,8 @@ import { add,
   max,
   sum,
   toArray,
-  upper } from '../../src/query/index.js'
+  upper,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
   AggregateFunctionNotInSelectError,

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { innerJoin, leftJoin } from '@tanstack/db'
+import { include } from '../../src/query/index.js'
+import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
+import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import { processJoins } from '../../src/query/compiler/joins.js'
 import { applyOptimizations } from '../../src/query/optimizer-joins.js'
 import { CollectionImpl } from '../../src/collection/index.js'
@@ -874,6 +877,7 @@ function createAlphaRenamedJoinQuery(
       {
         compile: processJoins,
         optimize: applyOptimizations,
+        materialize: materializeCompilation,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -918,6 +922,7 @@ function createAlphaRenamedImplicitJoinQuery(
       {
         compile: processJoins,
         optimize: applyOptimizations,
+        materialize: materializeCompilation,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -1022,6 +1027,7 @@ function createUnionDerivedIncludesQuery(parentAlias: string): QueryIR {
     new PropRef([parentAlias, `id`]),
     new PropRef([`userId`]),
     `posts`,
+    includesRuntime,
     undefined,
     undefined,
     `array`,
@@ -1064,6 +1070,7 @@ function createCorrelatedUnionIncludesQuery(parentAlias: string): QueryIR {
     new PropRef([parentAlias, `id`]),
     new PropRef([`userId`]),
     `posts`,
+    includesRuntime,
     undefined,
     [new PropRef([parentAlias, `age`])],
     `array`,
@@ -1104,6 +1111,7 @@ function createAlphaRenamedIncludesQuery(
     new PropRef([parentAlias, `id`]),
     new PropRef([childAlias, `userId`]),
     `posts`,
+    includesRuntime,
     [
       new Func(`eq`, [
         new PropRef([parentAlias, `status`]),
@@ -1343,13 +1351,15 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
       getQueryIR(
         new Query().from({ user: usersCollection }).select(({ user }) => ({
           id: user.id,
-          posts: new Query()
-            .from({ post: postsCollection })
-            .where(({ post }) => eq(post.userId, user.id))
-            .select(({ post }) => ({
-              id: post.id,
-              title: post.title,
-            })),
+          posts: include(
+            new Query()
+              .from({ post: postsCollection })
+              .where(({ post }) => eq(post.userId, user.id))
+              .select(({ post }) => ({
+                id: post.id,
+                title: post.title,
+              })),
+          ),
         })),
       ),
   ],

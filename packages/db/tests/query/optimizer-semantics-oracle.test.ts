@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import { applyOptimizations } from '../../src/query/optimizer-joins.js'
 import { processJoins } from '../../src/query/compiler/joins.js'
 import {
@@ -512,6 +513,7 @@ describe(`optimizer residual convergence`, () => {
                 {
                   compile: processJoins,
                   optimize: applyOptimizations,
+                  materialize: materializeCompilation,
                   type: join.type,
                   from: new CollectionRef(collection, `member`),
                   on: new Func('eq', [
@@ -578,6 +580,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -588,6 +591,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `inner`,
           from: new CollectionRef(collection, `tag`),
           on: new Func('eq', [
@@ -637,6 +641,7 @@ describe(`optimizer residual convergence`, () => {
           {
             compile: processJoins,
             optimize: applyOptimizations,
+            materialize: materializeCompilation,
             type: joinType,
             from: new CollectionRef(collection, `member`),
             on: new Func('eq', [
@@ -671,6 +676,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -706,6 +712,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -737,6 +744,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -777,6 +785,7 @@ describe(`optimizer residual convergence`, () => {
           {
             compile: processJoins,
             optimize: applyOptimizations,
+            materialize: materializeCompilation,
             type: `left`,
             from: new CollectionRef(collection, `member`),
             on: new Func('eq', [
@@ -787,6 +796,7 @@ describe(`optimizer residual convergence`, () => {
           {
             compile: processJoins,
             optimize: applyOptimizations,
+            materialize: materializeCompilation,
             type: laterJoin,
             from: new CollectionRef(collection, `tag`),
             on: new Func('eq', [
@@ -850,6 +860,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [
@@ -891,6 +902,7 @@ describe(`optimizer residual convergence`, () => {
         {
           compile: processJoins,
           optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new CollectionRef(collection, `member`),
           on: new Func('eq', [

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { leftJoin } from '@tanstack/db'
+import { include } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
 import {
@@ -13,9 +14,8 @@ import { BaseQueryBuilder, getQueryIR } from '../src/query/builder/index.js'
 import {
   caseWhen,
   eq,
-  materialize,
-  toArray,
 } from '../src/query/builder/functions.js'
+import { materialize, toArray } from '../src/query/builder/include-functions.js'
 import { collectSourceRefs } from '../src/query/ir.js'
 import type { DeferredLiveQueryCollections } from '../src/live-query-options.js'
 
@@ -314,13 +314,13 @@ describe(`live query preparation`, () => {
             .where(({ child }) => eq(child.parentId, parent.id))
           return {
             id: parent.id,
-            children: childQuery,
+            children: include(childQuery),
             nested: { inlineChildren: toArray(childQuery) },
             materializedChildren: materialize(childQuery),
             conditionalChildren: caseWhen(
               eq(parent.id, `parent`),
-              childQuery,
-              childQuery,
+              include(childQuery),
+              include(childQuery),
             ),
           }
         })

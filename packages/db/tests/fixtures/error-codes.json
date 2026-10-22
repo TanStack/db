@@ -92,5 +92,6 @@
   "DuplicateTransactionIdError": 233,
   "SetWindowFindOneLimitError": 244,
   "JoinOperatorRequiredError": 245,
-  "GroupingOperatorRequiredError": 246
+  "GroupingOperatorRequiredError": 246,
+  "IncludeOperatorRequiredError": 247
 }

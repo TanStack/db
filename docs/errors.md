@@ -990,6 +990,16 @@ Development builds show the full message. For example:
 setWindow() cannot change the limit of a findOne() query.
 ```
 
+<a id="error-247"></a>
+
+## Error 247: `IncludeOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.
+```
+
 ## Other errors and log messages
 
 These are plain `Error`, `TypeError`, `RangeError`, or

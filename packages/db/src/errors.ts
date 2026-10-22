@@ -610,6 +610,16 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export class IncludeOperatorRequiredError extends QueryBuilderError {
+  constructor(field: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A subquery in select() needs include(), toArray(), or materialize(). Wrap the ${field} field: ${field}: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.`
+        : codedMessage(247, { field }),
+    )
+  }
+}
+
 export class JoinOperatorRequiredError extends QueryBuilderError {
   constructor(type: string) {
     super(

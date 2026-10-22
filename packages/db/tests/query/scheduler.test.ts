@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createLiveQueryCollection,
+import { createLiveQueryCollection,
   eq,
   fullJoin,
+  include,
   innerJoin,
   isNull,
-  leftJoin,
-} from '../../src/query/index.js'
+  leftJoin } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createTransaction } from '../../src/transactions.js'
@@ -1640,12 +1639,16 @@ describe(`live query scheduler`, () => {
         query: (q) =>
           q.from({ root: firstSource }).select(({ root }) => ({
             id: root.id,
-            second: q
-              .from({ item: secondSource })
-              .where(({ item }) => eq(item.id, root.id)),
-            third: q
-              .from({ item: thirdSource })
-              .where(({ item }) => eq(item.id, root.id)),
+            second: include(
+              q
+                .from({ item: secondSource })
+                .where(({ item }) => eq(item.id, root.id)),
+            ),
+            third: include(
+              q
+                .from({ item: thirdSource })
+                .where(({ item }) => eq(item.id, root.id)),
+            ),
           })),
       })
       type BuilderSyncConfig = Parameters<

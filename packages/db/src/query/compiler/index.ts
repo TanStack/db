@@ -11,7 +11,6 @@ import {
 import { isPlainObject } from '../../utils/type-guards.js'
 import { getOrCreate } from '../../utils/get-or-create.js'
 import { optimizeQuery } from '../optimizer.js'
-import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
   createParentContext,
   createValueIdentity,
@@ -88,6 +87,7 @@ import {
 } from './route-metadata.js'
 import { processSelect } from './select.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
@@ -322,6 +322,8 @@ export interface IncludesCompilationResult {
   materialization: IncludesMaterialization
   /** Internal field used to unwrap scalar child selects */
   scalarField?: string
+  /** The materializer the include value brought */
+  runtime: IncludesRuntime
 }
 
 /**
@@ -929,6 +931,7 @@ function compileQueryInternal(
           parentProjection: subquery.parentProjection,
           materialization: subquery.materialization,
           scalarField: subquery.scalarField,
+          runtime: subquery.runtime,
         })
       }
       if (parentHasTopK) deferredIncludes.push(compileInclude)
@@ -995,15 +998,16 @@ function compileQueryInternal(
         ],
       ),
     ) as ResultStream
-    const materializedInput = materializeCompilation({
-      pipeline: inputPipeline,
-      includes: includesResults,
-      valueIdentity,
-      collectionId: mainCollectionId,
-      sourceWhereClauses,
-      aliasToCollectionId,
-      aliasRemapping,
-    })
+    const materializedInput =
+      includesResults[0]!.runtime.materializeCompilation({
+        pipeline: inputPipeline,
+        includes: includesResults,
+        valueIdentity,
+        collectionId: mainCollectionId,
+        sourceWhereClauses,
+        aliasToCollectionId,
+        aliasRemapping,
+      })
     pipeline = materializedInput.pipeline.pipe(
       map(([key, [value]]) => {
         const row = { ...value }

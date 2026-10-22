@@ -17,6 +17,7 @@ import type {
 import type {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
@@ -273,7 +274,7 @@ type SelectValue =
   | ConcatToArrayWrapper // concat(toArray(...)) wrapped subquery
   | CaseWhenWrapper // conditional projection
   | MaterializeWrapper // materialize() wrapped subquery (Array<T> or T | undefined)
-  | QueryBuilder<any> // includes subquery (produces a child Collection)
+  | IncludeWrapper // include() wrapped subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
@@ -338,7 +339,7 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                       readonly _result?: infer T
                     }
                   ? ResultTypeFromCaseWhen<T>
-                  : TSelectValue extends QueryBuilder<infer TChildContext>
+                  : TSelectValue extends IncludeWrapper<infer TChildContext>
                     ? Collection<GetResult<TChildContext>>
                     : TSelectValue extends AnyRef<infer _T>
                       ? ExtractRef<TSelectValue>
@@ -438,8 +439,8 @@ export type ResultTypeFromSelect<TSelectObject> =
                           readonly _result?: infer T
                         }
                       ? ResultTypeFromCaseWhen<T>
-                      : // includes subquery (bare QueryBuilder) — produces a child Collection
-                        TSelectObject[K] extends QueryBuilder<
+                      : // include() subquery — produces a child Collection
+                        TSelectObject[K] extends IncludeWrapper<
                             infer TChildContext
                           >
                         ? Collection<GetResult<TChildContext>>

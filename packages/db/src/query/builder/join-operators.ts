@@ -1,6 +1,7 @@
 import { processJoins } from '../compiler/joins.js'
 import { validateJoinConditions } from '../join-conditions.js'
 import { applyOptimizations } from '../optimizer-joins.js'
+import { materializeCompilation } from '../live/materialized-pipeline.js'
 import type {
   Context,
   JoinOnCallback,
@@ -27,6 +28,7 @@ export interface JoinOperator<
   type: TJoinType
   compile: typeof processJoins
   optimize: typeof applyOptimizations
+  materialize: typeof materializeCompilation
   validate: typeof validateJoinConditions
 }
 
@@ -42,6 +44,7 @@ function joinOperator<TJoinType extends JoinType>(type: TJoinType) {
     type,
     compile: processJoins,
     optimize: applyOptimizations,
+    materialize: materializeCompilation,
     validate: validateJoinConditions,
   })
 }

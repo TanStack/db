@@ -154,6 +154,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
           on: joinClause.on,
           compile: joinClause.compile,
           optimize: joinClause.optimize,
+          materialize: joinClause.materialize,
           from: deepCopyFrom(joinClause.from) as
             CollectionSourceRef | QueryRefClass,
         }))
@@ -495,4 +496,3 @@ function deepCopyFrom(from: From): From {
     ),
   )
 }
-

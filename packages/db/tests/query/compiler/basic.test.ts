@@ -213,7 +213,10 @@ describe(`Query2 Compiler`, () => {
         const query: QueryIR = {
           from: new CollectionRef(usersCollection, userAlias),
           join: [
-            { compile: processJoins, optimize: applyOptimizations,
+            {
+              compile: processJoins,
+              optimize: applyOptimizations,
+              materialize: materializeCompilation,
               type: `inner`,
               from: new CollectionRef(postsCollection, postAlias),
               on: new Func('eq', [

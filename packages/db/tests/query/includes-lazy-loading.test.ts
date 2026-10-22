@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  and,
+import { and,
   createLiveQueryCollection,
   eq,
   gte,
+  include,
   leftJoin,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import {
@@ -485,13 +484,15 @@ describe(`includes lazy loading`, () => {
       q.from({ r: roots }).select(({ r }) => ({
         id: r.id,
         name: r.name,
-        children: q
-          .from({ item: items })
-          .where(({ item }) => eq(item.rootId, r.id))
-          .select(({ item }) => ({
-            id: item.id,
-            title: item.title,
-          })),
+        children: include(
+          q
+            .from({ item: items })
+            .where(({ item }) => eq(item.rootId, r.id))
+            .select(({ item }) => ({
+              id: item.id,
+              title: item.title,
+            })),
+        ),
       })),
     )
 

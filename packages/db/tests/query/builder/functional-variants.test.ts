@@ -73,9 +73,13 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     it(`works with joins`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
-        .join(leftJoin({ departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)))
+        .join(
+          leftJoin(
+            { departments: departmentsCollection },
+            ({ employees, departments }) =>
+              eq(employees.department_id, departments.id),
+          ),
+        )
         .fn.select((row) => ({
           employeeName: row.employees.name,
           departmentName: row.departments?.name || `No Department`,
@@ -141,9 +145,13 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     it(`works with joins`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
-        .join(leftJoin({ departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)))
+        .join(
+          leftJoin(
+            { departments: departmentsCollection },
+            ({ employees, departments }) =>
+              eq(employees.department_id, departments.id),
+          ),
+        )
         .fn.where(
           (row) =>
             row.employees.active &&
@@ -213,9 +221,13 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     it(`works with joins and grouping`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
-        .join(leftJoin({ departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)))
+        .join(
+          leftJoin(
+            { departments: departmentsCollection },
+            ({ employees, departments }) =>
+              eq(employees.department_id, departments.id),
+          ),
+        )
         .groupBy(({ departments }) => departments.name)
         .fn.having(
           (row) =>
@@ -233,9 +245,13 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     it(`supports all functional variants together`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
-        .join(leftJoin({ departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)))
+        .join(
+          leftJoin(
+            { departments: departmentsCollection },
+            ({ employees, departments }) =>
+              eq(employees.department_id, departments.id),
+          ),
+        )
         .fn.where((row) => row.employees.active)
         .fn.where((row) => row.employees.salary > 40000)
         .groupBy(({ departments }) => departments.name)

@@ -83,9 +83,8 @@ export {
   min,
   max,
   // Includes helpers
-  toArray,
-  materialize,
 } from './builder/functions.js'
+export { include, materialize, toArray } from './builder/include-functions.js'
 
 // Ref proxy utilities
 export type { Ref } from './builder/types.js'

@@ -1,5 +1,6 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
+import { materializeCompilation } from '../../../src/query/live/materialized-pipeline.js'
 import { applyOptimizations } from '../../../src/query/optimizer-joins.js'
 import { processJoins } from '../../../src/query/compiler/joins.js'
 import { createCollection } from '../../../src/collection/index.js'
@@ -31,7 +32,10 @@ function createDemandHarness(
     {
       from: new CollectionRef(left, `left`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: joinType,
           from: new CollectionRef(right, `right`),
           on:

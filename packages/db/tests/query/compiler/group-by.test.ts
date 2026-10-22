@@ -74,8 +74,16 @@ describe(`group-by compiler`, () => {
         const groupByClause = [new PropRef([`users`, `department`])]
         const selectClause = {
           department: new PropRef([`users`, `department`]),
-          count: new Aggregate(`count`, [new PropRef([`users`, `id`])], grouping),
-          avg_salary: new Aggregate(`avg`, [new PropRef([`users`, `salary`])], grouping),
+          count: new Aggregate(
+            `count`,
+            [new PropRef([`users`, `id`])],
+            grouping,
+          ),
+          avg_salary: new Aggregate(
+            `avg`,
+            [new PropRef([`users`, `salary`])],
+            grouping,
+          ),
         }
 
         // Should not throw

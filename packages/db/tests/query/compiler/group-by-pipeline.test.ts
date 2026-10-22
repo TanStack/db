@@ -134,7 +134,11 @@ describe(`group-by production pipeline`, () => {
       const graph = new D2()
       const input = graph.newInput<KeyedNamespacedRow>()
       const groupRef = new PropRef([`row`, `group`])
-      const total = new Aggregate(`sum`, [new PropRef([`row`, `amount`])], grouping)
+      const total = new Aggregate(
+        `sum`,
+        [new PropRef([`row`, `amount`])],
+        grouping,
+      )
       // Exercise generated-field collision avoidance as well as wrapped refs.
       const totalAlias = `__tanstack_group_synced`
       const select: Select | undefined =

@@ -61,9 +61,13 @@ describe(`buildQuery function`, () => {
     const query = buildQuery((q) =>
       q
         .from({ employees: employeesCollection })
-        .join(leftJoin({ departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)))
+        .join(
+          leftJoin(
+            { departments: departmentsCollection },
+            ({ employees, departments }) =>
+              eq(employees.department_id, departments.id),
+          ),
+        )
         .select(({ employees, departments }) => ({
           employee_name: employees.name,
           department_name: departments.name,
@@ -120,8 +124,11 @@ describe(`buildQuery function`, () => {
     const query = buildQuery((q) =>
       q
         .from({ comment: commentsCollection })
-        .join(leftJoin({ user: usersCollection }, ({ comment, user }) =>
-          eq(comment.user_id, user.id)))
+        .join(
+          leftJoin({ user: usersCollection }, ({ comment, user }) =>
+            eq(comment.user_id, user.id),
+          ),
+        )
         .where(({ comment }) => or(eq(comment.id, 1), eq(comment.id, 2)))
         .orderBy(({ comment }) => comment.date, `desc`)
         .select(({ comment, user }) => ({

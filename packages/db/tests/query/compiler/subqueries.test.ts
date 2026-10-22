@@ -224,8 +224,11 @@ describe(`Query2 Subqueries`, () => {
       // Use the subquery in a join
       const query = new Query()
         .from({ issue: issuesCollection })
-        .join(leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)))
+        .join(
+          leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
+            eq(issue.userId, activeUser.id),
+          ),
+        )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
@@ -258,8 +261,11 @@ describe(`Query2 Subqueries`, () => {
       // Use the subquery in a join
       const query = new Query()
         .from({ issue: issuesCollection })
-        .join(leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)))
+        .join(
+          leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
+            eq(issue.userId, activeUser.id),
+          ),
+        )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
@@ -361,8 +367,11 @@ describe(`Query2 Subqueries`, () => {
 
       const outerQuery = new Query()
         .from({ issue: issuesCollection })
-        .join(leftJoin({ userInfo: middleQuery }, ({ issue, userInfo }) =>
-          eq(issue.userId, userInfo.id)))
+        .join(
+          leftJoin({ userInfo: middleQuery }, ({ issue, userInfo }) =>
+            eq(issue.userId, userInfo.id),
+          ),
+        )
         .select(({ issue, userInfo }) => ({
           issueId: issue.id,
           issueTitle: issue.title,

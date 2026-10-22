@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import {
-  createLiveQueryCollection,
+import { createLiveQueryCollection,
   eq,
+  include,
   materialize,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
 describe(`functional include input boundary`, () => {
@@ -180,9 +179,11 @@ describe(`functional include input boundary`, () => {
                     .from({ parent: parents.collection })
                     .select(({ parent }) => ({
                       id: parent.id,
-                      children: q
-                        .from({ child: children.collection })
-                        .where(({ child }) => eq(child.parentId, parent.id)),
+                      children: include(
+                        q
+                          .from({ child: children.collection })
+                          .where(({ child }) => eq(child.parentId, parent.id)),
+                      ),
                     })),
                 })
                 .fn.select(({ row }) => {
@@ -287,9 +288,11 @@ describe(`functional include input boundary`, () => {
         .from({
           row: q.from({ parent: parents.collection }).select(({ parent }) => ({
             id: parent.id,
-            children: q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentId, parent.id)),
+            children: include(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentId, parent.id)),
+            ),
           })),
         })
         .select(({ row }) => ({ id: row.id, children: row.children })),
@@ -323,9 +326,11 @@ describe(`functional include input boundary`, () => {
       return q.from({ row: projected }).select(({ row }) => ({
         id: row.id,
         label: row.label,
-        children: q
-          .from({ child: children.collection })
-          .where(({ child }) => eq(child.parentId, row.id)),
+        children: include(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentId, row.id)),
+        ),
       }))
     })
     let publications = 0
@@ -377,7 +382,9 @@ describe(`functional include input boundary`, () => {
                         .where(({ leaf }) => eq(leaf.childId, child.id))
                       return {
                         id: child.id,
-                        leaves: inline ? toArray(leafQuery) : leafQuery,
+                        leaves: inline
+                          ? toArray(leafQuery)
+                          : include(leafQuery),
                       }
                     }),
                 ),

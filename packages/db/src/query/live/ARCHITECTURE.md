@@ -106,6 +106,14 @@ operators and a few boundary adapters:
 | Start and release asynchronous demand      | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
 | Ordered provider loading and continuation  | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
 
+Operator values carry their compilers, so an app bundles only the operators it
+imports. `include()`, `toArray()`, and `materialize()` carry the materializer
+and the Collection-facade adapter (`includes-runtime.ts`); join operators carry
+the join compiler, the optimizer's join pushdown, and the materializer for key
+reduction; aggregates and `groupKeys()` carry the grouping compiler. A query
+that uses an operator always holds the value that carries it, so compilation
+stays synchronous.
+
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
 function: its possible duplicate contributors still pass through the keyed
@@ -628,8 +636,9 @@ tie-breaker, normally the child public key. An order-only change is a
 bucket-value change for arrays, singletons, concatenation, and Collection
 layout.
 
-A bare child query is a Collection-valued include. It exposes one stable public
-Collection facade per active bucket in that edge:
+`include(childQuery)` is a Collection-valued include. A bare child query in a
+select throws `IncludeOperatorRequiredError`. The include exposes one stable
+public Collection facade per active bucket in that edge:
 
 ```text
 ActiveBucket + BucketRow -> ActiveBucketRow -> BucketFacade(bucket, Collection)

@@ -34,7 +34,11 @@ describe(`select compiler`, () => {
     })
 
     it(`throws error for aggregate expressions`, () => {
-      const arg = new Aggregate(`count`, [new PropRef([`users`, `id`])], grouping)
+      const arg = new Aggregate(
+        `count`,
+        [new PropRef([`users`, `id`])],
+        grouping,
+      )
       const namespacedRow = { users: { id: 1 } }
 
       expect(() => {

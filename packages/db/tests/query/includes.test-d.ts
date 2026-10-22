@@ -1,13 +1,12 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import {
-  Query,
+import { Query,
   concat,
   createLiveQueryCollection,
   eq,
+  include,
   materialize,
   queryOnce,
-  toArray,
-} from '../../src/query/index.js'
+  toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { WithVirtualProps } from '../../src/virtual-props.js'
@@ -104,13 +103,15 @@ describe(`includes subquery types`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
         })),
       )
 
@@ -130,7 +131,9 @@ describe(`includes subquery types`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
-          issues: q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+          issues: include(
+            q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+          ),
         })),
       )
 
@@ -149,20 +152,24 @@ describe(`includes subquery types`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
-          comments: q
-            .from({ c: comments })
-            .where(({ c }) => eq(c.issueId, p.id))
-            .select(({ c }) => ({
-              id: c.id,
-              body: c.body,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+          comments: include(
+            q
+              .from({ c: comments })
+              .where(({ c }) => eq(c.issueId, p.id))
+              .select(({ c }) => ({
+                id: c.id,
+                body: c.body,
+              })),
+          ),
         })),
       )
 
@@ -179,20 +186,24 @@ describe(`includes subquery types`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              comments: q
-                .from({ c: comments })
-                .where(({ c }) => eq(c.issueId, i.id))
-                .select(({ c }) => ({
-                  id: c.id,
-                  body: c.body,
-                })),
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                comments: include(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      body: c.body,
+                    })),
+                ),
+              })),
+          ),
         })),
       )
 

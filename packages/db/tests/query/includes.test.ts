@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   and,
+  caseWhen,
   coalesce,
   concat,
   count,
   createLiveQueryCollection,
   eq,
+  gt,
   gte,
+  include,
   innerJoin,
   materialize,
   toArray,
@@ -20,6 +23,7 @@ import {
   resetCleanupQueue,
   stripVirtualProps,
 } from '../utils.js'
+import { IncludeOperatorRequiredError } from '../../src/errors.js'
 import type { SyncConfig } from '../../src/types.js'
 
 type Project = {
@@ -160,13 +164,15 @@ describe(`includes subqueries`, () => {
       q.from({ p: projects }).select(({ p }) => ({
         id: p.id,
         name: p.name,
-        issues: q
-          .from({ i: issues })
-          .where(({ i }) => eq(i.projectId, p.id))
-          .select(({ i }) => ({
-            id: i.id,
-            title: i.title,
-          })),
+        issues: include(
+          q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        ),
       })),
     )
   }
@@ -373,10 +379,12 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ parent: parents }).select(({ parent }) => ({
           id: parent.id,
-          items: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.groupId, parent.groupId))
-            .select(({ child }) => ({ id: child.id })),
+          items: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          ),
         })),
       )
 
@@ -531,12 +539,14 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              ...i,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                ...i,
+              })),
+          ),
         })),
       )
 
@@ -665,14 +675,16 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
           id: lineItem.id,
-          product: q
-            .from({ product: products })
-            .where(({ product }) => eq(product.id, lineItem.productId))
-            .select(({ product }) => ({
-              id: product.id,
-              categoryId: product.categoryId,
-              name: product.name,
-            })),
+          product: include(
+            q
+              .from({ product: products })
+              .where(({ product }) => eq(product.id, lineItem.productId))
+              .select(({ product }) => ({
+                id: product.id,
+                categoryId: product.categoryId,
+                name: product.name,
+              })),
+          ),
         })),
       )
       await collection.preload()
@@ -792,13 +804,15 @@ describe(`includes subqueries`, () => {
           .select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
+            issues: include(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
           })),
       )
 
@@ -823,14 +837,16 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .orderBy(({ i }) => i.title, `desc`)
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `desc`)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
         })),
       )
 
@@ -860,14 +876,16 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .orderBy(({ i }) => i.title, `asc`)
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
         })),
       )
 
@@ -899,11 +917,13 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .orderBy(({ i }) => i.title, `asc`)
-            .select(({ i }) => ({ id: i.id })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .select(({ i }) => ({ id: i.id })),
+          ),
         })),
       )
 
@@ -933,15 +953,17 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .orderBy(({ i }) => i.title, `asc`)
-            .limit(1)
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .limit(1)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
         })),
       )
 
@@ -967,15 +989,17 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .orderBy(({ i }) => i.title, `asc`)
-            .limit(1)
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .limit(1)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
         })),
       )
 
@@ -1053,13 +1077,15 @@ describe(`includes subqueries`, () => {
           id: t.id,
           name: t.name,
           departmentId: t.departmentId,
-          members: q
-            .from({ m: members })
-            .where(({ m }) => eq(m.departmentId, t.departmentId))
-            .select(({ m }) => ({
-              id: m.id,
-              name: m.name,
-            })),
+          members: include(
+            q
+              .from({ m: members })
+              .where(({ m }) => eq(m.departmentId, t.departmentId))
+              .select(({ m }) => ({
+                id: m.id,
+                name: m.name,
+              })),
+          ),
         })),
       )
 
@@ -1103,13 +1129,15 @@ describe(`includes subqueries`, () => {
           id: t.id,
           name: t.name,
           departmentId: t.departmentId,
-          members: q
-            .from({ m: members })
-            .where(({ m }) => eq(m.departmentId, t.departmentId))
-            .select(({ m }) => ({
-              id: m.id,
-              name: m.name,
-            })),
+          members: include(
+            q
+              .from({ m: members })
+              .where(({ m }) => eq(m.departmentId, t.departmentId))
+              .select(({ m }) => ({
+                id: m.id,
+                name: m.name,
+              })),
+          ),
         })),
       )
 
@@ -1150,13 +1178,15 @@ describe(`includes subqueries`, () => {
           id: t.id,
           name: t.name,
           departmentId: t.departmentId,
-          members: q
-            .from({ m: members })
-            .where(({ m }) => eq(m.departmentId, t.departmentId))
-            .select(({ m }) => ({
-              id: m.id,
-              name: m.name,
-            })),
+          members: include(
+            q
+              .from({ m: members })
+              .where(({ m }) => eq(m.departmentId, t.departmentId))
+              .select(({ m }) => ({
+                id: m.id,
+                name: m.name,
+              })),
+          ),
         })),
       )
 
@@ -1216,10 +1246,12 @@ describe(`includes subqueries`, () => {
         q.from({ parent: parents }).select(({ parent }) => ({
           id: parent.id,
           groupId: parent.groupId,
-          children: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.groupId, parent.groupId))
-            .select(({ child }) => ({ id: child.id })),
+          children: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          ),
         })),
       )
 
@@ -1312,10 +1344,12 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ parent: parents }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.groupId, parent.groupId))
-            .select(({ child }) => ({ id: child.id })),
+          children: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          ),
         })),
       )
 
@@ -1361,10 +1395,12 @@ describe(`includes subqueries`, () => {
           .limit(1)
           .select(({ parent }) => ({
             id: parent.id,
-            children: q
-              .from({ child: children })
-              .where(({ child }) => eq(child.groupId, parent.groupId))
-              .select(({ child }) => ({ id: child.id })),
+            children: include(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.groupId, parent.groupId))
+                .select(({ child }) => ({ id: child.id })),
+            ),
           })),
       )
 
@@ -1416,13 +1452,15 @@ describe(`includes subqueries`, () => {
             .limit(1)
             .select(({ parent }) => ({
               id: parent.id,
-              children: q
-                .from({ child: children })
-                .where(({ child }) => eq(child.groupId, parent.groupId))
-                .select(({ child }) => ({
-                  id: child.id,
-                  label: child.label,
-                })),
+              children: include(
+                q
+                  .from({ child: children })
+                  .where(({ child }) => eq(child.groupId, parent.groupId))
+                  .select(({ child }) => ({
+                    id: child.id,
+                    label: child.label,
+                  })),
+              ),
             })),
         )
       const collection = buildQuery()
@@ -1498,9 +1536,11 @@ describe(`includes subqueries`, () => {
           .where(({ parent }) => eq(parent.active, true))
           .select(({ parent }) => ({
             id: parent.id,
-            children: q
-              .from({ child: children })
-              .where(({ child }) => eq(child.groupId, parent.groupId)),
+            children: include(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.groupId, parent.groupId)),
+            ),
           })),
       )
 
@@ -1548,10 +1588,12 @@ describe(`includes subqueries`, () => {
           q.from({ parent: parents }).select(({ parent }) => ({
             id: parent.id,
             groupId: parent.groupId,
-            children: q
-              .from({ child: children })
-              .where(({ child }) => eq(child.groupId, parent.groupId))
-              .select(({ child }) => ({ id: child.id })),
+            children: include(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.groupId, parent.groupId))
+                .select(({ child }) => ({ id: child.id })),
+            ),
           })),
         getKey: (row) => {
           keyReads += 1
@@ -1643,10 +1685,12 @@ describe(`includes subqueries`, () => {
           .limit(3)
           .select(({ parent }) => ({
             id: parent.id,
-            children: q
-              .from({ child: children })
-              .where(({ child }) => eq(child.groupId, parent.groupId))
-              .select(({ child }) => ({ id: child.id })),
+            children: include(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.groupId, parent.groupId))
+                .select(({ child }) => ({ id: child.id })),
+            ),
           })),
       )
       const observations: Array<
@@ -1713,10 +1757,12 @@ describe(`includes subqueries`, () => {
         q.from({ parent: parents }).select(({ parent }) => ({
           id: parent.id,
           groupId: parent.groupId,
-          children: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.groupId, parent.groupId))
-            .select(({ child }) => ({ id: child.id })),
+          children: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .select(({ child }) => ({ id: child.id })),
+          ),
         })),
       )
 
@@ -1786,13 +1832,15 @@ describe(`includes subqueries`, () => {
         q.from({ t: teams }).select(({ t }) => ({
           id: t.id,
           name: t.name,
-          members: q
-            .from({ m: members })
-            .where(({ m }) => eq(m.departmentId, t.departmentId))
-            .select(({ m }) => ({
-              id: m.id,
-              name: m.name,
-            })),
+          members: include(
+            q
+              .from({ m: members })
+              .where(({ m }) => eq(m.departmentId, t.departmentId))
+              .select(({ m }) => ({
+                id: m.id,
+                name: m.name,
+              })),
+          ),
         })),
       )
 
@@ -1837,20 +1885,24 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              comments: q
-                .from({ c: comments })
-                .where(({ c }) => eq(c.issueId, i.id))
-                .select(({ c }) => ({
-                  id: c.id,
-                  body: c.body,
-                })),
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                comments: include(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      body: c.body,
+                    })),
+                ),
+              })),
+          ),
         })),
       )
     }
@@ -2229,22 +2281,24 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              comments: toArray(
-                q
-                  .from({ c: comments })
-                  .where(({ c }) => eq(c.issueId, i.id))
-                  .select(({ c }) => ({
-                    id: c.id,
-                    body: c.body,
-                  })),
-              ),
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                comments: toArray(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      body: c.body,
+                    })),
+                ),
+              })),
+          ),
         })),
       )
     }
@@ -2462,13 +2516,15 @@ describe(`includes subqueries`, () => {
               .select(({ i }) => ({
                 id: i.id,
                 title: i.title,
-                comments: q
-                  .from({ c: comments })
-                  .where(({ c }) => eq(c.issueId, i.id))
-                  .select(({ c }) => ({
-                    id: c.id,
-                    body: c.body,
-                  })),
+                comments: include(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      body: c.body,
+                    })),
+                ),
               })),
           ),
         })),
@@ -2942,15 +2998,17 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .where(({ i }) => eq(i.createdBy, p.createdBy))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .where(({ i }) => eq(i.createdBy, p.createdBy))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -2997,15 +3055,17 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .where(({ i }) => eq(i.createdBy, p.createdBy))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .where(({ i }) => eq(i.createdBy, p.createdBy))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3037,15 +3097,17 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .where(({ i }) => eq(i.createdBy, p.createdBy))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .where(({ i }) => eq(i.createdBy, p.createdBy))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3082,16 +3144,18 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .where(({ i }) => eq(i.createdBy, p.createdBy))
-            .where(({ i }) => eq(i.title, `Bug in Alpha`))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .where(({ i }) => eq(i.createdBy, p.createdBy))
+              .where(({ i }) => eq(i.title, `Bug in Alpha`))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3115,15 +3179,17 @@ describe(`includes subqueries`, () => {
         q.from({ p: projectsWC }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) =>
-              and(eq(i.projectId, p.id), eq(i.createdBy, `alice`)),
-            )
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) =>
+                and(eq(i.projectId, p.id), eq(i.createdBy, `alice`)),
+              )
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
         })),
       )
 
@@ -3154,16 +3220,18 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) =>
-              and(eq(i.projectId, p.id), eq(i.createdBy, p.createdBy)),
-            )
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) =>
+                and(eq(i.projectId, p.id), eq(i.createdBy, p.createdBy)),
+              )
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3193,16 +3261,18 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) =>
-              and(eq(i.projectId, p.id), eq(i.createdBy, p.createdBy)),
-            )
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) =>
+                and(eq(i.projectId, p.id), eq(i.createdBy, p.createdBy)),
+              )
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3269,14 +3339,16 @@ describe(`includes subqueries`, () => {
         q.from({ p: parents }).select(({ p }) => ({
           id: p.id,
           createdBy: p.createdBy,
-          items: q
-            .from({ c: children })
-            .where(({ c }) => eq(c.groupId, p.groupId))
-            .where(({ c }) => eq(c.createdBy, p.createdBy))
-            .select(({ c }) => ({
-              id: c.id,
-              createdBy: c.createdBy,
-            })),
+          items: include(
+            q
+              .from({ c: children })
+              .where(({ c }) => eq(c.groupId, p.groupId))
+              .where(({ c }) => eq(c.createdBy, p.createdBy))
+              .select(({ c }) => ({
+                id: c.id,
+                createdBy: c.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3515,19 +3587,21 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ parent: parents }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.groupId, parent.groupId))
-            .where(({ child }) => gte(child.score, parent.minimumScore))
-            .select(({ child }) => ({
-              id: child.id,
-              notes: materialize(
-                q
-                  .from({ note: notes })
-                  .where(({ note }) => eq(note.childId, child.id))
-                  .select(({ note }) => ({ id: note.id })),
-              ),
-            })),
+          children: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId))
+              .where(({ child }) => gte(child.score, parent.minimumScore))
+              .select(({ child }) => ({
+                id: child.id,
+                notes: materialize(
+                  q
+                    .from({ note: notes })
+                    .where(({ note }) => eq(note.childId, child.id))
+                    .select(({ note }) => ({ id: note.id })),
+                ),
+              })),
+          ),
         })),
       )
 
@@ -3605,16 +3679,18 @@ describe(`includes subqueries`, () => {
         q.from({ p: parents }).select(({ p }) => ({
           id: p.id,
           createdBy: p.createdBy,
-          items: q
-            .from({ c: children })
-            .where(({ c }) => eq(c.groupId, p.groupId))
-            .where(({ c }) => eq(c.createdBy, p.createdBy))
-            .orderBy(({ c }) => c.id, `asc`)
-            .limit(1)
-            .select(({ c }) => ({
-              id: c.id,
-              createdBy: c.createdBy,
-            })),
+          items: include(
+            q
+              .from({ c: children })
+              .where(({ c }) => eq(c.groupId, p.groupId))
+              .where(({ c }) => eq(c.createdBy, p.createdBy))
+              .orderBy(({ c }) => c.id, `asc`)
+              .limit(1)
+              .select(({ c }) => ({
+                id: c.id,
+                createdBy: c.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3640,20 +3716,22 @@ describe(`includes subqueries`, () => {
           id: p.id,
           name: p.name,
           createdBy: p.createdBy,
-          issues: q
-            .from({ i: issuesWC })
-            .where(({ i }) =>
-              and(
-                eq(i.projectId, p.id),
-                eq(i.createdBy, p.createdBy),
-                eq(i.title, `Bug in Alpha`),
-              ),
-            )
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              createdBy: i.createdBy,
-            })),
+          issues: include(
+            q
+              .from({ i: issuesWC })
+              .where(({ i }) =>
+                and(
+                  eq(i.projectId, p.id),
+                  eq(i.createdBy, p.createdBy),
+                  eq(i.title, `Bug in Alpha`),
+                ),
+              )
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                createdBy: i.createdBy,
+              })),
+          ),
         })),
       )
 
@@ -3716,24 +3794,28 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: nProjects }).select(({ p }) => ({
           id: p.id,
-          issues: q
-            .from({ i: nIssues })
-            .where(({ i }) => eq(i.groupId, p.groupId))
-            .where(({ i }) => eq(i.createdBy, p.createdBy))
-            .select(({ i }) => ({
-              id: i.id,
-              createdBy: i.createdBy,
-              categoryId: i.categoryId,
-              comments: q
-                .from({ c: nComments })
-                .where(({ c }) => eq(c.categoryId, i.categoryId))
-                .where(({ c }) => eq(c.createdBy, i.createdBy))
-                .select(({ c }) => ({
-                  id: c.id,
-                  createdBy: c.createdBy,
-                  body: c.body,
-                })),
-            })),
+          issues: include(
+            q
+              .from({ i: nIssues })
+              .where(({ i }) => eq(i.groupId, p.groupId))
+              .where(({ i }) => eq(i.createdBy, p.createdBy))
+              .select(({ i }) => ({
+                id: i.id,
+                createdBy: i.createdBy,
+                categoryId: i.categoryId,
+                comments: include(
+                  q
+                    .from({ c: nComments })
+                    .where(({ c }) => eq(c.categoryId, i.categoryId))
+                    .where(({ c }) => eq(c.createdBy, i.createdBy))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      createdBy: c.createdBy,
+                      body: c.body,
+                    })),
+                ),
+              })),
+          ),
         })),
       )
 
@@ -3804,32 +3886,38 @@ describe(`includes subqueries`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ a: l0 }).select(({ a }) => ({
           id: a.id,
-          children: q
-            .from({ b: l1 })
-            .where(({ b }) => eq(b.groupId, a.groupId))
-            .where(({ b }) => eq(b.owner, a.owner))
-            .select(({ b }) => ({
-              id: b.id,
-              tagId: b.tagId,
-              owner: b.owner,
-              grandchildren: q
-                .from({ c: l2 })
-                .where(({ c }) => eq(c.tagId, b.tagId))
-                .where(({ c }) => eq(c.owner, b.owner))
-                .select(({ c }) => ({
-                  id: c.id,
-                  flagId: c.flagId,
-                  owner: c.owner,
-                  leaves: q
-                    .from({ d: l3 })
-                    .where(({ d }) => eq(d.flagId, c.flagId))
-                    .where(({ d }) => eq(d.owner, c.owner))
-                    .select(({ d }) => ({
-                      id: d.id,
-                      text: d.text,
+          children: include(
+            q
+              .from({ b: l1 })
+              .where(({ b }) => eq(b.groupId, a.groupId))
+              .where(({ b }) => eq(b.owner, a.owner))
+              .select(({ b }) => ({
+                id: b.id,
+                tagId: b.tagId,
+                owner: b.owner,
+                grandchildren: include(
+                  q
+                    .from({ c: l2 })
+                    .where(({ c }) => eq(c.tagId, b.tagId))
+                    .where(({ c }) => eq(c.owner, b.owner))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      flagId: c.flagId,
+                      owner: c.owner,
+                      leaves: include(
+                        q
+                          .from({ d: l3 })
+                          .where(({ d }) => eq(d.flagId, c.flagId))
+                          .where(({ d }) => eq(d.owner, c.owner))
+                          .select(({ d }) => ({
+                            id: d.id,
+                            text: d.text,
+                          })),
+                      ),
                     })),
-                })),
-            })),
+                ),
+              })),
+          ),
         })),
       )
 
@@ -3864,9 +3952,11 @@ describe(`includes subqueries`, () => {
         createLiveQueryCollection((q) =>
           q.from({ p: projects }).select(({ p }) => ({
             id: p.id,
-            issues: q
-              .from({ i: issues })
-              .select(({ i }) => ({ id: i.id, title: i.title })),
+            issues: include(
+              q
+                .from({ i: issues })
+                .select(({ i }) => ({ id: i.id, title: i.title })),
+            ),
           })),
         ),
       ).toThrow(/must have a WHERE clause with an eq\(\) condition/)
@@ -3877,10 +3967,12 @@ describe(`includes subqueries`, () => {
         createLiveQueryCollection((q) =>
           q.from({ p: projects }).select(({ p }) => ({
             id: p.id,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => i.projectId)
-              .select(({ i }) => ({ id: i.id, title: i.title })),
+            issues: include(
+              q
+                .from({ i: issues })
+                .where(({ i }) => i.projectId)
+                .select(({ i }) => ({ id: i.id, title: i.title })),
+            ),
           })),
         ),
       ).toThrow(/must have a WHERE clause with an eq\(\) condition/)
@@ -3891,10 +3983,12 @@ describe(`includes subqueries`, () => {
         createLiveQueryCollection((q) =>
           q.from({ p: projects }).select(({ p }) => ({
             id: p.id,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, i.id))
-              .select(({ i }) => ({ id: i.id, title: i.title })),
+            issues: include(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, i.id))
+                .select(({ i }) => ({ id: i.id, title: i.title })),
+            ),
           })),
         ),
       ).toThrow(/must have a WHERE clause with an eq\(\) condition/)
@@ -3931,14 +4025,18 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({ id: i.id, title: i.title })),
-          milestones: q
-            .from({ m: milestones })
-            .where(({ m }) => eq(m.projectId, p.id))
-            .select(({ m }) => ({ id: m.id, name: m.name })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({ id: i.id, title: i.title })),
+          ),
+          milestones: include(
+            q
+              .from({ m: milestones })
+              .where(({ m }) => eq(m.projectId, p.id))
+              .select(({ m }) => ({ id: m.id, name: m.name })),
+          ),
         })),
       )
 
@@ -4029,14 +4127,18 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({ id: i.id, title: i.title })),
-          milestones: q
-            .from({ m: milestones })
-            .where(({ m }) => eq(m.projectId, p.id))
-            .select(({ m }) => ({ id: m.id, name: m.name })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({ id: i.id, title: i.title })),
+          ),
+          milestones: include(
+            q
+              .from({ m: milestones })
+              .where(({ m }) => eq(m.projectId, p.id))
+              .select(({ m }) => ({ id: m.id, name: m.name })),
+          ),
         })),
       )
 
@@ -4228,22 +4330,24 @@ describe(`includes subqueries`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-              comments: toArray(
-                q
-                  .from({ c: comments })
-                  .where(({ c }) => eq(c.issueId, i.id))
-                  .select(({ c }) => ({
-                    id: c.id,
-                    body: c.body,
-                  })),
-              ),
-            })),
+          issues: include(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                comments: toArray(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      body: c.body,
+                    })),
+                ),
+              })),
+          ),
         })),
       )
     }
@@ -4461,13 +4565,15 @@ describe(`includes subqueries`, () => {
               .select(({ i }) => ({
                 id: i.id,
                 title: i.title,
-                comments: q
-                  .from({ c: comments })
-                  .where(({ c }) => eq(c.issueId, i.id))
-                  .select(({ c }) => ({
-                    id: c.id,
-                    body: c.body,
-                  })),
+                comments: include(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({
+                      id: c.id,
+                      body: c.body,
+                    })),
+                ),
               })),
           ),
         })),
@@ -4890,10 +4996,12 @@ describe(`includes subqueries`, () => {
           q.from({ p: projects }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issueCount: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({ total: count(i.id) })),
+            issueCount: include(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({ total: count(i.id) })),
+            ),
           })),
         )
       }
@@ -5010,17 +5118,21 @@ describe(`includes subqueries`, () => {
           q.from({ p: projects }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-                commentCount: q
-                  .from({ c: comments })
-                  .where(({ c }) => eq(c.issueId, i.id))
-                  .select(({ c }) => ({ total: count(c.id) })),
-              })),
+            issues: include(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                  commentCount: include(
+                    q
+                      .from({ c: comments })
+                      .where(({ c }) => eq(c.issueId, i.id))
+                      .select(({ c }) => ({ total: count(c.id) })),
+                  ),
+                })),
+            ),
           })),
         )
       }
@@ -5055,19 +5167,21 @@ describe(`includes subqueries`, () => {
           q.from({ p: projects }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-                commentCount: toArray(
-                  q
-                    .from({ c: comments })
-                    .where(({ c }) => eq(c.issueId, i.id))
-                    .select(({ c }) => ({ total: count(c.id) })),
-                ),
-              })),
+            issues: include(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                  commentCount: toArray(
+                    q
+                      .from({ c: comments })
+                      .where(({ c }) => eq(c.issueId, i.id))
+                      .select(({ c }) => ({ total: count(c.id) })),
+                  ),
+                })),
+            ),
           })),
         )
       }
@@ -7203,17 +7317,21 @@ describe(`includes subqueries`, () => {
           q.from({ p: products }).select(({ p }) => ({
             id: p.id,
             title: p.title,
-            priceRanges: q
-              .from({ pr: priceRanges })
-              .where(({ pr }) => eq(pr.productId, p.id))
-              .select(({ pr }) => ({
-                id: pr.id,
-                regionId: pr.regionId,
-                region: q
-                  .from({ r: regions })
-                  .where(({ r }) => eq(r.id, pr.regionId))
-                  .select(({ r }) => ({ id: r.id, name: r.name })),
-              })),
+            priceRanges: include(
+              q
+                .from({ pr: priceRanges })
+                .where(({ pr }) => eq(pr.productId, p.id))
+                .select(({ pr }) => ({
+                  id: pr.id,
+                  regionId: pr.regionId,
+                  region: include(
+                    q
+                      .from({ r: regions })
+                      .where(({ r }) => eq(r.id, pr.regionId))
+                      .select(({ r }) => ({ id: r.id, name: r.name })),
+                  ),
+                })),
+            ),
           })),
       })
       await collection.preload()
@@ -7614,7 +7732,7 @@ describe(`includes subqueries`, () => {
 
           return {
             id: parent.id,
-            facade: childRows(),
+            facade: include(childRows()),
             array: toArray(childRows()),
             joined: concat(
               toArray(
@@ -7881,5 +7999,46 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+  })
+})
+
+describe(`a subquery in select needs an include operator`, () => {
+  const query = (shape: `field` | `nested` | `caseWhen`) => () =>
+    createLiveQueryCollection((q) =>
+      q.from({ p: createProjectsCollection() }).select(({ p }) => {
+        const issues = q
+          .from({ i: createIssuesCollection() })
+          .where(({ i }) => eq(i.projectId, p.id)) as any
+        return shape === `field`
+          ? { id: p.id, issues }
+          : shape === `nested`
+            ? { id: p.id, detail: { issues } }
+            : { id: p.id, detail: caseWhen(gt(p.id, 0), { issues }, null) }
+      }),
+    )
+
+  it.each([`field`, `nested`, `caseWhen`] as const)(
+    `throws a coded error for a bare subquery: %s`,
+    (shape) => {
+      expect(query(shape)).toThrow(IncludeOperatorRequiredError)
+      expect(query(shape)).toThrow(/issues: include\(/)
+    },
+  )
+
+  it(`includes a Collection with include()`, async () => {
+    const projects = createProjectsCollection()
+    const issues = createIssuesCollection()
+    const live = createLiveQueryCollection((q) =>
+      q.from({ p: projects }).select(({ p }) => ({
+        id: p.id,
+        issues: include(
+          q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+        ),
+      })),
+    )
+    await live.preload()
+    const first = live.toArray[0]!
+    expect(first.issues.toArray.length).toBeGreaterThan(0)
+    await live.cleanup()
   })
 })

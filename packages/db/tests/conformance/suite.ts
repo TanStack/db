@@ -38,6 +38,7 @@ import { describe, expect, it } from 'vitest'
  * inputs, error status, and order-only moves.
  */
 import { leftJoin, waitForPersistedInitialRender } from '@tanstack/db'
+import { include } from '../../src/query/index.js'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
@@ -732,10 +733,10 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           q.from({ persons: people.collection }).select(({ persons }: any) => ({
             id: persons.id,
             name: persons.name,
-            issues: q
+            issues: include(q
               .from({ issues: issues.collection })
               .where(({ issues: i }: any) => ops.eq(i.userId, persons.id))
-              .select(({ issues: i }: any) => ({ id: i.id, title: i.title })),
+              .select(({ issues: i }: any) => ({ id: i.id, title: i.title }))),
           })),
         )
         await h.flush()

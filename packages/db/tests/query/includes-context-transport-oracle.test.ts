@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { add,
+import {
+  add,
   and,
   caseWhen,
   coalesce,
@@ -8,13 +9,15 @@ import { add,
   eq,
   groupKeys,
   gt,
+  include,
   innerJoin,
   lt,
   lte,
   materialize,
   multiply,
   sum,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import {
   attachRouteMetadata,
   stripInternalRouteMetadata,
@@ -560,7 +563,7 @@ function includeInEveryForm<TContext extends Context>(
   query: QueryBuilder<TContext>,
 ) {
   return {
-    collection: query,
+    collection: include(query),
     array: toArray(query),
     materialized: materialize(query),
   }

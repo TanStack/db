@@ -3,6 +3,7 @@ import { D2, MultiSet, output, serializeValue } from '@tanstack/db-ivm'
 import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
+import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import {
   Query,
   and,
@@ -160,6 +161,7 @@ async function runShapes(
                   {
                     compile: processJoins,
                     optimize: applyOptimizations,
+                    materialize: materializeCompilation,
                     type: 'inner',
                     from: post,
                     on: new Func('eq', [

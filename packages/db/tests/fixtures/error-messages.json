@@ -266,5 +266,8 @@
   ],
   "GroupingOperatorRequiredError": [
     "groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra."
+  ],
+  "IncludeOperatorRequiredError": [
+    "A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db."
   ]
 }

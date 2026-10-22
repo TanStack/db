@@ -5,6 +5,7 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   innerJoin,
   leftJoin,
   toArray,
@@ -658,13 +659,15 @@ describe(`caseWhen`, () => {
             id: user.id,
             name: user.name,
             label: `adult`,
-            posts: q
-              .from({ post: posts })
-              .where(({ post }) => eq(post.userId, user.id))
-              .orderBy(({ post }) => post.id)
-              .select(({ post }) => ({
-                title: post.title,
-              })),
+            posts: include(
+              q
+                .from({ post: posts })
+                .where(({ post }) => eq(post.userId, user.id))
+                .orderBy(({ post }) => post.id)
+                .select(({ post }) => ({
+                  title: post.title,
+                })),
+            ),
           }
 
           return {

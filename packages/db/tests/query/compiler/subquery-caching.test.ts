@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { D2 } from '@tanstack/db-ivm'
+import { materializeCompilation } from '../../../src/query/live/materialized-pipeline.js'
 import { applyOptimizations } from '../../../src/query/optimizer-joins.js'
 import { processJoins } from '../../../src/query/compiler/joins.js'
 import { compileQuery } from '../../../src/query/compiler/index.js'
@@ -105,7 +106,10 @@ describe(`Subquery Caching`, () => {
     const mainQuery: QueryIR = {
       from: new QueryRef(subquery, `main_users`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `inner`,
           from: new QueryRef(subquery, `joined_users`), // Same subquery object reference
           on: new Func('eq', [
@@ -381,7 +385,10 @@ describe(`Subquery Caching`, () => {
     const middleSubquery: QueryIR = {
       from: new QueryRef(innerSubquery, `inner1`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `left`,
           from: new QueryRef(innerSubquery, `inner2`), // Same innerSubquery
           on: new Func('eq', [
@@ -395,7 +402,10 @@ describe(`Subquery Caching`, () => {
     const outerQuery: QueryIR = {
       from: new QueryRef(middleSubquery, `middle`),
       join: [
-        { compile: processJoins, optimize: applyOptimizations,
+        {
+          compile: processJoins,
+          optimize: applyOptimizations,
+          materialize: materializeCompilation,
           type: `inner`,
           from: new QueryRef(innerSubquery, `direct`), // innerSubquery again at top level
           on: new Func('eq', [
