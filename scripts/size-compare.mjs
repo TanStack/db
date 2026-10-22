@@ -41,7 +41,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { availableParallelism, tmpdir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { build as esbuild } from 'esbuild'
@@ -255,9 +255,9 @@ const scenarioDir = join(root, `scripts`, `size-scenarios`)
 // The typical app first; each other scenario adds one feature to it.
 const scenarios = existsSync(scenarioDir)
   ? walk(scenarioDir, (name) => name.endsWith(`.js`)).sort((a, b) =>
-      a.endsWith(`/app.js`)
+      basename(a) === `app.js`
         ? -1
-        : b.endsWith(`/app.js`)
+        : basename(b) === `app.js`
           ? 1
           : a.localeCompare(b),
     )

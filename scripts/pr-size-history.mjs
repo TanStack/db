@@ -21,11 +21,22 @@ import { promisify } from 'node:util'
 
 const run = promisify(execFile)
 const args = process.argv.slice(2)
+// An option present without an operand is an error, not its default.
 const option = (name, fallback) => {
   const index = args.indexOf(`--${name}`)
-  return index === -1 ? fallback : args[index + 1]
+  if (index === -1) return fallback
+  const value = args[index + 1]
+  if (value === undefined || value.startsWith(`--`)) {
+    console.error(`--${name} needs a value`)
+    process.exit(1)
+  }
+  return value
 }
 const count = Number(option(`count`, `300`))
+if (!Number.isInteger(count) || count < 1) {
+  console.error(`--count needs a positive integer`)
+  process.exit(1)
+}
 const pkg = option(`package`, `db`)
 const repo = option(`repo`, `TanStack/db`)
 const units = { B: 1, kB: 1000, MB: 1000_000 }
@@ -33,14 +44,23 @@ const row = new RegExp(
   `^\\|\\s*\`packages/${pkg}/dist/esm/([^\`]+)\`\\s*\\|[^|]*\\|\\s*([+-]?[\\d.]+)\\s*(B|kB|MB)\\b`,
 )
 
-const gh = async (path) =>
-  JSON.parse(
-    (await run(`gh`, [`api`, path], { maxBuffer: 64 * 1024 * 1024 })).stdout,
+const gh = async (path, { paginate = false } = {}) => {
+  const { stdout } = await run(
+    `gh`,
+    [`api`, ...(paginate ? [`--paginate`, `--slurp`] : []), path],
+    { maxBuffer: 64 * 1024 * 1024 },
   )
+  // `--slurp` wraps each page's array in an outer array.
+  return paginate ? JSON.parse(stdout).flat() : JSON.parse(stdout)
+}
 
+// Pages come newest-updated first, and a pull request's update time is never
+// earlier than its merge time. So once a page's oldest update is earlier than
+// the count-th newest merge already collected, no later page can hold a newer
+// merge, and paging can stop.
 async function mergedPullRequests() {
   const merged = []
-  for (let page = 1; merged.length < count; page++) {
+  for (let page = 1; ; page++) {
     const batch = await gh(
       `repos/${repo}/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100&page=${page}`,
     )
@@ -52,6 +72,13 @@ async function mergedPullRequests() {
           title: pr.title,
           mergedAt: pr.merged_at,
         })
+    const oldestUpdate = batch.at(-1).updated_at
+    const newestMerges = merged
+      .map(({ mergedAt }) => mergedAt)
+      .sort()
+      .reverse()
+    if (newestMerges.length >= count && oldestUpdate < newestMerges[count - 1])
+      break
   }
   return merged
     .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt))
@@ -62,6 +89,7 @@ async function mergedPullRequests() {
 async function sizeChange(number) {
   const comments = await gh(
     `repos/${repo}/issues/${number}/comments?per_page=100`,
+    { paginate: true },
   )
   const comment = comments.findLast(
     (c) =>
