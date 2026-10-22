@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   include,
   materialize,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
 describe(`functional include input boundary`, () => {

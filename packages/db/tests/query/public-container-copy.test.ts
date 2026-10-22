@@ -1,9 +1,11 @@
 import { expect, it } from 'vitest'
-import { createLiveQueryCollection,
+import {
+  createLiveQueryCollection,
   eq,
   include,
   materialize,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { transformPublicContainers } from '../../src/query/compiler/route-metadata.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 

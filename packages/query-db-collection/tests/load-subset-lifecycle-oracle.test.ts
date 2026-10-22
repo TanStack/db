@@ -1,10 +1,12 @@
-import { BasicIndex,
+import {
+  BasicIndex,
   IR,
   createCollection,
   createLiveQueryCollection,
   eq,
   getLoadSubsetDemandKey,
-  leftJoin } from '@tanstack/db'
+  leftJoin,
+} from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { describe, expect, it, vi } from 'vitest'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
@@ -1300,8 +1302,12 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
   const live = createLiveQueryCollection((query) =>
     query
       .from({ left: left.collection })
-      .join(leftJoin({ right: right.collection }, ({ left: leftRow, right: rightRow }) =>
-        eq(leftRow.id, rightRow.id)))
+      .join(
+        leftJoin(
+          { right: right.collection },
+          ({ left: leftRow, right: rightRow }) => eq(leftRow.id, rightRow.id),
+        ),
+      )
       .select(({ left: row }) => ({ id: row.id })),
   )
   const preload = live.preload()

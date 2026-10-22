@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { add,
+import {
+  add,
   caseWhen,
   concat,
   count,
@@ -14,7 +15,8 @@ import { add,
   materialize,
   multiply,
   sum,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { runTrace } from '../trace-runner.js'

@@ -28,7 +28,7 @@ import {
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { IncludesRuntime } from './includes-runtime.js'
-import type { BasicExpression, JoinClause, QueryIR  } from '../ir.js'
+import type { BasicExpression, JoinClause, QueryIR } from '../ir.js'
 import type { BucketFacadeAdapter } from './bucket-facade-adapter.js'
 import type { materializeCompilation } from './materialized-pipeline.js'
 import type { WindowOptions } from '../compiler/index.js'

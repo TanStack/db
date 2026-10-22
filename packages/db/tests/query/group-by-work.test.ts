@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createLiveQueryCollection, eq, include  } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { count, max, sum } from '../../src/query/builder/functions.js'
 import { mockSyncCollectionOptions } from '../utils.js'

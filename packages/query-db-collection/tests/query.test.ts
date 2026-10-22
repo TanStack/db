@@ -1,4 +1,5 @@
-import { BTreeIndex,
+import {
+  BTreeIndex,
   DbClient,
   IR,
   collectionOptions,
@@ -10,7 +11,8 @@ import { BTreeIndex,
   inArray,
   include,
   or,
-  resetWarnings } from '@tanstack/db'
+  resetWarnings,
+} from '@tanstack/db'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   QueryClient,
@@ -1384,14 +1386,16 @@ describe(`QueryCollection`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
         id: lineItem.id,
-        product: include(q
-          .from({ product: products })
-          .where(({ product }) => eq(product.id, lineItem.productId))
-          .select(({ product }) => ({
-            id: product.id,
-            categoryId: product.categoryId,
-            name: product.name,
-          }))),
+        product: include(
+          q
+            .from({ product: products })
+            .where(({ product }) => eq(product.id, lineItem.productId))
+            .select(({ product }) => ({
+              id: product.id,
+              categoryId: product.categoryId,
+              name: product.name,
+            })),
+        ),
       })),
     )
 
@@ -1464,13 +1468,15 @@ describe(`QueryCollection`, () => {
     const live = createLiveQueryCollection((q) =>
       q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
         id: lineItem.id,
-        product: include(q
-          .from({ product: products })
-          .where(({ product }) => eq(product.id, lineItem.productId))
-          .select(({ product }) => ({
-            id: product.id,
-            name: product.name,
-          }))),
+        product: include(
+          q
+            .from({ product: products })
+            .where(({ product }) => eq(product.id, lineItem.productId))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+            })),
+        ),
       })),
     )
 

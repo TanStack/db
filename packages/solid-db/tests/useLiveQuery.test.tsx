@@ -1,4 +1,6 @@
-import { Query, count ,
+import {
+  Query,
+  count,
   createCollection,
   createLiveQueryCollection,
   createOptimisticAction,
@@ -7,7 +9,8 @@ import { Query, count ,
   include,
   leftJoin,
   toArray,
-  waitForPersistedInitialRender } from '@tanstack/db'
+  waitForPersistedInitialRender,
+} from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
@@ -381,8 +384,11 @@ describe(`Query Collections`, () => {
       return useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)))
+          .join(
+            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            ),
+          )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -864,8 +870,11 @@ describe(`Query Collections`, () => {
       const queryResult = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)))
+          .join(
+            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            ),
+          )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -1437,8 +1446,11 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)))
+            .join(
+              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+                eq(issues.userId, persons.id),
+              ),
+            )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
@@ -1834,8 +1846,11 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)))
+            .join(
+              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+                eq(issues.userId, persons.id),
+              ),
+            )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
@@ -3463,14 +3478,16 @@ describe(`includes subqueries`, () => {
       useLiveQuery((q) =>
         q.from({ project: projects }).select(({ project }) => ({
           id: project.id,
-          issues: include(q
-            .from({ issue: issues })
-            .where(({ issue }) => eq(issue.projectId, project.id))
-            .select(({ issue }) => ({
-              id: issue.id,
-              projectId: issue.projectId,
-              title: issue.title,
-            }))),
+          issues: include(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                projectId: issue.projectId,
+                title: issue.title,
+              })),
+          ),
         })),
       ),
     )

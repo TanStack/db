@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq, include  } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection'
 import { createDeferred } from '../../src/deferred'
 import { BasicIndex } from '../../src/indexes/basic-index'

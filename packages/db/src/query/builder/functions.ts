@@ -6,11 +6,7 @@ import { registerWrapper } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir'
 import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { RefProxy } from './ref-proxy.js'
-import type {
-  Context,
-  RefLeaf,
-  StringifiableScalar,
-} from './types.js'
+import type { Context, RefLeaf, StringifiableScalar } from './types.js'
 import type { BaseQueryBuilder, QueryBuilder } from './index.js'
 
 type StringRef =

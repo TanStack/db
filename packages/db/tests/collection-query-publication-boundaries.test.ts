@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { MultiSet } from '@tanstack/db-ivm'
-import { createLiveQueryCollection, eq, innerJoin  } from '../src/query/index.js'
+import { createLiveQueryCollection, eq, innerJoin } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'

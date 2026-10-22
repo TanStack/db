@@ -1,4 +1,6 @@
-import { DbClient, Query ,
+import {
+  DbClient,
+  Query,
   coalesce,
   collectionOptions,
   count,
@@ -12,7 +14,8 @@ import { DbClient, Query ,
   localOnlyCollectionOptions,
   lte,
   sum,
-  toArray } from '@tanstack/db'
+  toArray,
+} from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
@@ -446,8 +449,11 @@ describe(`Query Collections`, () => {
       return useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)))
+          .join(
+            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            ),
+          )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -820,8 +826,11 @@ describe(`Query Collections`, () => {
       const queryResult = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)))
+          .join(
+            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            ),
+          )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -1457,8 +1466,11 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)))
+            .join(
+              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+                eq(issues.userId, persons.id),
+              ),
+            )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
@@ -1882,8 +1894,11 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)))
+            .join(
+              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+                eq(issues.userId, persons.id),
+              ),
+            )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
@@ -2635,8 +2650,11 @@ describe(`Query Collections`, () => {
 
           return q
             .from({ persons: personCollection })
-            .join(leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
-              eq(persons.id, ic.userId)))
+            .join(
+              leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
+                eq(persons.id, ic.userId),
+              ),
+            )
             .select(({ persons, ic }) => ({
               name: persons.name,
               issueCount: ic.issueCount,
@@ -2755,13 +2773,15 @@ describe(`Query Collections`, () => {
           q.from({ p: projectsCollection }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: include(q
-              .from({ i: issuesCollection })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              }))),
+            issues: include(
+              q
+                .from({ i: issuesCollection })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
           })),
         )
       })

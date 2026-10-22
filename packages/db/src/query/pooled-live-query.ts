@@ -730,6 +730,9 @@ export function createPooledLiveQuery(
  * query config to serve equality-filtered queries of one shape from a shared
  * partition. Apps that do not pass it do not bundle pooling.
  */
-export const pooledLiveQueries = { createPooledLiveQuery, getPooledQueryIdentity }
+export const pooledLiveQueries = {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+}
 
 export type PooledLiveQueries = typeof pooledLiveQueries

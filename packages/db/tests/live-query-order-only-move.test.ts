@@ -393,11 +393,13 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     const lq = createLiveQueryCollection((q) =>
       q.from({ parent: parents }).select(({ parent }) => ({
         id: parent.id,
-        children: include(q
-          .from({ child: children })
-          .where(({ child }) => eq(child.parentId, parent.id))
-          .orderBy(({ child }) => child.position)
-          .select(({ child }) => ({ id: child.id, name: child.name }))),
+        children: include(
+          q
+            .from({ child: children })
+            .where(({ child }) => eq(child.parentId, parent.id))
+            .orderBy(({ child }) => child.position)
+            .select(({ child }) => ({ id: child.id, name: child.name })),
+        ),
       })),
     )
     await lq.preload()
@@ -464,18 +466,25 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     const lq = createLiveQueryCollection((q) =>
       q.from({ org: orgs }).select(({ org }) => ({
         id: org.id,
-        teams: include(q
-          .from({ team: teams })
-          .where(({ team }) => eq(team.orgId, org.id))
-          .orderBy(({ team }) => team.position)
-          .select(({ team }) => ({
-            id: team.id,
-            members: include(q
-              .from({ member: members })
-              .where(({ member }) => eq(member.teamId, team.id))
-              .orderBy(({ member }) => member.position)
-              .select(({ member }) => ({ id: member.id, name: member.name }))),
-          }))),
+        teams: include(
+          q
+            .from({ team: teams })
+            .where(({ team }) => eq(team.orgId, org.id))
+            .orderBy(({ team }) => team.position)
+            .select(({ team }) => ({
+              id: team.id,
+              members: include(
+                q
+                  .from({ member: members })
+                  .where(({ member }) => eq(member.teamId, team.id))
+                  .orderBy(({ member }) => member.position)
+                  .select(({ member }) => ({
+                    id: member.id,
+                    name: member.name,
+                  })),
+              ),
+            })),
+        ),
       })),
     )
     await lq.preload()

@@ -1,8 +1,10 @@
-import { BasicIndex,
+import {
+  BasicIndex,
   createCollection,
   createLiveQueryCollection,
   eq,
-  include } from '@tanstack/db'
+  include,
+} from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { describe, expect, it } from 'vitest'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
@@ -362,27 +364,33 @@ async function checkNestedTreeShape(
         q.from({ root: sources.roots }).select(({ root }) => ({
           id: root.id,
           value: root.value,
-          children: include(q
-            .from({ branch: sources.branches })
-            .where(({ branch }) => eq(branch.parentId, root.id))
-            .select(({ branch }) => ({
-              id: branch.id,
-              value: branch.value,
-              children: include(q
-                .from({ twig: sources.twigs })
-                .where(({ twig }) => eq(twig.parentId, branch.id))
-                .select(({ twig }) => ({
-                  id: twig.id,
-                  value: twig.value,
-                  children: include(q
-                    .from({ leaf: sources.leaves })
-                    .where(({ leaf }) => eq(leaf.parentId, twig.id))
-                    .select(({ leaf }) => ({
-                      id: leaf.id,
-                      value: leaf.value,
-                    }))),
-                }))),
-            }))),
+          children: include(
+            q
+              .from({ branch: sources.branches })
+              .where(({ branch }) => eq(branch.parentId, root.id))
+              .select(({ branch }) => ({
+                id: branch.id,
+                value: branch.value,
+                children: include(
+                  q
+                    .from({ twig: sources.twigs })
+                    .where(({ twig }) => eq(twig.parentId, branch.id))
+                    .select(({ twig }) => ({
+                      id: twig.id,
+                      value: twig.value,
+                      children: include(
+                        q
+                          .from({ leaf: sources.leaves })
+                          .where(({ leaf }) => eq(leaf.parentId, twig.id))
+                          .select(({ leaf }) => ({
+                            id: leaf.id,
+                            value: leaf.value,
+                          })),
+                      ),
+                    })),
+                ),
+              })),
+          ),
         })),
     })
     rootCollection = roots

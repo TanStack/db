@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { and,
+import {
+  and,
   createLiveQueryCollection,
   eq,
   gte,
   include,
   leftJoin,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import {

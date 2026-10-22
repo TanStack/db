@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { caseWhen,
+import {
+  caseWhen,
   coalesce,
   concat,
   count,
@@ -11,7 +12,8 @@ import { caseWhen,
   innerJoin,
   leftJoin,
   rightJoin,
-  toArray } from '../../src/query/index.js'
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {

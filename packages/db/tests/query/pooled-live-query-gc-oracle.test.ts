@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPooledLiveQuery, pooledLiveQueries  } from '../../src/query/pooled-live-query.js'
+import {
+  createPooledLiveQuery,
+  pooledLiveQueries,
+} from '../../src/query/pooled-live-query.js'
 import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'

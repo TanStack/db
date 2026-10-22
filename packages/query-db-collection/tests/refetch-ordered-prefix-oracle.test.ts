@@ -1,4 +1,5 @@
-import { BTreeIndex,
+import {
+  BTreeIndex,
   IR,
   createCollection,
   createLiveQueryCollection,
@@ -6,7 +7,8 @@ import { BTreeIndex,
   getLoadSubsetDemandKey,
   isUndefined,
   leftJoin,
-  not } from '@tanstack/db'
+  not,
+} from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
@@ -638,8 +640,11 @@ async function startRun(testCase: Case): Promise<Run> {
   const window = createLiveQueryCollection((q) => {
     const ordered = q
       .from({ item: items })
-      .join(leftJoin({ marker: markerCollection }, ({ item, marker }) =>
-        eq(item.id, marker.itemId)))
+      .join(
+        leftJoin({ marker: markerCollection }, ({ item, marker }) =>
+          eq(item.id, marker.itemId),
+        ),
+      )
       .where(({ marker }) => not(isUndefined(marker.itemId)))
       .orderBy(
         ({ item }) => (scenario.orderKey === `rank` ? item.rank : item.label),

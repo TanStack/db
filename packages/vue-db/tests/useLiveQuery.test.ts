@@ -1,10 +1,12 @@
-import { count,
+import {
+  count,
   createCollection,
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
   gt,
-  leftJoin } from '@tanstack/db'
+  leftJoin,
+} from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { nextTick, ref, watchEffect } from 'vue'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -315,8 +317,11 @@ describe(`Query Collections`, () => {
     const { state } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
-        .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)))
+        .join(
+          leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
+          ),
+        )
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
@@ -603,8 +608,11 @@ describe(`Query Collections`, () => {
     const queryResult = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
-        .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)))
+        .join(
+          leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
+          ),
+        )
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
@@ -1174,8 +1182,11 @@ describe(`Query Collections`, () => {
       const { isReady } = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)))
+          .join(
+            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            ),
+          )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
@@ -1700,8 +1711,11 @@ describe(`Query Collections`, () => {
       const { isLoading, state, data } = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)))
+          .join(
+            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            ),
+          )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
