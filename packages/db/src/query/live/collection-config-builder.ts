@@ -137,8 +137,12 @@ export class CollectionConfigBuilder<
    */
   async reload(): Promise<void> {
     const query = this.liveQueryCollection
-    // A crashed query rejects without touching its sources.
+    // A crashed query rejects without touching its sources. One that is not
+    // running starts, as any Collection's reload does; its preload is what
+    // lets it start its sources.
     if (query?.status === `crashed`) return query._sync.reload()
+    if (query?.status === `idle` || query?.status === `cleaned-up`)
+      return query.preload()
     const failed = this.collectionSources
       .map(({ collection }) => collection)
       .filter(
