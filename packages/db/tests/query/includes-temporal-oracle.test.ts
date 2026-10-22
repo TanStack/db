@@ -22,7 +22,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { flushPromises } from '../utils.js'
+import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { Deferred } from '../../src/deferred.js'
@@ -1980,6 +1980,8 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     collectionId: comments.id,
     initialKeys: new Set(),
   }
+  // Core reports the throwing release uncaught, once.
+  const uncaught = captureMicrotaskErrors()
 
   let primaryFailure: CapturedFailure | undefined
   try {
@@ -1991,6 +1993,8 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     const retired = controller.setDemand(subscription, plan, new Set())
     expect(retired).toMatchObject({ changed: true, empty: true })
     expect(unloadCount).toBe(1)
+    await flushPromises()
+    expect(uncaught.errors).toEqual([releaseError])
 
     const reactivated = controller.setDemand(subscription, plan, new Set(keys))
     expectReleaseReentryObservation(
@@ -2010,6 +2014,7 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     () => controller.clear(),
     () => subscription.unsubscribe(),
     () => comments.cleanup(),
+    () => uncaught.restore(),
   ])
 }
 
@@ -2060,6 +2065,9 @@ async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<vo
   })
   const live = createPostsWithCommentsLive(posts.collection, comments)
   const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  // A throwing release is an adapter bug: core reports it uncaught, once,
+  // and records no subset error.
+  const uncaught = captureMicrotaskErrors()
 
   let primaryFailure: CapturedFailure | undefined
   try {
@@ -2071,7 +2079,8 @@ async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<vo
     await flushPromises()
     expect(live.size).toBe(0)
     expect(live.status).toBe(`ready`)
-    expect(live.utils.lastSubsetError).toBe(releaseError)
+    expect(uncaught.errors).toEqual([releaseError])
+    expect(live.utils.lastSubsetError).toBeUndefined()
 
     posts.write(`insert`, post)
     await flushPromises()
@@ -2086,6 +2095,7 @@ async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<vo
     () => posts.collection.cleanup(),
     () => comments.cleanup(),
     () => consoleError.mockRestore(),
+    () => uncaught.restore(),
   ])
 }
 
@@ -3484,7 +3494,7 @@ describe(`includes temporal oracle`, () => {
   }
 
   it(
-    `failed release retires an empty live-query demand without poisoning reentry`,
+    `failed release retires an empty live-query demand, reported uncaught, without poisoning reentry`,
     expectRetiredDemandStaysNonfatalAfterReleaseFailure,
   )
 

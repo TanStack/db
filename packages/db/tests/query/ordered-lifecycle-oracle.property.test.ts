@@ -12,7 +12,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { flushPromises } from '../utils.js'
+import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -2394,8 +2394,9 @@ function assertLaterFallbackObservation(
   expect(observed.final.rootLoading).toBe(false)
   if (observed.childDemand === `settled`)
     expect(observed.final.liveLoading).toBe(false)
-  if (observed.releaseError) expect(observed.final.status).toBe(`error`)
-  else expect([`loading`, `ready`]).toContain(observed.final.status)
+  // A throwing release is an adapter bug that fails no load, so it leaves
+  // the status to the load results.
+  expect([`loading`, `ready`]).toContain(observed.final.status)
   // Changes may be split across publications. At each callback, applying
   // its changes to the prior public snapshot must match the rows a reader
   // sees there; the flattened delta must match the finite join model.
@@ -2514,13 +2515,24 @@ describe(`post-publication null fallback oracle`, () => {
   it.each([`delete-marker`, `retarget-marker`] as const)(
     `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
     async (mutation) => {
-      await observeLaterFallback(
-        mutation,
-        `literal-true`,
-        `pending`,
-        (observed) => assertLaterFallbackObservation(mutation, observed),
-        true,
-      )
+      // The subscription reports the throwing release uncaught, once: it is
+      // an adapter bug, not a load result.
+      const uncaught = captureMicrotaskErrors()
+      try {
+        await observeLaterFallback(
+          mutation,
+          `literal-true`,
+          `pending`,
+          (observed) => assertLaterFallbackObservation(mutation, observed),
+          true,
+        )
+        await flushPromises()
+      } finally {
+        uncaught.restore()
+      }
+      expect(uncaught.errors.map(String)).toEqual([
+        `Error: first ordered acquisition release failed`,
+      ])
     },
   )
 })

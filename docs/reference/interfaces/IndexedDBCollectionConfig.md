@@ -3,7 +3,7 @@ id: IndexedDBCollectionConfig
 title: IndexedDBCollectionConfig
 ---
 
-Defined in: [packages/db/src/indexed-db.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L145)
+Defined in: [packages/db/src/indexed-db.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L149)
 
 Configuration options for creating an IndexedDB Collection
 
@@ -33,7 +33,7 @@ Configuration options for creating an IndexedDB Collection
 optional autoIndex: "eager" | "off";
 ```
 
-Defined in: [packages/db/src/types.ts:781](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L781)
+Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
 
 Auto-indexing mode for the collection.
 When enabled, indexes will be automatically created for simple where expressions.
@@ -62,7 +62,7 @@ When enabled, indexes will be automatically created for simple where expressions
 optional compare: (x, y) => number;
 ```
 
-Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
+Defined in: [packages/db/src/types.ts:828](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L828)
 
 Optional function to compare two items.
 This is used to order the items in the collection.
@@ -106,7 +106,7 @@ compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
 db: IndexedDBInstance;
 ```
 
-Defined in: [packages/db/src/indexed-db.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L154)
+Defined in: [packages/db/src/indexed-db.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L158)
 
 IndexedDB instance from createIndexedDB()
 REQUIRED - must create database before collections
@@ -119,7 +119,7 @@ REQUIRED - must create database before collections
 optional defaultIndexType: IndexConstructor<TKey>;
 ```
 
-Defined in: [packages/db/src/types.ts:795](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L795)
+Defined in: [packages/db/src/types.ts:817](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L817)
 
 Default index type to use when creating indexes without an explicit type.
 Required for auto-indexing. Import from '@tanstack/db'.
@@ -147,7 +147,7 @@ const collection = createCollection({
 optional defaultStringCollation: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/types.ts:981](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L981)
+Defined in: [packages/db/src/types.ts:1003](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1003)
 
 Specifies how to compare data in the collection.
 This should be configured to match data ordering on the backend.
@@ -166,7 +166,7 @@ E.g., when using the Electric DB collection these options
 optional gcTime: number;
 ```
 
-Defined in: [packages/db/src/types.ts:760](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L760)
+Defined in: [packages/db/src/types.ts:782](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L782)
 
 Time in milliseconds after which the collection will be garbage collected
 when it has no active subscribers. Defaults to 5 minutes (300000ms).
@@ -187,7 +187,7 @@ disables automatic garbage collection.
 getKey: (item) => TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:751](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L751)
+Defined in: [packages/db/src/types.ts:773](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L773)
 
 Function to extract the ID from an object
 This is required for update/delete operations which now only accept IDs
@@ -225,7 +225,7 @@ getKey: (item) => item.uuid
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:740](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L740)
+Defined in: [packages/db/src/types.ts:762](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L762)
 
 #### Inherited from
 
@@ -239,7 +239,7 @@ Defined in: [packages/db/src/types.ts:740](https://github.com/TanStack/db/blob/m
 name: string;
 ```
 
-Defined in: [packages/db/src/indexed-db.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L160)
+Defined in: [packages/db/src/indexed-db.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L164)
 
 Name of the object store within the database
 Must exist in the underlying database
@@ -252,7 +252,7 @@ Must exist in the underlying database
 optional onDelete: DeleteMutationFn<T, TKey, UtilsRecord>;
 ```
 
-Defined in: [packages/db/src/types.ts:973](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L973)
+Defined in: [packages/db/src/types.ts:995](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L995)
 
 Optional asynchronous handler function called before a delete operation
 
@@ -324,7 +324,7 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: InsertMutationFn<T, TKey, UtilsRecord>;
 ```
 
-Defined in: [packages/db/src/types.ts:865](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L865)
+Defined in: [packages/db/src/types.ts:887](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L887)
 
 Optional asynchronous handler function called before an insert operation
 
@@ -393,7 +393,7 @@ onInsert: async ({ transaction, collection }) => {
 optional onUpdate: UpdateMutationFn<T, TKey, UtilsRecord>;
 ```
 
-Defined in: [packages/db/src/types.ts:920](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L920)
+Defined in: [packages/db/src/types.ts:942](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L942)
 
 Optional asynchronous handler function called before an update operation
 
@@ -466,7 +466,7 @@ onUpdate: async ({ transaction, collection }) => {
 optional schema: TSchema;
 ```
 
-Defined in: [packages/db/src/types.ts:741](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L741)
+Defined in: [packages/db/src/types.ts:763](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L763)
 
 #### Inherited from
 
@@ -480,7 +480,7 @@ Defined in: [packages/db/src/types.ts:741](https://github.com/TanStack/db/blob/m
 optional startSync: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:771](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L771)
+Defined in: [packages/db/src/types.ts:793](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L793)
 
 Whether to eagerly start syncing on collection creation.
 When true, syncing begins immediately. When false, syncing starts when the first subscriber attaches.
@@ -507,7 +507,7 @@ false
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/db/src/types.ts:815](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L815)
+Defined in: [packages/db/src/types.ts:837](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L837)
 
 The mode of sync to use for the collection.
 
@@ -533,7 +533,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 optional utils: UtilsRecord;
 ```
 
-Defined in: [packages/db/src/types.ts:983](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L983)
+Defined in: [packages/db/src/types.ts:1005](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1005)
 
 #### Inherited from
 

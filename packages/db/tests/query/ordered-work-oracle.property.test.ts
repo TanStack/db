@@ -5185,6 +5185,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // The rows each served request last returned, at its answer or at the
   // latest refetch. A refetching provider keeps exactly these rows.
   const lastAnswered = new Map<LoadSubsetOptions, Set<number>>()
+  // Bounded pages that ended on a null or NaN rank. Neither can be
+  // expressed as a cursor (canExpressCursorOrder), so the loader then takes
+  // the documented full-source fallback.
+  let unexpressiblePageEnds = 0
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
     providerRequests++
     if (providerRequests > 4 * rows.size + 100) {
@@ -5234,6 +5238,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     lastAnswered.set(options, new Set(page.map((row) => row.id)))
     if (options.orderBy && options.limit !== undefined && page.length > 0) {
       rangeEnds.set(options, { ...page.at(-1)! })
+      // Generated rows may carry a null rank behind the `number` row type.
+      const end = page.at(-1)!.rank as number | null
+      if (end === null || Number.isNaN(end)) unexpressiblePageEnds++
     }
     served += page.length
     servedBy.set(
@@ -5873,16 +5880,13 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       stepChangedInFlight = false
       if (command.type === `refetch`) {
         const fullSourceBefore = fullSourceRequests
+        const unexpressibleBefore = unexpressiblePageEnds
         await refetch()
-        // A report over an indexed numeric order can repair an expressible
-        // boundary with a bounded prefix, tie, and refill. An unindexed
-        // underfilled continuation, or a null/NaN boundary, cannot make that
-        // promise and may need the documented full-source fallback.
-        if (
-          signalsRefetch &&
-          testCase.indexed &&
-          [...rows.values()].every((row) => Number.isFinite(row.rank))
-        ) {
+        // The repair a report starts reads each window's bounded prefix,
+        // tie, and refill; a whole-source read would be the cost the report
+        // exists to avoid. A page that ends on a null or NaN rank takes the
+        // documented full-source fallback instead.
+        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,

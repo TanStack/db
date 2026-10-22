@@ -622,11 +622,25 @@ export interface PersistenceAdapter {
     task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
   ) => Promise<T>
   /** Schedule one regular operation before it acquires external writer locks. */
-  runInRegularScope?: <T>(
-    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
-  ) => Promise<T>
+  runInRegularScope?: RegularScope
   /** Whether hydration scopes currently enter a shared driver scheduler. */
   isHydrationScopeScheduled?: () => boolean
+}
+
+/**
+ * Regular work on a shared driver scheduler. A scheduler that admits regular
+ * work also orders it against hydrates, so the barrier is part of the same
+ * capability rather than a separate optional member.
+ */
+export type RegularScope = (<T>(
+  task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+) => Promise<T>) & {
+  /**
+   * Resolves after every operation, in either lane, queued or running at the
+   * call settles. It never rejects, takes no scheduler turn, and does not
+   * count as a lane completion.
+   */
+  afterQueuedWork: () => Promise<void>
 }
 
 export type HydrationPersistenceAdapter = PersistenceAdapter & {
@@ -1225,17 +1239,34 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
       value: T
     }
 
+type MetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
+
+function applyMetadataWrite<K>(
+  target:
+    | { set: (key: K, value: unknown) => unknown; delete: (key: K) => unknown }
+    | undefined,
+  key: K,
+  write: MetadataWrite,
+): void {
+  if (write.type === `delete`) target?.delete(key)
+  else target?.set(key, write.value)
+}
+
+function toMetadataMutations<K>(
+  writes: Map<K, MetadataWrite>,
+): Array<{ type: `set`; key: K; value: unknown } | { type: `delete`; key: K }> {
+  return Array.from(writes, ([key, write]) =>
+    write.type === `delete`
+      ? { type: `delete`, key }
+      : { type: `set`, key, value: write.value },
+  )
+}
+
 type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   operations: Array<NormalizedSyncOperation<T, TKey>>
   partialUpdateOperationIndexes: Set<number>
-  rowMetadataWrites: Map<
-    TKey,
-    { type: `set`; value: unknown } | { type: `delete` }
-  >
-  collectionMetadataWrites: Map<
-    string,
-    { type: `set`; value: unknown } | { type: `delete` }
-  >
+  rowMetadataWrites: Map<TKey, MetadataWrite>
+  collectionMetadataWrites: Map<string, MetadataWrite>
   deferredHydrationMetadataDeleteKeys: Set<TKey>
   hydrationContext?: { suppliedRowKeys: Set<TKey> }
   hydrationSequence?: number
@@ -1270,6 +1301,9 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
     reject: (error: unknown) => void
   }>
   terminalFailure?: { error: unknown }
+  // Set just before the transaction is handed to the Collection; from then
+  // on core holds its keys itself.
+  handedToCollection?: boolean
 }
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
@@ -2175,34 +2209,33 @@ class PersistedCollectionRuntime<
             }
             return result
           })
-        } else {
+        } else if (this.persistence.adapter.runInHydrationScope) {
           // Preserve the existing unscheduled-adapter lifecycle contract: a
-          // replacement upstream may start while stale hydration is settling.
-          if (await loadStartupMetadata(this.persistence.adapter)) {
-            if (this.persistence.adapter.isHydrationScopeScheduled?.()) {
-              startup = await this.applyMutex.run(async () => {
-                const result = await this.runInHydrationScope((adapter) =>
-                  this.startInternal(
-                    lifecycleGeneration,
-                    adapter,
-                    resolveStartupMetadata,
-                  ),
+          // replacement upstream may start while stale hydration is settling,
+          // so this restart takes no mutex and waits for no scheduler. One
+          // scope still marks both startup reads as queued work, which an
+          // election term must not run ahead of.
+          startup = await this.runInHydrationScope(async (adapter) =>
+            (await loadStartupMetadata(adapter))
+              ? this.startInternal(
+                  lifecycleGeneration,
+                  adapter,
+                  resolveStartupMetadata,
                 )
-                if (lifecycleGeneration === this.lifecycleGeneration) {
-                  await this.flushQueuedTxCommittedUnsafe()
-                }
-                return result
-              })
-            } else {
-              startup = await this.startInternal(
-                lifecycleGeneration,
-                this.persistence.adapter,
-                resolveStartupMetadata,
-              )
-              if (lifecycleGeneration === this.lifecycleGeneration) {
-                await this.flushQueuedTxCommittedUnsafe()
-              }
-            }
+              : undefined,
+          )
+          if (startup && lifecycleGeneration === this.lifecycleGeneration) {
+            await this.flushQueuedTxCommittedUnsafe()
+          }
+        } else if (await loadStartupMetadata(this.persistence.adapter)) {
+          // An adapter without a hydration scope reads directly.
+          startup = await this.startInternal(
+            lifecycleGeneration,
+            this.persistence.adapter,
+            resolveStartupMetadata,
+          )
+          if (lifecycleGeneration === this.lifecycleGeneration) {
+            await this.flushQueuedTxCommittedUnsafe()
           }
         }
         if (
@@ -4124,23 +4157,9 @@ class PersistedCollectionRuntime<
               value: operation.value as Record<string, unknown>,
             },
       ),
-      rowMetadataMutations: Array.from(
-        transaction.rowMetadataWrites.entries(),
-      ).map(([key, metadataWrite]) =>
-        metadataWrite.type === `delete`
-          ? { type: `delete` as const, key: key }
-          : {
-              type: `set` as const,
-              key: key,
-              value: metadataWrite.value,
-            },
-      ),
-      collectionMetadataMutations: Array.from(
-        transaction.collectionMetadataWrites.entries(),
-      ).map(([key, metadataWrite]) =>
-        metadataWrite.type === `delete`
-          ? { type: `delete`, key }
-          : { type: `set`, key, value: metadataWrite.value },
+      rowMetadataMutations: toMetadataMutations(transaction.rowMetadataWrites),
+      collectionMetadataMutations: toMetadataMutations(
+        transaction.collectionMetadataWrites,
       ),
     }
   }
@@ -4275,12 +4294,8 @@ class PersistedCollectionRuntime<
         )
       }
 
-      this.observeStreamPosition(
-        response.term,
-        response.seq,
-        response.latestRowVersion,
-      )
-
+      // The commit's own tx:committed notice advances the observed position.
+      // Observing it here first would make that notice look like a gap.
       const uniqueAcceptedMutationIds = Array.from(
         new Set(response.acceptedMutationIds),
       )
@@ -5083,25 +5098,19 @@ class PersistedCollectionRuntime<
         // A DbClient hydration seed owns both its row and row metadata until
         // an accepted source transaction confirms the key.
         if (this.collection?._hasHydratedKey(mutation.key as TKey)) return
-        if (mutation.type === `delete`) {
-          this.syncControls.metadata?.row.delete(mutation.key as TKey)
-        } else {
-          this.syncControls.metadata?.row.set(
-            mutation.key as TKey,
-            mutation.value,
-          )
-        }
+        applyMetadataWrite(
+          this.syncControls.metadata?.row,
+          mutation.key as TKey,
+          mutation,
+        )
       })
 
       txCommitted.collectionMetadataMutations?.forEach((mutation) => {
-        if (mutation.type === `delete`) {
-          this.syncControls.metadata?.collection.delete(mutation.key)
-        } else {
-          this.syncControls.metadata?.collection.set(
-            mutation.key,
-            mutation.value,
-          )
-        }
+        applyMetadataWrite(
+          this.syncControls.metadata?.collection,
+          mutation.key,
+          mutation,
+        )
       })
 
       return this.syncControls.commit?.() ?? true
@@ -5616,13 +5625,22 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
         const index = pendingPublicationTransactions.indexOf(transaction)
-        if (index !== -1) pendingPublicationTransactions.splice(index, 1)
+        if (index === -1) return
+        pendingPublicationTransactions.splice(index, 1)
+        // A deferred transaction that never reaches the Collection releases
+        // the optimistic rows it held.
+        if (!transaction.handedToCollection)
+          params.collection._state.recomputeOptimisticState(false)
       }
-      const settlePendingTransaction = (
-        transaction: OpenSyncTransaction<T, TKey>,
-      ) => {
-        removePendingPublicationTransaction(transaction)
-      }
+      // Committed source transactions not yet handed to the Collection. Core
+      // holds settled optimistic rows on their keys until they apply.
+      params.collection._state.setDeferredSyncKeys((key) =>
+        pendingPublicationTransactions.some(
+          (transaction) =>
+            !transaction.handedToCollection &&
+            transaction.operationKeys.has(key),
+        ),
+      )
       // A source receipt is accepted once its rows are durable, and resolves
       // when core makes them visible.
       const visibleAfterDurable = (
@@ -5640,49 +5658,66 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
         applied: Promise<void>,
       ) => {
-        void applied.then(
-          () => settlePendingTransaction(transaction),
-          () => {
-            settlePendingTransaction(transaction)
-          },
-        )
+        const settle = () => removePendingPublicationTransaction(transaction)
+        void applied.then(settle, settle)
       }
-      const getPendingRowMetadataWrite = (key: TKey) => {
+      const metadataValue = (write: MetadataWrite) =>
+        write.type === `delete` ? undefined : write.value
+      // A metadata read sees the open transaction's write, then the newest
+      // staged one, then the Collection's. A truncate hides older row
+      // metadata. Reading a staged write makes its transaction a dependency.
+      const readStagedMetadata = <K>(
+        key: K,
+        getMap: (
+          transaction: OpenSyncTransaction<T, TKey>,
+        ) => Map<K, MetadataWrite>,
+        truncates: boolean,
+        stored: () => unknown,
+      ): unknown => {
+        if (startupState.cleanedUp) return undefined
+        const openTransaction = getOpenTransaction()
+        const openWrite = openTransaction && getMap(openTransaction).get(key)
+        if (openWrite) return metadataValue(openWrite)
+        if (truncates && openTransaction?.truncate) return undefined
         for (
           let index = pendingPublicationTransactions.length - 1;
           index >= 0;
           index--
         ) {
           const transaction = pendingPublicationTransactions[index]!
-          const write = transaction.rowMetadataWrites.get(key)
-          if (write) {
+          const write = getMap(transaction).get(key)
+          if (write || (truncates && transaction.truncate)) {
             markPendingMetadataDependency(transaction)
-            return { found: true, write }
-          }
-          if (transaction.truncate) {
-            markPendingMetadataDependency(transaction)
-            return {
-              found: true,
-              write: { type: `delete` as const },
-            }
+            return write && metadataValue(write)
           }
         }
-        return { found: false as const }
+        return stored()
       }
-      const getPendingCollectionMetadataWrite = (key: string) => {
-        for (
-          let index = pendingPublicationTransactions.length - 1;
-          index >= 0;
-          index--
-        ) {
-          const transaction = pendingPublicationTransactions[index]!
-          const write = transaction.collectionMetadataWrites.get(key)
-          if (write) {
-            markPendingMetadataDependency(transaction)
-            return { found: true, write }
-          }
+      const abortPublicationTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        error: unknown,
+      ) => {
+        removePendingPublicationTransaction(transaction)
+        settlePublicationAdmissionWaiters(transaction, error)
+        return createHandledRejection(error)
+      }
+      const updateMetadataWrite = <K>(
+        key: K,
+        write: MetadataWrite,
+        getMap: (
+          transaction: OpenSyncTransaction<T, TKey>,
+        ) => Map<K, MetadataWrite>,
+        contextName: string,
+      ) => {
+        if (startupState.cleanedUp) return
+        const openTransaction = getOpenTransaction()
+        if (openTransaction?.terminalFailure ?? getTerminalFailure()) return
+        if (!openTransaction) {
+          throw new InvalidPersistedCollectionConfigError(
+            `${contextName} must be called within an open sync transaction`,
+          )
         }
-        return { found: false as const }
+        getMap(openTransaction).set(key, write)
       }
       let fullStartPromise: Promise<void> | null = null
       let sourceResultPromise: Promise<SyncConfigRes> | null = null
@@ -5790,16 +5825,16 @@ function createWrappedSyncConfig<
           }
           if (params.metadata) {
             for (const [key, write] of transaction.rowMetadataWrites) {
-              if (write.type === `delete`) params.metadata.row.delete(key)
-              else params.metadata.row.set(key, write.value)
+              applyMetadataWrite(params.metadata.row, key, write)
             }
             for (const [key, write] of transaction.collectionMetadataWrites) {
-              if (write.type === `delete`)
-                params.metadata.collection.delete(key)
-              else params.metadata.collection.set(key, write.value)
+              applyMetadataWrite(params.metadata.collection, key, write)
             }
           }
 
+          // Core takes the transaction in `commit()` unless its signal has
+          // aborted; only then do core's own holds cover its keys.
+          transaction.handedToCollection = signal?.aborted !== true
           const applied = params.commit(signal)
           transaction.applicationReceipt = applied
           // Core accepted the transaction, so it is no longer staged here;
@@ -5808,6 +5843,7 @@ function createWrappedSyncConfig<
           if (applied !== true) void applied.catch(() => undefined)
           return applied
         } catch (error) {
+          transaction.handedToCollection = false
           removePendingPublicationTransaction(transaction)
           throw error
         }
@@ -6008,104 +6044,53 @@ function createWrappedSyncConfig<
           ? {
               persistence: persistenceCapability,
               row: {
-                get: (key: TKey) => {
-                  if (startupState.cleanedUp) return undefined
-                  const openTransaction = getOpenTransaction()
-                  const pendingWrite =
-                    openTransaction?.rowMetadataWrites.get(key)
-                  if (pendingWrite) {
-                    return pendingWrite.type === `delete`
-                      ? undefined
-                      : pendingWrite.value
-                  }
-                  if (openTransaction?.truncate) {
-                    return undefined
-                  }
-                  const pending = getPendingRowMetadataWrite(key)
-                  if (pending.found) {
-                    return pending.write.type === `delete`
-                      ? undefined
-                      : pending.write.value
-                  }
-                  return params.metadata!.row.get(key)
-                },
+                get: (key: TKey) =>
+                  readStagedMetadata(
+                    key,
+                    (transaction) => transaction.rowMetadataWrites,
+                    true,
+                    () => params.metadata!.row.get(key),
+                  ),
                 set: (key: TKey, value: unknown) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.row.set must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.rowMetadataWrites.set(key, {
-                    type: `set`,
-                    value,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `set`, value },
+                    (t) => t.rowMetadataWrites,
+                    `metadata.row.set`,
+                  )
                 },
                 delete: (key: TKey) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.row.delete must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.rowMetadataWrites.set(key, {
-                    type: `delete`,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `delete` },
+                    (t) => t.rowMetadataWrites,
+                    `metadata.row.delete`,
+                  )
                 },
               },
               collection: {
-                get: (key: string) => {
-                  if (startupState.cleanedUp) return undefined
-                  const openTransaction = getOpenTransaction()
-                  const pendingWrite =
-                    openTransaction?.collectionMetadataWrites.get(key)
-                  if (pendingWrite) {
-                    return pendingWrite.type === `delete`
-                      ? undefined
-                      : pendingWrite.value
-                  }
-                  const pending = getPendingCollectionMetadataWrite(key)
-                  if (pending.found) {
-                    return pending.write.type === `delete`
-                      ? undefined
-                      : pending.write.value
-                  }
-                  return params.metadata!.collection.get(key)
-                },
+                get: (key: string) =>
+                  readStagedMetadata(
+                    key,
+                    (transaction) => transaction.collectionMetadataWrites,
+                    false,
+                    () => params.metadata!.collection.get(key),
+                  ),
                 set: (key: string, value: unknown) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.collection.set must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.collectionMetadataWrites.set(key, {
-                    type: `set`,
-                    value,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `set`, value },
+                    (t) => t.collectionMetadataWrites,
+                    `metadata.collection.set`,
+                  )
                 },
                 delete: (key: string) => {
-                  if (startupState.cleanedUp) return
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
-                    return
-                  if (!openTransaction) {
-                    throw new InvalidPersistedCollectionConfigError(
-                      `metadata.collection.delete must be called within an open sync transaction`,
-                    )
-                  }
-                  openTransaction.collectionMetadataWrites.set(key, {
-                    type: `delete`,
-                  })
+                  updateMetadataWrite(
+                    key,
+                    { type: `delete` },
+                    (t) => t.collectionMetadataWrites,
+                    `metadata.collection.delete`,
+                  )
                 },
                 list: (prefix?: string) => {
                   if (startupState.cleanedUp) return []
@@ -6126,11 +6111,7 @@ function createWrappedSyncConfig<
                       if (!prefix || key.startsWith(prefix)) {
                         pendingOwners.set(key, transaction)
                       }
-                      if (metadataWrite.type === `delete`) {
-                        merged.delete(key)
-                      } else {
-                        merged.set(key, metadataWrite.value)
-                      }
+                      applyMetadataWrite(merged, key, metadataWrite)
                     }
                   }
                   for (const owner of new Set(pendingOwners.values())) {
@@ -6142,11 +6123,7 @@ function createWrappedSyncConfig<
                       key,
                       metadataWrite,
                     ] of openTransaction.collectionMetadataWrites) {
-                      if (metadataWrite.type === `delete`) {
-                        merged.delete(key)
-                      } else {
-                        merged.set(key, metadataWrite.value)
-                      }
+                      applyMetadataWrite(merged, key, metadataWrite)
                     }
                   }
 
@@ -6187,8 +6164,7 @@ function createWrappedSyncConfig<
             openTransaction?.terminalFailure ?? getTerminalFailure()
           if (terminalFailure) {
             if (openTransaction) {
-              settlePendingTransaction(openTransaction)
-              settlePublicationAdmissionWaiters(
+              return abortPublicationTransaction(
                 openTransaction,
                 terminalFailure.error,
               )
@@ -6204,16 +6180,12 @@ function createWrappedSyncConfig<
           }
 
           if (signal?.aborted) {
-            settlePendingTransaction(openTransaction)
             const error = new SyncTransactionAbortedError()
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            return createHandledRejection(error)
+            return abortPublicationTransaction(openTransaction, error)
           }
           if (runtime.isScopedRecoveryPending()) {
-            settlePendingTransaction(openTransaction)
             const error = new SyncTransactionAbortedError()
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            return createHandledRejection(error)
+            return abortPublicationTransaction(openTransaction, error)
           }
           try {
             bindToCurrentHydration(openTransaction)

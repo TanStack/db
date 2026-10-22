@@ -7,7 +7,7 @@ title: DeleteMutationFn
 type DeleteMutationFn<T, TKey, TUtils> = (params) => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:692](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L692)
+Defined in: [packages/db/src/types.ts:714](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L714)
 
 ## Type Parameters
 

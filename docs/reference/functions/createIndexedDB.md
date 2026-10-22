@@ -7,7 +7,7 @@ title: createIndexedDB
 function createIndexedDB(options): Promise<IndexedDBInstance>;
 ```
 
-Defined in: [packages/db/src/indexed-db.ts:290](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L290)
+Defined in: [packages/db/src/indexed-db.ts:294](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L294)
 
 Creates or opens an IndexedDB database with the specified stores.
 Call this once at app startup, then pass the instance to collections.

@@ -1,5 +1,20 @@
 # @tanstack/query-db-collection
 
+## 1.4.8
+
+### Patch Changes
+
+- Keep a reacquired Query's cached rows when an earlier release of the same Query publishes later. Previously, reacquiring a stale on-demand Query while its release waited behind another sync transaction could drop its rows, and they stayed missing if the refetch failed. ([#2206](https://github.com/TanStack/db/pull/2206))
+
+- Updated dependencies [[`5a1b286`](https://github.com/TanStack/db/commit/5a1b286910bdf56917a76732ba160c99d7b1ad66), [`9aecbab`](https://github.com/TanStack/db/commit/9aecbab4cacb3f1123b1716e6f063abb5affc74f)]:
+  - @tanstack/db@0.15.2
+
+## 1.4.7
+
+### Patch Changes
+
+- Fix query ownership cleanup across overlapping refetch and observer lifecycles so removed rows do not remain visible because of stale persisted metadata. ([#2198](https://github.com/TanStack/db/pull/2198))
+
 ## 1.4.6
 
 ### Patch Changes

@@ -98,11 +98,13 @@ class QueryObservingDriver implements SQLiteDriver {
   ): Promise<ReadonlyArray<T>> {
     const normalizedSql = sql.replace(/\s+/g, ` `).trim()
     this.queries.push(normalizedSql)
+    // Hide stream bookkeeping, but not the registry read that checks it.
     if (
-      normalizedSql.includes(`FROM leader_term`) ||
-      normalizedSql.includes(`FROM collection_version`) ||
-      normalizedSql.includes(`FROM applied_tx`) ||
-      normalizedSql.includes(`FROM collection_metadata`)
+      !normalizedSql.includes(`FROM collection_registry`) &&
+      (normalizedSql.includes(`FROM leader_term`) ||
+        normalizedSql.includes(`FROM collection_version`) ||
+        normalizedSql.includes(`FROM applied_tx`) ||
+        normalizedSql.includes(`FROM collection_metadata`))
     ) {
       return []
     }

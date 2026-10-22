@@ -7,7 +7,7 @@ title: InsertMutationFn
 type InsertMutationFn<T, TKey, TUtils> = (params) => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:680](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L680)
+Defined in: [packages/db/src/types.ts:702](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L702)
 
 ## Type Parameters
 

@@ -755,14 +755,19 @@ rolls the tentative owner back without calling `unloadSubset`. Logical demand
 retires even when `unloadSubset` fails. Each physical acquisition gets one release
 attempt, marked before calling adapter or error-listener code. Reentrant and
 repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
-and a cleanup failure cannot replace an earlier request failure. Core reports
-the error but retains no retry debt: a broken adapter can leak external resources
-if it throws before freeing them. Adapters must make their own cleanup reliable.
+and a cleanup failure cannot replace an earlier request failure. An
+`unloadSubset` that throws is an adapter bug. Core reports its error uncaught,
+once, from a microtask, and continues as if the release had succeeded: the
+error is not a load error, so it sets no `lastError`, emits no
+`loadSubset:error`, fails no replay, window move, or Effect, and no
+`releaseSnapshot()`, `unsubscribe()`, or `dispose()` call throws or rejects
+with it. Core retains no retry debt: a broken adapter can leak external
+resources if it throws before freeing them. Adapters must make their own
+cleanup reliable.
 Replay replaces acquisition leases sequentially: detach and release the old lease,
 then acquire a fresh one only if the logical demand and replay are still current.
-A release failure fails that replay without starting a replacement. A load
-throw leaves the logical demand detached; a later authoritative replay can
-reacquire it. Neither path restores an already released lease. A sole adapter
+A load throw leaves the logical demand detached; a later authoritative replay
+can reacquire it. Neither path restores an already released lease. A sole adapter
 resource may stop and restart in this gap; adapters must not tear down resources
 held by another owner. The public replacement barrier remains closed throughout
 the gap and through failed startup, so visible results do not flicker. Once a
@@ -955,7 +960,10 @@ logical demand so a later truncate replay can retry one authoritative
 replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
-a later truncate replays one logical demand rather than both attempts. A
+a later truncate replays one logical demand rather than both attempts. The
+failed read stops being the loader's source demand before its lease is
+released. A replay that settles during or after a throwing release therefore
+cannot count the released read as complete source coverage. A
 successful authoritative replay clears its source-recovery gate, but it does
 not clear an unrelated failed window operation. A later explicit window move
 revalidates that physical window before publishing it.
@@ -973,8 +981,11 @@ Successful authoritative full-source recovery also retires settled successful
 page and tie demands. Later replay therefore reacquires the full source without
 repeating those finite requests. Retirement waits for each original request to
 settle and for any active replay to finish; it does not cancel unfinished work
-merely because the full-source request finished first. Failed finite demands
-still follow the explicit-retry rule above. Release callbacks retire ownership
+merely because the full-source request finished first. A failed finite demand
+that authoritative work superseded also retires then, or at once if it fails
+after full-source coverage completed: the full-source read covers its partial
+writes. Other failed finite demands still follow the explicit-retry rule above,
+and a full-source replay does not retire them. Release callbacks retire ownership
 before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
@@ -1023,9 +1034,84 @@ starts at once, and that work's later result is ignored for its boundary.
 Such a prefix also cannot retire the repair's acquisitions: it was issued before
 the invalidation, so it proves no current coverage. The repair supersedes any
 such request, so one that settles after the repair finished is released at
-once, like the acquisitions the repair retires. If such a request fails, its
-partial writes still need the full-source read that the overlap replaced: the
-loader starts it when the bounded repair succeeds, without an explicit retry.
+once, like the acquisitions the repair retires. A request is superseded when
+authoritative work (a bounded repair or a full-source read) started after it was
+issued. Its failure is not the loader's own failure and blocks no refills: its
+partial writes only raise the repair debt to the full-source read that the
+overlap replaced. A running repair restarts as that read. Otherwise the loader
+starts it at once, unless its own recorded failure is waiting for an explicit
+retry. This holds even when the repair finished and a newer invalidation's
+reaction is still deferred. A request belongs to the ordering epoch it was
+issued in, even when its own synchronous delivery invalidates ordering before it
+returns, so its result and continuation do not count as current coverage. An
+authoritative read also stops waiting on the superseded request: a repair that
+answers at once continues without it. A superseded failure cannot drop the
+repair's staged continuation, and a repair-chain step does not release failed
+acquisitions; the explicit retry that resumed it does. A repair request belongs
+to the chain it was issued in. When a truncate replay finishes a chain whose
+prefix is still in flight and a newer invalidation starts the replacement, that
+prefix settles outside the replacement's chain, and the replacement retires it.
+A repair chain is superseded once a newer repair or full-source read starts.
+A request of the superseded chain proves no current coverage: it issues no
+tie or refill, and its failure is not the loader's own. A chain that finished
+still owns a request that settles late. Once a full-source read covers the source, any
+finite or repair request that settles later is retired at once. Every lease
+release pass, including the explicit and backoff retries' release of failed
+acquisitions, stops when a release resets the cursor or disposes the loader.
+The replay that follows owns the leases the pass did not reach. A release
+can deliver deletes that run the graph synchronously, so ordered refinement
+stays blocked until the pass unwinds. No second pass can then reach the same
+leases within one generation, so a lease missing from its map during a pass is
+an invariant violation, not a case to skip.
+
+The loader's authoritative work is a small state machine. Its work slot is
+idle, a repair chain, or a full-source read that is held, complete, or failed;
+its repair debt is none, bounded, or full. Every move names the states it may
+leave, and the loader throws `OrderedLoaderInvariantError` for any other move:
+
+| Move                                           | From                   | To                   |
+| ---------------------------------------------- | ---------------------- | -------------------- |
+| Start a bounded repair or a full-source read   | idle                   | repair, held         |
+| A chain finishes, is replaced, or is abandoned | repair                 | idle                 |
+| A chain request fails as the loader's own      | repair                 | idle                 |
+| A full-source read succeeds                    | held, complete         | complete (debt none) |
+| A truncate replay settles                      | held, failed, complete | complete (debt none) |
+| A full-source read fails as the loader's own   | held                   | failed               |
+| A cursor reset                                 | complete               | held                 |
+| An explicit or backoff retry                   | failed (or idle)       | idle                 |
+
+Three work and debt pairs are coherent only one way: complete coverage owes no
+debt, a repair runs only to pay a debt, and a failed full-source read owes a
+full-source read. So full coverage absorbs what would otherwise raise debt: a
+failure or an invalidation under complete coverage owes nothing, and a
+full-source transport that fails after a replay reacquired its demand leaves
+the coverage and its lease in place. A replay that settles is the full-source
+read's success: it pays the debt and retires the settled finite leases and the
+superseded failed leases, as a full-source success does. A chain request owns authority only while its
+chain runs: when a replay finished the chain first, the request's later failure
+is superseded by that replay.
+
+Each request carries one stamp from issue: the ordered-load generation, the
+authority generation, the ordering generation, and its role (finite, repair,
+or full-source). A request is dead after a cursor reset. A repair-chain request
+is stale once a newer authoritative start supersedes it; a finite request is
+stale once the ordering epoch moves; a full-source read stays current. A
+request that fails reports its own error. When the full-source read that a
+superseded failure starts throws while it starts, that read is the loader's
+own failure and is reported on its own; the superseded request still reports
+its error. Dispose
+resets the cursor, so a disposed loader's requests are dead and it issues and
+releases nothing more.
+
+A truncate replay owns every request the loader issued before the truncate:
+their results and failures change no loader state beyond the debt a failure
+raises, and the replay settles their demands. The loader has no request
+timeout. A request the provider never answers keeps its work slot, so an
+authoritative read that never settles holds its repair or recovery until the
+subscription ends; recovery from a provider that stops answering belongs to the
+adapter or the subscription lifecycle.
+A request issued before a cursor reset that later fails still raises the repair
+debt, but it cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its
@@ -1072,7 +1158,8 @@ LEFT join to a Collection is an exception for a cross-alias filter when every or
 term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root
 page, core waits for the current lazy join demand and any joined subset load to
-settle, then reruns the graph. Joined-side changes also recheck ordered demand
+settle, then reruns the graph. A joined load can settle without delivering a
+row, so the joined source becoming ready schedules that run itself. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. An empty joined replay still
 releases held Effect callbacks.
 
@@ -1170,9 +1257,12 @@ A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
 retire cursor suffixes, ties, unfinished work, or another subscription's leases.
 Adapter eviction must still preserve rows owned by the replacement or peers.
-If an older prefix's release throws, the successful replacement still finishes
-its boundary and continuation bookkeeping before surfacing the cleanup error.
-Cleanup failure does not turn the successful acquisition into a failed load.
+A lease release reports an adapter's throwing `unloadSubset` uncaught, as
+described for subscription cleanup, and does not throw. The ordered loader
+also reports any error a release callback still throws uncaught, from a
+microtask, and continues as if the release had succeeded. The error changes no load result,
+window move, publication, or loader state: the successful replacement finishes
+its boundary and continuation bookkeeping and publishes.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting

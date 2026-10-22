@@ -180,6 +180,14 @@ export class CollectionConfigBuilder<
   private windowFailed = false
   private syncRunGeneration = 0
   private windowOperationGeneration = 0
+  // Counts setWindow calls, deferred or not. A separate count from window
+  // operations, so a deferred call does not drop the settlement of a move
+  // that already applied.
+  private windowRequestGeneration = 0
+  // The newest call's settlement. An older call that a newer one superseded
+  // resolves only once it settles, so an awaited call reflects the window
+  // that won. A superseded call that fails still rejects with its own error.
+  private latestWindowRequest: Promise<void> | undefined
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections = createSourceRecord<OrderByOptimizationInfo>()
 
@@ -329,22 +337,31 @@ export class CollectionConfigBuilder<
       offset: options.offset ?? baseWindow?.offset,
       limit: options.limit ?? baseWindow?.limit,
     }
+    const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      return sourceRecovery.then(async () => {
+      const deferred: Promise<void> = sourceRecovery.then(async () => {
+        // A newer call wins, even if this deferred one resumes after it.
+        if (request !== this.windowRequestGeneration) {
+          await this.latestWindowRequest
+          return
+        }
         const settlement = this.setWindow(requestedWindow)
+        // The resumed call settles on behalf of this one.
+        this.latestWindowRequest = deferred
         if (settlement !== true) await settlement
       })
+      return (this.latestWindowRequest = deferred)
     }
     if (this.hasFailedSourceRecovery()) {
-      return Promise.reject(
+      return (this.latestWindowRequest = Promise.reject(
         this.lastSubsetError ??
           new Error(
             devBuild() && process.env.NODE_ENV !== `production`
               ? `Source recovery failed`
               : codedMessage(147),
           ),
-      )
+      ))
     }
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
@@ -392,13 +409,17 @@ export class CollectionConfigBuilder<
     const settlement = loadOperation?.wait() ?? true
     if (settlement === true) {
       this.settledWindow = requestedWindow
+      this.latestWindowRequest = undefined
       return true
     }
-    return settlement.then(
+    return (this.latestWindowRequest = settlement.then(
       () => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
           this.settledWindow = requestedWindow
         }
+        return request === this.windowRequestGeneration
+          ? undefined
+          : this.latestWindowRequest
       },
       (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
@@ -407,7 +428,7 @@ export class CollectionConfigBuilder<
         }
         throw error
       },
-    )
+    ))
   }
 
   getWindow(): { offset: number; limit: number } | undefined {

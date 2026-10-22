@@ -27,6 +27,7 @@
     "test:production-errors": "node scripts/generate-error-docs.mjs --check && node scripts/test-production-errors.mjs",
     "test:release": "node --test scripts/version-packages.test.mjs scripts/publish-packages.test.mjs",
     "check:mangle": "node scripts/mangle-private-members.mjs",
+    "size:compare": "node scripts/size-compare.mjs",
     "typecheck:tests": "pnpm --filter @tanstack/db-ivm --filter @tanstack/offline-transactions typecheck",
     "test:docs": "node scripts/verify-links.ts",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
