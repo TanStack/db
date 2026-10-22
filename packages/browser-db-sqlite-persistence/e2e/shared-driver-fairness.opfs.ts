@@ -167,7 +167,7 @@ async function run(): Promise<void> {
     ]
   }
 
-  if (observation) {
+  if (observation && primaryFailure === undefined) {
     window.__tanstackDriverFairnessOracle = {
       status: `complete`,
       provider: `Chromium OPFSCoopSyncVFS worker`,
