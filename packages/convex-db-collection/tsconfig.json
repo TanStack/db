@@ -13,7 +13,8 @@
     "jsx": "react",
     "paths": {
       "@tanstack/db": ["../db/src"],
-      "@tanstack/db-ivm": ["../db-ivm/src"]
+      "@tanstack/db-ivm": ["../db-ivm/src"],
+      "@tanstack/offline-transactions": ["../offline-transactions/src"]
     }
   },
   "include": [
