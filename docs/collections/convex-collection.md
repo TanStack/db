@@ -37,6 +37,8 @@ await tasks.preload()
 
 An existing `ConvexReactClient`, including the client from `useConvex()`, also works. The adapter imports neither React nor the Convex runtime. Keep the client and collection stable across renders.
 
+Create fresh adapter options for each direct `createCollection` call. Reusing the same options, including a shallow copy, throws. A `collectionOptions` descriptor can still materialize independent collections in separate `DbClient` instances.
+
 Each result replaces the subscribed query's rows. Missing documents are deleted, and missing fields are removed. An empty array is a ready, empty collection. Keys must be unique strings or finite numbers. Duplicate keys reject the complete result and preserve the last valid snapshot.
 
 The adapter uses eager sync. DB filters, ordering, and limits apply locally to the subscribed result. They do not change your Convex query or fetch documents outside its result. To change the query arguments, create a new collection with a distinct ID.

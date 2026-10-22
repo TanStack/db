@@ -6,16 +6,17 @@
  * come from tasks:all, which does not paginate or use the adapter.
  *
  * The durable driver checks the outbox's documented process-restart law with
- * actual disk storage and SIGKILL. Its independent model is one logical insert,
- * hence one final server row and one idempotency receipt. Histories vary the
- * draft's text/rank and whether a second crash loses the server acknowledgement.
+ * actual disk storage and SIGKILL. Its independent model applies one logical
+ * insert, update, or delete, hence the draft row or its absence and one receipt.
+ * Histories vary the operation and draft's text/rank, plus whether a second
+ * crash loses the server acknowledgement. Native values vary on inserted rows.
  * A server-accepted checkpoint occurs before the outbox phase can be recorded,
  * so replay must reuse its key rather than rely on a completed local marker.
  * Checkpoints are observed in child stdout before killing the process. Server
  * rows/receipts and replayed Collection rows are checked only after replay.
  *
  * This is a receiving witness for the offline engine's interruption/settlement
- * owners, not another model of leadership. It covers one pending insert in one
+ * owners, not another model of leadership. It covers one pending mutation in one
  * Collection against a real local backend. Shared-key/multi-tab histories stay
  * with those primary owners. Cloud infrastructure and an OS power failure
  * during a filesystem write are outside this process-crash test.
@@ -173,8 +174,9 @@ describe.each([`javascript`, `react`] as const)(
 )
 
 async function durableHistory(
-  draft: { clientId: string; text: string; rank: number; payload: Value },
+  draft: { clientId: string; text: string; rank: number; payload?: Value },
   uncertain: boolean,
+  operation: `insert` | `update` | `delete`,
 ) {
   const { spawn } = await import('node:child_process')
   const { mkdtemp, rm } = await import('node:fs/promises')
@@ -183,7 +185,14 @@ async function durableHistory(
   const { fileURLToPath } = await import('node:url')
   const directory = await mkdtemp(join(tmpdir(), `convex-outbox-`))
   const client = new ConvexClient(url, { unsavedChangesWarning: false })
-  await client.mutation(seed, { count: 0 })
+  await client.mutation(seed, { count: operation === `insert` ? 0 : 1 })
+  const before = (await client.query(all, {})).map(
+    ({ clientId, text, rank, payload }) => ({ clientId, text, rank, payload }),
+  )
+  // The public write contract gives one final draft for insert/update and no
+  // row for delete. These expectations do not inspect restored mutations.
+  const expected =
+    operation === `delete` ? [] : [{ ...draft, payload: draft.payload }]
   async function run(mode: string, target: string): Promise<Array<string>> {
     const child = spawn(
       process.execPath,
@@ -195,6 +204,7 @@ async function durableHistory(
         directory,
         url,
         JSON.stringify(convexToJson(draft)),
+        operation,
       ],
       { stdio: [`ignore`, `pipe`, `pipe`] },
     )
@@ -236,14 +246,23 @@ async function durableHistory(
   try {
     const admitted = await run(`admit`, `durable`)
     expect(admitted).not.toContain(`provider-call`)
-    expect(await client.query(all, {})).toEqual([])
+    expect(
+      (await client.query(all, {})).map(
+        ({ clientId, text, rank, payload }) => ({
+          clientId,
+          text,
+          rank,
+          payload,
+        }),
+      ),
+    ).toEqual(before)
     if (uncertain) {
       expect(await run(`uncertain`, `server-accepted`)).toContain(
         `provider-call`,
       )
-      expect((await client.query(all, {})).map((row) => row.clientId)).toEqual([
-        draft.clientId,
-      ])
+      expect((await client.query(all, {})).map((row) => row.clientId)).toEqual(
+        expected.map((row) => row.clientId),
+      )
     }
     expect(await run(`replay`, `replayed`)).toContain(`provider-call`)
     const receipts = makeFunctionReference<`query`, {}, Array<{ key: string }>>(
@@ -259,42 +278,61 @@ async function durableHistory(
           payload,
         }),
       ),
-    ).toEqual([draft])
+    ).toEqual(expected)
   } finally {
     await client.close()
     await rm(directory, { recursive: true, force: true })
   }
 }
 
-it(`restores durable writes and deduplicates uncertain acknowledgements across generated process histories`, async () => {
-  const property = fc.asyncProperty(
-    fc.record({
-      text: fc.string({ maxLength: 12 }),
-      rank: fc.integer({ min: -50, max: 50 }),
-      uncertain: fc.boolean(),
-      payload: fc.oneof(
-        fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n }),
-        fc.constantFrom(NaN, Infinity, -Infinity, -0),
-        fc
-          .uint8Array({ maxLength: 12 })
-          .map((bytes) => bytes.buffer as ArrayBuffer),
-      ),
-    }),
-    async ({ text, rank, uncertain, payload }) =>
-      durableHistory(
-        { clientId: `offline-created`, text, rank, payload },
-        uncertain,
-      ),
-  )
-  const replaySeed = process.env.CONVEX_BACKEND_ORACLE_SEED
-  if (replaySeed)
-    await fc.assert(property, {
-      numRuns: 6,
-      seed: Number(replaySeed),
-      path: process.env.CONVEX_BACKEND_ORACLE_PATH,
-    })
-  else {
-    await fc.assert(property, { numRuns: 6, seed: 20261022 })
-    await fc.assert(property, { numRuns: 6 })
-  }
-}, 120000)
+it.each([`insert`, `update`, `delete`] as const)(
+  `restores durable %s and deduplicates uncertain acknowledgements across generated process histories`,
+  async (operation) => {
+    const property = fc.asyncProperty(
+      fc.record({
+        text:
+          operation === `delete`
+            ? fc.constant(`task 0`)
+            : fc.string({ maxLength: 12 }),
+        rank:
+          operation === `delete`
+            ? fc.constant(0)
+            : fc.integer({ min: -50, max: 50 }),
+        uncertain: fc.boolean(),
+        payload:
+          operation === `insert`
+            ? fc.oneof(
+                fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n }),
+                fc.constantFrom(NaN, Infinity, -Infinity, -0),
+                fc
+                  .uint8Array({ maxLength: 12 })
+                  .map((bytes) => bytes.buffer as ArrayBuffer),
+              )
+            : fc.constant(undefined),
+      }),
+      async ({ text, rank, uncertain, payload }) =>
+        durableHistory(
+          {
+            clientId: operation === `insert` ? `offline-created` : `0`,
+            text,
+            rank,
+            ...(operation === `insert` ? { payload } : {}),
+          },
+          uncertain,
+          operation,
+        ),
+    )
+    const replaySeed = process.env.CONVEX_BACKEND_ORACLE_SEED
+    if (replaySeed)
+      await fc.assert(property, {
+        numRuns: 6,
+        seed: Number(replaySeed),
+        path: process.env.CONVEX_BACKEND_ORACLE_PATH,
+      })
+    else {
+      await fc.assert(property, { numRuns: 6, seed: 20261022 })
+      await fc.assert(property, { numRuns: 6 })
+    }
+  },
+  120000,
+)

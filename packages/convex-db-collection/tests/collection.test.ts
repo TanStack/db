@@ -33,6 +33,21 @@ function setup(
 }
 
 describe(`Convex collection`, () => {
+  it(`rejects concrete options reuse before it can steal cached mutation confirmation`, async () => {
+    const { transport, collection, options } = setup({
+      onUpdate: () => Promise.resolve(),
+    })
+    transport.emit([{ _id: `a`, text: `old` }])
+    expect(() => createCollection(options)).toThrow(`only one Collection`)
+    transport.cache([{ _id: `a`, text: `server` }])
+    const transaction = collection.update(`a`, (row) => {
+      row.text = `optimistic`
+    })
+    await transaction.isPersisted.promise
+    expect(collection.get(`a`)?.text).toBe(`server`)
+    await collection.cleanup()
+  })
+
   it(`waits for a snapshot and accepts an empty initial result`, async () => {
     const { transport, collection } = setup()
     expect(collection.status).toBe(`loading`)

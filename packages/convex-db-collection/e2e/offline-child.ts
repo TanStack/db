@@ -19,11 +19,12 @@ import type { StorageAdapter } from '@tanstack/offline-transactions'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
 
 type Task = { clientId: string; text: string; rank: number; payload?: Value }
-const [mode, directory, url, draftJSON] = process.argv.slice(2) as [
+const [mode, directory, url, draftJSON, operation] = process.argv.slice(2) as [
   string,
   string,
   string,
   string,
+  `insert` | `update` | `delete`,
 ]
 const draft = jsonToConvex(JSON.parse(draftJSON)) as Task
 const checkpoint = (value: string) => {
@@ -80,6 +81,7 @@ const mutation = makeFunctionReference<
     text: string
     rank: number
     payload?: Value
+    remove?: boolean
   },
   null
 >(`tasks:write`)
@@ -110,11 +112,13 @@ const persist = convexOfflineMutation({
   mutation,
   collections: [collection],
   getArgs: ({ transaction }) => {
-    const row = transaction.mutations[0].modified as Task
+    const change = transaction.mutations[0]
+    const row = change.modified as Task
     return {
       clientId: row.clientId,
       text: row.text,
       rank: row.rank,
+      ...(change.type === `delete` ? { remove: true } : {}),
       ...(row.payload === undefined ? {} : { payload: row.payload }),
     }
   },
@@ -149,7 +153,12 @@ if (offline) {
   const action = executor.createOfflineAction<Task>({
     mutationFnName: `save`,
     onMutate: (row) => {
-      collection.insert(row)
+      if (operation === `insert`) collection.insert(row)
+      else if (operation === `update`)
+        collection.update(row.clientId, (current) =>
+          Object.assign(current, row),
+        )
+      else collection.delete(row.clientId)
     },
   })
   action(draft)
@@ -164,7 +173,11 @@ if (offline) {
     if ((await executor.peekOutbox()).length === 0) {
       clearInterval(poll)
       await collection.utils.awaitSync()
-      if (collection.get(draft.clientId)?.text !== draft.text)
+      if (
+        operation === `delete`
+          ? collection.has(draft.clientId)
+          : collection.get(draft.clientId)?.text !== draft.text
+      )
         throw new Error(`Restored row did not reach the collection`)
       checkpoint(`replayed`)
       executor.dispose()

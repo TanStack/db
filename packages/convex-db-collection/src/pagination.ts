@@ -104,7 +104,7 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
     flushing = true
     result = undefined
     try {
-      const rows: Array<TRow> = []
+      const completePages: Array<Array<TRow>> = []
       for (let index = 0; index < pages.length; index++) {
         const page = pages[index]!
         const value = page.subscription!.getCurrentValue()
@@ -133,8 +133,11 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
           replace(index, page, value.continueCursor)
           return
         }
-        rows.push(...value.page)
+        completePages.push(value.page)
       }
+      // Acquisition can add many ranges. Materialize rows only once every
+      // range is available, rather than copying each incomplete prefix.
+      const rows = completePages.flat()
       error = undefined
       result = rows
       receive(rows)

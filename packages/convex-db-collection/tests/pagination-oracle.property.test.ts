@@ -42,6 +42,7 @@ function provider(
   split: `none` | `required` | `recommended`,
 ) {
   const slots: Array<Slot> = []
+  let rowVisits = 0
   const client = {
     onUpdate: (
       _query: unknown,
@@ -65,6 +66,9 @@ function provider(
   return {
     client,
     slots,
+    get rowVisits() {
+      return rowVisits
+    },
     publish: async (rows: Array<Row>) => {
       const served = new Set<Slot>()
       for (let turn = 0; turn < 100; turn++) {
@@ -83,7 +87,12 @@ function provider(
           const boundary = endCursor ?? String(page.at(-1)?.rank ?? from)
           const needsSplit = split !== `none` && interval.length > 2
           slot.current = {
-            page: needsSplit && split === `required` ? [] : page,
+            page: new Proxy(needsSplit && split === `required` ? [] : page, {
+              get(target, key, receiver) {
+                if (typeof key === `string` && /^\d+$/.test(key)) rowVisits++
+                return Reflect.get(target, key, receiver)
+              },
+            }),
             continueCursor: boundary,
             isDone: endCursor == null && page.length === interval.length,
             ...(needsSplit
@@ -176,5 +185,59 @@ it(`refines exhausted snapshots across reactive ranges and page splits`, async (
   else {
     await fc.assert(property, { seed: 20261022, numRuns: 60 })
     await fc.assert(property, { numRuns: 60 })
+  }
+})
+
+// A finite initial load must materialize its rows only after all ranges are
+// available. Recopying every earlier prefix on each continuation makes initial
+// acquisition quadratic. This work law follows the adapter's complete-snapshot
+// design: incomplete rows cannot be published, so materializing them earns no
+// useful output. Count numeric element reads at the provider boundary, rather
+// than copying production's loop or predicting its number of subscriptions.
+// This bounds row materialization, not cache lookups, RPC count, or elapsed time.
+// Calibration: copying incomplete prefixes failed the row-visit comparison at
+// seed 20261022/path 0:0:0:0, three rows at pageSize 1 read four elements.
+// The same direct replay passes after deferring materialization until exhaustion.
+const initialWork = fc.asyncProperty(
+  fc.integer({ min: 3, max: 40 }),
+  fc.integer({ min: 1, max: 8 }),
+  fc.boolean(),
+  async (pageCount, pageSize, reverse) => {
+    const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
+      id: String(rank),
+      rank,
+      text: String(rank),
+    }))
+    const source = provider(reverse, `none`)
+    const collection = createCollection(
+      convexPaginatedCollectionOptions({
+        client: source.client,
+        query,
+        queryArgs: {},
+        pageSize,
+        getKey: (row) => row.id,
+        gcTime: 0,
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      await source.publish(rows)
+      // Check before awaitSync's explicit cache refreshes. At initial exhaustion
+      // there is exactly one useful materialization, the complete public result.
+      expect(collection.size).toBe(rows.length)
+      expect(source.rowVisits).toBe(rows.length)
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
+it(`materializes complete rows once during finite initial pagination`, async () => {
+  const seed = process.env.CONVEX_ORACLE_SEED
+  const path = process.env.CONVEX_ORACLE_PATH
+  if (seed)
+    await fc.assert(initialWork, { seed: Number(seed), path, numRuns: 60 })
+  else {
+    await fc.assert(initialWork, { seed: 20261022, numRuns: 60 })
+    await fc.assert(initialWork, { numRuns: 60 })
   }
 })

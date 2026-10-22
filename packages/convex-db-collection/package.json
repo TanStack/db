@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
-    "test:oracles": "vitest run tests/snapshot-oracle.property.test.ts tests/pagination-oracle.property.test.ts tests/offline-oracle.property.test.ts tests/values-oracle.property.test.ts",
+    "test:oracles": "vitest run tests/snapshot-oracle.property.test.ts tests/ownership-oracle.property.test.ts tests/pagination-oracle.property.test.ts tests/offline-oracle.property.test.ts tests/values-oracle.property.test.ts",
     "typecheck": "tsc --noEmit",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },

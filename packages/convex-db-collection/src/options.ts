@@ -213,8 +213,21 @@ export function createConvexOptions<
       },
     },
   }
-  return withCollectionConfigFactory(options, () =>
-    createConvexOptions(config, subscribe),
+  let claimed = false
+  return withCollectionConfigFactory(
+    options,
+    () => createConvexOptions(config, subscribe),
+    () => {
+      if (claimed) {
+        throw new Error(
+          `Convex options can create only one Collection. Create fresh options for each Collection.`,
+        )
+      }
+      claimed = true
+      return () => {
+        claimed = false
+      }
+    },
   ) as CollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils> & {
     utils: ConvexCollectionUtils
   } & ([TSchema] extends [never] ? unknown : { schema: TSchema })
