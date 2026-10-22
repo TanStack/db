@@ -3766,3 +3766,22 @@ do not depend on its resolution. Real server ordering, framework unmount
 scheduling, and published npm behavior require receiving integration witnesses;
 the present evidence is controlled DB source execution. The revision-bound
 review record is `docs/contributing/oracle-reviews/issue-2058-paced-serialization.md`.
+
+## Opt-in operator bundles
+
+Joins, grouping, includes, and pooling ship only with the value that names
+them: a join operator, an aggregate or `groupKeys`, an include function, or
+`pooledLiveQueries`. `packages/db/tests/opt-in-operator-bundle.test.ts` owns
+that law. It bundles small apps from source with esbuild and reads which
+modules reach the output: an app that imports none keeps every operator out,
+and each operator's value brings its modules in without the others. The
+positive controls keep a renamed or moved module from passing the absence
+checks. A mutant that statically imports `BucketFacadeAdapter` into the
+live-query builder fails the absence checks.
+
+The owner checks module reachability only, not byte budgets; `pnpm
+size:compare` measures bytes. It bundles `@tanstack/db` alone, with other
+packages external, so it does not check db-ivm operators or framework
+adapters. Query results under the new API are owned by the existing query and
+includes oracles, which run with migrated queries; no oracle compares a
+query's old and new spellings on one input.
