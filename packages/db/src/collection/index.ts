@@ -1312,7 +1312,7 @@ export class CollectionImpl<
    */
   public reload(): Promise<void> {
     const builder = getBuilderFromConfig(this.config)
-    return builder ? builder.reload() : this._sync.reload()
+    return builder ? builder.reload(this) : this._sync.reload()
   }
 
   /**

@@ -221,34 +221,35 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.retireDemand(plan.id)
       return
     }
-    // The query no longer needs the data whose load failed.
-    if (update.failureRetired)
-      this.collectionConfigBuilder.clearFailedRequest(plan.id)
-
     const generation = this.collectionConfigBuilder.beginDemand(
       plan.id,
       update.ready instanceof Promise,
     )
+    // The request error clears once the query needs no key whose latest
+    // load failed: when a later load of that key succeeds, or when the
+    // query stops needing it.
+    const clearIfLoaded = () => {
+      if (!this.demand.hasFailedKeys(plan.id))
+        this.collectionConfigBuilder.clearFailedRequest(plan.id)
+    }
+    clearIfLoaded()
+    const settle = () => {
+      this.collectionConfigBuilder.settleDemand(plan.id, generation)
+      clearIfLoaded()
+    }
     if (update.ready instanceof Promise) {
       const settleWith = (ready: Promise<unknown>) =>
-        void ready.then(
-          () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
-          (error) => {
-            // A truncate replay aborts the acquisition it supersedes. Its
-            // replacement decides the demand; a real failure rejects it too.
-            const replacement = subscription.pendingTruncateReplacement
-            if (replacement) settleWith(replacement)
-            else
-              this.collectionConfigBuilder.failDemand(
-                plan.id,
-                generation,
-                error,
-              )
-          },
-        )
+        void ready.then(settle, (error) => {
+          // A truncate replay aborts the acquisition it supersedes. Its
+          // replacement decides the demand; a real failure rejects it too.
+          const replacement = subscription.pendingTruncateReplacement
+          if (replacement) settleWith(replacement)
+          else
+            this.collectionConfigBuilder.failDemand(plan.id, generation, error)
+        })
       settleWith(update.ready)
     } else {
-      this.collectionConfigBuilder.settleDemand(plan.id, generation)
+      settle()
     }
   }
 

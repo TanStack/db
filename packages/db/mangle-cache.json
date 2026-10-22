@@ -431,5 +431,7 @@
   "publishedErrors": "hc",
   "views": "he",
   "isDeferredSyncKey": "b6",
-  "overlayHeldAndActive": "e8"
+  "overlayHeldAndActive": "e8",
+  "adapterTruncates": "dp",
+  "recordOutcome": "gP"
 }

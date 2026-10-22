@@ -134,15 +134,15 @@ export class CollectionConfigBuilder<
    * Reload each source with an error anywhere in its tree, then this query if
    * its own node shows an error. A nested live query passes the reload down the
    * same way. A source's reload keeps this query's status until it commits.
+   * A query that is not running starts once its sources reloaded, as any
+   * Collection's reload starts one; `query` is the live-query Collection,
+   * which a query that never started has not given this builder yet.
    */
-  async reload(): Promise<void> {
-    const query = this.liveQueryCollection
-    // A crashed query rejects without touching its sources. One that is not
-    // running starts, as any Collection's reload does; its preload is what
-    // lets it start its sources.
+  async reload(
+    query: Collection<any, any, any> | undefined = this.liveQueryCollection,
+  ): Promise<void> {
+    // A crashed query rejects without touching its sources.
     if (query?.status === `crashed`) return query._sync.reload()
-    if (query?.status === `idle` || query?.status === `cleaned-up`)
-      return query.preload()
     const failed = this.collectionSources
       .map(({ collection }) => collection)
       .filter(
@@ -151,6 +151,9 @@ export class CollectionConfigBuilder<
           findProblems(collection.errors).some((node) => node.error !== null),
       )
     await Promise.all(failed.map((collection) => collection.reload()))
+    // Its preload is what lets a live query start its sources.
+    if (query?.status === `idle` || query?.status === `cleaned-up`)
+      return query.preload()
     // The query reloads itself after its sources when its own node shows an
     // error (a failed first load or a request error); a reload of it already
     // in flight settles with that run.
@@ -507,7 +510,6 @@ export class CollectionConfigBuilder<
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
-    this.clearFailedRequest(planId)
     try {
       this.maybeRunGraphFn?.()
       demand.participant?.resolve()
@@ -1128,9 +1130,7 @@ export class CollectionConfigBuilder<
           begin()
           // A reload's first transaction replaces every row, so no earlier
           // row exists for the batch it holds.
-          const replaces =
-            config.collection._state.pendingSyncedTransactions.at(-1)
-              ?.truncate === true
+          const replaces = config.collection._state.openTransactionReplaces()
           let lookup: ((key: string | number) => boolean) | undefined
           const hasSyncedKey = (key: string | number) => {
             if (replaces) return false

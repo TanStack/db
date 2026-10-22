@@ -931,6 +931,12 @@ export class CollectionStateManager<
     )
   }
 
+  /** Whether the open sync transaction replaces every synced row. */
+  openTransactionReplaces(): boolean {
+    const open = this.pendingSyncedTransactions.at(-1)
+    return open?.committed === false && open.truncate === true
+  }
+
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
     // A reload's next commit replaces every synced row, so it builds on none.

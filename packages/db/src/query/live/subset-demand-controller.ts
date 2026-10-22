@@ -18,21 +18,20 @@ type DemandSegment = {
   ready: LoadSubsetRequestResult
   state: `starting` | `pending` | `settled` | `failed`
   replaces?: Array<DemandSegment>
-  // Keys whose earlier load failed and that this segment loads again.
-  retries?: Map<string, unknown>
 }
 
 type DemandState = {
   keys: Map<string, unknown>
   segments: Array<DemandSegment>
+  // Needed keys whose latest load failed; the plan's request error clears
+  // once none remains.
+  failedKeys: Set<string>
 }
 
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
   ready: Promise<Array<unknown>> | true
-  // The demand no longer needs any key whose load failed.
-  failureRetired?: boolean
 }
 
 /**
@@ -50,6 +49,11 @@ export class SubsetDemandController {
     return this.states.keys()
   }
 
+  /** Whether the plan still needs a key whose latest load failed. */
+  hasFailedKeys(planId: string): boolean {
+    return (this.states.get(planId)?.failedKeys.size ?? 0) > 0
+  }
+
   setDemand(
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,
@@ -61,20 +65,6 @@ export class SubsetDemandController {
       (segment) =>
         segment.state === `failed` && intersects(segment.keys, nextKeys),
     )
-    // Keys whose load failed: in a failed segment, or retried by one still
-    // loading.
-    const failedKeys = new Map(
-      (previous?.segments ?? []).flatMap((segment) =>
-        segment.state === `failed`
-          ? [...segment.keys]
-          : segment.state === `settled`
-            ? []
-            : [...(segment.retries ?? [])],
-      ),
-    )
-    const failureRetired =
-      failedKeys.size > 0 &&
-      [...failedKeys.keys()].every((key) => !nextKeys.has(key))
     if (
       previous &&
       equalKeySets(previous.keys, nextKeys) &&
@@ -98,7 +88,13 @@ export class SubsetDemandController {
         segment.state === `failed` &&
         equalKeySets(segment.keys, nextKeys),
     )
-    const state: DemandState = { keys: nextKeys, segments }
+    const state: DemandState = {
+      keys: nextKeys,
+      segments,
+      failedKeys: new Set(
+        [...(previous?.failedKeys ?? [])].filter((key) => nextKeys.has(key)),
+      ),
+    }
     this.states.set(plan.id, state)
 
     for (const segment of retired) releaseSegment(subscription, segment)
@@ -126,11 +122,12 @@ export class SubsetDemandController {
     if (requestedKeys.size > 0) {
       const segment = createSegment(plan, requestedKeys)
       if (replace) segment.replaces = [...segments]
-      const retried = [...failedKeys].filter(([key]) => nextKeys.has(key))
-      if (retried.length > 0) segment.retries = new Map(retried)
       segments.push(segment)
-      const started = startSegment(subscription, segment, () =>
-        this.warnUnoptimized(plan),
+      const started = startSegment(
+        subscription,
+        segment,
+        () => this.warnUnoptimized(plan),
+        (succeeded) => this.recordOutcome(plan.id, segment, succeeded),
       )
       if (this.states.get(plan.id) !== state) {
         return { changed: false, empty: false, ready: true }
@@ -164,7 +161,22 @@ export class SubsetDemandController {
       changed: true,
       empty: false,
       ready: pending.length > 0 ? Promise.all(pending) : true,
-      failureRetired,
+    }
+  }
+
+  // A load's outcome decides its keys: a success loaded them, and a failure
+  // of a segment the plan still holds leaves the needed ones missing.
+  private recordOutcome(
+    planId: string,
+    segment: DemandSegment,
+    succeeded: boolean,
+  ): void {
+    const state = this.states.get(planId)
+    if (!state) return
+    for (const key of segment.keys.keys()) {
+      if (succeeded) state.failedKeys.delete(key)
+      else if (state.segments.includes(segment) && state.keys.has(key))
+        state.failedKeys.add(key)
     }
   }
 
@@ -277,6 +289,7 @@ function startSegment(
   subscription: CollectionSubscription,
   segment: DemandSegment,
   onUnoptimized: () => void,
+  onOutcome: (succeeded: boolean) => void,
 ): boolean {
   let observed = false
   const requested = subscription.requestSnapshot({
@@ -294,9 +307,11 @@ function startSegment(
     void segment.ready.then(
       () => {
         segment.state = `settled`
+        onOutcome(true)
       },
       () => {
         segment.state = `failed`
+        onOutcome(false)
       },
     )
   }

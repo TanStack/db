@@ -99,7 +99,9 @@ export class CollectionSyncManager<
   private syncEntryActive = false
   // A reload's new sync run has not begun its first transaction yet.
   // The transaction that carries the reload's truncate, until it commits.
-  private reloadTruncateTransaction: object | undefined
+  private readonly adapterTruncates = new WeakSet<object>()
+  private reloadTruncateTransaction:
+    (typeof this.state.pendingSyncedTransactions)[number] | undefined
   private pendingSyncEntryCleanup:
     | {
         tasks: Array<Promise<void>>
@@ -394,6 +396,8 @@ export class CollectionSyncManager<
           truncate: (options) => {
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
+            // The adapter's own truncate stays even if a reload ends early.
+            this.adapterTruncates.add(pendingTransaction)
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
@@ -547,13 +551,27 @@ export class CollectionSyncManager<
    */
   public dropReloadReplacement(): void {
     this.state.reloadTruncatePending = false
-    const open = this.state.pendingSyncedTransactions.find(
-      (transaction) =>
-        transaction === this.reloadTruncateTransaction &&
-        !transaction.committed,
+    const open = this.reloadTruncateTransaction
+    this.reloadTruncateTransaction = undefined
+    if (
+      !open ||
+      open.committed ||
+      this.adapterTruncates.has(open) ||
+      !this.state.pendingSyncedTransactions.includes(open)
     )
-    if (!open) return
+      return
     open.truncate = false
+    // The run wrote against no rows; on the kept rows, an insert of a kept
+    // key is an update.
+    const kept = this.state.createSyncedKeyLookup()
+    for (const operation of open.operations)
+      if (
+        operation.originalSyncType === `insert` &&
+        kept(operation.key as TKey)
+      ) {
+        operation.type = `update`
+        operation.originalSyncType = undefined
+      }
     this.state.refreshPendingSyncedProjection()
   }
 
@@ -568,6 +586,8 @@ export class CollectionSyncManager<
     const syncRunGeneration = this.syncRunGeneration
     void applied.promise.then(
       () => {
+        if (this.reloadTruncateTransaction === transaction)
+          this.reloadTruncateTransaction = undefined
         if (
           syncRunGeneration === this.syncRunGeneration &&
           this.lifecycle.status === `ready`

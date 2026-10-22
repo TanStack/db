@@ -673,8 +673,10 @@ export class CollectionSubscription
     failure: Error,
   ): void {
     if (this.truncateReplayState !== replayState) return
+    // A later check of the same failed attempt reports nothing new.
+    const first = replayState.completion.isPending()
     replayState.completion.reject(failure)
-    this.options.truncateReplayPublication?.fail?.(failure)
+    if (first) this.options.truncateReplayPublication?.fail?.(failure)
     // Delegated publication already delivered its rows. Only a private buffer
     // returns the caller's pagination position to the public snapshot; the
     // private rows and their sent-key tracking stay together for a retry.

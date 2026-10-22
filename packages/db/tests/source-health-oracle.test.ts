@@ -191,6 +191,9 @@ type Step =
   // open). The transaction stays open across other steps.
   | { kind: `write`; source: SourceName; key: RowKey }
   | { kind: `commit`; source: SourceName }
+  // `truncate` calls the adapter's truncate() in the open transaction, which
+  // then replaces every row; it stays the adapter's even if a reload ends.
+  | { kind: `truncate`; source: SourceName }
   | { kind: `restart` }
   | { kind: `reload-query` }
   // `effect` disposes the Effect over A and creates a new one.
@@ -235,8 +238,9 @@ type SourceModel = GateModel & {
 }
 // A query's reload() reloads the Collections below it that show an error,
 // then reloads the query itself once they all settle, unless one failed.
+// `start`: the query a cascade ended starts once its reloaded sources settle.
 type PendingSelfReload = {
-  target: `query` | `inner`
+  target: `query` | `inner` | `start`
   waits: Set<SourceName | `inner`>
   failed: boolean
 }
@@ -245,7 +249,7 @@ type RowKey = 1 | 2 | 3
 type Rows = Map<number, number>
 // A sync transaction the run has begun and not committed. `truncate`: the
 // transaction is a reload's first, so its commit replaces every row.
-type OpenTransaction = { writes: Rows; truncate: boolean }
+type OpenTransaction = { writes: Rows; truncate: boolean; adapter?: boolean }
 type Model = {
   sources: Record<SourceName, SourceModel>
   query: GateModel
@@ -325,12 +329,18 @@ function startQuery(
 }
 function restartEndedQuery(shape: Shape, model: Model): void {
   model.queryEnded = false
-  model.selfReloads = []
   if (shape === `nested` && model.innerEnded) {
     model.innerEnded = false
     model.inner = startQuery(model, [`A`])
   } else model.innerEnded = false
-  model.query = startQuery(model, queryInputs[shape])
+  // An inner query that crashes as it starts throws into the outer start,
+  // which then starts nothing more.
+  model.query =
+    shape === `nested` &&
+    model.inner.gate === `crashed` &&
+    model.inner.cause === cleanedUnderQuery
+      ? { ...model.inner }
+      : startQuery(model, queryInputs[shape])
   deriveQueries(shape, model)
   deriveEffect(model)
   model.queryDetached =
@@ -556,7 +566,59 @@ function applyModel(
     // A pooled view has no reload of its own.
     if (shape === `pooled-nested`) return `ok`
     if (model.queryEnded) {
-      restartEndedQuery(shape, model)
+      // It reloads every Collection below it that shows an error, then
+      // starts once those reloads succeed; a crashed one rejects, so it does
+      // not start.
+      const stopped = shapeSources[shape].filter((name) => {
+        const source = model.sources[name]
+        return (
+          source.gate === `error` ||
+          source.gate === `crashed` ||
+          source.stopped !== null
+        )
+      })
+      if (stopped.length === 0) {
+        restartEndedQuery(shape, model)
+        return `ok`
+      }
+      // The reloads run together: a crashed or cleaning one rejects, and
+      // the query then does not start, but the others still reload.
+      const rejects = stopped.filter(
+        (name) =>
+          model.sources[name].gate === `crashed` ||
+          model.sources[name].cleaning,
+      )
+      const reloaded = stopped.filter((name) => !rejects.includes(name))
+      for (const name of reloaded) {
+        const source = model.sources[name]
+        if (source.reloading) continue
+        source.reloading = true
+        source.armed = true
+        source.open = null
+      }
+      // A nested query reloads its inner query too, which reloads A, then
+      // itself.
+      const waits = new Set<SourceName | `inner`>(reloaded)
+      if (
+        shape === `nested` &&
+        !model.innerEnded &&
+        model.inner.gate === `error` &&
+        !rejects.includes(`A`)
+      ) {
+        model.selfReloads.push({
+          target: `inner`,
+          waits: new Set(reloaded.includes(`A`) ? [`A`] : []),
+          failed: false,
+        })
+        waits.delete(`A`)
+        waits.add(`inner`)
+      }
+      model.selfReloads.push({
+        target: `start`,
+        waits,
+        failed: rejects.length > 0,
+      })
+      settleSelfReloads(shape, model)
       return `ok`
     }
     if (model.query.gate === `crashed`) return `throws`
@@ -640,6 +702,12 @@ function applyModel(
       openTransaction(source).writes.set(step.key, ++model.serial)
     if (step.kind === `commit`) commitOpen(source)
     if (step.kind === `cancel`) source.open = null
+    if (step.kind === `truncate`) {
+      const open = openTransaction(source)
+      open.writes = new Map()
+      open.truncate = true
+      open.adapter = true
+    }
     deriveQueries(shape, model)
     deriveEffect(model)
     return step.kind === `reload` || step.kind === `reload-cleanup-fails`
@@ -665,6 +733,13 @@ function applyModel(
     case `commit`:
       commitOpen(source)
       break
+    case `truncate`: {
+      const open = openTransaction(source)
+      open.writes = new Map()
+      open.truncate = true
+      open.adapter = true
+      break
+    }
     case `reload`:
       // Everything visible stays until the new run commits or fails. The
       // retired run's open transaction is dropped.
@@ -705,7 +780,7 @@ function applyModel(
         // them.
         if (source.reloading) {
           source.armed = false
-          if (source.open) source.open.truncate = false
+          if (source.open && !source.open.adapter) source.open.truncate = false
         }
       }
       if (outcome === `throws`) break
@@ -744,7 +819,7 @@ function applyModel(
       // first commit: the rows stay the baseline.
       if (source.reloading) {
         source.armed = false
-        if (source.open) source.open.truncate = false
+        if (source.open && !source.open.adapter) source.open.truncate = false
       }
       if (source.gate !== `crashed`) {
         source.gate = `crashed`
@@ -784,6 +859,10 @@ function settleSelfReloads(shape: Shape, model: Model): void {
       if (pending.waits.size > 0) continue
       model.selfReloads.splice(model.selfReloads.indexOf(pending), 1)
       progressed = true
+      if (pending.target === `start`) {
+        if (!pending.failed && model.queryEnded) restartEndedQuery(shape, model)
+        continue
+      }
       const current = model[pending.target]
       if (pending.failed || current.gate !== `error`) continue
       // The restarted run fails at once on an input that still failed, and
@@ -1371,6 +1450,9 @@ async function runHistory(
           } else if (step.kind === `commit`) {
             if (!pre!.open) params.begin()
             params.commit()
+          } else if (step.kind === `truncate`) {
+            if (!pre!.open) params.begin()
+            params.truncate({ markReady: false })
           } else if (step.kind === `cancel`) {
             const canceled = new AbortController()
             canceled.abort()
@@ -1535,6 +1617,48 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
+  'an inner query that crashes as it starts stops the outer start': [
+    { kind: `cleanup-hold`, source: `A` },
+    { kind: `cleanup-hold`, source: `B` },
+    { kind: `cleanup-settle`, source: `B` },
+    { kind: `reload-query` },
+  ],
+  "a query's reload after a cascade reloads a failed source first": [
+    on(`ready`, `A`),
+    on(`fail`, `B`),
+    { kind: `cleanup-hold`, source: `A` },
+    { kind: `cleanup-settle`, source: `A` },
+    { kind: `reload-query` },
+    on(`ready`, `B`),
+    on(`ready`, `A`),
+  ],
+  "a failed reload keeps the adapter's own truncate": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `commit`, source: `A` },
+    on(`reload`, `A`),
+    { kind: `truncate`, source: `A` },
+    { kind: `write`, source: `A`, key: 3 },
+    on(`fail`, `A`),
+    { kind: `commit`, source: `A` },
+  ],
+  "a failed reload's open write of a kept row applies on the kept rows": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 1 },
+    on(`fail`, `A`),
+    { kind: `commit`, source: `A` },
+  ],
+  'a crash during a reload still applies its open write of a kept row': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 1 },
+    on(`crash`, `A`),
+    { kind: `commit`, source: `A` },
+  ],
   'a crash during cleanup lasts until cleanup settles': [
     on(`ready`, `A`),
     on(`ready`, `B`),
@@ -1795,8 +1919,11 @@ describe(`source failure and health oracle`, () => {
     {
       weight: 1,
       arbitrary: fc
-        .constantFrom(`A` as const, `B` as const)
-        .map((source): Step => ({ kind: `commit`, source })),
+        .tuple(
+          fc.constantFrom(`commit` as const, `truncate` as const),
+          fc.constantFrom(`A` as const, `B` as const),
+        )
+        .map(([kind, source]): Step => ({ kind, source })),
     },
     { weight: 1, arbitrary: fc.constant(restart) },
     { weight: 1, arbitrary: fc.constant({ kind: `reload-query` } as const) },
@@ -2118,6 +2245,49 @@ describe(`reload invariant`, () => {
       expect(collection.status).toBe(`ready`)
       expect(collection.errors.reloading).toBe(false)
       await collection.cleanup()
+    },
+  )
+
+  // A live query that never started has no run yet. Its reload starts it,
+  // as any Collection's reload starts an idle one, after it reloads a source
+  // whose first load failed.
+  it.each([`ready`, `failed`] as const)(
+    `starts a never-started live query on reload: source %s`,
+    async (sourceState) => {
+      let runs = 0
+      const source = createCollection<Row, number>({
+        id: `health-idle-query-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        gcTime: 0,
+        startSync: true,
+        sync: {
+          sync: (params) => {
+            if (runs++ === 0 && sourceState === `failed`) {
+              params.fail(new Error(`first load failed`))
+              return
+            }
+            params.begin()
+            params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+            params.commit()
+            params.markReady()
+          },
+        },
+      })
+      await source.preload().catch(() => undefined)
+      const query = createLiveQueryCollection({
+        query: (q) => q.from({ row: source }),
+        startSync: false,
+      })
+      expect(query.status).toBe(`idle`)
+      try {
+        await query.reload()
+        expect(query.status).toBe(`ready`)
+        expect(query.size).toBe(1)
+        expect(source.status).toBe(`ready`)
+      } finally {
+        await query.cleanup()
+        await source.cleanup()
+      }
     },
   )
 
@@ -3287,6 +3457,10 @@ type DemandModel = {
   offset: number
   // The window whose load last succeeded; the query shows it.
   shown: number
+  // A source reload's replay is pending; a window move made now waits for
+  // it, and a later reload aborts that move (setWindow() rejects).
+  replayPending: boolean
+  moveWaitsForReplay: boolean
   source: { failure: string | null; stopped: string | null; crashed: boolean }
   serial: number
 }
@@ -3310,11 +3484,15 @@ function applyDemandModel(model: DemandModel, step: DemandStep): void {
   if (model.gate === `crashed`) return
   switch (step) {
     case `window`:
-      if (model.gate === `ready`) model.offset += 2
+      if (model.gate !== `ready`) return
+      model.offset += 2
+      if (model.replayPending) model.moveWaitsForReplay = true
       return
     case `settle-ok`:
       if (model.pending === 0) return
       model.pending = 0
+      model.replayPending = false
+      model.moveWaitsForReplay = false
       if (model.gate === `loading`) model.gate = `ready`
       if (model.requestError && model.laterLoad) model.requestError = null
       model.shown = model.offset
@@ -3322,6 +3500,8 @@ function applyDemandModel(model: DemandModel, step: DemandStep): void {
     case `settle-fail`:
       if (model.pending === 0) return
       model.pending = 0
+      model.replayPending = false
+      model.moveWaitsForReplay = false
       if (model.gate === `loading`) {
         model.gate = `error`
         return
@@ -3338,6 +3518,11 @@ function applyDemandModel(model: DemandModel, step: DemandStep): void {
       if (model.source.crashed) return
       model.source.failure = null
       model.source.stopped = null
+      if (model.moveWaitsForReplay) {
+        model.offset = model.shown
+        model.moveWaitsForReplay = false
+      }
+      model.replayPending = true
       return
     case `report`:
       if (model.source.stopped) return
@@ -3367,6 +3552,8 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
     pending: 0,
     offset: 0,
     shown: 0,
+    replayPending: false,
+    moveWaitsForReplay: false,
     source: { failure: null, stopped: null, crashed: false },
     serial: 0,
   }
@@ -3402,7 +3589,6 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
       },
     },
   })
-  void params
   const query = createLiveQueryCollection((q) =>
     q
       .from({ row: source })
@@ -3442,8 +3628,6 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
         source._lifecycle.crash(new Error(`source crashed`))
       } else {
         try {
-          const current = source._lifecycle
-          void current
           if (step === `report`) params.reportError(new Error(`source problem`))
           else if (step === `healthy`) params.reportHealthy()
           else params.fail(new Error(`source gave up`))
@@ -3502,6 +3686,19 @@ describe(`on-demand demand grammar`, () => {
     'a failed load after readiness is a request error, and a later load clears it':
       [`settle-ok`, `window`, `settle-fail`, `window`, `settle-ok`],
     'a failed first load fails the query': [`settle-fail`],
+    'a reload aborts a window move that waits for an earlier replay': [
+      `settle-ok`,
+      `reload`,
+      `window`,
+      `reload`,
+      `settle-ok`,
+    ],
+    'a window move with its own load joins the next replay': [
+      `settle-ok`,
+      `window`,
+      `reload`,
+      `settle-ok`,
+    ],
     "a failed source reload's replay is a request error": [
       `settle-ok`,
       `window`,
@@ -3586,8 +3783,10 @@ type LazyModel = {
   // A source reload's replay is in flight: every load the query starts
   // joins it, inside its publication barrier.
   replayActive: boolean
-  // Needed keys a failed replay could not load again.
-  replayFailed: Set<number>
+  // A failed replay keeps the query's publication private for all its
+  // demand, so its error stays until a replay succeeds or the query has no
+  // demand left.
+  replayFailed: boolean
   pending: Array<{ keys: Set<number>; replay: boolean }>
   source: { failure: string | null; stopped: string | null; crashed: boolean }
 }
@@ -3631,7 +3830,7 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
     case `unparent`:
       model.parents.delete(step.key)
       model.failed.delete(step.key)
-      model.replayFailed.delete(step.key)
+      if (model.parents.size === 0) model.replayFailed = false
       return
     case `settle-ok`:
       for (const { keys, replay } of model.pending) {
@@ -3639,7 +3838,7 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
           model.loaded.add(key)
           model.failed.delete(key)
         }
-        if (replay) model.replayFailed.clear()
+        if (replay) model.replayFailed = false
       }
       model.pending = []
       model.replayActive = false
@@ -3654,7 +3853,7 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
           // A replay fails the query's data only for demand it still needs.
           for (const key of keys) {
             if (!model.parents.has(key)) continue
-            if (replay) model.replayFailed.add(key)
+            if (replay) model.replayFailed = true
             else model.failed.add(key)
           }
         }
@@ -3696,12 +3895,13 @@ async function runLazyHistory(steps: ReadonlyArray<LazyStep>) {
     loaded: new Set(),
     failed: new Set(),
     replayActive: false,
-    replayFailed: new Set(),
+    replayFailed: false,
     pending: [],
     source: { failure: null, stopped: null, crashed: false },
   }
   const loads: Array<ReturnType<typeof createDeferred<void>>> = []
   const requests: Array<Set<number>> = []
+  let failures = 0
   let parentParams!: SyncParams
   let childParams!: SyncParams
   const parents = createCollection<Row, number>({
@@ -3772,8 +3972,18 @@ async function runLazyHistory(steps: ReadonlyArray<LazyStep>) {
     void query.preload().catch(() => undefined)
     await flushPromises()
     report()
+    let announcements = 0
+    query.on(`errors:change`, () => announcements++)
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${JSON.stringify(step)}`
+      // A demand change that leaves the projected tree as it was keeps the
+      // tree's identity and announces nothing.
+      const treeBefore = query.errors
+      const factsBefore = JSON.stringify(project(treeBefore))
+      const announcedBefore = announcements
+      // Only a demand change can leave every fact as it was; a reload, a
+      // settled load, or a source call can change a fact and change it back.
+      const demandOnly = step.kind === `parent` || step.kind === `unparent`
       applyLazyModel(model, step)
       if (step.kind === `parent` || step.kind === `unparent`) {
         parentParams.begin()
@@ -3789,8 +3999,9 @@ async function runLazyHistory(steps: ReadonlyArray<LazyStep>) {
           if (round > 0) report()
         }
       } else if (step.kind === `settle-fail`) {
+        // Each failure has its own message, so two problems never look alike.
         for (const load of loads.splice(0))
-          load.reject(new Error(`child load failed`))
+          load.reject(new Error(`child load ${++failures} failed`))
       } else if (step.kind === `reload`) {
         void children.reload().catch(() => undefined)
       } else if (step.kind === `crash`) {
@@ -3809,16 +4020,26 @@ async function runLazyHistory(steps: ReadonlyArray<LazyStep>) {
       deriveLazyGate(model)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
+      expect(query.errors, `${label}: stable read`).toBe(query.errors)
+      if (demandOnly && JSON.stringify(project(query.errors)) === factsBefore) {
+        expect(query.errors, `${label}: unchanged tree keeps identity`).toBe(
+          treeBefore,
+        )
+        expect(
+          announcements,
+          `${label}: unchanged tree announces nothing`,
+        ).toBe(announcedBefore)
+      }
       // Open: a demand change while a source reload's replay is in flight
       // can clear a request error before its key loads again (see the
       // coverage map). Until that is settled, the check waits for the
       // replay to succeed; it still checks the error a failed replay shows.
       const replayOpen =
-        (model.replayActive || model.replayFailed.size > 0) &&
+        (model.replayActive || model.replayFailed) &&
         step.kind !== `settle-fail`
       if (model.gate === `ready` && !replayOpen) {
         expect(query.errors.error !== null, `${label}: request error`).toBe(
-          model.failed.size > 0 || model.replayFailed.size > 0,
+          model.failed.size > 0 || model.replayFailed,
         )
       }
       // After a failed replay the query keeps its last complete snapshot
@@ -3826,7 +4047,7 @@ async function runLazyHistory(steps: ReadonlyArray<LazyStep>) {
       if (
         model.gate === `ready` &&
         model.pending.length === 0 &&
-        model.replayFailed.size === 0
+        !model.replayFailed
       ) {
         const rows = query.toArray.map(
           (row: { parent: Row; child?: Row }) =>
@@ -3898,6 +4119,26 @@ describe(`lazy join demand grammar`, () => {
       { kind: `reload` },
       { kind: `settle-fail` },
     ],
+    "a failed replay's error is not reported again when another demand retires":
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 2 },
+      ],
+    'a failed replacement keeps its error while a still-needed key is missing':
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 3 },
+      ],
   }
   for (const [name, steps] of Object.entries(named))
     it(name, () => runLazyHistory(steps))
