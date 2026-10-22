@@ -1398,6 +1398,33 @@ async function runHistory(
   }
   let effect: ReturnType<typeof createEffect> | undefined
   let effectErrors: Array<Error> = []
+  // A direct subscriber with the initial state, on each source the shape
+  // reads. Within one Collection lifetime its applied rows are its
+  // Collection's rows at every step, also while a reload is in flight or
+  // after one fails. What a subscription that survives cleanup sees belongs
+  // to the subscription lifecycle oracle, so the check stops at cleanup
+  // start and a restart subscribes again.
+  const mirrors = { A: new Map<number, number>(), B: new Map<number, number>() }
+  const mirrored = { A: true, B: true }
+  let mirrorSubscriptions: Array<{ unsubscribe: () => void }> = []
+  const mirror = () => {
+    for (const subscription of mirrorSubscriptions) subscription.unsubscribe()
+    mirrorSubscriptions = shapeSources[shape].map((name) => {
+      mirrors[name] = new Map()
+      mirrored[name] = true
+      return sources[name].collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = change.key
+            if (change.type === `delete`) mirrors[name].delete(key)
+            else mirrors[name].set(key, (change.value as Row).tag ?? 0)
+          }
+        },
+        { includeInitialState: true },
+      )
+    })
+  }
+  mirror()
   let listenersBeforeEffect = 0
   const listenersOn = (collection: Collection<any, any>) =>
     [
@@ -1518,6 +1545,7 @@ async function runHistory(
             sources.A.collection.cleanup(),
             sources.B.collection.cleanup(),
           ])
+          mirror()
           begin()
         } else if (shapeSources[shape].includes(step.source)) {
           const params = sources[step.source].params
@@ -1617,6 +1645,12 @@ async function runHistory(
         expect(tagsOf(collection.toArray), `${label}: ${name} rows`).toEqual(
           sortedTags(source.rows),
         )
+        if (source.cleaning || source.retired) mirrored[name] = false
+        if (mirrored[name])
+          expect(
+            sortedTags(mirrors[name]),
+            `${label}: ${name} direct subscriber rows`,
+          ).toEqual(sortedTags(source.rows))
         if (source.gate === `crashed`) continue
         expect(
           sortedTags(
@@ -1698,6 +1732,7 @@ async function runHistory(
   } finally {
     console.error = consoleError
     stop()
+    for (const subscription of mirrorSubscriptions) subscription.unsubscribe()
     await settleCleanups()
     await effect?.dispose()
     await query.cleanup()
@@ -3970,7 +4005,13 @@ type LazyStep =
     }
 
 // One load the query requested, as the adapter saw it.
-type LazyLoad = { serial: number; keys: Set<number>; replay: boolean }
+// `fromReplay`: the replay itself made the request, not a demand change.
+type LazyLoad = {
+  serial: number
+  keys: Set<number>
+  replay: boolean
+  fromReplay?: boolean
+}
 
 type LazyModel = {
   gate: `loading` | `ready` | `error` | `crashed`
@@ -4133,8 +4174,10 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       model.source.stopped = null
       // The retired run's loads no longer apply, and its truncate drops the
       // loaded children until the replay loads them again.
-      for (const { serial, keys } of model.pending)
-        model.retiredInFlight.set(serial, keys)
+      // Only the query's own loads hold it; a replay's loads stop when a
+      // newer replay replaces them.
+      for (const { serial, keys, fromReplay } of model.pending)
+        if (!fromReplay) model.retiredInFlight.set(serial, keys)
       // A replay this reload discards reports nothing.
       model.replayFailedKeys = new Set()
       model.pending = []
@@ -4297,6 +4340,7 @@ async function runLazyHistory(
         serial: request.serial,
         keys: request.keys,
         replay: model.replayActive && (replayMade || !request.thrown),
+        fromReplay: replayMade,
       }
       model.requested.set(load.serial, load.keys)
       model.pending.push(load)
@@ -4648,6 +4692,19 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-last-fail` },
         { kind: `reload` },
         { kind: `settle-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a second reload's replay replaces the first replay's loads`, () =>
+    runLazyHistory(
+      [
+        { kind: `parent`, key: 2 },
+        { kind: `reload` },
+        { kind: `reload` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-first-ok` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-first-fail` },
       ],
       { honorsAbort: false },
     ))

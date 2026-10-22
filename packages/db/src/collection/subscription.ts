@@ -205,6 +205,8 @@ export class CollectionSubscription
   // and buffered changes until every attempt settles.
   private truncateReplayState: TruncateReplayState | undefined
   private replacements = 0
+  // The replay a reload started when it retired the sync run.
+  private reloadReplay: TruncateReplayState | undefined
   private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
     Error
@@ -267,9 +269,10 @@ export class CollectionSubscription
     // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
     // We need to re-request all previously loaded subsets to repopulate the data.
     this.truncateCleanup = this.collection.on(`truncate`, () => {
-      // A reload started its replay when it retired the run; the truncate of
-      // its first commit is part of that replay.
-      if (!this.collection._lifecycle.reloading) this.handleTruncate()
+      // A reload that replays on-demand demand started its replay when it
+      // retired the run; the truncate of its first commit is part of it.
+      if (this.reloadReplay !== this.truncateReplayState || !this.reloadReplay)
+        this.handleTruncate()
     })
     this.collectionCleanup = this.collection._onCleanupStart(() => {
       this.handleCollectionCleanup()
@@ -324,7 +327,16 @@ export class CollectionSubscription
    */
   public retireSyncRun(): void {
     this.handleCollectionCleanup(true)
-    this.handleTruncate()
+    // Other demand keeps its retained rows published until the reload's
+    // first commit truncates them.
+    if (
+      this.collection.config.syncMode === `on-demand` &&
+      !this.defersAcquisition &&
+      this.subsetDemands.length > 0
+    ) {
+      this.handleTruncate()
+      this.reloadReplay = this.truncateReplayState
+    }
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */

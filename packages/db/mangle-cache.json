@@ -433,5 +433,6 @@
   "overlayHeldAndActive": "e8",
   "recordOutcome": "gP",
   "replacements": "dp",
-  "onLoaded": "gR"
+  "onLoaded": "gR",
+  "reloadReplay": "gU"
 }
