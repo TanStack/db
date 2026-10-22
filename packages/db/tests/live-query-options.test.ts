@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { leftJoin } from '@tanstack/db'
-import { include } from '../src/query/index.js'
+import { include, pooledLiveQueries } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
 import {
@@ -11,10 +11,7 @@ import {
   resolveLiveQueryValue,
 } from '../src/live-query-options.js'
 import { BaseQueryBuilder, getQueryIR } from '../src/query/builder/index.js'
-import {
-  caseWhen,
-  eq,
-} from '../src/query/builder/functions.js'
+import { caseWhen, eq } from '../src/query/builder/functions.js'
 import { materialize, toArray } from '../src/query/builder/include-functions.js'
 import { collectSourceRefs } from '../src/query/ir.js'
 import type { DeferredLiveQueryCollections } from '../src/live-query-options.js'
@@ -126,8 +123,11 @@ describe(`live query preparation`, () => {
     for (const collection of renderDeferrals) collection._resumeSyncStart()
     renderDeferrals.clear()
 
-    const continued = prepared.join(leftJoin({ later: laterDescriptor },
-      ({ source, later }) => eq(source.id, later.id)))
+    const continued = prepared.join(
+      leftJoin({ later: laterDescriptor }, ({ source, later }) =>
+        eq(source.id, later.id),
+      ),
+    )
     expect(
       collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
     ).toEqual([`collectionRef`, `descriptorRef`])
@@ -168,8 +168,11 @@ describe(`live query preparation`, () => {
       client,
       deferrals,
     ) as typeof base
-    const continued = prepared.join(leftJoin({ later: laterDescriptor },
-      ({ source, later }) => eq(source.id, later.id)))
+    const continued = prepared.join(
+      leftJoin({ later: laterDescriptor }, ({ source, later }) =>
+        eq(source.id, later.id),
+      ),
+    )
 
     expect(starts).toBe(0)
     const consumed = prepareLiveQueryValue(
@@ -212,8 +215,11 @@ describe(`live query preparation`, () => {
       new Set(),
     )
 
-    const continued = captured!.join(leftJoin({ later: laterDescriptor },
-      ({ source, later }) => eq(source.id, later.id)))
+    const continued = captured!.join(
+      leftJoin({ later: laterDescriptor }, ({ source, later }) =>
+        eq(source.id, later.id),
+      ),
+    )
     expect(
       collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
     ).toEqual([`descriptorRef`, `descriptorRef`])
@@ -429,5 +435,41 @@ describe(`live query identity`, () => {
     expect(getLiveQueryHash(config(compare))).not.toBe(
       getLiveQueryHash(config((a: string, b: string) => a.length - b.length)),
     )
+  })
+})
+
+describe(`pooling is opt-in`, () => {
+  const source = () =>
+    createCollection<{ id: number; group: number }>({
+      id: `pool-opt-in-${Math.random()}`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+  const eqQuery = (rows: ReturnType<typeof source>) =>
+    new BaseQueryBuilder()
+      .from({ row: rows })
+      .where(({ row }) => eq(row.group, 1))
+
+  // A pooled view has no Collection config; a compiled live query has one.
+  it(`compiles its own Collection unless the hook passes pooledLiveQueries`, () => {
+    const rows = source()
+    expect(resolveLiveQueryValue(eqQuery(rows))?.config).toBeDefined()
+    expect(
+      resolveLiveQueryValue({ query: eqQuery(rows) })?.config,
+    ).toBeDefined()
+    expect(
+      resolveLiveQueryValue({ query: eqQuery(rows), pool: pooledLiveQueries })
+        ?.config,
+    ).toBeUndefined()
+  })
+
+  it(`does not pool when the hook passes pool: false`, () => {
+    const rows = source()
+    expect(
+      resolveLiveQueryValue(
+        { query: eqQuery(rows), pool: pooledLiveQueries },
+        { pool: false },
+      )?.config,
+    ).toBeDefined()
   })
 })

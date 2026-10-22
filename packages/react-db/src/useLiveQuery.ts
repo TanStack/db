@@ -955,8 +955,9 @@ function useLiveQueryImpl(
           gcTime: forSuspense
             ? DEFAULT_SUSPENSE_GC_TIME_MS
             : DEFAULT_GC_TIME_MS,
-          // Hydration and Suspense key the live-query Collection by identity.
-          pool: !forSuspense && !dbClient,
+          // Hydration and Suspense key the live-query Collection by identity,
+          // so they never pool, even when the config passes a pool.
+          pool: forSuspense || dbClient ? false : undefined,
           // Without a DbClient, Suspense starts it through a preload below.
           startSync: !forSuspense || dbClient !== undefined,
         }) as SuspenseCollection | null

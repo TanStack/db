@@ -35,6 +35,12 @@ export {
   type Prettify,
 } from './builder/index.js'
 
+// Pooled live queries for framework hooks
+export {
+  pooledLiveQueries,
+  type PooledLiveQueries,
+} from './pooled-live-query.js'
+
 // Grouping without aggregates
 export { groupKeys, type GroupKeys } from './builder/group-keys.js'
 

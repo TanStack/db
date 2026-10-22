@@ -428,12 +428,12 @@ export function useLiveQuery(
       // Hydration keys the live-query Collection by identity.
       collection = resolveLiveQueryValue(preparedValue, {
         gcTime: DEFAULT_GC_TIME_MS,
-        pool: !dbClient,
+        pool: dbClient ? false : undefined,
       })
     } else {
       collection = resolveLiveQueryValue(preparedValue, {
         gcTime: DEFAULT_GC_TIME_MS,
-        pool: !dbClient,
+        pool: dbClient ? false : undefined,
       })
     }
 

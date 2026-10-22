@@ -1,3 +1,5 @@
+import { describe, expect, it, vi } from 'vitest'
+import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 /**
  * # A DbClient preload cannot substitute another source Collection
  *
@@ -55,7 +57,6 @@
  * the observer's own row after preload. It does not model concurrent first
  * claims or arbitrary hydration orders.
  */
-import { describe, expect, it, vi } from 'vitest'
 import {
   DbClient,
   Query,
@@ -155,7 +156,9 @@ describe(`DbClient preload source identity`, () => {
           /different source Collections/,
         )
         if (streamState === `pending`) {
-          conflictingView = resolveLiveQueryValue(otherQuery)
+          conflictingView = resolveLiveQueryValue(otherQuery, {
+            pool: pooledLiveQueries,
+          })
           expect(conflictingView).not.toBeNull()
           conflictingObserver = createLiveQueryObserver(conflictingView, {
             client: browser,
@@ -279,7 +282,9 @@ describe(`DbClient preload source identity`, () => {
         if (streamState === `settled`)
           expect(rows(client)).toEqual([{ id: `one`, value: `server` }])
 
-        view = resolveLiveQueryValue(replacementQuery)
+        view = resolveLiveQueryValue(replacementQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(view).not.toBeNull()
         observer = createLiveQueryObserver(view, { client, queryHash })
         expect(() => {
@@ -450,7 +455,9 @@ describe(`DbClient preload source identity`, () => {
         await client.preloadLiveQuery({ query: firstQuery })
         const queryHash = getLiveQueryHash({ query: firstQuery })
         expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
-        view = resolveLiveQueryValue(candidateQuery)
+        view = resolveLiveQueryValue(candidateQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(view).not.toBeNull()
         observer = createLiveQueryObserver(view, { client, queryHash })
 
@@ -519,7 +526,9 @@ describe(`DbClient preload source identity`, () => {
         expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
         expect(rows(client)).toEqual([{ id: `one`, value: `first` }])
 
-        firstView = resolveLiveQueryValue(firstQuery)
+        firstView = resolveLiveQueryValue(firstQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(firstView).not.toBeNull()
         firstObserver = createLiveQueryObserver(firstView, {
           client,
@@ -536,7 +545,9 @@ describe(`DbClient preload source identity`, () => {
           ),
         ).toEqual([`first`])
 
-        nextView = resolveLiveQueryValue(candidateQuery)
+        nextView = resolveLiveQueryValue(candidateQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(nextView).not.toBeNull()
         nextObserver = createLiveQueryObserver(nextView, { client, queryHash })
         expect(() => {
@@ -585,7 +596,9 @@ describe(`DbClient preload source identity`, () => {
         await client.preloadLiveQuery({ query: firstQuery })
         expect(rows(client)?.[0]?.value).toBe(`first`)
 
-        const view = resolveLiveQueryValue(candidateQuery)
+        const view = resolveLiveQueryValue(candidateQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(view).not.toBeNull()
         expect(view?.config, `the receiving view is pooled`).toBeUndefined()
         observer = createLiveQueryObserver(view, { client, queryHash })
@@ -629,7 +642,7 @@ describe(`DbClient preload source identity`, () => {
       await client.preloadLiveQuery({ query: firstQuery })
       const queryHash = getLiveQueryHash({ query: firstQuery })
       expect(getLiveQueryHash({ query: secondQuery })).toBe(queryHash)
-      view = resolveLiveQueryValue(secondQuery)
+      view = resolveLiveQueryValue(secondQuery, { pool: pooledLiveQueries })
       expect(view).not.toBeNull()
       observer = createLiveQueryObserver(view, { client, queryHash })
       let preload: Promise<void> | undefined

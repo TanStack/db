@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest'
+import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 /**
  * Initial-query readiness exposure witnesses for core readers.
  *
@@ -12,7 +14,6 @@
  * live-query path that frameworks use for `eq` filters, and
  * `toArrayWhenReady`.
  */
-import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { resolveLiveQueryValue } from '../src/live-query-options.js'
@@ -99,7 +100,7 @@ describe(`core readers release at initial-query readiness`, () => {
     const query = new Query()
       .from({ post: source.collection })
       .where(({ post }) => eq(post.id, `p1`))
-    const live = resolveLiveQueryValue(query)!
+    const live = resolveLiveQueryValue(query, { pool: pooledLiveQueries })!
     // On-demand loading needs the live-query Collection, not the pooled view.
     expect(`materialize` in live).toBe(false)
     const subscription = live.subscribeChanges(() => {})
@@ -130,7 +131,7 @@ describe(`core readers release at initial-query readiness`, () => {
     const query = new Query()
       .from({ post: source.collection })
       .where(({ post }) => eq(post.id, `p1`))
-    const live = resolveLiveQueryValue(query)!
+    const live = resolveLiveQueryValue(query, { pool: pooledLiveQueries })!
     expect(`materialize` in live).toBe(true)
     const subscription = live.subscribeChanges(() => {})
     await flush()

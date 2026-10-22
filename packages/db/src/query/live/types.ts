@@ -1,4 +1,5 @@
 import type { D2, RootStreamBuilder } from '@tanstack/db-ivm'
+import type { PooledLiveQueries } from '../pooled-live-query.js'
 import type {
   CollectionConfig,
   ResultStream,
@@ -71,6 +72,14 @@ export interface LiveQueryCollectionConfig<
    * If not provided, defaults to `live-query-${number}` with auto-incrementing number
    */
   id?: string
+
+  /**
+   * Framework hooks only: pass `pooledLiveQueries` to serve this query from a
+   * shared equality partition when its shape allows. A config with any option
+   * other than `query`, `gcTime`, and `pool` compiles its own Collection.
+   * `createLiveQueryCollection` does not pool.
+   */
+  pool?: PooledLiveQueries
 
   /**
    * Query builder function that defines the live query
