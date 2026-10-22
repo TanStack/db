@@ -1,10 +1,11 @@
-// A Collection persisted to localStorage.
+// The typical app, plus a collection persisted to localStorage.
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db'
 
-const drafts = createCollection(
+export * from './app.js'
+
+export const drafts = createCollection(
   localStorageCollectionOptions({
     storageKey: `drafts`,
     getKey: (draft) => draft.id,
   }),
 )
-drafts.insert({ id: 1, body: `` })

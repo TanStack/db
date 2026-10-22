@@ -23,11 +23,12 @@
  * module's minified bytes in the bundle, before compression.
  *
  * A package bundle keeps every export, so nothing is tree-shaken. Production
- * mode therefore also measures scenarios: small apps in
- * `scripts/size-scenarios/` that use one part of `@tanstack/db` each (a
- * Collection alone, a filtered live query, a join, an Effect, ...). Each is
- * bundled with its dependencies, as an app ships it, so a scenario shows the
- * code that its users pay for. With `--files`, the changed modules of each
+ * mode therefore also measures scenarios: apps in `scripts/size-scenarios/`.
+ * `app` is the typical app: a query collection, a live query, and the React
+ * adapter. Each other scenario adds one feature to it (a join, a groupBy,
+ * includes, an optimistic action, LocalStorage, an Effect), so its delta is
+ * that feature's cost. Each is tree-shaken as an app ships it, with React and
+ * TanStack Query left external because an app ships them anyway. With `--files`, the changed modules of each
  * scenario are listed too. `--no-scenarios` skips them.
  */
 import { execFile, execSync } from 'node:child_process'
@@ -66,10 +67,16 @@ const DEFAULT_PACKAGES = [
 // Built first, in order: the other packages resolve their types while their
 // declarations build.
 const PREREQUISITES = [`db-ivm`, `db`]
+// Packages that the scenarios import; production mode always builds them.
+const SCENARIO_PACKAGES = [`react-db`, `query-db-collection`]
+// An app ships these itself, so a scenario leaves them out.
+const APP_DEPENDENCIES = [`react`, `react-dom`, `@tanstack/query-core`]
 
 const root = execSync(`git rev-parse --show-toplevel`, {
   encoding: `utf8`,
 }).trim()
+const runScenarios = !flag(`dev`) && !flag(`no-scenarios`)
+const scenarioPackages = runScenarios ? SCENARIO_PACKAGES : []
 const baseRef = option(`base`, `origin/main`)
 const packages = option(`packages`, DEFAULT_PACKAGES.join(`,`)).split(`,`)
 const git = (command) =>
@@ -139,7 +146,9 @@ async function build(dir, label, force) {
     prerequisiteResults[pkg] = await buildPackage(dir, pkg, force)
   // Packages build independently, so run them in parallel.
   const limit = Math.max(1, Math.floor(availableParallelism() / 2))
-  const queue = packages.filter((pkg) => !PREREQUISITES.includes(pkg))
+  const queue = [...new Set([...packages, ...scenarioPackages])].filter(
+    (pkg) => !PREREQUISITES.includes(pkg),
+  )
   const results = {}
   await Promise.all(
     Array.from({ length: limit }, async () => {
@@ -243,8 +252,15 @@ async function measureProduction(dir, pkg) {
 // A scenario as an app ships it: tree-shaken, with its dependencies, built
 // against one tree's packages.
 const scenarioDir = join(root, `scripts`, `size-scenarios`)
+// The typical app first; each other scenario adds one feature to it.
 const scenarios = existsSync(scenarioDir)
-  ? walk(scenarioDir, (name) => name.endsWith(`.js`)).sort()
+  ? walk(scenarioDir, (name) => name.endsWith(`.js`)).sort((a, b) =>
+      a.endsWith(`/app.js`)
+        ? -1
+        : b.endsWith(`/app.js`)
+          ? 1
+          : a.localeCompare(b),
+    )
   : []
 async function measureScenario(dir, scenario) {
   const result = await esbuild({
@@ -255,17 +271,13 @@ async function measureScenario(dir, scenario) {
     format: `esm`,
     platform: `browser`,
     tsconfigRaw: `{}`,
-    alias: {
-      '@tanstack/db': join(dir, `packages`, `db`, `dist`, `esm`, `index.js`),
-      '@tanstack/db-ivm': join(
-        dir,
-        `packages`,
-        `db-ivm`,
-        `dist`,
-        `esm`,
-        `index.js`,
-      ),
-    },
+    external: APP_DEPENDENCIES,
+    alias: Object.fromEntries(
+      [`db`, `db-ivm`, ...SCENARIO_PACKAGES].map((pkg) => [
+        `@tanstack/${pkg}`,
+        join(dir, `packages`, pkg, `dist`, `esm`, `index.js`),
+      ]),
+    ),
     write: false,
     metafile: true,
     logLevel: `error`,
@@ -353,18 +365,27 @@ console.log(
   ].join(`\t`),
 )
 
-if (production && !flag(`no-scenarios`) && packages.includes(`db`)) {
+if (runScenarios) {
   console.log(
-    `\nscenarios: apps in scripts/size-scenarios, tree-shaken with their dependencies\n`,
+    `\nscenarios: apps in scripts/size-scenarios, tree-shaken, with ${APP_DEPENDENCIES.join(`, `)} external\n`,
   )
   console.log(
-    [`scenario`, `base gzip`, `head gzip`, `Δ gzip`, `Δ brotli`].join(`\t`),
+    [
+      `scenario`,
+      `base gzip`,
+      `head gzip`,
+      `Δ gzip`,
+      `Δ brotli`,
+      `feature cost (head gzip over app)`,
+    ].join(`\t`),
   )
+  let appGzip
   for (const scenario of scenarios) {
     const base = await measureScenario(baseDir, scenario)
     const head = await measureScenario(root, scenario)
     const baseGzip = base.get(`(bundle)`).gzip
     const headGzip = head.get(`(bundle)`).gzip
+    appGzip ??= headGzip
     console.log(
       [
         relative(scenarioDir, scenario).replace(/\.js$/, ``),
@@ -372,6 +393,7 @@ if (production && !flag(`no-scenarios`) && packages.includes(`db`)) {
         headGzip,
         signed(headGzip - baseGzip) + percent(headGzip - baseGzip, baseGzip),
         signed(head.get(`(bundle)`).brotli - base.get(`(bundle)`).brotli),
+        signed(headGzip - appGzip),
       ].join(`\t`),
     )
     if (!flag(`files`)) continue
