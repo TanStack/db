@@ -650,9 +650,10 @@ export class OrderedSourceLoader {
    * A window inside this loader's own first page needs no repair either.
    */
   revalidateLoadedCoverage(): void {
+    // A `requiresFullSource` plan's coverage is its full-source read: nothing
+    // has settled before it, and it covers the source after.
     if (
       !this.active ||
-      this.info.requiresFullSource ||
       !this.hasSettledSourceRequest ||
       this.coversSource() ||
       this.windowIsInsideOwnPrefix()
@@ -937,13 +938,12 @@ export class OrderedSourceLoader {
     this.repairTimer = undefined
   }
 
+  // Only the loader's own failure outside a window move schedules a retry.
+  // That failure blocks the ordinary passes that could fail again, and the
+  // timer clears itself before it retries, so no timer is pending here. An
+  // explicit move cancels the timer before it takes the failure over.
   private scheduleRepairRetry(): void {
-    if (
-      !this.active ||
-      !this.canRetryRepair() ||
-      this.repairTimer !== undefined ||
-      this.repairRetries >= 2
-    )
+    if (!this.active || !this.canRetryRepair() || this.repairRetries >= 2)
       return
     const orderedLoadGeneration = this.orderedLoadGeneration
     const failedRequest = this.failedRequest
@@ -955,8 +955,7 @@ export class OrderedSourceLoader {
             !this.active ||
             !this.canRetryRepair() ||
             orderedLoadGeneration !== this.orderedLoadGeneration ||
-            this.failedRequest !== failedRequest ||
-            this.failedRequest?.windowOperationGeneration !== undefined
+            this.failedRequest !== failedRequest
           )
             return
           this.moveWork({ kind: `idle` }, [`idle`, `failed`])
