@@ -98,9 +98,9 @@ const { data, isLoading, isError } = $derived(query)
 // Join pattern
 const issuesQuery = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
+   .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
-   )
+   ))
    .select(({ issues, persons }) => ({
      id: issues.id,
      title: issues.title,
@@ -224,9 +224,9 @@ const { data, isLoading, isError } = $derived(query)
 // Join pattern
 const issuesQuery = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
+   .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
-   )
+   ))
    .select(({ issues, persons }) => ({
      id: issues.id,
      title: issues.title,
@@ -506,9 +506,9 @@ const { data, isLoading, isError } = $derived(query)
 // Join pattern
 const issuesQuery = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
+   .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
-   )
+   ))
    .select(({ issues, persons }) => ({
      id: issues.id,
      title: issues.title,

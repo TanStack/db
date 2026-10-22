@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:387](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L387)
+Defined in: [useLiveQuery.ts:396](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L396)
 
 Create a live query using a query function.
 
@@ -163,9 +163,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -196,7 +196,7 @@ return (
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:407](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L407)
+Defined in: [useLiveQuery.ts:416](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L416)
 
 Create a live query using a query function.
 
@@ -354,9 +354,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -387,7 +387,7 @@ return (
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:429](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L429)
+Defined in: [useLiveQuery.ts:438](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L438)
 
 Create a live query using a query function.
 
@@ -548,9 +548,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -581,7 +581,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:451](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L451)
+Defined in: [useLiveQuery.ts:460](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L460)
 
 Create a live query using a query function.
 
@@ -747,9 +747,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -780,7 +780,7 @@ return (
 function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:477](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L477)
+Defined in: [useLiveQuery.ts:486](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L486)
 
 Create a live query using a query function.
 
@@ -957,9 +957,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -990,7 +990,7 @@ return (
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:548](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L548)
+Defined in: [useLiveQuery.ts:557](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L557)
 
 Create a live query using configuration object
 
@@ -1134,7 +1134,7 @@ return <div>{data.length} items loaded</div>
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:567](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L567)
+Defined in: [useLiveQuery.ts:576](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L576)
 
 Create a live query using a query function.
 
@@ -1284,9 +1284,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -1317,7 +1317,7 @@ return (
 function useLiveQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:586](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L586)
+Defined in: [useLiveQuery.ts:595](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L595)
 
 Create a live query using a query function.
 
@@ -1469,9 +1469,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -1502,7 +1502,7 @@ return (
 function useLiveQuery<TContext>(config, deps): object;
 ```
 
-Defined in: [useLiveQuery.ts:606](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L606)
+Defined in: [useLiveQuery.ts:615](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L615)
 
 Create a live query using a query function.
 
@@ -1658,9 +1658,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,
@@ -1691,7 +1691,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:655](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L655)
+Defined in: [useLiveQuery.ts:664](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L664)
 
 Subscribe to an existing live query collection
 
@@ -1837,7 +1837,7 @@ return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:678](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L678)
+Defined in: [useLiveQuery.ts:687](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L687)
 
 Create a live query using a query function.
 
@@ -1990,9 +1990,9 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
+     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
-     )
+     ))
      .select(({ issues, persons }) => ({
        id: issues.id,
        title: issues.title,

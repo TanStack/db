@@ -1151,7 +1151,7 @@ type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
  * from({ users }).where(...) // → User[]
  *
  * // Join query without select:
- * from({ users }).leftJoin({ orders }, ...) // → { users: User, orders: Order | undefined }[]
+ * from({ users }).join(leftJoin({ orders }, ...)) // → { users: User, orders: Order | undefined }[]
  *
  * // Query with select:
  * from({ users }).select({ id: users.id, name: users.name }) // → { id: number, name: string }[]
@@ -1313,11 +1313,11 @@ export type HasJoinType<
  * **Example**:
  * ```typescript
  * .from({ users })
- * .leftJoin({ orders }, ({ users, orders }) => {
+ * .join(leftJoin({ orders }, ({ users, orders }) => {
  *   // users is NOT optional here - we can access users.id directly
  *   // orders is NOT optional here - we can access orders.userId directly
  *   return eq(users.id, orders.userId)
- * })
+ * }))
  * .where(({ orders }) => {
  *   // NOW orders is optional because it's after the LEFT JOIN
  *   return orders?.status === 'pending'

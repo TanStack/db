@@ -14,6 +14,8 @@ Defined in: [packages/db/src/errors.ts:576](https://github.com/TanStack/db/blob/
 - [`OnlyOneSourceAllowedError`](OnlyOneSourceAllowedError.md)
 - [`SubQueryMustHaveFromClauseError`](SubQueryMustHaveFromClauseError.md)
 - [`InvalidSourceError`](InvalidSourceError.md)
+- [`IncludeOperatorRequiredError`](IncludeOperatorRequiredError.md)
+- [`JoinOperatorRequiredError`](JoinOperatorRequiredError.md)
 - [`InvalidSourceTypeError`](InvalidSourceTypeError.md)
 - [`JoinConditionMustBeEqualityError`](JoinConditionMustBeEqualityError.md)
 - [`QueryMustHaveFromClauseError`](QueryMustHaveFromClauseError.md)

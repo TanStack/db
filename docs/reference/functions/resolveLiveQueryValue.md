@@ -9,7 +9,7 @@ function resolveLiveQueryValue(value, __namedParameters):
   | null;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L229)
+Defined in: [packages/db/src/live-query-options.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L232)
 
 ## Parameters
 
@@ -25,7 +25,13 @@ Defined in: [packages/db/src/live-query-options.ts:229](https://github.com/TanSt
 
 #### pool?
 
-`boolean` = `true`
+  \| `false`
+  \| \{
+  `createPooledLiveQuery`: (`query`, `__namedParameters`) => 
+     \| [`Collection`](../interfaces/Collection.md)\<`any`, `any`, `any`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `any`\>
+    \| `undefined`;
+  `getPooledQueryIdentity`: (`query`) => `string` \| `undefined`;
+\}
 
 #### startSync?
 

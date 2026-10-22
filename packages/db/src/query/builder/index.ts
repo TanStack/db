@@ -324,19 +324,18 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * // Left join users with posts
    * query
    *   .from({ users: usersCollection })
-   *   .join({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   *   .join(leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId)))
    *
-   * // Inner join with explicit type
+   * // Inner join
    * query
    *   .from({ u: usersCollection })
-   *   .join({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId), 'inner')
-   * ```
+   *   .join(innerJoin({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId)))
    *
-   * // Join with a subquery
-   * const activeUsers = query.from({ u: usersCollection }).where(({u}) => u.active)
+   * // Join type chosen at run time
    * query
-   *   .from({ activeUsers })
-   *   .join({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId))
+   *   .from({ u: usersCollection })
+   *   .join(joinOf(type, { p: postsCollection }, ({u, p}) => eq(u.id, p.userId)))
+   * ```
    */
   join<TSource extends Source, TJoinType extends JoinType>(
     operator: JoinOperator<TContext, TSource, TJoinType>,

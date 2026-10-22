@@ -990,6 +990,26 @@ Development builds show the full message. For example:
 setWindow() cannot change the limit of a findOne() query.
 ```
 
+<a id="error-245"></a>
+
+## Error 245: `JoinOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+.join() takes a join operator, such as .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Import leftJoin, innerJoin, rightJoin, fullJoin, or joinOf from @tanstack/db. Got: object
+```
+
+<a id="error-246"></a>
+
+## Error 246: `GroupingOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.
+```
+
 <a id="error-247"></a>
 
 ## Error 247: `IncludeOperatorRequiredError`
@@ -1005,16 +1025,6 @@ A subquery in select() needs include(), toArray(), or materialize(). Wrap the is
 These are plain `Error`, `TypeError`, `RangeError`, or
 `AggregateError` values, and `console` messages about runtime failures.
 Each heading names the source file under `packages/db/src` that writes it.
-
-<a id="error-245"></a>
-
-## Error 245: `JoinOperatorRequiredError`
-
-Development builds show the full message. For example:
-
-```text
-.join() takes a join operator, such as .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Import leftJoin, innerJoin, rightJoin, fullJoin, or joinOf from @tanstack/db. Got: object
-```
 
 <a id="error-88"></a>
 
@@ -2488,14 +2498,4 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 A windowed or findOne result row has no include route
-```
-
-<a id="error-246"></a>
-
-## Error 246: `GroupingOperatorRequiredError`
-
-Development builds show the full message. For example:
-
-```text
-groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.
 ```

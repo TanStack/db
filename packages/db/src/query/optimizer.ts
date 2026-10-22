@@ -60,7 +60,7 @@
  * ```javascript
  * query
  *   .from({ users: usersCollection })
- *   .join({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.user_id))
+ *   .join(leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.user_id)))
  *   .where(({users}) => eq(users.department_id, 1))
  *   .where(({posts}) => gt(posts.views, 100))
  *   .where(({users, posts}) => eq(users.id, posts.author_id))
@@ -74,11 +74,11 @@
  *       .from({ users: usersCollection })
  *       .where(({users}) => eq(users.department_id, 1))
  *   })
- *   .join({
+ *   .join(leftJoin({
  *     posts: subquery
  *       .from({ posts: postsCollection })
  *       .where(({posts}) => gt(posts.views, 100))
- *   }, ({users, posts}) => eq(users.id, posts.user_id))
+ *   }, ({users, posts}) => eq(users.id, posts.user_id)))
  *   .where(({users, posts}) => eq(users.id, posts.author_id))
  * ```
  *
@@ -87,7 +87,7 @@
  * ```javascript
  * query
  *   .from({ users: usersCollection })
- *   .join({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.user_id))
+ *   .join(leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.user_id)))
  *   .where(({users}) => eq(users.department_id, 1))
  *   .groupBy(['users.department_id'])
  *   .select({ count: agg('count', '*') })
@@ -101,7 +101,7 @@
  *       .from({ users: usersCollection })
  *       .where(({users}) => eq(users.department_id, 1))
  *   })
- *   .join({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.user_id))
+ *   .join(leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.user_id)))
  *   .groupBy(['users.department_id'])
  *   .select({ count: agg('count', '*') })
  * ```

@@ -330,11 +330,8 @@ const Todos = () => {
     query: (q) =>
       q
         .from({ todos: todoCollection })
-        .join(
-          { lists: listCollection },
-          ({ todos, lists }) => eq(lists.id, todos.listId),
-          'inner'
-        )
+        .join(innerJoin({ lists: listCollection },
+          ({ todos, lists }) => eq(lists.id, todos.listId)))
         .where(({ lists }) => eq(lists.active, true))
         .select(({ todos, lists }) => ({
           id: todos.id,
@@ -497,11 +494,8 @@ const Todos = () => {
     query: (q) =>
       q
         .from({ todo: todoCollection })
-        .join(
-          { list: listCollection },
-          ({ todo, list }) => eq(list.id, todo.list_id),
-          "inner"
-        )
+        .join(innerJoin({ list: listCollection },
+          ({ todo, list }) => eq(list.id, todo.list_id)))
         .where(({ list }) => eq(list.active, true))
         .select(({ todo, list }) => ({
           id: todo.id,

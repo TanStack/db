@@ -7,7 +7,7 @@ title: MergeContextForJoinCallback
 type MergeContextForJoinCallback<TContext, TNewSchema> = Omit<TContext, "schema" | "refsSchema" | "hasJoins" | "joinTypes"> & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1328](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1328)
+Defined in: [packages/db/src/query/builder/types.ts:1329](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1329)
 
 MergeContextForJoinCallback - Special context for join condition callbacks
 
@@ -22,11 +22,11 @@ Optionality is only applied to the result AFTER the join logic executes.
 **Example**:
 ```typescript
 .from({ users })
-.leftJoin({ orders }, ({ users, orders }) => {
+.join(leftJoin({ orders }, ({ users, orders }) => {
   // users is NOT optional here - we can access users.id directly
   // orders is NOT optional here - we can access orders.userId directly
   return eq(users.id, orders.userId)
-})
+}))
 .where(({ orders }) => {
   // NOW orders is optional because it's after the LEFT JOIN
   return orders?.status === 'pending'

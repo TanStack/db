@@ -892,7 +892,7 @@ For a complete list of available functions, see the [Expression Functions Refere
 
 ## Joins
 
-Use `join` to combine data from multiple collections. Joins default to `left` join type and support equality conditions combined with `and()`.
+Use `join` with a join operator to combine data from multiple collections. Import `leftJoin`, `innerJoin`, `rightJoin`, or `fullJoin` from `@tanstack/db` and pass it to `join`. Join conditions are equalities, optionally combined with `and()`. The operator brings the join code with it, so an app that never joins does not bundle it.
 
 Joins in TanStack DB are a way to combine data from multiple collections, and are conceptually very similar to SQL joins. When two collections are joined, the result is a new collection that contains the combined data as single rows. The new collection is a live query collection, and will automatically update when the underlying data changes.
 
@@ -906,17 +906,26 @@ The result type of a join will take into account the join type, with the optiona
 ### Method Signature
 
 ```ts
-join(
+join(operator: JoinOperator): Query
+
+leftJoin(
   { [alias]: Collection | Query },
   condition: (row: TRow) => Expression<boolean>, // `eq(...)` or `and(eq(...), ...)`
-  joinType?: 'left' | 'right' | 'inner' | 'full'
-): Query
+): JoinOperator // also innerJoin, rightJoin, fullJoin
+
+joinOf(
+  joinType: 'left' | 'right' | 'inner' | 'full',
+  { [alias]: Collection | Query },
+  condition: (row: TRow) => Expression<boolean>,
+): JoinOperator
 ```
 
 **Parameters:**
 - `aliases` - An object where keys are alias names and values are collections or subqueries to join
 - `condition` - A callback function that receives the combined row object and returns an equality or a conjunction of equalities
-- `joinType` - Optional join type: `'left'` (default), `'right'`, `'inner'`, or `'full'`
+- `joinType` - For `joinOf`, a join type chosen at run time
+
+Pass the operator inline, as in `.join(leftJoin(...))`, so its condition callback is typed from the query.
 
 ### Basic Joins
 
@@ -926,9 +935,9 @@ Join users with their posts:
 const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join({ post: postsCollection }, ({ user, post }) => 
+    .join(leftJoin({ post: postsCollection }, ({ user, post }) => 
       eq(user.id, post.userId)
-    )
+    ))
 )
 
 /*
@@ -953,9 +962,9 @@ Use `and()` when rows must match on more than one field:
 ```ts
 const inventory = createLiveQueryCollection((q) =>
   q.from({ product: productsCollection })
-    .innerJoin({ stock: inventoryCollection }, ({ product, stock }) =>
+    .join(innerJoin({ stock: inventoryCollection }, ({ product, stock }) =>
       and(eq(product.sku, stock.sku), eq(product.region, stock.region))
-    )
+    ))
 )
 ```
 
@@ -983,21 +992,18 @@ no keyed demand when lazy loading applies.
 
 ### Join Types
 
-Specify the join type as the third parameter:
+Choose the join type with the operator you import:
 
 ```ts
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join(
-      { post: postsCollection }, 
-      ({ user, post }) => eq(user.id, post.userId),
-      'inner', // `inner`, `left`, `right` or `full`
-    )
+    .join(innerJoin({ post: postsCollection },
+      ({ user, post }) => eq(user.id, post.userId)))
 )
 ```
 
-Or using the aliases `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` methods:
+Each join type has its own operator:
 
 ### Left Join
 ```ts
@@ -1005,10 +1011,8 @@ Or using the aliases `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` methods
 const allUsers = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .leftJoin(
-      { post: postsCollection }, 
-      ({ user, post }) => eq(user.id, post.userId),
-    )
+    .join(leftJoin({ post: postsCollection },
+      ({ user, post }) => eq(user.id, post.userId)))
 )
 
 /*
@@ -1027,10 +1031,8 @@ Result type:
 const allPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .rightJoin(
-      { post: postsCollection }, 
-      ({ user, post }) => eq(user.id, post.userId),
-    )
+    .join(rightJoin({ post: postsCollection },
+      ({ user, post }) => eq(user.id, post.userId)))
 )
 
 /*
@@ -1049,10 +1051,8 @@ Result type:
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .innerJoin(
-      { post: postsCollection }, 
-      ({ user, post }) => eq(user.id, post.userId),
-    )
+    .join(innerJoin({ post: postsCollection },
+      ({ user, post }) => eq(user.id, post.userId)))
 )
 
 /*
@@ -1071,10 +1071,8 @@ Result type:
 const allUsersAndPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .fullJoin(
-      { post: postsCollection }, 
-      ({ user, post }) => eq(user.id, post.userId),
-    )
+    .join(fullJoin({ post: postsCollection },
+      ({ user, post }) => eq(user.id, post.userId)))
 )
 
 /*
@@ -1094,12 +1092,12 @@ Chain multiple joins in a single query:
 const userPostComments = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join({ post: postsCollection }, ({ user, post }) => 
+    .join(leftJoin({ post: postsCollection }, ({ user, post }) => 
       eq(user.id, post.userId)
-    )
-    .join({ comment: commentsCollection }, ({ post, comment }) => 
+    ))
+    .join(leftJoin({ comment: commentsCollection }, ({ post, comment }) => 
       eq(post.id, comment.postId)
-    )
+    ))
     .select(({ user, post, comment }) => ({
       userName: user.name,
       postTitle: post.title,
@@ -1131,9 +1129,9 @@ const activeUserPosts = createCollection(liveQueryCollectionOptions({
     // Use the subquery in the main query
     return q
       .from({ activeUser: activeUsers })
-      .join({ post: postsCollection }, ({ activeUser, post }) => 
+      .join(leftJoin({ post: postsCollection }, ({ activeUser, post }) => 
         eq(activeUser.id, post.userId)
-      )
+      ))
   }
 }))
 ```
@@ -1155,9 +1153,9 @@ const userRecentPosts = createCollection(liveQueryCollectionOptions({
     // Use the subquery in the main query
     return q
       .from({ user: usersCollection })
-      .join({ recentPost: recentPosts }, ({ user, recentPost }) => 
+      .join(leftJoin({ recentPost: recentPosts }, ({ user, recentPost }) => 
         eq(user.id, recentPost.userId)
-      )
+      ))
   }
 }))
 ```
@@ -1177,12 +1175,12 @@ const complexQuery = createCollection(liveQueryCollectionOptions({
     // Use the same subquery multiple times
     return q
       .from({ activeUser: activeUsers })
-      .join({ post: postsCollection }, ({ activeUser, post }) => 
+      .join(leftJoin({ post: postsCollection }, ({ activeUser, post }) => 
         eq(activeUser.id, post.userId)
-      )
-      .join({ comment: commentsCollection }, ({ activeUser, comment }) => 
+      ))
+      .join(leftJoin({ comment: commentsCollection }, ({ activeUser, comment }) => 
         eq(activeUser.id, comment.userId)
-      )
+      ))
   }
 }))
 ```
@@ -1194,7 +1192,7 @@ In this example, the `activeUsers` subquery is used twice but executed only once
 Build complex queries with multiple levels of nesting:
 
 ```ts
-import { count } from '@tanstack/db'
+import { count, leftJoin } from '@tanstack/db'
 
 const topUsers = createCollection(liveQueryCollectionOptions({
   query: (q) => {
@@ -1210,9 +1208,9 @@ const topUsers = createCollection(liveQueryCollectionOptions({
     // Build the user stats subquery
     const userStats = q
       .from({ user: usersCollection })
-      .join({ postCount: postCounts }, ({ user, postCount }) => 
+      .join(leftJoin({ postCount: postCounts }, ({ user, postCount }) => 
         eq(user.id, postCount.userId)
-      )
+      ))
       .select(({ user, postCount }) => ({
         id: user.id,
         name: user.name,
@@ -1231,20 +1229,22 @@ const topUsers = createCollection(liveQueryCollectionOptions({
 
 Includes let you nest subqueries inside `.select()` to produce hierarchical results. Instead of joins that flatten 1:N relationships into repeated rows, each parent row gets a nested collection of its related items.
 
+Wrap a child query in `include()` to get a live child Collection, or in `toArray()` or `materialize()` to get inline values. A child query in `.select()` without one of these throws `IncludeOperatorRequiredError`. These functions bring the include code with them, so an app that never includes subqueries does not bundle it.
+
 ```ts
-import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { createLiveQueryCollection, eq, include } from '@tanstack/db'
 
 const projectsWithIssues = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: q
+    issues: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
       .select(({ i }) => ({
         id: i.id,
         title: i.title,
-      })),
+      }))),
   })),
 )
 ```
@@ -1277,7 +1277,7 @@ Child queries support additional `.where()` clauses beyond the correlation condi
 q.from({ p: projectsCollection }).select(({ p }) => ({
   id: p.id,
   name: p.name,
-  issues: q
+  issues: include(q
     .from({ i: issuesCollection })
     .where(({ i }) => eq(i.projectId, p.id))       // correlation
     .where(({ i }) => eq(i.createdBy, p.createdBy)) // parent-referencing filter
@@ -1285,7 +1285,7 @@ q.from({ p: projectsCollection }).select(({ p }) => ({
     .select(({ i }) => ({
       id: i.id,
       title: i.title,
-    })),
+    }))),
 }))
 ```
 
@@ -1299,7 +1299,7 @@ Child queries support `.orderBy()` and `.limit()`, applied per parent:
 q.from({ p: projectsCollection }).select(({ p }) => ({
   id: p.id,
   name: p.name,
-  issues: q
+  issues: include(q
     .from({ i: issuesCollection })
     .where(({ i }) => eq(i.projectId, p.id))
     .orderBy(({ i }) => i.createdAt, 'desc')
@@ -1307,7 +1307,7 @@ q.from({ p: projectsCollection }).select(({ p }) => ({
     .select(({ i }) => ({
       id: i.id,
       title: i.title,
-    })),
+    }))),
 }))
 ```
 
@@ -1388,16 +1388,16 @@ Do not return child queries, `toArray()`, `materialize()`, or query expressions 
 You can use aggregate functions in child queries. Aggregates are computed per parent:
 
 ```ts
-import { createLiveQueryCollection, eq, count } from '@tanstack/db'
+import { count, createLiveQueryCollection, eq, include } from '@tanstack/db'
 
 const projectsWithCounts = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issueCount: q
+    issueCount: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
-      .select(({ i }) => ({ total: count(i.id) })),
+      .select(({ i }) => ({ total: count(i.id) }))),
   })),
 )
 ```
@@ -1413,7 +1413,7 @@ const tree = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: q
+    issues: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
       .select(({ i }) => ({
@@ -1426,7 +1426,7 @@ const tree = createLiveQueryCollection((q) =>
             id: c.id,
             body: c.body,
           })),
-      })),
+      }))),
   })),
 )
 ```
@@ -1439,7 +1439,7 @@ When using includes with React, each child `Collection` needs its own `useLiveQu
 
 ```tsx
 import { useLiveQuery } from '@tanstack/react-db'
-import { eq } from '@tanstack/db'
+import { eq, include } from '@tanstack/db'
 
 function ProjectList() {
   const { data: projects } = useLiveQuery({
@@ -1447,13 +1447,13 @@ function ProjectList() {
       q.from({ p: projectsCollection }).select(({ p }) => ({
         id: p.id,
         name: p.name,
-        issues: q
+        issues: include(q
           .from({ i: issuesCollection })
           .where(({ i }) => eq(i.projectId, p.id))
           .select(({ i }) => ({
             id: i.id,
             title: i.title,
-          })),
+          }))),
       })),
   })
 
@@ -1492,6 +1492,19 @@ Each `IssueList` component independently subscribes to its project's issues. Whe
 ## groupBy and Aggregations
 
 Use `groupBy` to group your data and apply aggregate functions. When you use aggregates in `select` without `groupBy`, the entire result set is treated as a single group.
+
+Aggregate functions such as `count()` bring the grouping code with them. A `groupBy` with no aggregate wraps its keys in `groupKeys()` instead; without it, the query throws `GroupingOperatorRequiredError`:
+
+```ts
+import { createLiveQueryCollection, groupKeys } from '@tanstack/db'
+
+const departments = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .groupBy(groupKeys(({ user }) => user.departmentId))
+    .select(({ user }) => ({ departmentId: user.departmentId })),
+)
+```
 
 ### Method Signature
 
@@ -2021,6 +2034,31 @@ const page2Users = createLiveQueryCollection((q) =>
 )
 ```
 
+## Pooled Live Queries
+
+Apps that mount many live queries of the same shape at once, such as one per
+list row, can share their work. Pass `pooledLiveQueries` as `pool` in a hook's
+query config. Queries that filter one eager source with `eq(field, literal)`
+then read one shared partition instead of compiling a graph each:
+
+```tsx
+import { eq, pooledLiveQueries } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/react-db'
+
+function TodoRow({ listId }: { listId: string }) {
+  const { data } = useLiveQuery({
+    query: (q) =>
+      q.from({ todo: todosCollection }).where(({ todo }) => eq(todo.listId, listId)),
+    pool: pooledLiveQueries,
+  })
+  // ...
+}
+```
+
+Results are the same with or without pooling. Without `pool`, each query
+compiles its own live-query Collection, and the app does not bundle pooling.
+Suspense hooks and queries with a `DbClient` never pool.
+
 ## Composable Queries
 
 Build complex queries by composing smaller, reusable parts. This approach makes your queries more maintainable and allows for better performance through caching.
@@ -2068,9 +2106,9 @@ const activeUsers = createLiveQueryCollection((q) =>
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: activeUsers })
-    .join({ post: postsCollection }, ({ user, post }) => 
+    .join(leftJoin({ post: postsCollection }, ({ user, post }) => 
       eq(user.id, post.userId)
-    )
+    ))
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
@@ -2083,7 +2121,7 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 You can use the `Query` class to create reusable query definitions. This is useful for building complex queries where you want to reuse the same query builder instance multiple times throughout your application.
 
 ```ts
-import { Query, eq } from '@tanstack/db'
+import { eq, leftJoin, Query } from '@tanstack/db'
 
 // Create a reusable query builder
 const userQuery = new Query()
@@ -2102,9 +2140,9 @@ const activeUsers = createLiveQueryCollection({
 const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ activeUser: userQuery })
-    .join({ post: postsCollection }, ({ activeUser, post }) => 
+    .join(leftJoin({ post: postsCollection }, ({ activeUser, post }) => 
       eq(activeUser.id, post.userId)
-    )
+    ))
 )
 ```
 
@@ -2201,9 +2239,9 @@ const highValueCustomers = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
       .from({ user: usersCollection })
-      .join({ order: ordersCollection }, ({ user, order }) =>
+      .join(leftJoin({ order: ordersCollection }, ({ user, order }) =>
         eq(user.id, order.userId)
-      )
+      ))
       .where(isHighValueCustomer)
       .select(({ user, order }) => ({
         userName: user.name,
@@ -2482,9 +2520,9 @@ createEffect({
   query: (q) =>
     q
       .from({ user: usersCollection })
-      .join({ post: postsCollection }, ({ user, post }) =>
+      .join(leftJoin({ post: postsCollection }, ({ user, post }) =>
         eq(user.id, post.userId)
-      )
+      ))
       .select(({ user, post }) => ({
         userName: user.name,
         postTitle: post.title,
@@ -2577,16 +2615,16 @@ or hot-path queries.
 Here's a more complete example showing an effect that monitors order status changes and sends notifications:
 
 ```ts
-import { createEffect, eq } from '@tanstack/db'
+import { createEffect, eq, leftJoin } from '@tanstack/db'
 
 const orderEffect = createEffect({
   id: 'order-status-monitor',
   query: (q) =>
     q
       .from({ order: ordersCollection })
-      .join({ customer: customersCollection }, ({ order, customer }) =>
+      .join(leftJoin({ customer: customersCollection }, ({ order, customer }) =>
         eq(order.customerId, customer.id)
-      )
+      ))
       .where(({ order }) => eq(order.status, 'shipped'))
       .select(({ order, customer }) => ({
         orderId: order.id,
@@ -2673,10 +2711,9 @@ These functions are particularly important when working with joins and optional 
 const usersWithoutProfiles = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .leftJoin(
-      { profile: profilesCollection },
+    .join(leftJoin({ profile: profilesCollection },
       ({ user, profile }) => eq(user.id, profile.userId)
-    )
+    ))
     .where(({ profile }) => isUndefined(profile))
 )
 

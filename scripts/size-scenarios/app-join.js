@@ -1,5 +1,5 @@
 // The typical app, plus a live query that joins a second collection.
-import { createCollection, eq } from '@tanstack/db'
+import { createCollection, eq, leftJoin } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { useLiveQuery } from '@tanstack/react-db'
 import { queryClient, todos } from './app.js'
@@ -19,7 +19,9 @@ export function AssignedTodos() {
   const { data } = useLiveQuery((q) =>
     q
       .from({ todo: todos })
-      .join({ user: users }, ({ todo, user }) => eq(todo.userId, user.id))
+      .join(
+        leftJoin({ user: users }, ({ todo, user }) => eq(todo.userId, user.id)),
+      )
       .select(({ todo, user }) => ({ title: todo.title, owner: user.name })),
   )
   return data
