@@ -328,9 +328,7 @@ const productsCollection = createCollection(
         transaction.mutations.map((m) => m.modified),
       )
       await collection.utils.writeBatch(() => {
-        serverItems.forEach((item) =>
-          collection.utils.writeInsert(item),
-        )
+        serverItems.forEach((item) => collection.utils.writeInsert(item))
       })
     },
     onUpdate: async ({ transaction, collection }) => {
