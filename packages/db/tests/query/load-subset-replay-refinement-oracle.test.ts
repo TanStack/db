@@ -12,6 +12,7 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
@@ -1079,6 +1080,22 @@ describe(`loadSubset replay refinement`, () => {
  *   it is a settlement-phase release, which must not hold back publication.
  *   An unload that throws while the replay starts can fail the replay, which
  *   law 9 allows, so the law does not judge that case.
+ * - **Retention:** a truncate replay is one publication barrier (law 9 and
+ *   "Replay participants and failure"). It rises when a source truncates and
+ *   falls when its replay succeeds. Every load the source starts while its
+ *   replay is open joins the barrier; a load that a newer truncate aborts or
+ *   whose demand retires stops participating, and work an older replay
+ *   started still holds the newer one. A participant that fails fails the
+ *   replay while its logical demand is held. Once that demand retires, its
+ *   failure no longer counts, and demand started meanwhile joins the
+ *   replacement, which publishes when it succeeds; otherwise only a later
+ *   truncate of that source can replace the failed replay. While
+ *   any barrier is up, the query shows exactly the rows it showed when the
+ *   first one rose: partly replayed rows, rank moves, and marker changes stay
+ *   private, and a failed replay keeps that result instead of ending the
+ *   query. The law is checked after every command and once loading is quiet,
+ *   for barriers that rise after the query first became ready; before that
+ *   there is no complete publication to keep, and initial readiness governs.
  * - **Convergence:** after a final truncate with no faults, and an explicit
  *   window move that revalidates a window whose own move failed, the window
  *   equals the model.
@@ -1104,6 +1121,10 @@ describe(`loadSubset replay refinement`, () => {
  *     commit deletes the source's rows privately, so the query can demand
  *     keys that it never published, such as a row that a LEFT join filter
  *     now keeps.
+ *   A load that joins an open replay belongs to it as well, which covers a
+ *   demand that the graph starts after the commit while the replay still
+ *   loads. The model judges that only where the source has one subscription
+ *   in the query (see Limits).
  *   A load that fails before the query first becomes ready is fatal too (an
  *   initial load failure), except on a lazy join source, which owns its
  *   demand. So a query may end in `error` only after a demand load outside a
@@ -1140,7 +1161,13 @@ describe(`loadSubset replay refinement`, () => {
  *
  * Limits: one ordered source; no full joins (the ordered-work oracle owns
  * them); includes one level deep; and a provider that reads its rows at the time it
- * answers.
+ * answers. The adapter boundary cannot tell which subscription issued a load,
+ * and each subscription has its own replay. So the retention law, and the
+ * rule that a replay participant counts as recovery, apply only where each
+ * recovering source has one subscription in the query: the order source
+ * without a peer, and the marker source unless the query both joins and
+ * includes it (or a peer reads it too). A release that throws while a replay starts may
+ * fail that replay, so the retention law skips a barrier where one did.
  */
 type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
@@ -1277,6 +1304,10 @@ type OrderedReach = {
   replayLoads: number
   abortRejections: number
   preloadChecks: number
+  heldPublicationChecks: number
+  retainedFailedReplays: number
+  participantDemandFailures: number
+  includeDemandFailures: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1369,6 +1400,103 @@ async function checkOrderedReplay(
   // be placed before or after the replay's loads settle.
   type Load = { epoch: number; outcome: `pending` | `ok` | `failed` }
   const loads: Array<Load> = []
+  // Retention model. Each source with an open or failed replay has a
+  // barrier. `pending` holds the loads that still hold its publication: the
+  // loads started while it is up, and work an older replay started. `own`
+  // holds the loads this replay started, whose failure fails it. A failure
+  // is scoped to its logical demand: once that demand retires, it no longer
+  // fails the replay, and demand started meanwhile joins the replacement.
+  type BarrierSource = `rows` | `markers`
+  type Barrier = {
+    failures: Map<Load, LoadSubsetOptions>
+    // A release threw while this replay started, which may fail it.
+    ambiguous: boolean
+    pending: Map<Load, LoadSubsetOptions>
+    own: Set<Load>
+  }
+  const barriers = new Map<BarrierSource, Barrier>()
+  // The rows the query showed when the first barrier rose, if it had
+  // published by then. Before the first ready there is no complete
+  // publication to keep, and the initial-readiness law governs.
+  let retainedRows: string | undefined
+  let retainedAfterReady = false
+  const raiseBarrier = (source: BarrierSource) => {
+    lowerSettledBarriers()
+    if (barriers.size === 0) {
+      retainedRows = JSON.stringify(live.toArray)
+      retainedAfterReady = live.status === `ready`
+    }
+    barriers.set(source, {
+      failures: new Map(),
+      ambiguous: false,
+      pending: new Map(barriers.get(source)?.pending),
+      own: new Set(),
+    })
+  }
+  // A replay whose participants all settled without a failure publishes.
+  const lowerSettledBarriers = () => {
+    for (const [source, barrier] of barriers) {
+      if (barrier.failures.size === 0 && barrier.pending.size === 0) {
+        barriers.delete(source)
+      }
+    }
+    if (barriers.size === 0) retainedRows = undefined
+  }
+  // Returns whether the load joined a replay.
+  const joinBarrier = (
+    source: BarrierSource,
+    load: Load,
+    options: LoadSubsetOptions,
+  ) => {
+    const barrier = barriers.get(source)
+    if (!barrier) return false
+    barrier.pending.set(load, options)
+    barrier.own.add(load)
+    return true
+  }
+  const settleParticipant = (
+    source: BarrierSource,
+    load: Load,
+    options: LoadSubsetOptions,
+    ok: boolean,
+  ) => {
+    const barrier = barriers.get(source)
+    // The replay has not failed, and other participants still load.
+    const replayLoading =
+      barrier !== undefined &&
+      barrier.failures.size === 0 &&
+      barrier.pending.has(load) &&
+      barrier.pending.size > 1
+    // An aborted request is obsolete demand, and a released one no longer
+    // participates, so neither fails the replay.
+    if (
+      !ok &&
+      barrier?.pending.has(load) &&
+      barrier.own.has(load) &&
+      !options.signal?.aborted
+    ) {
+      barrier.failures.set(load, options)
+    }
+    barrier?.pending.delete(load)
+    return replayLoading
+  }
+  const retireParticipants = (
+    source: BarrierSource,
+    options: LoadSubsetOptions,
+  ) => {
+    const barrier = barriers.get(source)
+    if (!barrier) return
+    for (const owned of [barrier.pending, barrier.failures]) {
+      for (const [load, held] of owned) {
+        if (held === options) owned.delete(load)
+      }
+    }
+  }
+  // Each subscription has its own replay, and the adapter boundary cannot
+  // tell which subscription issued a load.
+  const oneSubscription = (source: BarrierSource) =>
+    !scenario.peer &&
+    (source === `rows` || !(scenario.joined && scenario.includes))
   const acquired = new Map<LoadSubsetOptions, number>()
   const held: Array<(ok: boolean) => void> = []
   let holding = false
@@ -1391,8 +1519,22 @@ async function checkOrderedReplay(
   // Adapter callbacks set these flags, so read them through a call.
   const fatalLoadFailed = () => demandFailed || failedWhileLoading
   // Lazy join demand asks for keys; ordered and full-source loads do not.
+  // An ordered tie request also has a `where` and no `orderBy`, but it asks
+  // for rows by rank, so it is not demand.
+  const readsRank = (expression: unknown): boolean =>
+    Array.isArray(expression)
+      ? expression.some(readsRank)
+      : typeof expression === `object` && expression !== null
+        ? Object.entries(expression).some(([field, value]) =>
+            field === `path` && Array.isArray(value)
+              ? value.includes(`rank`)
+              : readsRank(value),
+          )
+        : false
   const isDemand = (options: LoadSubsetOptions) =>
-    options.where !== undefined && options.orderBy === undefined
+    options.where !== undefined &&
+    options.orderBy === undefined &&
+    !readsRank(options.where)
   // The truncate count of its source when each request was first issued. A
   // replay asks again for a held demand with the same request data, because
   // request data is immutable (ARCHITECTURE.md), and a new demand builds a
@@ -1457,6 +1599,10 @@ async function checkOrderedReplay(
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
+    heldPublicationChecks: 0,
+    retainedFailedReplays: 0,
+    participantDemandFailures: 0,
+    includeDemandFailures: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -1492,24 +1638,48 @@ async function checkOrderedReplay(
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
             reach.markerLoads++
-            const demand =
-              !belongsToRecovery(options, markerTruncates, markerCommitting) &&
-              isDemand(options)
+            const participant = joinBarrier(`markers`, load, options)
+            const recovery =
+              belongsToRecovery(options, markerTruncates, markerCommitting) ||
+              (participant && oneSubscription(`markers`))
+            const demand = !recovery && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
+              )
+              const replayLoading = settleParticipant(
+                `markers`,
+                load,
+                options,
+                ok,
               )
               if (!ok) {
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
+                // A demand the graph started after the commit, failing
+                // while its replay still loads.
+                if (
+                  participant &&
+                  replayLoading &&
+                  !options.signal?.aborted &&
+                  oneSubscription(`markers`) &&
+                  !markerCommitting &&
+                  isDemand(options)
+                ) {
+                  reach.participantDemandFailures++
+                  if (scenario.includes) reach.includeDemandFailures++
+                }
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
                 }
                 reach.failedLoads++
                 throw inject(new Error(`marker load failed`))
               }
-            } else await Promise.resolve()
+            } else {
+              await Promise.resolve()
+              settleParticipant(`markers`, load, options, true)
+            }
             if (options.signal?.aborted) {
               load.outcome = `ok`
               if (scenario.abortedMarkerLoads === `resolve`) return
@@ -1539,6 +1709,7 @@ async function checkOrderedReplay(
             load.outcome = `ok`
           },
           unloadSubset: (options) => {
+            retireParticipants(`markers`, options)
             const count = acquired.get(options) ?? 0
             if (count === 0) {
               violation ??= `marker unloadSubset released a demand it did not hold`
@@ -1564,24 +1735,42 @@ async function checkOrderedReplay(
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
-            const demand =
-              !belongsToRecovery(options, truncates, truncating) &&
-              isDemand(options)
+            const participant = joinBarrier(`rows`, load, options)
+            const recovery =
+              belongsToRecovery(options, truncates, truncating) ||
+              (participant && oneSubscription(`rows`))
+            const demand = !recovery && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
               )
+              const replayLoading = settleParticipant(`rows`, load, options, ok)
               if (!ok) {
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
+                // A demand the graph started after the commit, failing
+                // while its replay still loads.
+                if (
+                  participant &&
+                  replayLoading &&
+                  !options.signal?.aborted &&
+                  oneSubscription(`rows`) &&
+                  !truncating &&
+                  isDemand(options)
+                ) {
+                  reach.participantDemandFailures++
+                }
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
                 }
                 reach.failedLoads++
                 throw inject(new Error(`load failed`))
               }
-            } else await Promise.resolve()
+            } else {
+              await Promise.resolve()
+              settleParticipant(`rows`, load, options, true)
+            }
             if (options.signal?.aborted) {
               load.outcome = `ok`
               return
@@ -1625,6 +1814,7 @@ async function checkOrderedReplay(
             load.outcome = `ok`
           },
           unloadSubset: (options) => {
+            retireParticipants(`rows`, options)
             const count = acquired.get(options) ?? 0
             if (count === 0) {
               violation ??= `unloadSubset released a demand it did not hold`
@@ -1643,6 +1833,8 @@ async function checkOrderedReplay(
                 ))
             if (replayUnsettled) {
               earlyThrowSinceTruncate = true
+              const barrier = barriers.get(`rows`)
+              if (barrier) barrier.ambiguous = true
               reach.replayStartThrows++
             } else if (truncates > 0) reach.throwsAfterReplay++
             else reach.settlementThrows++
@@ -1723,6 +1915,27 @@ async function checkOrderedReplay(
         }
       }),
     )
+  // Retention: while a barrier is up, the query shows the rows it showed when
+  // the first one rose. A query in `error` is judged by the terminal-error
+  // law instead.
+  const checkRetention = (label: string) => {
+    lowerSettledBarriers()
+    if (retainedRows === undefined || !retainedAfterReady) return
+    // A source with two subscriptions has two replays, which the adapter
+    // boundary cannot tell apart.
+    if ([...barriers.keys()].some((barrier) => !oneSubscription(barrier))) {
+      return
+    }
+    const raised = [...barriers.values()]
+    if (raised.some(({ ambiguous }) => ambiguous)) return
+    if (live.status === `error`) return
+    expect(JSON.parse(JSON.stringify(live.toArray)), label).toEqual(
+      JSON.parse(retainedRows),
+    )
+    if (raised.some(({ failures }) => failures.size > 0)) {
+      reach.retainedFailedReplays++
+    } else reach.heldPublicationChecks++
+  }
   const settleAll = async () => {
     // Each truncate replays every retained demand of each query, so a long
     // held history can hold hundreds of loads. A load that starts another
@@ -1740,6 +1953,7 @@ async function checkOrderedReplay(
     earlyThrowSinceTruncate = false
     if (held.length > 0) reach.heldAcrossTruncate++
     installed.clear()
+    raiseBarrier(`rows`)
     truncating = true
     try {
       sync.begin()
@@ -1755,6 +1969,7 @@ async function checkOrderedReplay(
   // demand it retains.
   const truncateMarkers = async () => {
     installedMarkers.clear()
+    raiseBarrier(`markers`)
     markerSync.begin()
     markerSync.truncate()
     if (!onDemandMarkers) {
@@ -1899,6 +2114,7 @@ async function checkOrderedReplay(
         swallow(error)
       }
       await flushPromises()
+      checkRetention(`retained publication after ${command.type}`)
     }
     holding = false
     throwNextUnload = false
@@ -1922,6 +2138,7 @@ async function checkOrderedReplay(
         cause: escapedError(),
       })
     }
+    checkRetention(`retained publication once loading is quiet`)
     // Status: a release that throws is reported, but it fails no load, so a
     // quiet query with no failed load stays ready.
     if (!anyLoadFailedNow()) {
@@ -2298,8 +2515,9 @@ describe(`Ordered windows across truncate replays`, () => {
     history: Array<OrderedCommand>
     scenario?: OrderedScenario
     reaches?: keyof OrderedReach
-    // A replay whose history the law places in a recovery, where the model's
-    // own classification is permissive (see the terminal-error law).
+    // A replay whose history the law places in a recovery. The pin also
+    // holds where the model cannot tell which subscription issued a load
+    // (see Limits).
     recovers?: true
   }>)(
     `keeps the ordered window for $name (generated replay)`,
@@ -2340,6 +2558,10 @@ describe(`Ordered windows across truncate replays`, () => {
         replayLoads: 0,
         abortRejections: 0,
         preloadChecks: 0,
+        heldPublicationChecks: 0,
+        retainedFailedReplays: 0,
+        participantDemandFailures: 0,
+        includeDemandFailures: 0,
       }
       await fc.assert(
         fc.asyncProperty(
@@ -2365,14 +2587,170 @@ describe(`Ordered windows across truncate replays`, () => {
       // law is checked.
       // An aborted move needs a truncate to land inside a held move, and a
       // terminal error needs a held marker demand load to fail; the named
-      // replays above reach both.
+      // replays above reach both. A failed replay that the retention law can
+      // judge, and a demand that fails while its replay is open, are rare
+      // here; the failed-replay campaigns below declare both.
+      const ownedElsewhere = new Set([
+        `abortedMoves`,
+        `terminalErrors`,
+        `retainedFailedReplays`,
+        `participantDemandFailures`,
+        `includeDemandFailures`,
+      ])
       if (campaign !== `replay`) {
         for (const [dimension, count] of Object.entries(total)) {
-          if (dimension === `abortedMoves` || dimension === `terminalErrors`)
-            continue
+          if (ownedElsewhere.has(dimension)) continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The retention law needs a replay that fails while the query holds its
+  // last publication. Each history here starts by holding the next loads and
+  // truncating a source, so the replay's loads stay held. It may then change
+  // a rank, a marker, or the window, which starts demand while the replay is
+  // open. It then fails a held load: the oldest is a replay load, and the
+  // newest is the demand just started. Random commands follow, so later
+  // moves, marks, window moves, and truncates act on a failed replay. Peers
+  // stay out because the retention law does not judge them.
+  const failedReplayTruncate = fc.constantFrom(
+    { type: `truncate` as const, armAfterStart: false },
+    { type: `truncateMarkers` as const },
+  )
+  const failedReplayHistory: fc.Arbitrary<Array<OrderedCommand>> = fc
+    .tuple(
+      failedReplayTruncate,
+      fc.option(
+        fc.oneof(
+          fc.record({
+            type: fc.constant(`move` as const),
+            id: fc.integer({ min: 1, max: 5 }),
+            rank: fc.integer({ min: 1, max: 60 }),
+          }),
+          fc.record({
+            type: fc.constant(`mark` as const),
+            id: fc.integer({ min: 1, max: 5 }),
+            on: fc.boolean(),
+          }),
+          fc.record({
+            type: fc.constant(`window` as const),
+            offset: fc.constantFrom(0 as const, 1 as const),
+            limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+          }),
+        ),
+        { nil: undefined },
+      ),
+      fc.boolean(),
+      fc.array(orderedCommand, { maxLength: 8 }),
+    )
+    .map(([truncate, change, keepHolding, rest]) => [
+      { type: `hold` as const },
+      truncate,
+      ...(change
+        ? [change, { type: `settle` as const, ok: false, newest: true }]
+        : [{ type: `settle` as const, ok: false, keepHolding }]),
+      ...rest,
+    ])
+  const failedReplayScenario = orderedScenario.map((scenario) => ({
+    ...scenario,
+    peer: false,
+  }))
+  // An include demand that fails while its replay still loads needs an
+  // include over on-demand markers and a move that brings a row into the
+  // window during the marker replay; this branch builds that start. The
+  // window starts at offset 0 without ties, and the moved row starts past
+  // it, so moving it before every other row shows it.
+  const includeDemandCase = failedReplayScenario.chain((scenario) => {
+    const included = {
+      ...scenario,
+      offset: 0 as const,
+      ties: false,
+      joined: false as const,
+      includes: true,
+      markerMode: `on-demand` as const,
+    }
+    const ascending = included.direction === `asc`
+    return fc
+      .tuple(
+        fc.integer({ min: 1, max: 9 }),
+        fc.array(orderedCommand, { maxLength: 8 }),
+      )
+      .map(([rank, rest]): [Array<OrderedCommand>, OrderedScenario] => [
+        [
+          { type: `hold` },
+          { type: `truncateMarkers` },
+          {
+            type: `move`,
+            id: ascending ? 5 : 1,
+            rank: ascending ? rank : 61 - rank,
+          },
+          { type: `settle`, ok: false, newest: true },
+          ...rest,
+        ],
+        included,
+      ])
+  })
+  const failedReplayCase = fc.oneof(
+    {
+      weight: 3,
+      arbitrary: fc.tuple(failedReplayHistory, failedReplayScenario),
+    },
+    { weight: 1, arbitrary: includeDemandCase },
+  )
+  const failedReplayProperty = `replay.ordered-failed-replay`
+  const failedReplayCampaigns =
+    orderedReplayConfig.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : orderedReplayConfig.replayProperty === failedReplayProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(failedReplayCampaigns)(
+    `keeps the last publication through a failed replay (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: histories where the retention law judged a failed
+      // replay, judged a replay that still held publication, and saw a
+      // demand that the graph started after the commit fail while its replay
+      // still loaded, on either source and for an include. An include
+      // demand's rejection arrives before its replay records the failure, so
+      // only there does the demand wait for the replay to decide it.
+      const reach = createOracleReach(
+        failedReplayProperty,
+        [
+          `retainedFailedReplays`,
+          `heldPublicationChecks`,
+          `participantDemandFailures`,
+          `includeDemandFailures`,
+        ] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(failedReplayCase, async ([history, scenario]) => {
+          reach.beginHistory()
+          const observed = await checkOrderedReplay(history, scenario)
+          if (observed.retainedFailedReplays > 0) {
+            reach.reach(`retainedFailedReplays`)
+          }
+          if (observed.heldPublicationChecks > 0) {
+            reach.reach(`heldPublicationChecks`)
+          }
+          if (observed.participantDemandFailures > 0) {
+            reach.reach(`participantDemandFailures`)
+          }
+          if (observed.includeDemandFailures > 0) {
+            reach.reach(`includeDemandFailures`)
+          }
+        }),
+        campaign === `fixed`
+          ? { seed: 20261023, numRuns: oracleRuns(200) }
+          : {
+              ...oraclePropertyOptions(200, failedReplayProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      reach.assertReached()
     },
     120_000,
   )
