@@ -3,7 +3,7 @@ import { D2, MultiSet, output, serializeValue } from '@tanstack/db-ivm'
 import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
+import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
 import {
   Query,
   and,
@@ -11,8 +11,6 @@ import {
   eq,
   innerJoin,
 } from '../../src/query/index.js'
-import { processJoins } from '../../src/query/compiler/joins.js'
-import { applyOptimizations } from '../../src/query/optimizer-joins.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
 import { createCollection } from '../../src/collection/index.js'
 import { count as countRows } from '../../src/query/builder/functions.js'
@@ -159,9 +157,7 @@ async function runShapes(
                 from: user,
                 join: [
                   {
-                    compile: processJoins,
-                    optimize: applyOptimizations,
-                    materialize: materializeCompilation,
+                    runtime: joinRuntime,
                     type: 'inner',
                     from: post,
                     on: new Func('eq', [

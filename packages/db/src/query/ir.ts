@@ -10,11 +10,9 @@ import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
-import type { processJoins } from './compiler/joins.js'
+import type { JoinRuntime } from './compiler/join-runtime.js'
 import type { Grouping } from './compiler/grouping.js'
 import type { IncludesRuntime } from './live/includes-runtime.js'
-import type { materializeCompilation } from './live/materialized-pipeline.js'
-import type { applyOptimizations } from './optimizer-joins.js'
 
 export interface QueryIR {
   from: From
@@ -59,10 +57,7 @@ export interface JoinClause {
   on: BasicExpression<boolean>
   // The join operator value that built this clause supplies the compiler,
   // so apps without joins never import it.
-  compile: typeof processJoins
-  optimize: typeof applyOptimizations
-  // Reduces public keys for a joined query with a custom key.
-  materialize: typeof materializeCompilation
+  runtime: JoinRuntime
 }
 
 export type Where =

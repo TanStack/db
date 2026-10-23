@@ -2,11 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { innerJoin, leftJoin } from '@tanstack/db'
+import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
 import { include } from '../../src/query/index.js'
-import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import { includesRuntime } from '../../src/query/live/includes-runtime.js'
-import { processJoins } from '../../src/query/compiler/joins.js'
-import { applyOptimizations } from '../../src/query/optimizer-joins.js'
 import { CollectionImpl } from '../../src/collection/index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
 import {
@@ -875,9 +873,7 @@ function createAlphaRenamedJoinQuery(
     ),
     join: [
       {
-        compile: processJoins,
-        optimize: applyOptimizations,
-        materialize: materializeCompilation,
+        runtime: joinRuntime,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -920,9 +916,7 @@ function createAlphaRenamedImplicitJoinQuery(
     ),
     join: [
       {
-        compile: processJoins,
-        optimize: applyOptimizations,
-        materialize: materializeCompilation,
+        runtime: joinRuntime,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<

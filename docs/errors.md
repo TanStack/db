@@ -1688,7 +1688,7 @@ Query '${this.id}' has no collection sources. This should not happen; please rep
 
 <a id="error-154"></a>
 
-## Error 154: `query/live/materialized-pipeline.ts`
+## Error 154: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -1698,7 +1698,7 @@ Canonical query row has negative multiplicity
 
 <a id="error-155"></a>
 
-## Error 155: `query/live/materialized-pipeline.ts`
+## Error 155: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -1708,7 +1708,7 @@ Canonical query row has no positive contributor
 
 <a id="error-156"></a>
 
-## Error 156: `query/live/materialized-pipeline.ts`
+## Error 156: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 

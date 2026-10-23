@@ -347,7 +347,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     if (
       typeof value !== `object` ||
       value === null ||
-      typeof (value as { compile?: unknown }).compile !== `function`
+      typeof (value as { runtime?: { compile?: unknown } }).runtime?.compile !==
+        `function`
     )
       throw new JoinOperatorRequiredError(
         value === null ? `null` : typeof value,
@@ -370,14 +371,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Get the join condition expression
     const onExpression = operator.on(refProxy)
 
-    operator.validate(onExpression)
+    operator.runtime.validate(onExpression)
     const joinClause: JoinClause = {
       from,
       type: operator.type,
       on: onExpression,
-      compile: operator.compile,
-      optimize: operator.optimize,
-      materialize: operator.materialize,
+      runtime: operator.runtime,
     }
 
     const existingJoins = this.query.join || []

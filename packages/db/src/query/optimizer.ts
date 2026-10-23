@@ -440,7 +440,7 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
 
   // Step 4: The join operator supplies the pushdown that lifts single-source
   // clauses into subqueries, so apps without joins never import it.
-  return query.join[0]!.optimize(query, groupedClauses)
+  return query.join[0]!.runtime.optimize(query, groupedClauses)
 }
 
 /**

@@ -150,11 +150,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
     from: deepCopyFrom(query.from),
     join: query.join
       ? query.join.map((joinClause) => ({
-          type: joinClause.type,
-          on: joinClause.on,
-          compile: joinClause.compile,
-          optimize: joinClause.optimize,
-          materialize: joinClause.materialize,
+          ...joinClause,
           from: deepCopyFrom(joinClause.from) as
             CollectionSourceRef | QueryRefClass,
         }))

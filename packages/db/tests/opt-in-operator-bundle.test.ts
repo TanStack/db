@@ -22,14 +22,23 @@ import { describe, expect, it } from 'vitest'
 const index = fileURLToPath(new URL(`../src/index.ts`, import.meta.url))
 
 const modules = {
-  joins: [`src/query/compiler/joins.ts`, `src/query/optimizer-joins.ts`],
+  joins: [
+    `src/query/compiler/joins.ts`,
+    `src/query/compiler/join-runtime.ts`,
+    `src/query/optimizer-joins.ts`,
+  ],
   grouping: [`src/query/compiler/grouping.ts`],
   includes: [
     `src/query/live/bucket-facade-adapter.ts`,
     `src/query/live/includes-runtime.ts`,
+    `src/query/live/materialized-pipeline.ts`,
   ],
   pooling: [`src/query/pooled-live-query.ts`],
 } as const
+
+// Joins and includes share public-key reduction; an app with neither keeps it
+// out.
+const shared = [`src/query/live/public-key-reduction.ts`]
 
 /** Bundles an app that exports `names` and returns its modules' output bytes. */
 async function bundledModules(names: Array<string>) {
@@ -72,6 +81,7 @@ describe(`opt-in operator bundles`, () => {
     for (const files of Object.values(modules)) {
       for (const file of files) expect(bytes.has(file), file).toBe(false)
     }
+    for (const file of shared) expect(bytes.has(file), file).toBe(false)
     // Aggregate detection stays in core; the grouping compiler does not.
     expect(bytes.get(`src/query/compiler/group-by.ts`) ?? 0).toBeLessThan(1000)
   })

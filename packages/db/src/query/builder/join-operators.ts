@@ -1,7 +1,5 @@
-import { processJoins } from '../compiler/joins.js'
-import { validateJoinConditions } from '../join-conditions.js'
-import { applyOptimizations } from '../optimizer-joins.js'
-import { materializeCompilation } from '../live/materialized-pipeline.js'
+import { joinRuntime } from '../compiler/join-runtime.js'
+import type { JoinRuntime } from '../compiler/join-runtime.js'
 import type {
   Context,
   JoinOnCallback,
@@ -26,10 +24,7 @@ export interface JoinOperator<
     MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
   >
   type: TJoinType
-  compile: typeof processJoins
-  optimize: typeof applyOptimizations
-  materialize: typeof materializeCompilation
-  validate: typeof validateJoinConditions
+  runtime: JoinRuntime
 }
 
 /** A function that builds one join type's operator. */
@@ -55,10 +50,7 @@ function joinOperator<TJoinType extends JoinType>(
     source,
     on,
     type,
-    compile: processJoins,
-    optimize: applyOptimizations,
-    materialize: materializeCompilation,
-    validate: validateJoinConditions,
+    runtime: joinRuntime,
   })
 }
 

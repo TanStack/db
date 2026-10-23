@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
 import { includesRuntime } from '../../src/query/live/includes-runtime.js'
-import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
-import { applyOptimizations } from '../../src/query/optimizer-joins.js'
-import { processJoins } from '../../src/query/compiler/joins.js'
 import {
   IR,
   Query,
@@ -109,9 +107,7 @@ describe(`CollectionRef public shape`, () => {
           from: ref(`root`),
           join: [
             {
-              compile: processJoins,
-              optimize: applyOptimizations,
-              materialize: materializeCompilation,
+              runtime: joinRuntime,
               from: ref(`joined`),
               type: `inner`,
               on: new IR.Func(`eq`, [

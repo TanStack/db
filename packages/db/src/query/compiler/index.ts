@@ -595,7 +595,7 @@ function compileQueryInternal(
 
   // Process JOIN clauses if they exist
   if (query.join && query.join.length > 0) {
-    pipeline = query.join[0]!.compile(
+    pipeline = query.join[0]!.runtime.compile(
       pipeline,
       query.join,
       sources,
