@@ -26,7 +26,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
@@ -106,7 +106,7 @@ export interface UseLiveQueryReturnWithCollection<
 type MaybeGetter<T> = T | (() => T)
 
 export type UseLiveQueryConfig<TContext extends Context> =
-  LiveQueryCollectionConfig<TContext> & {
+  LiveQueryHookConfig<TContext> & {
     queryKey?: MaybeGetter<LiveQueryKey>
     client?: DbClient
   }
@@ -179,7 +179,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *   q.from({ issues: issueCollection })
  *    .join({ persons: personCollection }, ({ issues, persons }) =>
  *      eq(issues.userId, persons.id)
- *    )
+ *    ))
  *    .select(({ issues, persons }) => ({
  *      id: issues.id,
  *      title: issues.title,
@@ -428,12 +428,12 @@ export function useLiveQuery(
       // Hydration keys the live-query Collection by identity.
       collection = resolveLiveQueryValue(preparedValue, {
         gcTime: DEFAULT_GC_TIME_MS,
-        pool: !dbClient,
+        pool: dbClient ? false : undefined,
       })
     } else {
       collection = resolveLiveQueryValue(preparedValue, {
         gcTime: DEFAULT_GC_TIME_MS,
-        pool: !dbClient,
+        pool: dbClient ? false : undefined,
       })
     }
 

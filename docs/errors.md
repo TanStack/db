@@ -990,6 +990,26 @@ Development builds show the full message. For example:
 setWindow() cannot change the limit of a findOne() query.
 ```
 
+<a id="error-246"></a>
+
+## Error 246: `GroupingOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.
+```
+
+<a id="error-247"></a>
+
+## Error 247: `IncludeOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.
+```
+
 ## Other errors and log messages
 
 These are plain `Error`, `TypeError`, `RangeError`, or
@@ -1658,7 +1678,7 @@ Query '${this.id}' has no collection sources. This should not happen; please rep
 
 <a id="error-154"></a>
 
-## Error 154: `query/live/materialized-pipeline.ts`
+## Error 154: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -1668,7 +1688,7 @@ Canonical query row has negative multiplicity
 
 <a id="error-155"></a>
 
-## Error 155: `query/live/materialized-pipeline.ts`
+## Error 155: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -1678,7 +1698,7 @@ Canonical query row has no positive contributor
 
 <a id="error-156"></a>
 
-## Error 156: `query/live/materialized-pipeline.ts`
+## Error 156: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2468,4 +2488,24 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 A windowed or findOne result row has no include route
+```
+
+<a id="error-248"></a>
+
+## Error 248: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+include() must wrap a subquery builder
+```
+
+<a id="error-249"></a>
+
+## Error 249: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+include() must wrap a subquery builder
 ```

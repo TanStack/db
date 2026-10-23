@@ -22,7 +22,7 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection } from '@tanstack/db'
+import type { Collection, PooledLiveQueries } from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -187,17 +187,19 @@ export interface LiveQueryDriver {
   /**
    * Mount a live query whose input depends on a parameter that can change after
    * mount. `build` returns a query, or `null`/`undefined` to represent disabled.
+   * With `pool`, use the adapter's config form for a parameterized query.
    */
   mountControllable: <P>(
     build: (q: any, param: P) => any,
     initial: P,
+    opts?: { pool?: PooledLiveQueries },
   ) => ControllableHandle<P>
   /** Mount a pre-created collection passed directly to the hook. */
   mountCollection: (collection: Collection<any, any, any>) => LiveQueryHandle
-  /** Mount via the config-object input form (`{ query: build }`). */
+  /** Mount via the config-object input form (`{ query: build, ...opts }`). */
   mountConfig: (
     build: QueryBuild,
-    opts?: { gcTime?: number },
+    opts?: { gcTime?: number; pool?: PooledLiveQueries },
   ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle
@@ -214,8 +216,10 @@ export interface LiveQueryDriver {
     serverSnapshot?: boolean
     suspense?: boolean
     /**
-     * Public sharing policy: queries filtered only by `eq` on one source share
-     * one source subscription per filtered field set, instead of one each.
+     * Public sharing policy: queries whose config passes `pooledLiveQueries`
+     * and that filter only by `eq` on one source share one source subscription
+     * per filtered field set, instead of one each. Every other query has a
+     * subscription of its own: pooling is opt-in per query.
      */
     pooledEqFilters?: boolean
   }

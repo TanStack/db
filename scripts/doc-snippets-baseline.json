@@ -1,0 +1,352 @@
+{
+  "docs/collections/electric-collection.md": [
+    "371f515f0b173869",
+    "9418cc88b5429990",
+    "dc85bd060471e886"
+  ],
+  "docs/collections/indexed-db-collection.md": ["310e80f53a98504c"],
+  "docs/collections/local-only-collection.md": [
+    "07430f1a112f56ed",
+    "10078067e9e256b1",
+    "5bed34bf4c1e3022",
+    "8ede77c76c306aa1",
+    "a82cdf1fb51c0eed"
+  ],
+  "docs/collections/local-storage-collection.md": [
+    "005b4c8ee52cbf02",
+    "0b3c11bb47bc3f33",
+    "2b98418f2a1426ce",
+    "3aecd91454f157f4",
+    "b5a217ca4f43a25d",
+    "c8983fce1b78192d",
+    "e82be700dcd8b768"
+  ],
+  "docs/collections/powersync-collection.md": [
+    "06cfdef522049d0a",
+    "2169f8866b68808c",
+    "593fdd8f16e7bb3c",
+    "93783ab556f126f4",
+    "b8931b6ae90d1bdd",
+    "e627244ec232ca77"
+  ],
+  "docs/collections/query-collection.md": [
+    "0dfd4182f7c55105",
+    "1df96b094278c68b",
+    "451163a685a956fb",
+    "4ef53236f1f0e65a",
+    "54b7421f5428e352",
+    "5553816d1f70f5fe",
+    "58b6192f164394f5",
+    "8af878bb86475f81",
+    "a17d2412353cde87",
+    "ade3a379dbea8f04",
+    "b2da874232b8e1ce",
+    "c335bd701becd84c",
+    "c85d033e71fa3391",
+    "e35984115be53885",
+    "ec5b61cefc5339bf"
+  ],
+  "docs/collections/query-initial-placeholder-data-design.md": [
+    "4aab899a80ba22aa",
+    "6ab521638b08c996"
+  ],
+  "docs/collections/trailbase-collection.md": [
+    "4bd8a1df1fa7d70d",
+    "6b53a5c3015176d0",
+    "c07997601d4e67a8",
+    "c85dbf385cf700f7",
+    "d8104dcfbe716d0c"
+  ],
+  "docs/contributing/oracle-reviews/initial-full-source-sync-readiness.md": [
+    "a066dfd28d064b54"
+  ],
+  "docs/framework/angular/overview.md": ["0f2ebd3d5d7a7dc5"],
+  "docs/framework/react/overview.md": ["6f3b1689dbac470f", "d89b6c8f8cab169d"],
+  "docs/framework/solid/overview.md": ["6df72815a0829f83"],
+  "docs/guides/collection-options-creator.md": [
+    "178ba378787144e2",
+    "313ae9ea1d3110ca",
+    "36ae1a3ce3020496",
+    "3a5e006c63c69965",
+    "540fc1ab803f1ed9",
+    "5e48cf0b1808915a",
+    "6bbd6eafb3e59fa5",
+    "6e646d5e755a6cb3",
+    "93ffd67d77e6ec6b",
+    "97ce280ee90738e1",
+    "d0cd80983d56c809",
+    "e2390caca076fe07"
+  ],
+  "docs/guides/error-handling.md": [
+    "01d178432245c40b",
+    "2990abc3c0724666",
+    "31bbbdb312594461",
+    "340192b0e982afd3",
+    "5757f47d8f92b20a",
+    "5c25be1b3c47f6ab",
+    "60e9363d30c1d637",
+    "6e410f732e841a2e",
+    "8f931d6f08c9b84e",
+    "b7efa26f16d32802",
+    "c145addddfbc0910",
+    "d0546b51f1a87a0f",
+    "dd135a2d259a83ea",
+    "e6e50c9c782ecae8",
+    "f34d50969702c39b"
+  ],
+  "docs/guides/live-queries.md": [
+    "02c41fc67e388b3c",
+    "074c637c9ae5e2fd",
+    "10a9196f07dc48ba",
+    "141579ea42caabb7",
+    "143a5cdb4ed8f489",
+    "188affbe131b90fb",
+    "18c8495eb2bb1464",
+    "21f092c4ba68f8b7",
+    "298138e5ec4fa3da",
+    "30e9733da8adb766",
+    "3a3007f2bcd023d5",
+    "49546444e94d4039",
+    "5344f4ae3f0a97ac",
+    "576e7dee2a203c3b",
+    "6258952467b59d37",
+    "69491502d69fd49e",
+    "6ce994ae2334e0f0",
+    "7b7a71d57c11728b",
+    "7f72a99dc93b8051",
+    "8ff5fe45604eaa8f",
+    "9a984bcf2b1d9fdb",
+    "9b2bc781e86d85b1",
+    "a039dbf46e062521",
+    "a383434319068fab",
+    "ade01970173359a8",
+    "bee5ef646a9eedf9",
+    "bef58a069d2b56e4",
+    "c03e9d1cb3359f13",
+    "c362e8719de14415",
+    "d7152cc617862b5d",
+    "dd7c413d2ce6c7df",
+    "de0c570137f40f4d",
+    "deeb9d9bae889b2f",
+    "e8a965861e04ca9a",
+    "eb161ae8e10d86bb",
+    "fd8058964b4589c2"
+  ],
+  "docs/guides/mutations.md": [
+    "08575483c85ec9f9",
+    "0a075297e59413dd",
+    "0fc08a99c28070bd",
+    "142d5138b0644540",
+    "186888192750fbd1",
+    "1c893ecb05cc517b",
+    "2112ba6dca3a2b7f",
+    "286ed4244947a1d6",
+    "326c499f6a7b08e4",
+    "3b85ef26bf02720d",
+    "4d3c6115ad64e6bd",
+    "5f0beb87b4b1e4c8",
+    "68f4ab6cb8a16b50",
+    "75c78d57ec633739",
+    "7657b80606831f3e",
+    "81a5da4172e08422",
+    "85ad418b3d539e1a",
+    "935ef55166f84366",
+    "a47ffd2bd978da22",
+    "b23f0b1aeef99a43",
+    "b49db0f4e1827558",
+    "ca216ab01a47bf39",
+    "dc292443f5e037ac",
+    "e54b4ba952701be6"
+  ],
+  "docs/guides/offline-transactions.md": [
+    "01aaa26f0b625d5d",
+    "a8b3627a269a36ef",
+    "b22ff5481a36d67e"
+  ],
+  "docs/guides/schemas.md": [
+    "150239ecfd212f9e",
+    "261b9806e0c454d5",
+    "55bb8b531b58cbb8",
+    "6382c8b2a4da2455",
+    "69930192bebeaa01",
+    "830d39851adfb3df",
+    "847d96498a6b9f02",
+    "98926f89ebf1079f",
+    "afd0428f5b385bf3",
+    "bc4277ad28f41535",
+    "ce13948c81262d9a",
+    "ecc48e9de460816e",
+    "febe0217e0331212"
+  ],
+  "docs/guides/sqlite-persistence.md": [
+    "6049b3d5eea161a5",
+    "cd9b8ec84c33b4a3",
+    "dca3677993dbb9f8",
+    "f11b0660229e60d6"
+  ],
+  "docs/guides/ssr.md": [
+    "0f83196580f5a029",
+    "4810f1662cdf27e2",
+    "6ea020d808f1a559",
+    "73edcd444319eeba",
+    "8f6f88cb61cbeb10",
+    "941eff98a53f4391",
+    "96aa50abc108a7a8",
+    "c93592b33a464526",
+    "d6ede888487b1630"
+  ],
+  "docs/overview.md": [
+    "17fdf90b03a150dd",
+    "24b83a08692aed97",
+    "40d603e9bbfc91af",
+    "4e6338d120ce5848",
+    "84e9b444488d7a6b",
+    "92c7e96918d4a6f3",
+    "d5a8a15e8ea25ff2"
+  ],
+  "docs/quick-start.md": [
+    "1c2fe1bfdc225f1f",
+    "4cc404a2f380d516",
+    "d89b6c8f8cab169d",
+    "e4de8f646f661d71"
+  ],
+  "packages/angular-db/skills/angular-db/SKILL.md": [
+    "3a0bcdd6c765af48",
+    "464b244e06f475e1",
+    "86bdea1b8ff91fb8",
+    "a19a4ff2326685fb",
+    "b2cf08104cdeddbc"
+  ],
+  "packages/db/skills/db-core/collection-setup/references/electric-adapter.md": [
+    "20c0089b1cde36a5",
+    "97d3555c4042a974",
+    "ee3fe0e2db71fd53"
+  ],
+  "packages/db/skills/db-core/collection-setup/references/local-adapters.md": [
+    "3f40fac235e48769",
+    "417103b6203d0548",
+    "b106b78622c5d827",
+    "f873986a5c99aa5b"
+  ],
+  "packages/db/skills/db-core/collection-setup/references/powersync-adapter.md": [
+    "02024a69d58e3f84"
+  ],
+  "packages/db/skills/db-core/collection-setup/references/query-adapter.md": [
+    "209b716706b55919",
+    "2a12cb2c2a7ae211",
+    "2aa43b643d6e0ae1",
+    "4e5c42ca12a827b9",
+    "60d05717c49f7b99",
+    "775e62be4fcd19c2",
+    "7f60759fa3b6b7ad",
+    "852a097e426bcea9",
+    "9029b244ca7ca414",
+    "eae8d1649dbc18d5"
+  ],
+  "packages/db/skills/db-core/collection-setup/references/trailbase-adapter.md": [
+    "9f8156f6db6dc3c9"
+  ],
+  "packages/db/skills/db-core/collection-setup/SKILL.md": [
+    "09a82388169989af",
+    "0faec1f503e41efa",
+    "5422b105923f9a06",
+    "6ac0adc01e5a5ba2",
+    "73e9be29b2eabd99",
+    "9be49564d49c3537",
+    "bc9e33c6d8101932",
+    "c2e40e9ea4d731a6",
+    "c3982270aa3987bd",
+    "ca78f76e6a93609e",
+    "d46dc0fb779f3f2e",
+    "ea38711d84952007",
+    "ed585e8184791ac6"
+  ],
+  "packages/db/skills/db-core/custom-adapter/SKILL.md": [
+    "0482796467157654",
+    "7007cf2a6462b680",
+    "af3b7aaf4a476f75"
+  ],
+  "packages/db/skills/db-core/live-queries/references/operators.md": [
+    "e8a965861e04ca9a"
+  ],
+  "packages/db/skills/db-core/live-queries/SKILL.md": [
+    "004641b0cf42bda7",
+    "1c151b47026bfb63",
+    "2e839cd44f56421a",
+    "4df1b806a2a71b3a",
+    "68539db6b241e22d",
+    "8250ff79e8c5bce5",
+    "8d62c98242f89f3a"
+  ],
+  "packages/db/skills/db-core/mutations-optimistic/references/transaction-api.md": [
+    "0431b54fc856fd71",
+    "202d1f01879cfdcf",
+    "59e7e51408c2f16d",
+    "bb3d0273cf233b0f",
+    "e894238baaecc786",
+    "f8d9be1374eedd6e",
+    "ffc88e5fa8edf470"
+  ],
+  "packages/db/skills/db-core/mutations-optimistic/SKILL.md": [
+    "2c5656babca0da98",
+    "44bdfb42bae08d69",
+    "51c4242d1a66427e",
+    "5842b8bdcd0cc5e3",
+    "995c06ce286a7ce8",
+    "e3905c73f5d0758d"
+  ],
+  "packages/db/skills/db-core/persistence/SKILL.md": [
+    "055353a57302f9c0",
+    "0633e54a7e6e829e",
+    "142207b7c8d3f95e",
+    "156458f846d8ed40",
+    "8aa83c82d33133c7",
+    "f8c3ff40a459e220"
+  ],
+  "packages/db/skills/meta-framework/SKILL.md": [
+    "4457ee38065812ae",
+    "52e14f525ffb8f45",
+    "e08f750ae875cf11",
+    "eec85afecefbf64e"
+  ],
+  "packages/offline-transactions/skills/offline/SKILL.md": [
+    "05c9ecec5eb6c3e0",
+    "0edb87a7702e01f3",
+    "24aea730cbd03c39",
+    "313ab961f4728419",
+    "3eba40330af2e29e",
+    "3f950c8272dbc16e",
+    "4b2a1e91cf50e338",
+    "4fcc91057eb5d76d",
+    "777865643b0d79dd",
+    "7c4466b67154f21b",
+    "95f54055d2f8f35c",
+    "9d7c7778bc5337f4",
+    "d2dce4009d5fa25e",
+    "e8cea9396752d82a",
+    "fe65ab80f7f387c9"
+  ],
+  "packages/react-db/skills/react-db/SKILL.md": [
+    "1bcc7b8b735aff4f",
+    "47c932367431a68f",
+    "486a2fe62ea43bf6",
+    "60f0cc2b9131c0ec",
+    "623a399f123d7ab2",
+    "96fe86d3776c3201",
+    "cdb72e95bed7bce8"
+  ],
+  "packages/solid-db/skills/solid-db/SKILL.md": [
+    "10698b13b6021750",
+    "863b0c944ed3416e"
+  ],
+  "packages/svelte-db/skills/svelte-db/SKILL.md": [
+    "059b0f080d1d5689",
+    "853ee9cbae6ed1ed",
+    "887d8b01bed4ac4e",
+    "b17807b4cb2ad242"
+  ],
+  "packages/vue-db/skills/vue-db/SKILL.md": [
+    "0f57a4f557133032",
+    "fe2938818120e68f"
+  ]
+}

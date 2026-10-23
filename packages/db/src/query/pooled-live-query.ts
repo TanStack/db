@@ -724,3 +724,15 @@ export function createPooledLiveQuery(
       : undefined,
   ) as unknown as Collection<any, any, any>
 }
+
+/**
+ * Pooled live queries for framework hooks. Pass it as `pool` in a hook's
+ * query config to serve equality-filtered queries of one shape from a shared
+ * partition. Apps that do not pass it do not bundle pooling.
+ */
+export const pooledLiveQueries = {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+}
+
+export type PooledLiveQueries = typeof pooledLiveQueries

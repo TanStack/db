@@ -3,7 +3,7 @@ id: QueryCompilationError
 title: QueryCompilationError
 ---
 
-Defined in: [packages/db/src/errors.ts:677](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L677)
+Defined in: [packages/db/src/errors.ts:687](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L687)
 
 ## Extends
 
@@ -14,6 +14,7 @@ Defined in: [packages/db/src/errors.ts:677](https://github.com/TanStack/db/blob/
 - [`UnsafeAliasPathError`](UnsafeAliasPathError.md)
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
 - [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
+- [`GroupingOperatorRequiredError`](GroupingOperatorRequiredError.md)
 - [`UnsupportedFnSelectResultError`](UnsupportedFnSelectResultError.md)
 - [`UnsupportedRootScalarSelectError`](UnsupportedRootScalarSelectError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
@@ -37,7 +38,7 @@ Defined in: [packages/db/src/errors.ts:677](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:678](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L678)
+Defined in: [packages/db/src/errors.ts:688](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L688)
 
 #### Parameters
 

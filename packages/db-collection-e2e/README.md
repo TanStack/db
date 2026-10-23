@@ -330,8 +330,10 @@ it('should join Users and Posts', async () => {
   const query = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .join({ post: postsCollection }, ({ user, post }) =>
-        eq(user.id, post.userId),
+      .join(
+        leftJoin({ post: postsCollection }, ({ user, post }) =>
+          eq(user.id, post.userId),
+        ),
       )
       .select(({ user, post }) => ({
         id: post.id,

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 test(`an unmatched whole-object projection publishes undefined`, () => {

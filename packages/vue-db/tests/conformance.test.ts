@@ -29,6 +29,7 @@ import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -188,7 +189,10 @@ function mountCollection(collection: any) {
   return makeHandle(result, scope)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const { result, scope } = runInScope(() =>
     useLiveQuery({ query: build, ...opts } as any),
   )
@@ -206,10 +210,16 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const param = ref(initial) as { value: P }
   const { result, scope } = runInScope(() =>
-    useLiveQuery((q: any) => build(q, param.value), [() => param.value]),
+    opts?.pool
+      ? useLiveQuery(
+          { query: (q: any) => build(q, param.value), pool: opts.pool } as any,
+          [() => param.value],
+        )
+      : useLiveQuery((q: any) => build(q, param.value), [() => param.value]),
   )
   const handle = makeHandle(result, scope)
   return {

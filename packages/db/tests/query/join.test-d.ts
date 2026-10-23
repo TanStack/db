@@ -182,12 +182,12 @@ describe(`Join Types - Type Safety`, () => {
           .join(
             { dept: departmentsCollection },
             ({ user, dept }) => eq(user.department_id, dept.id),
-            `left`, // dept is optional
+            `left`,
           )
           .join(
             { project: projectsCollection },
             ({ user, project }) => eq(user.id, project.user_id),
-            `right`, // user becomes optional, project required
+            `right`,
           ),
     })
 
@@ -543,9 +543,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .innerJoin(
-            { user: userCollection },
-            ({ event, user }) => eq(event.user_id, user.id), // Should work with optional field
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(event.user_id, user.id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -558,9 +557,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .innerJoin(
-            { user: userCollection },
-            ({ event, user }) => eq(user.id, event.user_id), // Swapped argument order
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(user.id, event.user_id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -632,9 +630,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .innerJoin(
-            { user: userCollection },
-            ({ event, user }) => eq(event.user_id, user.id), // Should work with optional field
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(event.user_id, user.id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -647,9 +644,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .innerJoin(
-            { user: userCollection },
-            ({ event, user }) => eq(user.id, event.user_id), // Swapped argument order
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(user.id, event.user_id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -721,9 +717,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ post: postCollection })
-          .leftJoin(
-            { user: userCollection },
-            ({ post, user }) => eq(post.author_id, user.id), // Should work with nullable field
+          .leftJoin({ user: userCollection }, ({ post, user }) =>
+            eq(post.author_id, user.id),
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
@@ -1036,9 +1031,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .innerJoin(
-            { user: userCollection },
-            ({ event, user }) => eq(event.user_id, user.id), // Should work with optional field
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(event.user_id, user.id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -1051,9 +1045,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .innerJoin(
-            { user: userCollection },
-            ({ event, user }) => eq(user.id, event.user_id), // Swapped argument order
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(user.id, event.user_id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -1125,9 +1118,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ post: postCollection })
-          .leftJoin(
-            { user: userCollection },
-            ({ post, user }) => eq(post.author_id, user.id), // Should work with nullable field
+          .leftJoin({ user: userCollection }, ({ post, user }) =>
+            eq(post.author_id, user.id),
           )
           .select(({ post, user }) => ({
             postTitle: post.title,

@@ -21,10 +21,11 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
+  PooledLiveQueries,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
@@ -121,6 +122,8 @@ export function injectLiveQuery<
   TParams extends any,
 >(options: {
   params: () => TParams
+  /** Pass `pooledLiveQueries` to share one partition among equal-shape queries. */
+  pool?: PooledLiveQueries
   query: (args: {
     params: TParams
     q: InitialQueryBuilder
@@ -131,6 +134,8 @@ export function injectLiveQuery<
   TParams extends any,
 >(options: {
   params: () => TParams
+  /** Pass `pooledLiveQueries` to share one partition among equal-shape queries. */
+  pool?: PooledLiveQueries
   query: (args: {
     params: TParams
     q: InitialQueryBuilder
@@ -145,7 +150,7 @@ export function injectLiveQuery<TContext extends Context>(
   ) => QueryBuilder<TContext> | undefined | null,
 ): InjectConditionalLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
+  config: LiveQueryHookConfig<TContext>,
 ): InjectLiveQueryResult<TContext>
 // Pre-created collection without singleResult
 export function injectLiveQuery<
@@ -194,7 +199,7 @@ export function injectLiveQuery(opts: any) {
       typeof opts.params === `function`
 
     if (isReactiveQueryOptions) {
-      const { params, query } = opts
+      const { params, query, pool } = opts
       const currentParams = params()
 
       // Check if query function returns null/undefined (disabled query)
@@ -206,7 +211,10 @@ export function injectLiveQuery(opts: any) {
         return null
       }
 
-      return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
+      return resolveLiveQueryValue(result, {
+        gcTime: DEFAULT_GC_TIME_MS,
+        pool,
+      })
     }
 
     // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to

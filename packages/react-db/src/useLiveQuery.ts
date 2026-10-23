@@ -34,6 +34,7 @@ import type {
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
+  PooledLiveQueries,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
@@ -119,6 +120,11 @@ type UseLiveQueryConfigOptions<TContext extends Context> = Omit<
   queryKey?: LiveQueryKey
   /** Override the nearest DbProvider for this query. */
   client?: DbClient
+  /**
+   * Pass `pooledLiveQueries` to share one partition among equality-filtered
+   * queries of one shape. Suspense and DbClient queries never pool.
+   */
+  pool?: PooledLiveQueries
 }
 
 type ConfiguredQueryBuilder<TContext extends Context> = Extract<
@@ -369,7 +375,7 @@ export function warnUnhashableDerivedIdentity(
  *     q.from({ issues: issueCollection })
  *      .join({ persons: personCollection }, ({ issues, persons }) =>
  *        eq(issues.userId, persons.id)
- *      )
+ *      ))
  *      .select(({ issues, persons }) => ({
  *        id: issues.id,
  *        title: issues.title,
@@ -955,8 +961,9 @@ function useLiveQueryImpl(
           gcTime: forSuspense
             ? DEFAULT_SUSPENSE_GC_TIME_MS
             : DEFAULT_GC_TIME_MS,
-          // Hydration and Suspense key the live-query Collection by identity.
-          pool: !forSuspense && !dbClient,
+          // Hydration and Suspense key the live-query Collection by identity,
+          // so they never pool, even when the config passes a pool.
+          pool: forSuspense || dbClient ? false : undefined,
           // Without a DbClient, Suspense starts it through a preload below.
           startSync: !forSuspense || dbClient !== undefined,
         }) as SuspenseCollection | null

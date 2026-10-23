@@ -3,10 +3,6 @@ import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
-  createPooledLiveQuery,
-  getPooledQueryIdentity,
-} from './query/pooled-live-query.js'
-import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
@@ -15,10 +11,12 @@ import { codedMessage, devBuild } from './error-message.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
+import type { PooledLiveQueries } from './query/pooled-live-query.js'
 import type {
   Context,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   QueryBuilder,
 } from './query/index.js'
 
@@ -50,7 +48,7 @@ export function resumeDeferredLiveQueryCollections(
 }
 
 type PreparedLiveQueryConfigInput = Omit<
-  LiveQueryCollectionConfig<Context>,
+  LiveQueryHookConfig<Context>,
   `query`
 > & {
   query:
@@ -116,6 +114,7 @@ export function prepareLiveQueryValue(
       query,
       queryKey: _queryKey,
       client: _client,
+      pool,
       ...config
     } = value as PreparedLiveQueryConfigInput
 
@@ -131,6 +130,9 @@ export function prepareLiveQueryValue(
 
     return {
       ...config,
+      // A DbClient query never pools, so its identity must not depend on
+      // pool: a server preload and a client hook must hash alike.
+      ...(pool && !dbClient ? { pool } : {}),
       query: preparedQuery,
     }
   }
@@ -162,12 +164,15 @@ export function getPreparedLiveQuerySources(
   return isCollection(query) ? [query] : []
 }
 
-export function getPreparedLiveQueryIdentity(value: unknown): unknown {
+export function getPreparedLiveQueryIdentity(
+  value: unknown,
+  pool?: PooledLiveQueries,
+): unknown {
   if (isCollection(value)) return [`collection`, value.id]
   if (value instanceof BaseQueryBuilder) {
     // A pooled query's fields and literals identify its rows without
     // canonicalizing its whole IR on every render.
-    const pooled = getPooledQueryIdentity(value)
+    const pooled = pool?.getPooledQueryIdentity(value)
     return pooled === undefined
       ? [`query`, getStableQueryBuilderHash(value)]
       : [`pooled`, pooled]
@@ -176,7 +181,10 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
     const config = value as LiveQueryCollectionConfig<any>
     return [
       `config`,
-      getPreparedLiveQueryIdentity(config.query),
+      getPreparedLiveQueryIdentity(
+        config.query,
+        (config as LiveQueryHookConfig<any>).pool,
+      ),
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
@@ -214,6 +222,7 @@ export function getLiveQueryHash(
 function poolConfig(
   config: LiveQueryCollectionConfig<any>,
   gcTime: number | undefined,
+  pool: PooledLiveQueries,
 ): Collection<any, any, any> | undefined {
   if (
     !(config.query instanceof BaseQueryBuilder) ||
@@ -221,7 +230,7 @@ function poolConfig(
   ) {
     return undefined
   }
-  return createPooledLiveQuery(config.query, {
+  return pool.createPooledLiveQuery(config.query, {
     gcTime: config.gcTime ?? gcTime,
   })
 }
@@ -230,9 +239,15 @@ export function resolveLiveQueryValue(
   value: unknown,
   {
     gcTime,
-    pool = true,
+    pool,
     startSync = true,
-  }: { gcTime?: number; pool?: boolean; startSync?: boolean } = {},
+  }: {
+    gcTime?: number
+    // `false` keeps a hook that cannot pool, such as a Suspense or DbClient
+    // query, from pooling even when its config passes `pooledLiveQueries`.
+    pool?: PooledLiveQueries | false
+    startSync?: boolean
+  } = {},
 ): Collection<any, any, any> | null {
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
@@ -241,14 +256,23 @@ export function resolveLiveQueryValue(
   }
   if (value instanceof BaseQueryBuilder) {
     return (
-      (pool ? createPooledLiveQuery(value, { gcTime }) : undefined) ??
+      (pool ? pool.createPooledLiveQuery(value, { gcTime }) : undefined) ??
       createLiveQueryCollection({ query: value, startSync, gcTime })
     )
   }
   if (typeof value === `object`) {
-    const config = value as LiveQueryCollectionConfig<any>
+    const { pool: configPool, ...given } = value as LiveQueryHookConfig<any>
+    const pooling = pool === false ? undefined : (configPool ?? pool)
+    // A pooled view needs the built query. Build a query function once and
+    // compile the same builder if the partition cannot serve it.
+    const built =
+      pooling && typeof given.query === `function`
+        ? given.query(createInitialQueryBuilder())
+        : undefined
+    const config =
+      built instanceof BaseQueryBuilder ? { ...given, query: built } : given
     return (
-      (pool ? poolConfig(config, gcTime) : undefined) ??
+      (pooling ? poolConfig(config, gcTime, pooling) : undefined) ??
       createLiveQueryCollection({
         ...config,
         startSync: config.startSync ?? startSync,

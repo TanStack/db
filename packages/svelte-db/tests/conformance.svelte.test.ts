@@ -28,6 +28,7 @@ import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -178,7 +179,10 @@ function mountCollection(collection: any) {
   return makeHandle(() => query, dispose)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   let query: any
   const dispose = $effect.root(() => {
     query = useLiveQuery({ query: build, ...opts } as any)
@@ -198,11 +202,17 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   let param = $state(initial)
   let query: any
   const dispose = $effect.root(() => {
-    query = useLiveQuery((q: any) => build(q, param), [() => param])
+    query = opts?.pool
+      ? useLiveQuery(
+          { query: (q: any) => build(q, param), pool: opts.pool } as any,
+          [() => param],
+        )
+      : useLiveQuery((q: any) => build(q, param), [() => param])
   })
   const handle = makeHandle(() => query, dispose)
   return {

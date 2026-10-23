@@ -28,7 +28,6 @@
  * This does not assert a process-wide Collection registry, legacy dependency
  * arrays, or explicit-key semantics; explicit queryKey callers own their key.
  */
-import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   collectionOptions,
@@ -36,6 +35,7 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Component, Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'

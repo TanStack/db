@@ -1,4 +1,5 @@
 import type { D2, RootStreamBuilder } from '@tanstack/db-ivm'
+import type { PooledLiveQueries } from '../pooled-live-query.js'
 import type {
   CollectionConfig,
   ResultStream,
@@ -62,6 +63,19 @@ export type FullSyncState = Required<Omit<SyncState, `flushPendingChanges`>> &
  * }
  * ```
  */
+/**
+ * A live query config that a framework hook accepts. Pass `pooledLiveQueries`
+ * as `pool` to serve the query from a shared equality partition when its
+ * shape allows. A config with any option other than `query`, `gcTime`, and
+ * `pool` compiles its own Collection.
+ */
+export type LiveQueryHookConfig<
+  TContext extends Context,
+  TResult extends object = RootQueryResult<TContext>,
+> = LiveQueryCollectionConfig<TContext, TResult> & {
+  pool?: PooledLiveQueries
+}
+
 export interface LiveQueryCollectionConfig<
   TContext extends Context,
   TResult extends object = RootQueryResult<TContext>,

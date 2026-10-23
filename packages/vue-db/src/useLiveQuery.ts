@@ -24,7 +24,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
@@ -152,7 +152,7 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
  *   q.from({ issues: issueCollection })
  *    .join({ persons: personCollection }, ({ issues, persons }) =>
  *      eq(issues.userId, persons.id)
- *    )
+ *    ))
  *    .select(({ issues, persons }) => ({
  *      id: issues.id,
  *      title: issues.title,
@@ -221,7 +221,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
+  config: LiveQueryHookConfig<TContext>,
   deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveQueryReturn<TContext>
 

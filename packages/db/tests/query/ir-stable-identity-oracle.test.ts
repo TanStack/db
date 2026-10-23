@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
+import { include } from '../../src/query/index.js'
+import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import { CollectionImpl } from '../../src/collection/index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
 import {
@@ -1015,6 +1017,7 @@ function createUnionDerivedIncludesQuery(parentAlias: string): QueryIR {
     new PropRef([parentAlias, `id`]),
     new PropRef([`userId`]),
     `posts`,
+    includesRuntime,
     undefined,
     undefined,
     `array`,
@@ -1057,6 +1060,7 @@ function createCorrelatedUnionIncludesQuery(parentAlias: string): QueryIR {
     new PropRef([parentAlias, `id`]),
     new PropRef([`userId`]),
     `posts`,
+    includesRuntime,
     undefined,
     [new PropRef([parentAlias, `age`])],
     `array`,
@@ -1097,6 +1101,7 @@ function createAlphaRenamedIncludesQuery(
     new PropRef([parentAlias, `id`]),
     new PropRef([childAlias, `userId`]),
     `posts`,
+    includesRuntime,
     [
       new Func(`eq`, [
         new PropRef([parentAlias, `status`]),
@@ -1335,13 +1340,15 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
       getQueryIR(
         new Query().from({ user: usersCollection }).select(({ user }) => ({
           id: user.id,
-          posts: new Query()
-            .from({ post: postsCollection })
-            .where(({ post }) => eq(post.userId, user.id))
-            .select(({ post }) => ({
-              id: post.id,
-              title: post.title,
-            })),
+          posts: include(
+            new Query()
+              .from({ post: postsCollection })
+              .where(({ post }) => eq(post.userId, user.id))
+              .select(({ post }) => ({
+                id: post.id,
+                title: post.title,
+              })),
+          ),
         })),
       ),
   ],

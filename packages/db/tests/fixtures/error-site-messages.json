@@ -440,17 +440,17 @@
     ]
   },
   "154": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Canonical query row has negative multiplicity",
     "literals": ["Canonical query row has negative multiplicity"]
   },
   "155": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Canonical query row has no positive contributor",
     "literals": ["Canonical query row has no positive contributor"]
   },
   "156": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent",
     "literals": ["Query contributors for public key ", " are not congruent"]
   },
@@ -928,5 +928,15 @@
     "file": "query/compiler/index.ts",
     "template": "A windowed or findOne result row has no include route",
     "literals": ["A windowed or findOne result row has no include route"]
+  },
+  "248": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
+  },
+  "249": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
   }
 }

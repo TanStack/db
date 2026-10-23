@@ -610,6 +610,16 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export class IncludeOperatorRequiredError extends QueryBuilderError {
+  constructor(field: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A subquery in select() needs include(), toArray(), or materialize(). Wrap the ${field} field: ${field}: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.`
+        : codedMessage(247, { field }),
+    )
+  }
+}
+
 export type SourceClauseContext =
   `from clause` | `unionAll clause` | `join clause`
 
@@ -712,6 +722,16 @@ export class FnSelectWithGroupByError extends QueryCompilationError {
             `which is not possible with fn.select() since it is an opaque function. ` +
             `Use .select() instead of .fn.select() when combining with groupBy().`
         : codedMessage(51),
+    )
+  }
+}
+
+export class GroupingOperatorRequiredError extends QueryCompilationError {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.`
+        : codedMessage(246),
     )
   }
 }

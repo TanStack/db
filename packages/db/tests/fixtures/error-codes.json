@@ -90,5 +90,7 @@
   "NameRequiredError": 177,
   "GetKeyRequiredError": 178,
   "DuplicateTransactionIdError": 233,
-  "SetWindowFindOneLimitError": 244
+  "SetWindowFindOneLimitError": 244,
+  "GroupingOperatorRequiredError": 246,
+  "IncludeOperatorRequiredError": 247
 }

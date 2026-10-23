@@ -4,6 +4,7 @@ import {
   createLiveQueryCollection,
   eq,
   gte,
+  include,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -482,13 +483,15 @@ describe(`includes lazy loading`, () => {
       q.from({ r: roots }).select(({ r }) => ({
         id: r.id,
         name: r.name,
-        children: q
-          .from({ item: items })
-          .where(({ item }) => eq(item.rootId, r.id))
-          .select(({ item }) => ({
-            id: item.id,
-            title: item.title,
-          })),
+        children: include(
+          q
+            .from({ item: items })
+            .where(({ item }) => eq(item.rootId, r.id))
+            .select(({ item }) => ({
+              id: item.id,
+              title: item.title,
+            })),
+        ),
       })),
     )
 

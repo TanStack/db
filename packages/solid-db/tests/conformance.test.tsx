@@ -30,6 +30,7 @@ import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -190,7 +191,10 @@ function mountCollection(collection: any) {
   return makeHandle(getResult, dispose)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   // Solid accepts the config-object form via an accessor.
   const { getResult, dispose } = inRoot(() =>
     useLiveQuery(() => ({ query: build, ...opts })),
@@ -207,11 +211,18 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const [param, setParam] = createSignal<P>(initial)
   const { getResult, dispose } = inRoot(() =>
-    // Reading param() inside the query fn makes Solid recompute on change.
-    useLiveQuery((q: any) => build(q, param())),
+    opts?.pool
+      ? // Reading param() in the config accessor makes Solid recompute on change.
+        useLiveQuery(() => {
+          const value = param()
+          return { query: (q: any) => build(q, value), pool: opts.pool }
+        })
+      : // Reading param() inside the query fn makes Solid recompute on change.
+        useLiveQuery((q: any) => build(q, param())),
   )
   const handle = makeHandle(getResult, dispose)
   return {

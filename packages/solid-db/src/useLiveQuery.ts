@@ -25,7 +25,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
@@ -65,7 +65,7 @@ type InferConditionalResultType<TContext extends Context> =
  *   q.from({ issues: issueCollection })
  *    .join({ persons: personCollection }, ({ issues, persons }) =>
  *      eq(issues.userId, persons.id)
- *    )
+ *    ))
  *    .select(({ issues, persons }) => ({
  *      id: issues.id,
  *      title: issues.title,
@@ -197,7 +197,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryCollectionConfig<TContext>>,
+  config: Accessor<LiveQueryHookConfig<TContext>>,
 ): Accessor<InferResultType<TContext>> & {
   /**
    * @deprecated use function result instead

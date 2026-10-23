@@ -11,7 +11,6 @@ import {
 import { isPlainObject } from '../../utils/type-guards.js'
 import { getOrCreate } from '../../utils/get-or-create.js'
 import { optimizeQuery } from '../optimizer.js'
-import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
   createParentContext,
   createValueIdentity,
@@ -23,6 +22,7 @@ import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
   FnSelectWithGroupByError,
+  GroupingOperatorRequiredError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
   NonAggregateExpressionNotInGroupByError,
@@ -39,6 +39,7 @@ import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from '../builder/functions.js'
@@ -67,7 +68,7 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import { processJoins, registerLazyDemandPlan } from './joins.js'
-import { containsAggregate, processGroupBy } from './group-by.js'
+import { findAggregate } from './find-aggregate.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
@@ -86,6 +87,7 @@ import {
 } from './route-metadata.js'
 import { processSelect } from './select.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
@@ -118,6 +120,7 @@ function getUnsupportedFnSelectResultDescription(
   value: unknown,
   seen: Set<object> = new Set(),
 ): string | undefined {
+  if (value instanceof IncludeWrapper) return `include()`
   if (value instanceof BaseQueryBuilder) return `a child query builder`
   if (value instanceof ToArrayWrapper) return `toArray()`
   if (value instanceof ConcatToArrayWrapper) return `concat(toArray())`
@@ -320,6 +323,8 @@ export interface IncludesCompilationResult {
   materialization: IncludesMaterialization
   /** Internal field used to unwrap scalar child selects */
   scalarField?: string
+  /** The materializer the include value brought */
+  runtime: IncludesRuntime
 }
 
 /**
@@ -721,8 +726,10 @@ function compileQueryInternal(
       })
     }
   }
-  const selectHasAggregates =
-    query.select !== undefined && containsAggregate(query.select)
+  // One walker finds aggregates; the aggregate it finds carries the grouping
+  // compiler.
+  const selectAggregate = findAggregate(query.select)
+  const selectHasAggregates = selectAggregate !== undefined
   // A windowed query's or a findOne's includes compile after its top-K and
   // route only from the rows it shows (law 12); others compile here.
   const hasOrderBy = (query.orderBy?.length ?? 0) > 0
@@ -927,6 +934,7 @@ function compileQueryInternal(
           parentProjection: subquery.parentProjection,
           materialization: subquery.materialization,
           scalarField: subquery.scalarField,
+          runtime: subquery.runtime,
         })
       }
       if (parentHasTopK) deferredIncludes.push(compileInclude)
@@ -993,15 +1001,16 @@ function compileQueryInternal(
         ],
       ),
     ) as ResultStream
-    const materializedInput = materializeCompilation({
-      pipeline: inputPipeline,
-      includes: includesResults,
-      valueIdentity,
-      collectionId: mainCollectionId,
-      sourceWhereClauses,
-      aliasToCollectionId,
-      aliasRemapping,
-    })
+    const materializedInput =
+      includesResults[0]!.runtime.materializeCompilation({
+        pipeline: inputPipeline,
+        includes: includesResults,
+        valueIdentity,
+        collectionId: mainCollectionId,
+        sourceWhereClauses,
+        aliasToCollectionId,
+        aliasRemapping,
+      })
     pipeline = materializedInput.pipeline.pipe(
       map(([key, [value]]) => {
         const row = { ...value }
@@ -1108,8 +1117,17 @@ function compileQueryInternal(
       unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
     )
   }
+  // An aggregate value or groupKeys brings the grouping compiler.
+  const grouping =
+    query.grouping ??
+    findAggregate([
+      query.select,
+      query.having,
+      query.orderBy?.map((clause) => clause.expression),
+    ])?.grouping
   if (query.groupBy && query.groupBy.length > 0) {
-    pipeline = processGroupBy(
+    if (!grouping) throw new GroupingOperatorRequiredError()
+    pipeline = grouping.processGroupBy(
       pipeline,
       query.groupBy,
       valueIdentity,
@@ -1121,9 +1139,9 @@ function compileQueryInternal(
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
     )
-  } else if (selectHasAggregates) {
+  } else if (selectAggregate) {
     // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
-    pipeline = processGroupBy(
+    pipeline = selectAggregate.grouping.processGroupBy(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,

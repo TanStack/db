@@ -14,11 +14,10 @@ import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { reducePublicKeys } from './public-key-reduction.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
-import { materializeCompilation } from './materialized-pipeline.js'
-import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
 import { scheduleQueryGraphRun } from './graph-scheduler.js'
 import { hasPendingJoinedWork as hasPendingJoinedSourceWork } from './subset-demand-controller.js'
 import {
@@ -29,6 +28,9 @@ import {
   sourcePermitsInitialReadiness,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
+import type { IncludesRuntime } from './includes-runtime.js'
+import type { BucketFacadeAdapter } from './bucket-facade-adapter.js'
+import type { materializeCompilation } from './materialized-pipeline.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -156,6 +158,7 @@ export class CollectionConfigBuilder<
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
     Map<string, BasicExpression<boolean>> | undefined
+  private includesRuntimeCache: IncludesRuntime | undefined
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
 
@@ -860,6 +863,7 @@ export class CollectionConfigBuilder<
     this.pipelineCache = undefined
     this.sourceWhereClausesCache = undefined
     this.bucketFacadesCache = undefined
+    this.includesRuntimeCache = undefined
 
     // Reset lazy source alias state
     this.lazySources.clear()
@@ -910,14 +914,19 @@ export class CollectionConfigBuilder<
       },
     )
 
-    const materialized = materializeCompilation(
-      compilation,
-      this.config.getKey,
-      this.hasJoins(this.query),
-    )
+    // Includes bring the materializer. A joined query with a custom key
+    // reduces its public keys without it.
+    const includesRuntime = compilation.includes?.[0]?.runtime
+    const getKey = this.config.getKey
+    const materialized = includesRuntime
+      ? includesRuntime.materializeCompilation(compilation, getKey)
+      : getKey && this.hasJoins(this.query)
+        ? reducePublicKeys(compilation, getKey)
+        : { pipeline: compilation.pipeline, facades: undefined }
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.bucketFacadesCache = materialized.facades
+    this.includesRuntimeCache = includesRuntime
 
     const missingSources = this.collectionSources
       .map((source) => source.sourceId)
@@ -962,14 +971,22 @@ export class CollectionConfigBuilder<
       }),
     )
 
-    // A query whose pipeline was not materialized publishes its rows directly
-    // and pays for no facade state.
+    // A query without includes publishes its rows directly and pays for no
+    // facade state. With includes, the adapter also strips private route
+    // state at publication, even when every include is inline. A joined
+    // query with a custom key is materialized for key reduction only.
     const facadeCompilations = this.bucketFacadesCache
-    const bucketFacades = facadeCompilations
-      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
-          syncState.messagesCount += count
-        })
-      : undefined
+    const includesRuntime = this.includesRuntimeCache
+    const bucketFacades =
+      facadeCompilations && includesRuntime
+        ? includesRuntime.createBucketFacades(
+            this.id,
+            facadeCompilations,
+            (count) => {
+              syncState.messagesCount += count
+            },
+          )
+        : undefined
     if (bucketFacades) {
       syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
     }

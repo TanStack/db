@@ -113,7 +113,7 @@ const { data, isLoading } = $derived(query)
 
 ## Includes (Hierarchical Data)
 
-When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `useLiveQuery` in a subcomponent:
+When a query uses `include()` for a subquery in `select`, each child field is a live `Collection`. Subscribe to it with `useLiveQuery` in a subcomponent:
 
 ```svelte
 <!-- ProjectList.svelte -->

@@ -66,7 +66,7 @@ const { data } = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
    .join({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
-   )
+   ))
    .select(({ issues, persons }) => ({
      id: issues.id,
      title: issues.title,
@@ -152,7 +152,7 @@ const { data } = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
    .join({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
-   )
+   ))
    .select(({ issues, persons }) => ({
      id: issues.id,
      title: issues.title,
@@ -195,7 +195,7 @@ Create a live query using configuration object
 
 #### config
 
-`LiveQueryCollectionConfig`\<`TContext`\>
+`LiveQueryHookConfig`\<`TContext`\>
 
 Configuration object with query and options
 
@@ -385,7 +385,7 @@ const { data } = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
    .join({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
-   )
+   ))
    .select(({ issues, persons }) => ({
      id: issues.id,
      title: issues.title,
