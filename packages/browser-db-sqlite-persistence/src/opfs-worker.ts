@@ -137,6 +137,7 @@ async function closeWorkerDatabase(): Promise<void> {
 async function initializeWorkerDatabase(request: {
   databaseName: string
   vfsName: string
+  wasmUrl: string
 }): Promise<void> {
   if (!hasWorkerOPFSSyncAccessSupport(workerGlobal)) {
     throw new PersistenceUnavailableError(
@@ -146,7 +147,9 @@ async function initializeWorkerDatabase(request: {
 
   await closeWorkerDatabase()
 
-  const sqliteModule = await SQLiteESMFactory()
+  const sqliteModule = await SQLiteESMFactory({
+    locateFile: () => request.wasmUrl,
+  })
   const sqlite3 = SQLite.Factory(sqliteModule)
   const opfsVfs = await OPFSCoopSyncVFS.create(request.vfsName, sqliteModule)
   sqlite3.vfs_register(opfsVfs as never, true)
@@ -263,10 +266,7 @@ async function handleWorkerRequest(
   try {
     switch (request.type) {
       case `init`:
-        await initializeWorkerDatabase({
-          databaseName: request.databaseName,
-          vfsName: request.vfsName,
-        })
+        await initializeWorkerDatabase(request)
         return {
           type: `response`,
           requestId: request.requestId,
