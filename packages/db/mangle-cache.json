@@ -434,6 +434,7 @@
   "publishedHealth": "gK",
   "reportHealth": "gT",
   "healthTree": "gV",
-  "reloadReplaying": "gU",
-  "demandsToReplay": "gY"
+  "emittingReloadTruncate": "gU",
+  "reloadReplayed": "gY",
+  "replaysDemand": "g6"
 }

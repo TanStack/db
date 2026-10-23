@@ -121,6 +121,13 @@ export class CollectionStateManager<
   public transactions: SortedMap<string, Transaction<any>>
   /** A reload armed its truncate for the new run's next transaction. */
   public reloadTruncatePending = false
+  // The truncate event being emitted is a reload's own first-commit truncate.
+  private emittingReloadTruncate = false
+
+  /** @internal The truncate event being emitted is a reload's own. */
+  public isEmittingReloadTruncate(): boolean {
+    return this.emittingReloadTruncate
+  }
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
@@ -1287,10 +1294,15 @@ export class CollectionStateManager<
           }
 
           // Emit truncate event so subscriptions can reset their cursor tracking state
-          this._events.emit(`truncate`, {
-            type: `truncate`,
-            collection: this.collection,
-          })
+          this.emittingReloadTruncate = transaction.truncateOwner === `reload`
+          try {
+            this._events.emit(`truncate`, {
+              type: `truncate`,
+              collection: this.collection,
+            })
+          } finally {
+            this.emittingReloadTruncate = false
+          }
         }
 
         // Attribution belongs to the whole atomic batch. A repeated write must

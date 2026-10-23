@@ -4016,6 +4016,7 @@ type LazyStep =
         | `throw-next`
         | `reload`
         | `truncate`
+        | `child-ready`
         | `report`
         | `fail`
         | `crash`
@@ -4063,7 +4064,26 @@ type LazyModel = {
   // latest such load decides it, so an older load that settles later changes
   // nothing, and an aborted one leaves the decision to the one before it.
   requested: Map<number, Set<number>>
-  source: { failure: string | null; stopped: string | null; crashed: boolean }
+  // `ready`: the child Collection's status is `ready`. `firstLoadFailed`:
+  // its sync run failed its first load (status `error`).
+  source: {
+    failure: string | null
+    stopped: string | null
+    crashed: boolean
+    ready: boolean
+    firstLoadFailed: boolean
+    // A reload's new run has not marked ready yet, and the child was not
+    // ready when it started.
+    reloadRun: boolean
+    // A reload is in flight: another reload() returns its promise. Only a
+    // held markReady() keeps it in flight past the step.
+    reloadInFlight: boolean
+    // The `holdChildReady` option.
+    holdsReady: boolean
+    // The reload's first commit, which replaces every child row, has not
+    // happened yet: the rows from before the reload stay until it does.
+    replacementPending: boolean
+  }
 }
 
 // A load the query requested settles. Its rows apply on success either way;
@@ -4222,9 +4242,12 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       return
     case `reload`:
       if (model.source.crashed) return
+      if (model.source.reloadInFlight) return
       // The replay loads the demand again; a key it loads is loaded again.
       model.source.failure = null
       model.source.stopped = null
+      if (!model.source.ready) model.source.reloadRun = true
+      model.source.reloadInFlight = model.source.holdsReady
       // The retired run's loads no longer apply, and its truncate drops the
       // loaded children until the replay loads them again.
       // Only the query's own loads hold it; a replay's loads stop when a
@@ -4235,7 +4258,10 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       model.replayFailedKeys = new Set()
       model.pending = []
       model.obsolete = new Map()
-      model.loaded = new Set()
+      // The new run's first commit replaces every child row. Without a held
+      // markReady() it commits within this step.
+      if (model.source.holdsReady) model.source.replacementPending = true
+      else model.loaded = new Set()
       model.replayActive = true
       return
     case `truncate`:
@@ -4259,16 +4285,45 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       model.replayActive = true
       return
     case `report`:
-      if (!model.source.stopped) model.source.failure = `source problem`
+      // reportError() before Collection readiness throws.
+      if (!model.source.stopped && model.source.ready)
+        model.source.failure = `source problem`
       return
     case `fail`:
-      if (!model.source.stopped) {
-        model.source.failure = null
-        model.source.stopped = `source gave up`
+      if (model.source.stopped || model.source.firstLoadFailed) return
+      // A reload that fails before its first commit keeps the rows.
+      model.source.reloadInFlight = false
+      model.source.replacementPending = false
+      if (!model.source.ready) {
+        // The child's first load fails: so does the query's first load.
+        model.source.firstLoadFailed = true
+        if (model.gate === `loading`) model.gate = `error`
+        return
       }
+      model.source.failure = null
+      model.source.stopped = `source gave up`
+      model.source.reloadInFlight = false
+      return
+    case `child-ready`:
+      // The held markReady() of the child's current sync run. After a
+      // failed first load it throws, unless a reload started a new run. A
+      // reload's markReady() before any commit replaces the rows with none.
+      if (model.source.replacementPending) {
+        model.source.replacementPending = false
+        model.loaded = new Set()
+      }
+      model.source.reloadInFlight = false
+      if (model.source.ready) return
+      if (model.source.firstLoadFailed && !model.source.reloadRun) return
+      model.source.ready = true
+      model.source.firstLoadFailed = false
+      model.source.reloadRun = false
+      // A query in `error` stays there until its own reload().
       return
     case `crash`:
       model.source.crashed = true
+      model.source.reloadInFlight = false
+      model.source.replacementPending = false
       model.gate = `crashed`
       return
   }
@@ -4278,12 +4333,20 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
 // sync() returns, so its loads in flight settle before the replay exists.
 // `honorsAbort`: the loader rejects a request whose signal aborts; one that
 // does not may still finish it later.
+// `holdChildReady`: every child sync run holds markReady() until a
+// `child-ready` step, so the child can still be `loading` when it reloads,
+// and its reload stays in flight past the new run's first commit.
 async function runLazyHistory(
   steps: ReadonlyArray<LazyStep>,
   {
     asyncChildReady = false,
     honorsAbort = true,
-  }: { asyncChildReady?: boolean; honorsAbort?: boolean } = {},
+    holdChildReady = false,
+  }: {
+    asyncChildReady?: boolean
+    honorsAbort?: boolean
+    holdChildReady?: boolean
+  } = {},
 ) {
   const model: LazyModel = {
     gate: `loading`,
@@ -4297,7 +4360,17 @@ async function runLazyHistory(
     obsolete: new Map(),
     retiredInFlight: new Map(),
     requested: new Map(),
-    source: { failure: null, stopped: null, crashed: false },
+    source: {
+      failure: null,
+      stopped: null,
+      crashed: false,
+      ready: !holdChildReady,
+      firstLoadFailed: false,
+      reloadRun: false,
+      reloadInFlight: false,
+      holdsReady: holdChildReady,
+      replacementPending: false,
+    },
   }
   // Loads in flight at the adapter, oldest first, and what the adapter saw
   // since the last report: each request, and which of them were aborted or
@@ -4319,6 +4392,7 @@ async function runLazyHistory(
   let parentParams!: SyncParams
   let childParams!: SyncParams
   let forgetServed = () => {}
+  let heldReady: (() => void) | undefined
   // Loads that threw, by serial.
   const thrownLoads = new Set<number>()
   const parents = createCollection<Row, number>({
@@ -4347,7 +4421,8 @@ async function runLazyHistory(
         // after the run's own truncate, serves them again.
         const served = new Set<number>()
         forgetServed = () => served.clear()
-        if (childRuns++ > 0 && asyncChildReady)
+        if (holdChildReady) heldReady = () => params.markReady()
+        else if (childRuns++ > 0 && asyncChildReady)
           setTimeout(() => params.markReady(), 0)
         else params.markReady()
         return {
@@ -4454,6 +4529,14 @@ async function runLazyHistory(
         1,
       )
       const load = model.pending.find((entry) => entry.serial === serial)
+      // A reload of a ready child completes at the new run's first commit,
+      // which replaces every child row.
+      if (succeeded && load && model.source.ready)
+        model.source.reloadInFlight = false
+      if (succeeded && load && model.source.replacementPending) {
+        model.source.replacementPending = false
+        model.loaded = new Set()
+      }
       if (load) settleLazyLoad(model, load, succeeded)
       else if (succeeded && model.obsolete.has(serial))
         for (const key of model.obsolete.get(serial)!) model.loaded.add(key)
@@ -4504,6 +4587,14 @@ async function runLazyHistory(
           ? loads[0]
           : loads.at(-1)
         if (pick) settle([pick], step.kind.endsWith(`-ok`))
+      } else if (step.kind === `child-ready`) {
+        const ready = heldReady
+        heldReady = undefined
+        try {
+          ready?.()
+        } catch {
+          // markReady() after a failed first load throws.
+        }
       } else if (step.kind === `throw-next`) {
         throwNext = true
       } else if (step.kind === `reload`) {
@@ -4511,7 +4602,9 @@ async function runLazyHistory(
       } else if (step.kind === `truncate`) {
         if (children.status !== `crashed` && !model.source.stopped) {
           childParams.begin()
-          childParams.truncate()
+          // Readiness stays with markReady(), so a truncate can land while
+          // a reload is still in flight.
+          childParams.truncate({ markReady: false })
           childParams.commit()
           forgetServed()
         }
@@ -4621,6 +4714,7 @@ describe(`lazy join demand grammar`, () => {
         `throw-next` as const,
         `reload` as const,
         `truncate` as const,
+        `child-ready` as const,
         `report` as const,
         `fail` as const,
         `crash` as const,
@@ -4839,12 +4933,19 @@ describe(`lazy join demand grammar`, () => {
       asyncChildReady: true,
     }))
   fcTest.prop(
-    [fc.array(step, { maxLength: 10 }), fc.boolean(), fc.boolean()],
+    [
+      fc.array(step, { maxLength: 10 }),
+      fc.boolean(),
+      fc.boolean(),
+      fc.boolean(),
+    ],
     oraclePropertyOptions(60, `source-health.lazy-demand`),
   )(
     `generated lazy demand histories refine the model`,
-    (steps, asyncChildReady, honorsAbort) =>
-      withDeadline(runLazyHistory(steps, { asyncChildReady, honorsAbort })),
+    (steps, asyncChildReady, honorsAbort, holdChildReady) =>
+      withDeadline(
+        runLazyHistory(steps, { asyncChildReady, honorsAbort, holdChildReady }),
+      ),
     120_000,
   )
 })

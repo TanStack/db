@@ -204,10 +204,10 @@ export class CollectionSubscription
   // One replay state owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplayState: TruncateReplayState | undefined
+  // The reload that last retired the sync run started this subscription's
+  // replay; that reload's own truncate does not start another.
+  private reloadReplayed = false
   private replacements = 0
-  // The reload in flight started this subscription's replay when it retired
-  // the sync run.
-  private reloadReplaying = false
   private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
     Error
@@ -271,10 +271,13 @@ export class CollectionSubscription
     // We need to re-request all previously loaded subsets to repopulate the data.
     this.truncateCleanup = this.collection.on(`truncate`, () => {
       // A reload that replays on-demand demand started its replay when it
-      // retired the run. A truncate before the reload's first commit is part
-      // of that replay; no replay row has applied yet.
-      if (this.reloadReplaying && this.collection._lifecycle.reloading) return
-      this.reloadReplaying = false
+      // retired the run, and its own first-commit truncate is part of that
+      // replay. Every other truncate replays again.
+      const reloadTruncate = this.collection._state.isEmittingReloadTruncate()
+      if (reloadTruncate && this.reloadReplayed) {
+        this.reloadReplayed = false
+        return
+      }
       this.handleTruncate()
     })
     this.collectionCleanup = this.collection._onCleanupStart(() => {
@@ -332,19 +335,18 @@ export class CollectionSubscription
    */
   public retireSyncRun(): void {
     this.handleCollectionCleanup(true)
-    this.reloadReplaying = this.demandsToReplay().length > 0
-    if (this.reloadReplaying) this.handleTruncate()
+    this.reloadReplayed = this.replaysDemand() && this.subsetDemands.length > 0
+    if (this.reloadReplayed) this.handleTruncate()
   }
 
-  /** The demand a truncate acquires again through the sync adapter. */
-  private demandsToReplay(): Array<SubsetDemand> {
+  /** Whether a truncate acquires this subscription's demand again. */
+  private replaysDemand(): boolean {
     // Eager demand is satisfied by source readiness, even when the adapter
     // happens to expose a loader. Deferred demand never acquired, so it
     // acquires the replacement rows when acquisition resumes.
-    return this.collection.config.syncMode === `on-demand` &&
-      !this.defersAcquisition
-      ? [...this.subsetDemands]
-      : []
+    return (
+      this.collection.config.syncMode === `on-demand` && !this.defersAcquisition
+    )
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */
@@ -445,7 +447,7 @@ export class CollectionSubscription
     this.replacements++
     // A reload's truncate can apply inside the new run's `sync()`, before it
     // returns its loader; the requests below start after it has.
-    const demandsToReload = this.demandsToReplay()
+    const demandsToReload = this.replaysDemand() ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
