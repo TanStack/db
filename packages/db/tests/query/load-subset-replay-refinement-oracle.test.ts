@@ -12,6 +12,7 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
@@ -1079,6 +1080,22 @@ describe(`loadSubset replay refinement`, () => {
  *   it is a settlement-phase release, which must not hold back publication.
  *   An unload that throws while the replay starts can fail the replay, which
  *   law 9 allows, so the law does not judge that case.
+ * - **Retention:** a truncate replay is one publication barrier (law 9 and
+ *   "Replay participants and failure"). It rises when a source truncates and
+ *   falls when its replay succeeds. Every load the source starts while its
+ *   replay is open joins the barrier; a load that a newer truncate aborts or
+ *   whose demand retires stops participating, and work an older replay
+ *   started still holds the newer one. A participant that fails fails the
+ *   replay while its logical demand is held. Once that demand retires, its
+ *   failure no longer counts, and demand started meanwhile joins the
+ *   replacement, which publishes when it succeeds; otherwise only a later
+ *   truncate of that source can replace the failed replay. While
+ *   any barrier is up, the query shows exactly the rows it showed when the
+ *   first one rose: partly replayed rows, rank moves, and marker changes stay
+ *   private, and a failed replay keeps that result instead of ending the
+ *   query. The law is checked after every command and once loading is quiet,
+ *   for barriers that rise after the query first became ready; before that
+ *   there is no complete publication to keep, and initial readiness governs.
  * - **Convergence:** after a final truncate with no faults, and an explicit
  *   window move that revalidates a window whose own move failed, the window
  *   equals the model.
@@ -1095,14 +1112,29 @@ describe(`loadSubset replay refinement`, () => {
  *   convergence does not apply. Either side can be the lazy one: the planner
  *   loads an inner join's root by key when the marker source is eager. A
  *   demand load asks for keys (a `where` with no `orderBy`). A failed load
- *   that a truncate's replay issued is not fatal: it keeps the last
- *   publication until the next replay. A load that fails before the query
- *   first becomes ready is fatal too (an initial load failure), except on
- *   a lazy join source, which owns its demand. So a query may end in
- *   `error` only after a demand load issued outside a replay failed, or a
- *   load failed while the query was still loading.
+ *   that belongs to a truncate's recovery is not fatal: the replay fails, and
+ *   the query keeps its last publication until a later replay of that source
+ *   (law 9). Two kinds of load belong to a recovery:
+ *   - a replay load, which asks again for a demand the source held before
+ *     the truncate; and
+ *   - a demand load that the graph starts while the truncate commits. The
+ *     commit deletes the source's rows privately, so the query can demand
+ *     keys that it never published, such as a row that a LEFT join filter
+ *     now keeps.
+ *   A load that joins an open replay belongs to it as well, which covers a
+ *   demand that the graph starts after the commit while the replay still
+ *   loads, from any of the query's subscriptions to that source. The model
+ *   judges that only without a peer (see Limits).
+ *   A load that fails before the query first becomes ready is fatal too (an
+ *   initial load failure), except on a lazy join source, which owns its
+ *   demand. So a query may end in `error` only after a demand load outside a
+ *   recovery failed, or a load failed while the query was still loading.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
+ * - **Initial readiness:** when the history starts during the initial
+ *   preload, that preload has resolved or rejected once loading is quiet. A
+ *   failure before the first ready ends the query, so the preload cannot wait
+ *   for a later truncate.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
  *   thrown release, a window move rejected by a load failure, or an error the
  *   subscription rethrows from a microtask. A window move whose load a
@@ -1110,8 +1142,13 @@ describe(`loadSubset replay refinement`, () => {
  *   window move. No other error may escape.
  *
  * History grammar: rank moves, holding the next loads, settling the oldest
- * held load with success or failure, truncates (optionally arming the next
- * unload once the replay has started), and arming the next unload to throw. The driver uses a real on-demand Collection with an index and an
+ * or newest held load with success or failure (optionally keeping later
+ * loads held),
+ * truncates (optionally arming the next unload once the replay has started),
+ * and arming the next unload to throw. A history may start while the initial
+ * preload's loads are held. A marker load whose request was aborted either
+ * resolves without writing or rejects with `AbortError`, as the source
+ * contract asks; an `AbortError` is not a failed load. The driver uses a real on-demand Collection with an index and an
  * ordered live query. At the end, every held load succeeds in order.
  *
  * The joined scenarios cross a LEFT join that keeps marked or unmarked rows
@@ -1124,13 +1161,22 @@ describe(`loadSubset replay refinement`, () => {
  *
  * Limits: one ordered source; no full joins (the ordered-work oracle owns
  * them); includes one level deep; and a provider that reads its rows at the time it
- * answers.
+ * answers. A query's subscriptions to one source share one replay barrier,
+ * so a load joins it whichever of them issued it. A peer is another query
+ * with its own barrier, and the adapter boundary cannot tell which query
+ * issued a load, so the retention law and the rule that a replay
+ * participant counts as recovery skip histories with a peer. A release that throws while a replay starts may
+ * fail that replay, so the retention law skips a barrier where one did.
  */
 type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
   | { type: `move`; id: number; rank: number }
   | { type: `hold` }
-  | { type: `settle`; ok: boolean }
+  // `keepHolding` leaves later loads held, so a history can settle one load
+  // while the next stays pending. `newest` settles the most recently held
+  // load instead of the oldest, so a later load can settle before an earlier
+  // one, as independent provider requests may.
+  | { type: `settle`; ok: boolean; keepHolding?: boolean; newest?: boolean }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
@@ -1154,6 +1200,12 @@ type OrderedScenario = {
   markerMode: `eager` | `on-demand`
   // Whether each shown row includes its markers as a `toArray` child.
   includes: boolean
+  // How a marker load whose request was aborted settles. The source contract
+  // asks a source to reject it with `AbortError` once its accepted rows apply;
+  // a source that cannot cancel may also resolve it without writing.
+  abortedMarkerLoads: `resolve` | `reject`
+  // Whether the history starts while the initial preload is still held.
+  historyDuringPreload: boolean
 }
 
 const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
@@ -1170,6 +1222,8 @@ const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
   ),
   markerMode: fc.constantFrom(`eager` as const, `on-demand` as const),
   includes: fc.boolean(),
+  abortedMarkerLoads: fc.constantFrom(`resolve` as const, `reject` as const),
+  historyDuringPreload: fc.boolean(),
 })
 
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
@@ -1190,6 +1244,8 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
         { weight: 3, arbitrary: fc.constant(true) },
         { weight: 1, arbitrary: fc.constant(false) },
       ),
+      keepHolding: fc.boolean(),
+      newest: fc.boolean(),
     }),
   },
   {
@@ -1244,6 +1300,16 @@ type OrderedReach = {
   markerTruncates: number
   abortedMoves: number
   terminalErrors: number
+  replayLoads: number
+  abortRejections: number
+  preloadChecks: number
+  heldPublicationChecks: number
+  retainedFailedReplays: number
+  participantDemandFailures: number
+  includeDemandFailures: number
+  siblingDemandFailures: number
+  preloadReplayFailures: number
+  discardedReplayMoves: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1255,6 +1321,8 @@ const ordinaryOrderedScenario: OrderedScenario = {
   joined: false,
   markerMode: `eager`,
   includes: false,
+  abortedMarkerLoads: `resolve`,
+  historyDuringPreload: false,
 }
 
 async function checkOrderedReplay(
@@ -1334,6 +1402,111 @@ async function checkOrderedReplay(
   // be placed before or after the replay's loads settle.
   type Load = { epoch: number; outcome: `pending` | `ok` | `failed` }
   const loads: Array<Load> = []
+  // Retention model. Each source with an open or failed replay has a
+  // barrier. `pending` holds the loads that still hold its publication: the
+  // loads started while it is up, and work an older replay started. `own`
+  // holds the loads this replay started, whose failure fails it. A failure
+  // is scoped to its logical demand: once that demand retires, it no longer
+  // fails the replay, and demand started meanwhile joins the replacement.
+  type BarrierSource = `rows` | `markers`
+  type Barrier = {
+    failures: Map<Load, LoadSubsetOptions>
+    // A release threw while this replay started, which may fail it.
+    ambiguous: boolean
+    pending: Map<Load, LoadSubsetOptions>
+    own: Set<Load>
+  }
+  const barriers = new Map<BarrierSource, Barrier>()
+  // The rows the query showed when the first barrier rose, if it had
+  // published by then. Before the first ready there is no complete
+  // publication to keep, and the initial-readiness law governs.
+  let retainedRows: string | undefined
+  let retainedAfterReady = false
+  const raiseBarrier = (source: BarrierSource) => {
+    lowerSettledBarriers()
+    // A newer truncate discards the replay that a pending window move waits
+    // behind.
+    if (barriers.size > 0 && !settledMoves.has(latestMove)) {
+      reach.discardedReplayMoves++
+    }
+    if (barriers.size === 0) {
+      retainedRows = JSON.stringify(live.toArray)
+      retainedAfterReady = live.status === `ready`
+    }
+    barriers.set(source, {
+      failures: new Map(),
+      ambiguous: false,
+      pending: new Map(barriers.get(source)?.pending),
+      own: new Set(),
+    })
+  }
+  // A replay whose participants all settled without a failure publishes.
+  const lowerSettledBarriers = () => {
+    for (const [source, barrier] of barriers) {
+      if (barrier.failures.size === 0 && barrier.pending.size === 0) {
+        barriers.delete(source)
+      }
+    }
+    if (barriers.size === 0) retainedRows = undefined
+  }
+  // Returns whether the load joined a replay.
+  const joinBarrier = (
+    source: BarrierSource,
+    load: Load,
+    options: LoadSubsetOptions,
+  ) => {
+    const barrier = barriers.get(source)
+    if (!barrier) return false
+    barrier.pending.set(load, options)
+    barrier.own.add(load)
+    return true
+  }
+  const settleParticipant = (
+    source: BarrierSource,
+    load: Load,
+    options: LoadSubsetOptions,
+    ok: boolean,
+  ) => {
+    const barrier = barriers.get(source)
+    // The replay has not failed, and other participants still load.
+    const replayLoading =
+      barrier !== undefined &&
+      barrier.failures.size === 0 &&
+      barrier.pending.has(load) &&
+      barrier.pending.size > 1
+    // An aborted request is obsolete demand, and a released one no longer
+    // participates, so neither fails the replay.
+    if (
+      !ok &&
+      barrier?.pending.has(load) &&
+      barrier.own.has(load) &&
+      !options.signal?.aborted
+    ) {
+      barrier.failures.set(load, options)
+    }
+    barrier?.pending.delete(load)
+    // A replay completes when its last participant settles, so demand that
+    // starts after it does not join it.
+    lowerSettledBarriers()
+    return replayLoading
+  }
+  const retireParticipants = (
+    source: BarrierSource,
+    options: LoadSubsetOptions,
+  ) => {
+    const barrier = barriers.get(source)
+    if (!barrier) return
+    for (const owned of [barrier.pending, barrier.failures]) {
+      for (const [load, held] of owned) {
+        if (held === options) owned.delete(load)
+      }
+    }
+  }
+  // A query's subscriptions to one source share one replay barrier, so a
+  // load belongs to it whichever subscription issued it. A peer is another
+  // query with its own barrier, and the adapter boundary cannot tell which
+  // query issued a load.
+  const oneSubscription = (_source: BarrierSource) => !scenario.peer
   const acquired = new Map<LoadSubsetOptions, number>()
   const held: Array<(ok: boolean) => void> = []
   let holding = false
@@ -1341,12 +1514,13 @@ async function checkOrderedReplay(
   let throwNextUnload = false
   // Window moves whose settlement waits on held loads.
   const pendingMoves: Array<Promise<void>> = []
-  // The truncate starts its replay while it commits.
+  // The source truncate is committing.
   let truncating = false
   let anyLoadFailed = false
   let earlyThrowSinceTruncate = false
-  // A marker truncate's commit starts its replay loads synchronously.
-  let markerReplaying = false
+  // The marker truncate is committing, and how many marker truncates ran.
+  let markerCommitting = false
+  let markerTruncates = 0
   let demandFailed = false
   // A failed initial load is fatal too (error 229). The queries are created
   // below; a load can only fail after they start.
@@ -1355,8 +1529,45 @@ async function checkOrderedReplay(
   // Adapter callbacks set these flags, so read them through a call.
   const fatalLoadFailed = () => demandFailed || failedWhileLoading
   // Lazy join demand asks for keys; ordered and full-source loads do not.
+  // An ordered tie request also has a `where` and no `orderBy`, but it asks
+  // for rows by rank, so it is not demand.
+  const readsRank = (expression: unknown): boolean =>
+    Array.isArray(expression)
+      ? expression.some(readsRank)
+      : typeof expression === `object` && expression !== null
+        ? Object.entries(expression).some(([field, value]) =>
+            field === `path` && Array.isArray(value)
+              ? value.includes(`rank`)
+              : readsRank(value),
+          )
+        : false
   const isDemand = (options: LoadSubsetOptions) =>
-    options.where !== undefined && options.orderBy === undefined
+    options.where !== undefined &&
+    options.orderBy === undefined &&
+    !readsRank(options.where)
+  // The truncate count of its source when each request was first issued. A
+  // replay asks again for a held demand with the same request data, because
+  // request data is immutable (ARCHITECTURE.md), and a new demand builds a
+  // new `where`. So a load whose `where` was first issued before its source's
+  // latest truncate is a replay load.
+  const firstIssued = new WeakMap<object, number>()
+  // A load belongs to a recovery when it is a replay load, or when the graph
+  // starts it while its source's truncate commits.
+  const belongsToRecovery = (
+    options: LoadSubsetOptions,
+    sourceTruncates: number,
+    committing: boolean,
+  ) => {
+    const where = options.where
+    if (!where) return committing
+    if (!firstIssued.has(where)) firstIssued.set(where, sourceTruncates)
+    const replay = firstIssued.get(where)! < sourceTruncates
+    // The campaigns require replay loads, so production that rebuilt request
+    // data for a replay fails this witness instead of making every replay
+    // load look like new demand.
+    if (replay && isDemand(options)) reach.replayLoads++
+    return committing || replay
+  }
   let violation: string | undefined
   // The faults this history injects. They may surface as rejected loads, as
   // thrown releases, or as errors the subscription rethrows from a microtask,
@@ -1395,6 +1606,16 @@ async function checkOrderedReplay(
     markerTruncates: 0,
     abortedMoves: 0,
     terminalErrors: 0,
+    replayLoads: 0,
+    abortRejections: 0,
+    preloadChecks: 0,
+    heldPublicationChecks: 0,
+    retainedFailedReplays: 0,
+    participantDemandFailures: 0,
+    includeDemandFailures: 0,
+    siblingDemandFailures: 0,
+    preloadReplayFailures: 0,
+    discardedReplayMoves: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -1430,17 +1651,51 @@ async function checkOrderedReplay(
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
             reach.markerLoads++
-            const demand = !markerReplaying && isDemand(options)
+            const participant = joinBarrier(`markers`, load, options)
+            const recovery =
+              belongsToRecovery(options, markerTruncates, markerCommitting) ||
+              (participant && oneSubscription(`markers`))
+            const demand = !recovery && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
               )
               if (!ok) {
+                const replayLoading = settleParticipant(
+                  `markers`,
+                  load,
+                  options,
+                  false,
+                )
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
+                // A demand the graph started after the commit fails inside
+                // the replay.
+                if (
+                  participant &&
+                  !options.signal?.aborted &&
+                  oneSubscription(`markers`) &&
+                  !markerCommitting &&
+                  isDemand(options)
+                ) {
+                  // While other participants still load.
+                  if (replayLoading) {
+                    reach.participantDemandFailures++
+                    if (scenario.includes) reach.includeDemandFailures++
+                  }
+                  // The query both joins and includes the marker source, so
+                  // two of its subscriptions share the barrier.
+                  if (scenario.includes && scenario.joined) {
+                    reach.siblingDemandFailures++
+                  }
+                }
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
+                  // Lazy demand in a replay failed before the first ready.
+                  if (participant && isDemand(options)) {
+                    reach.preloadReplayFailures++
+                  }
                 }
                 reach.failedLoads++
                 throw inject(new Error(`marker load failed`))
@@ -1448,7 +1703,14 @@ async function checkOrderedReplay(
             } else await Promise.resolve()
             if (options.signal?.aborted) {
               load.outcome = `ok`
-              return
+              settleParticipant(`markers`, load, options, true)
+              if (scenario.abortedMarkerLoads === `resolve`) return
+              reach.abortRejections++
+              throw inject(
+                Object.assign(new Error(`marker load aborted`), {
+                  name: `AbortError`,
+                }),
+              )
             }
             operations.begin()
             for (const id of marked) {
@@ -1467,8 +1729,11 @@ async function checkOrderedReplay(
             }
             await operations.commit()
             load.outcome = `ok`
+            // The load settles once its rows apply.
+            settleParticipant(`markers`, load, options, true)
           },
           unloadSubset: (options) => {
+            retireParticipants(`markers`, options)
             const count = acquired.get(options) ?? 0
             if (count === 0) {
               violation ??= `marker unloadSubset released a demand it did not hold`
@@ -1494,17 +1759,43 @@ async function checkOrderedReplay(
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
-            const demand = !truncating && isDemand(options)
+            const participant = joinBarrier(`rows`, load, options)
+            const recovery =
+              belongsToRecovery(options, truncates, truncating) ||
+              (participant && oneSubscription(`rows`))
+            const demand = !recovery && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
               )
               if (!ok) {
+                const replayLoading = settleParticipant(
+                  `rows`,
+                  load,
+                  options,
+                  false,
+                )
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
+                // A demand the graph started after the commit, failing
+                // while its replay still loads.
+                if (
+                  participant &&
+                  replayLoading &&
+                  !options.signal?.aborted &&
+                  oneSubscription(`rows`) &&
+                  !truncating &&
+                  isDemand(options)
+                ) {
+                  reach.participantDemandFailures++
+                }
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
+                  // Lazy demand in a replay failed before the first ready.
+                  if (participant && isDemand(options)) {
+                    reach.preloadReplayFailures++
+                  }
                 }
                 reach.failedLoads++
                 throw inject(new Error(`load failed`))
@@ -1512,6 +1803,7 @@ async function checkOrderedReplay(
             } else await Promise.resolve()
             if (options.signal?.aborted) {
               load.outcome = `ok`
+              settleParticipant(`rows`, load, options, true)
               return
             }
             const rows = [...truth.values()]
@@ -1551,8 +1843,11 @@ async function checkOrderedReplay(
             }
             await sync.commit()
             load.outcome = `ok`
+            // The load settles once its rows apply.
+            settleParticipant(`rows`, load, options, true)
           },
           unloadSubset: (options) => {
+            retireParticipants(`rows`, options)
             const count = acquired.get(options) ?? 0
             if (count === 0) {
               violation ??= `unloadSubset released a demand it did not hold`
@@ -1571,6 +1866,8 @@ async function checkOrderedReplay(
                 ))
             if (replayUnsettled) {
               earlyThrowSinceTruncate = true
+              const barrier = barriers.get(`rows`)
+              if (barrier) barrier.ambiguous = true
               reach.replayStartThrows++
             } else if (truncates > 0) reach.throwsAfterReplay++
             else reach.settlementThrows++
@@ -1629,6 +1926,9 @@ async function checkOrderedReplay(
   if (peer) queries.push(peer)
   // A subscriber keeps each live query from garbage collection while a
   // history waits on held loads.
+  // A history during preload starts with every load held, including the
+  // loads that the first subscriber starts.
+  holding = scenario.historyDuringPreload
   const subscriptions = [live, peer].flatMap((collection) =>
     collection ? [collection.subscribeChanges(() => {})] : [],
   )
@@ -1648,6 +1948,27 @@ async function checkOrderedReplay(
         }
       }),
     )
+  // Retention: while a barrier is up, the query shows the rows it showed when
+  // the first one rose. A query in `error` is judged by the terminal-error
+  // law instead.
+  const checkRetention = (label: string) => {
+    lowerSettledBarriers()
+    if (retainedRows === undefined || !retainedAfterReady) return
+    // A source with two subscriptions has two replays, which the adapter
+    // boundary cannot tell apart.
+    if ([...barriers.keys()].some((barrier) => !oneSubscription(barrier))) {
+      return
+    }
+    const raised = [...barriers.values()]
+    if (raised.some(({ ambiguous }) => ambiguous)) return
+    if (live.status === `error`) return
+    expect(JSON.parse(JSON.stringify(live.toArray)), label).toEqual(
+      JSON.parse(retainedRows),
+    )
+    if (raised.some(({ failures }) => failures.size > 0)) {
+      reach.retainedFailedReplays++
+    } else reach.heldPublicationChecks++
+  }
   const settleAll = async () => {
     // Each truncate replays every retained demand of each query, so a long
     // held history can hold hundreds of loads. A load that starts another
@@ -1665,6 +1986,7 @@ async function checkOrderedReplay(
     earlyThrowSinceTruncate = false
     if (held.length > 0) reach.heldAcrossTruncate++
     installed.clear()
+    raiseBarrier(`rows`)
     truncating = true
     try {
       sync.begin()
@@ -1680,6 +2002,7 @@ async function checkOrderedReplay(
   // demand it retains.
   const truncateMarkers = async () => {
     installedMarkers.clear()
+    raiseBarrier(`markers`)
     markerSync.begin()
     markerSync.truncate()
     if (!onDemandMarkers) {
@@ -1688,18 +2011,23 @@ async function checkOrderedReplay(
         installedMarkers.add(id)
       }
     }
-    markerReplaying = true
+    markerTruncates++
+    markerCommitting = true
     let receipt: true | Promise<void>
     try {
       receipt = markerSync.commit()
     } finally {
-      markerReplaying = false
+      markerCommitting = false
     }
     if (receipt !== true) await receipt
   }
+  // The history's commands can interleave with the initial loads.
+  let preloadSettled = false
+  const preload = Promise.allSettled([live.preload(), peer?.preload()]).then(
+    () => (preloadSettled = true),
+  )
   try {
-    await live.preload()
-    await peer?.preload()
+    if (!scenario.historyDuringPreload) await preload
     for (const command of history) {
       try {
         switch (command.type) {
@@ -1731,8 +2059,8 @@ async function checkOrderedReplay(
             holding = true
             break
           case `settle`: {
-            holding = false
-            held.shift()?.(command.ok)
+            holding = command.keepHolding === true && holding
+            ;(command.newest === true ? held.pop() : held.shift())?.(command.ok)
             break
           }
           case `truncate`:
@@ -1819,6 +2147,7 @@ async function checkOrderedReplay(
         swallow(error)
       }
       await flushPromises()
+      checkRetention(`retained publication after ${command.type}`)
     }
     holding = false
     throwNextUnload = false
@@ -1826,6 +2155,13 @@ async function checkOrderedReplay(
     await Promise.all(pendingMoves.splice(0))
     await settleAll()
     await flushPromises()
+    // Initial readiness: once loading is quiet, the initial preload has
+    // settled. It resolves when the first window is covered and rejects when
+    // an initial load fails; it does not wait for a later truncate.
+    if (scenario.historyDuringPreload) {
+      reach.preloadChecks++
+      expect(preloadSettled, `initial preload settles`).toBe(true)
+    }
     if (violation) throw new Error(`adapter release: ${violation}`)
     if (moveOrderViolation) {
       throw new Error(`newest move wins: ${moveOrderViolation}`)
@@ -1835,6 +2171,7 @@ async function checkOrderedReplay(
         cause: escapedError(),
       })
     }
+    checkRetention(`retained publication once loading is quiet`)
     // Status: a release that throws is reported, but it fails no load, so a
     // quiet query with no failed load stays ready.
     if (!anyLoadFailedNow()) {
@@ -1914,8 +2251,8 @@ describe(`Ordered windows across truncate replays`, () => {
   //   graph that the pending joined work had held, so the window stayed on
   //   old rows until an unrelated write);
   // - a window move whose joined load a truncate aborts (the model counted
-  //   the move's AbortError as an escaped fault; it is a legal rejection, and
-  //   this replay keeps the branch reached);
+  //   the move's AbortError as an escaped fault; the move now waits for the
+  //   newer replay and applies, so this replay checks the moved window);
   // - a window move that retires lazy joined demand whose release throws (the
   //   subscription reported the release failure as a load error, so the move
   //   rejected with it; core now reports it uncaught);
@@ -1991,7 +2328,7 @@ describe(`Ordered windows across truncate replays`, () => {
         joined: `none`,
         markerMode: `on-demand`,
       },
-      reaches: `abortedMoves`,
+      reaches: `settledWindowChecks`,
     },
     {
       name: `a window move that retires lazy joined demand whose release throws`,
@@ -2081,11 +2418,165 @@ describe(`Ordered windows across truncate replays`, () => {
         markerMode: `on-demand`,
       },
     },
+    {
+      name: `a failed include demand that a marker truncate starts`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+    },
+    {
+      name: `a failed include demand started from no prior demand`,
+      history: [
+        { type: `mark`, id: 2, on: true },
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+    },
+    {
+      name: `a failed include replay before the first ready`,
+      history: [
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        markerMode: `on-demand`,
+        includes: true,
+        abortedMarkerLoads: `reject`,
+        historyDuringPreload: true,
+      },
+      reaches: `abortRejections`,
+    },
+    {
+      name: `an aborted marker load that rejects after its replay succeeds`,
+      history: [
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: true, keepHolding: false },
+        { type: `truncateMarkers` },
+        { type: `unloadThrows` },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        peer: true,
+        joined: `some`,
+        markerMode: `on-demand`,
+        abortedMarkerLoads: `reject`,
+        historyDuringPreload: true,
+      },
+      reaches: `abortRejections`,
+    },
+    {
+      name: `a replaced include segment whose aborted load rejects`,
+      history: [
+        { type: `hold` },
+        { type: `truncate`, armAfterStart: false },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `move`, id: 2, rank: 31 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        markerMode: `on-demand`,
+        includes: true,
+        abortedMarkerLoads: `reject`,
+      },
+      reaches: `abortRejections`,
+    },
+    {
+      name: `an include demand that fails while its replay still loads`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `move`, id: 3, rank: 1 },
+        { type: `settle`, ok: false, newest: true },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+      recovers: true,
+    },
+    {
+      // A move during the initial load waits behind a marker replay that the
+      // source truncate then discards. The newer move must wait for the
+      // replay that still holds publication and then apply. Before the fix,
+      // the discarded replay rejected it, so the older move's window won.
+      name: `a newer window move deferred behind a discarded replay`,
+      history: [
+        { type: `move`, id: 1, rank: 1 },
+        { type: `window`, offset: 0, limit: 2 },
+        { type: `truncateMarkers` },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncate`, armAfterStart: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        markerMode: `on-demand`,
+        includes: true,
+        historyDuringPreload: true,
+      },
+      reaches: `settledWindowChecks`,
+    },
+    {
+      // A query that joins and includes the marker source has two marker
+      // subscriptions. The truncate's commit deletes the markers privately,
+      // so the join filter drops row 1 and the graph demands markers for
+      // the next rows. One subscription's replay loads settle first, and
+      // the new demand then fails while the other's replay still loads.
+      // With one replay per subscription, that demand fell outside every
+      // replay and ended the query; the source's barrier owns it.
+      name: `a demand that fails while a sibling subscription's replay still loads`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true, keepHolding: true },
+        { type: `settle`, ok: false, newest: true, keepHolding: true },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `some`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `siblingDemandFailures`,
+      recovers: true,
+    },
   ] satisfies Array<{
     name: string
     history: Array<OrderedCommand>
     scenario?: OrderedScenario
     reaches?: keyof OrderedReach
+    // A replay whose history the law places in a recovery. The pin also
+    // holds where the model cannot tell which subscription issued a load
+    // (see Limits).
+    recovers?: true
   }>)(
     `keeps the ordered window for $name (generated replay)`,
     async ({ history, scenario, ...replay }) => {
@@ -2093,6 +2584,9 @@ describe(`Ordered windows across truncate replays`, () => {
       const reaches: keyof OrderedReach | undefined =
         `reaches` in replay ? replay.reaches : undefined
       if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
+      if (`recovers` in replay) {
+        expect(reach.terminalErrors, `recovery failure ends the query`).toBe(0)
+      }
     },
   )
 
@@ -2119,6 +2613,16 @@ describe(`Ordered windows across truncate replays`, () => {
         markerTruncates: 0,
         abortedMoves: 0,
         terminalErrors: 0,
+        replayLoads: 0,
+        abortRejections: 0,
+        preloadChecks: 0,
+        heldPublicationChecks: 0,
+        retainedFailedReplays: 0,
+        participantDemandFailures: 0,
+        includeDemandFailures: 0,
+        siblingDemandFailures: 0,
+        preloadReplayFailures: 0,
+        discardedReplayMoves: 0,
       }
       await fc.assert(
         fc.asyncProperty(
@@ -2140,17 +2644,361 @@ describe(`Ordered windows across truncate replays`, () => {
       )
       // Reach witnesses: releases throw without a truncate, while a replay
       // starts, and while it settles; loads fail and stay held across a
-      // truncate; and the settled-window law is checked.
+      // truncate; truncates ask again for held demand; and the settled-window
+      // law is checked.
       // An aborted move needs a truncate to land inside a held move, and a
       // terminal error needs a held marker demand load to fail; the named
-      // replays above reach both.
+      // replays above reach both. A failed replay that the retention law can
+      // judge, a demand that fails while its replay is open, a replay that
+      // fails before the first ready, and a window move behind a discarded
+      // replay are rare here; the campaigns below declare them.
+      const ownedElsewhere = new Set([
+        `abortedMoves`,
+        `terminalErrors`,
+        `retainedFailedReplays`,
+        `participantDemandFailures`,
+        `includeDemandFailures`,
+        `siblingDemandFailures`,
+        `preloadReplayFailures`,
+        `discardedReplayMoves`,
+      ])
       if (campaign !== `replay`) {
         for (const [dimension, count] of Object.entries(total)) {
-          if (dimension === `abortedMoves` || dimension === `terminalErrors`)
-            continue
+          if (ownedElsewhere.has(dimension)) continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The retention law needs a replay that fails while the query holds its
+  // last publication. Each history here starts by holding the next loads and
+  // truncating a source, so the replay's loads stay held. It may then change
+  // a rank, a marker, or the window, which starts demand while the replay is
+  // open. It then fails a held load: the oldest is a replay load, and the
+  // newest is the demand just started. Random commands follow, so later
+  // moves, marks, window moves, and truncates act on a failed replay. Peers
+  // stay out because the retention law does not judge them.
+  const failedReplayTruncate = fc.constantFrom(
+    { type: `truncate` as const, armAfterStart: false },
+    { type: `truncateMarkers` as const },
+  )
+  const failedReplayHistory: fc.Arbitrary<Array<OrderedCommand>> = fc
+    .tuple(
+      failedReplayTruncate,
+      fc.option(
+        fc.oneof(
+          fc.record({
+            type: fc.constant(`move` as const),
+            id: fc.integer({ min: 1, max: 5 }),
+            rank: fc.integer({ min: 1, max: 60 }),
+          }),
+          fc.record({
+            type: fc.constant(`mark` as const),
+            id: fc.integer({ min: 1, max: 5 }),
+            on: fc.boolean(),
+          }),
+          fc.record({
+            type: fc.constant(`window` as const),
+            offset: fc.constantFrom(0 as const, 1 as const),
+            limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+          }),
+        ),
+        { nil: undefined },
+      ),
+      fc.boolean(),
+      fc.array(orderedCommand, { maxLength: 8 }),
+    )
+    .map(([truncate, change, keepHolding, rest]) => [
+      { type: `hold` as const },
+      truncate,
+      ...(change
+        ? [change, { type: `settle` as const, ok: false, newest: true }]
+        : [{ type: `settle` as const, ok: false, keepHolding }]),
+      ...rest,
+    ])
+  const failedReplayScenario = orderedScenario.map((scenario) => ({
+    ...scenario,
+    peer: false,
+  }))
+  // An include demand that fails while its replay still loads needs an
+  // include over on-demand markers and a move that brings a row into the
+  // window during the marker replay; this branch builds that start. The
+  // window starts at offset 0 without ties, and the moved row starts past
+  // it, so moving it before every other row shows it.
+  const includeDemandCase = failedReplayScenario.chain((scenario) => {
+    const included = {
+      ...scenario,
+      offset: 0 as const,
+      ties: false,
+      joined: false as const,
+      includes: true,
+      markerMode: `on-demand` as const,
+    }
+    const ascending = included.direction === `asc`
+    return fc
+      .tuple(
+        fc.integer({ min: 1, max: 9 }),
+        fc.array(orderedCommand, { maxLength: 8 }),
+      )
+      .map(([rank, rest]): [Array<OrderedCommand>, OrderedScenario] => [
+        [
+          { type: `hold` },
+          { type: `truncateMarkers` },
+          {
+            type: `move`,
+            id: ascending ? 5 : 1,
+            rank: ascending ? rank : 61 - rank,
+          },
+          { type: `settle`, ok: false, newest: true },
+          ...rest,
+        ],
+        included,
+      ])
+  })
+  // A query that joins and includes the marker source has two marker
+  // subscriptions under one barrier. Settling some held loads can finish one
+  // subscription's own replay loads while the other's still load; the graph
+  // then demands markers for rows the commit privately exposed, and the
+  // newest load fails.
+  const siblingDemandCase = fc
+    .tuple(
+      failedReplayScenario,
+      fc.constantFrom(`some` as const, `none` as const, `inner` as const),
+      fc.integer({ min: 1, max: 2 }),
+      fc.boolean(),
+      fc.array(orderedCommand, { maxLength: 6 }),
+    )
+    .map(
+      ([scenario, joined, settles, newest, rest]): [
+        Array<OrderedCommand>,
+        OrderedScenario,
+      ] => [
+        [
+          { type: `hold` },
+          { type: `truncateMarkers` },
+          ...Array.from({ length: settles }, () => ({
+            type: `settle` as const,
+            ok: true,
+            keepHolding: true,
+            newest,
+          })),
+          { type: `settle`, ok: false, newest: true, keepHolding: true },
+          ...rest,
+        ],
+        { ...scenario, joined, includes: true, markerMode: `on-demand` },
+      ],
+    )
+  const failedReplayCase = fc.oneof(
+    {
+      weight: 3,
+      arbitrary: fc.tuple(failedReplayHistory, failedReplayScenario),
+    },
+    { weight: 1, arbitrary: includeDemandCase },
+    { weight: 1, arbitrary: siblingDemandCase },
+  )
+  const failedReplayProperty = `replay.ordered-failed-replay`
+  const failedReplayCampaigns =
+    orderedReplayConfig.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : orderedReplayConfig.replayProperty === failedReplayProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  // Recovery during the initial preload. A history starts while the first
+  // loads are held, over on-demand markers that the query includes or joins.
+  // Its grammar settles held loads one at a time, truncates either source,
+  // moves the window, and fails a held load, so replays start, fail, and are
+  // discarded before the query first becomes ready, with window moves
+  // waiting behind them.
+  const preloadCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
+    {
+      weight: 4,
+      arbitrary: fc.record({
+        type: fc.constant(`settle` as const),
+        ok: fc.oneof(
+          { weight: 3, arbitrary: fc.constant(true) },
+          { weight: 1, arbitrary: fc.constant(false) },
+        ),
+        keepHolding: fc.oneof(
+          { weight: 3, arbitrary: fc.constant(true) },
+          { weight: 1, arbitrary: fc.constant(false) },
+        ),
+        newest: fc.boolean(),
+      }),
+    },
+    { weight: 2, arbitrary: fc.constant({ type: `truncateMarkers` as const }) },
+    {
+      weight: 1,
+      arbitrary: fc.constant({
+        type: `truncate` as const,
+        armAfterStart: false,
+      }),
+    },
+    {
+      weight: 2,
+      arbitrary: fc.record({
+        type: fc.constant(`window` as const),
+        offset: fc.constantFrom(0 as const, 1 as const),
+        limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+      }),
+    },
+    {
+      weight: 1,
+      arbitrary: fc.record({
+        type: fc.constant(`move` as const),
+        id: fc.integer({ min: 1, max: 5 }),
+        rank: fc.integer({ min: 1, max: 60 }),
+      }),
+    },
+    { weight: 1, arbitrary: fc.constant({ type: `hold` as const }) },
+  )
+  const preloadScenario = orderedScenario.map((scenario) => ({
+    ...scenario,
+    markerMode: `on-demand` as const,
+    includes: scenario.includes || !scenario.joined,
+    historyDuringPreload: true,
+  }))
+  // A replay of include demand that fails before the first ready: initial
+  // loads settle one at a time, so the order source delivers rows and the
+  // include demands them; the marker source truncates; more held loads
+  // settle; and the oldest or newest held load fails. The oldest is often
+  // a load the truncate aborted, and the newest a replay load.
+  const settleHeld = { type: `settle` as const, ok: true, keepHolding: true }
+  const preloadDemandFailure = fc
+    .tuple(
+      preloadScenario,
+      fc.integer({ min: 1, max: 2 }),
+      fc.integer({ min: 0, max: 3 }),
+      fc.boolean(),
+      fc.array(preloadCommand, { maxLength: 6 }),
+    )
+    .map(
+      ([scenario, before, after, newest, rest]): [
+        Array<OrderedCommand>,
+        OrderedScenario,
+      ] => [
+        [
+          ...Array.from({ length: before }, () => settleHeld),
+          { type: `truncateMarkers` },
+          ...Array.from({ length: after }, () => settleHeld),
+          { type: `settle`, ok: false, newest },
+          ...rest,
+        ],
+        { ...scenario, joined: false, includes: true },
+      ],
+    )
+  const preloadCase = fc.oneof(
+    {
+      weight: 2,
+      arbitrary: fc.tuple(
+        fc.array(preloadCommand, { minLength: 1, maxLength: 12 }),
+        preloadScenario,
+      ),
+    },
+    { weight: 1, arbitrary: preloadDemandFailure },
+  )
+  const preloadProperty = `replay.ordered-preload-recovery`
+  const preloadCampaigns =
+    orderedReplayConfig.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : orderedReplayConfig.replayProperty === preloadProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(preloadCampaigns)(
+    `recovers replays that start during the initial preload (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: a replay participant that fails before the first
+      // ready, which must end the query or let the preload settle, and a
+      // window move that waits behind a replay a newer truncate discards,
+      // which must still apply.
+      const reach = createOracleReach(
+        preloadProperty,
+        [
+          `preloadReplayFailures`,
+          `discardedReplayMoves`,
+          `preloadChecks`,
+        ] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(preloadCase, async ([history, scenario]) => {
+          reach.beginHistory()
+          const observed = await checkOrderedReplay(history, scenario)
+          for (const state of [
+            `preloadReplayFailures`,
+            `discardedReplayMoves`,
+            `preloadChecks`,
+          ] as const) {
+            if (observed[state] > 0) reach.reach(state)
+          }
+        }),
+        // The fixed seed kills both mutants that the evidence names: a
+        // builder that lets a discarded replay reject a deferred window move,
+        // and one that keeps a failure before the first ready non-fatal. Each
+        // dies in about half of 200-run seeds.
+        campaign === `fixed`
+          ? { seed: 20261027, numRuns: oracleRuns(300) }
+          : {
+              ...oraclePropertyOptions(300, preloadProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      reach.assertReached()
+    },
+    120_000,
+  )
+
+  it.each(failedReplayCampaigns)(
+    `keeps the last publication through a failed replay (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: histories where the retention law judged a failed
+      // replay, judged a replay that still held publication, and saw a
+      // demand that the graph started after the commit fail while its replay
+      // still loaded, on either source and for an include. An include
+      // demand's rejection arrives before its replay records the failure, so
+      // only there does the demand wait for the replay to decide it.
+      const reach = createOracleReach(
+        failedReplayProperty,
+        [
+          `retainedFailedReplays`,
+          `heldPublicationChecks`,
+          `participantDemandFailures`,
+          `includeDemandFailures`,
+          `siblingDemandFailures`,
+        ] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(failedReplayCase, async ([history, scenario]) => {
+          reach.beginHistory()
+          const observed = await checkOrderedReplay(history, scenario)
+          if (observed.retainedFailedReplays > 0) {
+            reach.reach(`retainedFailedReplays`)
+          }
+          if (observed.heldPublicationChecks > 0) {
+            reach.reach(`heldPublicationChecks`)
+          }
+          if (observed.participantDemandFailures > 0) {
+            reach.reach(`participantDemandFailures`)
+          }
+          if (observed.includeDemandFailures > 0) {
+            reach.reach(`includeDemandFailures`)
+          }
+          if (observed.siblingDemandFailures > 0) {
+            reach.reach(`siblingDemandFailures`)
+          }
+        }),
+        campaign === `fixed`
+          ? { seed: 20261023, numRuns: oracleRuns(200) }
+          : {
+              ...oraclePropertyOptions(200, failedReplayProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      reach.assertReached()
     },
     120_000,
   )

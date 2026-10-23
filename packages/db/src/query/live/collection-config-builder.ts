@@ -340,17 +340,36 @@ export class CollectionConfigBuilder<
     const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      const deferred: Promise<void> = sourceRecovery.then(async () => {
+      const syncRunGeneration = this.syncRunGeneration
+      const resume = async (): Promise<void> => {
+        // Wait for every replay that holds publication, including one a
+        // newer truncate starts meanwhile. A replay that a newer truncate or
+        // a retired demand discards rejects its completion with an
+        // AbortError, but it did not fail. Cleanup also rejects it, and then
+        // the move rejects with that error.
+        for (
+          let recovery: Promise<void> | undefined = sourceRecovery;
+          recovery;
+          recovery = this.pendingSourceRecovery()
+        ) {
+          try {
+            await recovery
+          } catch (error) {
+            if (syncRunGeneration !== this.syncRunGeneration) throw error
+          }
+        }
         // A newer call wins, even if this deferred one resumes after it.
         if (request !== this.windowRequestGeneration) {
           await this.latestWindowRequest
           return
         }
+        // A failed replay rejects the call. Otherwise it applies the window.
         const settlement = this.setWindow(requestedWindow)
         // The resumed call settles on behalf of this one.
         this.latestWindowRequest = deferred
         if (settlement !== true) await settlement
-      })
+      }
+      const deferred = resume()
       return (this.latestWindowRequest = deferred)
     }
     if (this.hasFailedSourceRecovery()) {
@@ -487,17 +506,32 @@ export class CollectionConfigBuilder<
     )
   }
 
-  failDemand(planId: string, generation: number, error: unknown): void {
+  /**
+   * A lazy demand load failure ends the query unless it failed a truncate
+   * replay after the query first became ready: that replay keeps the last
+   * publication until a later replay of the source reacquires the demand.
+   * Before the first ready there is no publication to keep, so the failure
+   * is an initial load failure. A failed demand is settled either way, so it
+   * holds no ordered loading.
+   */
+  failDemand(
+    planId: string,
+    generation: number,
+    error: unknown,
+    fatal = true,
+  ): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
+    demand.settled = true
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    this.transitionToError(
-      devBuild() && process.env.NODE_ENV !== `production`
-        ? `Subset demand '${planId}' failed: ${normalized.message}`
-        : codedMessage(228, { planId, cause: normalized.message }),
-      normalized,
-    )
+    if (fatal || this.liveQueryCollection?.status === `loading`)
+      this.transitionToError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Subset demand '${planId}' failed: ${normalized.message}`
+          : codedMessage(228, { planId, cause: normalized.message }),
+        normalized,
+      )
   }
 
   recordSubsetError(error: unknown, fatalBeforeReady = false): Error {
@@ -608,6 +642,24 @@ export class CollectionConfigBuilder<
     return pending.length > 0
       ? Promise.all(pending).then(() => undefined)
       : undefined
+  }
+
+  /** Replays of other subscriptions to a source's collection that still load. */
+  siblingReplays(sourceId: string): Promise<unknown> | undefined {
+    const collection = this.collectionSources.find(
+      (source) => source.sourceId === sourceId,
+    )?.collection
+    const pending = this.collectionSources.flatMap((source) => {
+      const subscription = this.subscriptions[source.sourceId]
+      // A replay whose completion already settled cannot be waited on.
+      return source.sourceId !== sourceId &&
+        source.collection === collection &&
+        subscription?.hasTruncateReplayWork &&
+        subscription.pendingTruncateReplacement
+        ? [subscription.pendingTruncateReplacement]
+        : []
+    })
+    return pending.length > 0 ? Promise.allSettled(pending) : undefined
   }
 
   private hasFailedSourceRecovery(): boolean {

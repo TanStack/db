@@ -20,6 +20,7 @@ import type {
   ChangeMessage,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
+  SubscribeChangesOptions,
   Subscription,
   SubscriptionEvents,
   SubscriptionLoadSubsetErrorEvent,
@@ -89,10 +90,9 @@ type CollectionSubscriptionOptions = {
   onResumeAcquisition?: () => void
 }
 
-type TruncateReplayPublicationControl = Readonly<{
-  start: () => void
-  succeed: () => void
-}>
+type TruncateReplayPublicationControl = NonNullable<
+  SubscribeChangesOptions[`truncateReplayPublication`]
+>
 
 type TruncatePublicationState = {
   loadedInitialState: boolean
@@ -401,11 +401,16 @@ export class CollectionSubscription
       this.collection._sync.syncLoadSubsetFn !== null
     // Deferred demand never acquired, so a truncate gives it nothing to
     // reload; it acquires the replacement rows when acquisition resumes.
-    const demandsToReload =
-      reloadsSubsets && !this.defersAcquisition ? [...this.subsetDemands] : []
+    const acquires = reloadsSubsets && !this.defersAcquisition
+    const demandsToReload = acquires ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
-    if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
+    const recovers =
+      demandsToReload.length > 0 || this.stalePublishedRows.size > 0
+    // A query subscription that acquires opens a replay without demand too:
+    // the commit's private deletes can make its graph start demand, and that
+    // demand belongs to the replay. Such a replay starts no recovery work.
+    if (!recovers && !(acquires && this.options.truncateReplayPublication)) {
       this.resetSnapshotTracking()
       return
     }
@@ -430,13 +435,13 @@ export class CollectionSubscription
       this.truncateReplayState = replayState
     }
     const attempt = replayState.currentAttempt
-    this.setStatus(`loadingSubset`)
+    if (recovers) this.setStatus(`loadingSubset`)
 
     if (this.truncateReplayState !== replayState) return
 
     if (this.options.truncateReplayPublication) {
       this.truncateReplacementPending = true
-      this.options.truncateReplayPublication.start()
+      if (recovers) this.options.truncateReplayPublication.start()
     }
 
     // A newer replay replaces every prior acquisition for these demands. Abort
@@ -611,6 +616,22 @@ export class CollectionSubscription
     }
   }
 
+  /**
+   * A graph's subscriptions to one collection share a barrier. While another
+   * one's replay still loads, this replay stays open, so demand this one
+   * starts meanwhile joins it; it finishes once those replays settle.
+   */
+  private awaitsSiblingReplays(
+    replayState: TruncateReplayState,
+    finish: () => void,
+  ): boolean {
+    const siblings = this.options.truncateReplayPublication?.siblingReplays()
+    void siblings?.then(() => {
+      if (this.truncateReplayState === replayState) finish()
+    })
+    return siblings !== undefined
+  }
+
   /** Publish only after every overlapping replay attempt has settled. */
   private checkTruncateReplayComplete(replayState: TruncateReplayState): void {
     if (this.truncateReplayState !== replayState) return
@@ -623,6 +644,12 @@ export class CollectionSubscription
       if (activeFailure) {
         this.abandonTruncateReplay(replayState, activeFailure[1])
       } else {
+        if (
+          this.awaitsSiblingReplays(replayState, () =>
+            this.checkTruncateReplayComplete(replayState),
+          )
+        )
+          return
         this.flushTruncateReplay(replayState)
       }
     } finally {
@@ -815,6 +842,15 @@ export class CollectionSubscription
     attempt.setupComplete = true
     replayState.pendingSetups--
     this.checkTruncateReplayComplete(replayState)
+  }
+
+  /** Whether this subscription's replay still waits on its own work. */
+  public get hasTruncateReplayWork(): boolean {
+    const replayState = this.truncateReplayState
+    return (
+      replayState !== undefined &&
+      (replayState.pendingSetups > 0 || replayState.pending.size > 0)
+    )
   }
 
   public get hasPendingTruncateReplacement(): boolean {
@@ -1379,6 +1415,8 @@ export class CollectionSubscription
       this.flushTruncateReplay(replayState)
       return
     }
+    if (this.awaitsSiblingReplays(replayState, () => this.retireEmptyReplay()))
+      return
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()

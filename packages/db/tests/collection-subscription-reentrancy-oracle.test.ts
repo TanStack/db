@@ -290,6 +290,7 @@ describe(`Collection subscription callback reentry oracle`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
       truncateReplayPublication: {
+        siblingReplays: () => undefined,
         start: () => delegate.push(`start`),
         succeed: () => delegate.push(`succeed`),
       },

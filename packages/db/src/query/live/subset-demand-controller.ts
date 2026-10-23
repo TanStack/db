@@ -79,20 +79,6 @@ export class SubsetDemandController {
     const state: DemandState = { keys: nextKeys, segments }
     this.states.set(plan.id, state)
 
-    // Release every retired segment even if subscriber code that a release
-    // runs throws, then report the first error.
-    runAllCallbacks(
-      retired.map((segment) => () => releaseSegment(subscription, segment)),
-    )
-    if (this.states.get(plan.id) !== state) {
-      return { changed: false, empty: false, ready: true }
-    }
-
-    if (nextKeys.size === 0) {
-      this.states.delete(plan.id)
-      return { changed: true, empty: true, ready: true }
-    }
-
     const coveredKeys = new Set(
       segments.flatMap((segment) => [...segment.keys.keys()]),
     )
@@ -105,16 +91,38 @@ export class SubsetDemandController {
     const replace =
       retryReplacement || (removed && (added.size > 0 || segments.length > 1))
     const requestedKeys = replace ? nextKeys : added
-    if (requestedKeys.size > 0) {
-      const segment = createSegment(plan, requestedKeys)
-      if (replace) segment.replaces = [...segments]
-      segments.push(segment)
-      const started = startSegment(subscription, segment, () =>
-        this.warnUnoptimized(plan),
-      )
-      if (this.states.get(plan.id) !== state) {
-        return { changed: false, empty: false, ready: true }
-      }
+    const newSegment =
+      requestedKeys.size > 0 ? createSegment(plan, requestedKeys) : undefined
+    // The start callback assigns this; the cast keeps it a plain boolean.
+    let started = true as boolean
+    // Start the new segment before releasing retired ones. Releasing a
+    // subscription's last demand ends its truncate replay, so demand started
+    // after that release would fall outside the replay that owns it. Release
+    // every retired segment even if the start or subscriber code that a
+    // release runs throws, then report the first error.
+    runAllCallbacks([
+      () => {
+        if (!newSegment) return
+        if (replace) newSegment.replaces = [...segments]
+        segments.push(newSegment)
+        started = startSegment(subscription, newSegment, () =>
+          this.warnUnoptimized(plan),
+        )
+      },
+      ...retired.map(
+        (retiredSegment) => () => releaseSegment(subscription, retiredSegment),
+      ),
+    ])
+    if (this.states.get(plan.id) !== state) {
+      return { changed: false, empty: false, ready: true }
+    }
+
+    if (nextKeys.size === 0) {
+      this.states.delete(plan.id)
+      return { changed: true, empty: true, ready: true }
+    }
+
+    if (newSegment) {
       if (!started)
         throw new Error(
           devBuild() && process.env.NODE_ENV !== `production`
@@ -122,13 +130,13 @@ export class SubsetDemandController {
             : codedMessage(159),
         )
       if (replace) {
-        if (segment.ready instanceof Promise) {
-          void segment.ready.then(
-            () => this.finishReplacement(subscription, plan.id, segment),
+        if (newSegment.ready instanceof Promise) {
+          void newSegment.ready.then(
+            () => this.finishReplacement(subscription, plan.id, newSegment),
             () => {},
           )
         } else {
-          this.finishReplacement(subscription, plan.id, segment)
+          this.finishReplacement(subscription, plan.id, newSegment)
         }
       }
     }
@@ -265,9 +273,24 @@ function startSegment(
     signal: segment.abortController.signal,
     trackLoadSubsetPromise: false,
     onUnoptimized,
-    onLoadSubsetResult: (result) => {
+    onLoadSubsetResult: (result, options) => {
       observed = true
-      segment.ready = result
+      // An aborted request is obsolete demand, not a load failure, as for the
+      // subscription. A truncate replay decides a segment whose acquisition
+      // it superseded, even when the replay settled first. Otherwise newer
+      // coverage replaced the segment, and it settles.
+      segment.ready =
+        result instanceof Promise
+          ? result.catch((error: unknown) => {
+              if (!options.signal?.aborted) throw error
+              return (
+                subscription.pendingTruncateReplacement ??
+                (subscription.hasFailedTruncateReplacement
+                  ? Promise.reject(subscription.lastError)
+                  : undefined)
+              )
+            })
+          : result
       segment.state = result instanceof Promise ? `pending` : `settled`
     },
   })

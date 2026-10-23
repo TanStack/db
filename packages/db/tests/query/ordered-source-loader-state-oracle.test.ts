@@ -9,6 +9,7 @@ import {
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
@@ -32,6 +33,14 @@ type RequestOptions = LoadSubsetOptions & {
     acquisition: LoadSubsetOptions,
     release: ReleaseLoadSubset,
   ) => void
+}
+
+// The leading order value that a tie request asks for: its `where` is
+// `eq(rank, value)`. Other requests have no tie value.
+function tieValue(options: RequestOptions): unknown {
+  const where = options.where as
+    { name?: string; args?: Array<{ value?: unknown }> } | undefined
+  return where?.name === `eq` ? where.args?.[1]?.value : undefined
 }
 
 function createDeferred() {
@@ -1816,10 +1825,21 @@ describe(`Successful finite demand retirement`, () => {
  *   exact result for its own options), or while the loader's coverage is
  *   its own first ordered prefix of at least `offset + limit` rows, with
  *   only that prefix's tie after it, and a row past the page sorts strictly
- *   after its end with no more rows needed (ARCHITECTURE.md). The law judges
- *   only quiet histories: every earlier step settled a request successfully,
- *   ran a pass, inserted a row, reported, or changed joined work, and no
- *   release callback has side effects, so no earlier event owes a repair.
+ *   after its end with no more rows needed (ARCHITECTURE.md). That row is
+ *   evidence only when the page read it, or when the tie the loader read is
+ *   the tie of the page's end. The law judges only quiet histories: every
+ *   earlier step settled a request successfully, ran a pass, inserted a row,
+ *   reported, or changed joined work, and no release callback has side
+ *   effects, so no earlier event owes a repair.
+ * - **Unproven report:** in such a quiet history, a report over the loader's
+ *   own first prefix that no row it read proves starts a repair on its pass,
+ *   or reads the tie of the page's end, which completes the proof.
+ *   An installed row past the page can come from another request, and a
+ *   refetch can move the page's end before the tie the loader read, so the
+ *   loader cannot use either as proof. This fake's installed rows ignore a
+ *   read's limit, so its tie is always for the last installed row; the
+ *   ignored-report branch for a first page is therefore unreachable here,
+ *   and only the unproven-report law runs on such a page.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -2174,6 +2194,7 @@ type AuthorityObservation = {
   joinedDeferrals: number
   ignoredReportsBeforeSettle: number
   ignoredReportsInsideFirstPage: number
+  repairedReportsOnOwnPage: number
   truncates: number
   replayFailures: number
   optimisticDepartures: number
@@ -2540,6 +2561,32 @@ async function checkAuthorityCase(
   let joinedDeferrals = 0
   let ignoredReportsBeforeSettle = 0
   let ignoredReportsInsideFirstPage = 0
+  let repairedReportsOnOwnPage = 0
+  // Steps that settle a request successfully, run a pass, report, or change
+  // joined work. None of them owes a repair.
+  const quietCommand = (command: AuthorityCommand) =>
+    (command.type === `settle` && command.ok) ||
+    command.type === `settleNewest` ||
+    command.type === `pass` ||
+    command.type === `report` ||
+    command.type === `joinedBusy` ||
+    command.type === `joinedIdle`
+  // An unproven report whose pass pending joined work deferred: the ledger
+  // index at the report and the window size it judged.
+  let owedProof: { from: number; windowSize: number } | undefined
+  const expectProofRequest = (from: number, windowSize: number) => {
+    const issued = ledger
+      .slice(from)
+      .some(
+        ({ authoritative, options }) =>
+          authoritative || tieValue(options) === windowSize,
+      )
+    if (!issued) {
+      throw new Error(
+        `unproven report: a report over a first page that no row it read proves issued no repair and no tie of its end`,
+      )
+    }
+  }
   let truncates = 0
   let replayFailures = 0
   let optimisticDepartures = 0
@@ -2759,6 +2806,9 @@ async function checkAuthorityCase(
     await flush()
     if (testCase.settledFirst && ledger[0]) await settle(ledger[0], true)
     for (const [step, command] of testCase.history.entries()) {
+      // An event outside the quiet set, such as a truncate, a failure, a
+      // move, or a disposal, can change or end what a deferred report owes.
+      if (owedProof && !quietCommand(command)) owedProof = undefined
       switch (command.type) {
         case `settle`: {
           const open = inflight()
@@ -2820,22 +2870,14 @@ async function checkAuthorityCase(
             !testCase.releaseTruncates &&
             !testCase.releaseDisposes &&
             !boundaryUnexpressible &&
-            testCase.history
-              .slice(0, step)
-              .every(
-                (earlier) =>
-                  (earlier.type === `settle` && earlier.ok) ||
-                  earlier.type === `settleNewest` ||
-                  earlier.type === `pass` ||
-                  earlier.type === `report` ||
-                  earlier.type === `joinedBusy` ||
-                  earlier.type === `joinedIdle`,
-              ) &&
+            testCase.history.slice(0, step).every(quietCommand) &&
             ledger.every(({ outcome }) => outcome !== `failed`)
           const windowSize = testCase.offset + info.limit
           const [first, ...later] = ledger
           const beforeSettle = ledger.every(({ outcome }) => outcome !== `ok`)
-          const insideFirstPage =
+          // The loader's coverage is its own first page with only tie
+          // requests after it.
+          const ownFirstPage =
             !testCase.requiresFullSource &&
             !testCase.needsMore &&
             testCase.snapshotRows > windowSize &&
@@ -2855,10 +2897,38 @@ async function checkAuthorityCase(
                 options.cursor === undefined &&
                 options.orderBy === undefined,
             )
+          // A row past the page proves the source's next row only when the
+          // page read it, or when it ties with the page's end and the loader
+          // read that tie. Any other installed row can come from another
+          // request, so it proves nothing. The installed ranks are 1..n, so
+          // the end's rank is the window size.
+          const insideFirstPage =
+            ownFirstPage &&
+            ((first.options.limit ?? 0) > windowSize ||
+              later.some(({ options }) => tieValue(options) === windowSize))
           const before = ledger.length
           loader.revalidateLoadedCoverage()
           if (command.react) graphPass()
           await flush()
+          // A report the loader cannot prove covers nothing it could change
+          // owes a repair, which its next pass starts, or a tie request for
+          // the page's end, which completes the proof. Pending joined work
+          // defers ordinary loading, so the pass that runs when that work
+          // finishes owes the request instead.
+          if (
+            command.react &&
+            quiet &&
+            !beforeSettle &&
+            ownFirstPage &&
+            !insideFirstPage
+          ) {
+            if (joinedPending && testCase.joined) {
+              owedProof = { from: before, windowSize }
+            } else {
+              expectProofRequest(before, windowSize)
+              repairedReportsOnOwnPage++
+            }
+          }
           if (quiet && (beforeSettle || insideFirstPage)) {
             const issued = ledger
               .slice(before)
@@ -2910,6 +2980,11 @@ async function checkAuthorityCase(
           joinedPending = false
           graphPass()
           await flush()
+          if (owedProof) {
+            expectProofRequest(owedProof.from, owedProof.windowSize)
+            owedProof = undefined
+            repairedReportsOnOwnPage++
+          }
           break
         case `truncate`:
           truncate()
@@ -3196,6 +3271,7 @@ async function checkAuthorityCase(
     joinedDeferrals,
     ignoredReportsBeforeSettle,
     ignoredReportsInsideFirstPage,
+    repairedReportsOnOwnPage,
     truncates,
     replayFailures,
     optimisticDepartures,
@@ -3612,9 +3688,85 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
-      // Without the first-page check, the report repaired a window that the
-      // loader's own first prefix already proves.
-      name: `a report while the window is inside the loader's first page`,
+      // The first page and its tie settle, then joined work starts. A report
+      // over the moved end stages only that end's tie, and pending joined
+      // work defers it. The pass after the joined work finishes must read it;
+      // a loader that dropped the staged tie read nothing.
+      name: `a staged end tie that waits for joined work`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `joinedBusy` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // A truncate after a deferred unproven report hands the window to its
+      // replay, so the pass after the joined work owes no repair or tie.
+      name: `an unproven report whose deferred pass a truncate replaces`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: true },
+          { type: `truncate` },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // Pending joined work defers the pass after an unproven report, so the
+      // repair or tie that the report owes waits for that work. The pass that
+      // runs when it finishes must start it. A random campaign found the law
+      // judging the deferred pass instead.
+      name: `an unproven report while joined work defers loading`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // The first page read only the window, and the loader's tie request
+      // read a value past it, not the page's end. An installed row past the
+      // page can come from another request, so it proves nothing, and the
+      // report must repair. Ignoring it kept a window that missed a row tied
+      // with a refetched page's end.
+      name: `a report over a first page that read only the window`,
       testCase: {
         indexed: false,
         limit: 1,
@@ -3625,6 +3777,7 @@ describe(`Ordered source request authority`, () => {
         snapshotRows: 3,
         needsMore: false,
         history: [
+          { type: `settle`, pick: 0, ok: true },
           { type: `settle`, pick: 0, ok: true },
           { type: `report`, react: true },
         ],
@@ -3667,6 +3820,7 @@ describe(`Ordered source request authority`, () => {
         joinedDeferrals: 0,
         ignoredReportsBeforeSettle: 0,
         ignoredReportsInsideFirstPage: 0,
+        repairedReportsOnOwnPage: 0,
         truncates: 0,
         replayFailures: 0,
         optimisticDepartures: 0,
@@ -3731,12 +3885,74 @@ describe(`Ordered source request authority`, () => {
         for (const [dimension, count] of Object.entries(later)) {
           if (
             dimension === `startThrowsDuringFailure` ||
-            dimension === `ignoredReportsInsideFirstPage`
+            dimension === `ignoredReportsInsideFirstPage` ||
+            dimension === `repairedReportsOnOwnPage`
           )
             continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The unproven-report law needs a quiet history whose coverage is the
+  // loader's own first page, longer than the window, with no more rows to
+  // read, and then a report whose pass reacts. The broad grammar rarely lines
+  // these up, so each history here settles the first page, settles the read
+  // after it, and reports, over random case parameters, before a random
+  // suffix. A release that truncates or disposes would end the quiet history.
+  const unprovenReportProperty = `ordered-loader.unproven-report`
+  const unprovenReportCase: fc.Arbitrary<AuthorityCase> = fc
+    .tuple(authorityCaseArbitrary, fc.array(authorityCommand, { maxLength: 8 }))
+    .map(([testCase, rest]) => ({
+      ...testCase,
+      settledFirst: true,
+      requiresFullSource: false,
+      snapshotRows: 3,
+      needsMore: false,
+      releaseTruncates: false,
+      releaseDisposes: false,
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `report`, react: true },
+        ...rest,
+      ],
+    }))
+  const unprovenReportCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === unprovenReportProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(unprovenReportCampaigns)(
+    `reads the end's tie or repairs after an unproven report (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: histories where the unproven-report law judged a
+      // report over the loader's own first page.
+      const reach = createOracleReach(
+        unprovenReportProperty,
+        [`repairedReportsOnOwnPage`] as const,
+        { minimum: 20 },
+      )
+      await fc.assert(
+        fc.asyncProperty(unprovenReportCase, async (testCase) => {
+          reach.beginHistory()
+          const observation = await checkAuthorityCase(testCase)
+          if (observation.repairedReportsOnOwnPage > 0) {
+            reach.reach(`repairedReportsOnOwnPage`)
+          }
+        }),
+        campaign === `fixed`
+          ? { seed: 20261023, numRuns: oracleRuns(300) }
+          : {
+              ...oraclePropertyOptions(300, unprovenReportProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      reach.assertReached()
     },
     120_000,
   )

@@ -739,6 +739,9 @@ old constant, even after its first load settles: deduplication and query state
 may retain its identity. Request data uses stable data properties, not stateful
 getters. The signal and subscription references do not change, but their
 lifecycle remains live. Cancellation and release are not data mutations.
+A truncate replay asks again for each retained demand with that demand's
+request data, so an adapter sees the same `where` expression it received
+before the truncate.
 The immutable-demand boundary matrix checks direct and deferred sync startup,
 adapter return and asynchronous settlement, cancellation, and release identity.
 
@@ -884,7 +887,10 @@ applied settlement. A failed or obsolete replacement cannot retire established
 coverage, and a retry requests the same union again. A partial shrink may keep
 one intersecting acquisition without replacement. This avoids repeatedly
 loading the growing prefix while allowing a changing bounded window to return
-to one acquisition.
+to one acquisition. The controller starts new coverage before it releases an
+acquisition that no longer intersects current demand. A demand change
+therefore never leaves its subscription without logical demand partway
+through, which would end that subscription's truncate replay.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
@@ -1000,7 +1006,20 @@ when its window is inside that page: every window row sorts at or before the
 `offset + limit`-th source row, and the next source row sorts strictly after
 it in the leading term. The refetched page holds every row from the start
 through its end, and any row it left out sorts after that end, so the window
-is proven. A window that needs a row past the page, such as one whose page
+is proven. The loader checks the next source row through an installed row,
+which is evidence only when the page read it, or when the loader read the tie
+of the page's current end: the refetch re-read that tie, so every row that ties
+with the end is installed. A row that another request installed proves
+nothing. Neither does a tie that the loader read for an older end, because a
+refetch can move the end earlier, so a row the provider never sent can tie
+with the new end. When the end moved, the loader reads only the new end's tie
+on the next pass: the refetched page holds every row before the end, so that
+tie completes the proof without a repair. It then releases the older tie,
+whose rows sort after the end and outside the window, and the deletes that
+release causes are not an order change. A loader that already owes a repair,
+has other work in flight, or has an end that no cursor can express repairs
+instead. A window that needs a row
+past the page, such as one whose page
 holds rows a joined filter rejects, still repairs. So does any loader while
 its source holds accepted sync rows back, as behind a persisting optimistic
 transaction: the visible rows then predate the refetch. Core reissues the
@@ -1309,7 +1328,10 @@ late rejection from an abandoned sync run cannot reset the replacement sync
 run's requested window.
 A window move started during an active source replay waits for that replay and
 applies only after its replacement is complete. A failed replay rejects the
-move without advancing the reported window. Replay completion callbacks carry
+move without advancing the reported window. A replay that a newer truncate or
+the retirement of its last demand discards did not fail, even though its
+completion rejects with `AbortError`: the move waits for any replay that still
+holds publication and then applies. Replay completion callbacks carry
 their sync-run identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.
@@ -1431,6 +1453,32 @@ while the retired transport can no longer gate it. A genuine replay failure is
 normalized once by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
+
+A truncate's commit deletes the source's rows privately, so the graph can
+demand keys that the query never published. A query subscription that acquires
+from an on-demand source therefore opens a replay at every truncate, even when
+it holds no demand. A replay without demand starts no recovery work and reports
+no loading state. Lazy demand that the graph starts while that replay is open
+belongs to it, including demand started after the replay failed while it still
+holds publication. A live query's subscriptions to one collection, such as a
+join and an include of the same source, share one publication barrier. None
+of their replays publishes, and none whose last demand retired closes, while
+another of them still has replay work. So demand that any of them starts
+meanwhile joins its own open replay instead of falling outside recovery.
+A rejection of an aborted lazy demand request is obsolete demand,
+not a load failure, as for the subscription. When a truncate supersedes the
+acquisition, its replay decides the demand, even if the replay settles before
+the aborted request rejects. A segment that newer coverage replaced settles. A
+lazy demand load whose failure fails its subscription's replay
+does not end the live query once it has first become ready. The query records
+the error and keeps its last complete publication until a later truncate
+replay of that source succeeds, which reacquires the retained demand. Before
+the first ready there is no complete publication to keep, so the failure is an
+initial load failure and ends the query. A lazy demand load that fails outside
+a replay ends the query (error 228): the parent rows it serves may already be
+public, and no barrier keeps their incomplete join side or bucket private. A
+synchronous `loadSubset` throw rolls its logical owner back, so it fails no
+replay that could reacquire the demand, and it ends the query too.
 
 ### Mutation boundaries and initial readiness
 

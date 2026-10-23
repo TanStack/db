@@ -452,6 +452,9 @@ type Run = {
   failAfter: (count: number | undefined) => void
   // The Query cache entries this Collection owns: one per tracked request.
   cachedQueries: () => number
+  // Queries an observer still holds. A refetch re-runs only these; a released
+  // Query stays cached until its gcTime.
+  activeQueries: () => number
   // Reports that served pages may have shifted (`loadedSubsets:invalidated`
   // events on the source Collection) so far.
   reports: () => number
@@ -741,6 +744,9 @@ async function startRun(testCase: Case): Promise<Run> {
     },
     cachedQueries: () =>
       queryClient.getQueryCache().findAll({ queryKey: [id] }).length,
+    activeQueries: () =>
+      queryClient.getQueryCache().findAll({ queryKey: [id], type: `active` })
+        .length,
     reports: () => reports,
     changedReanswers: () => changedReanswers,
     failNextApplication: () => {
@@ -1298,8 +1304,12 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   })
 
   // The ordinary insert into a top-N list. The page's end moves earlier, so
-  // Query DB reports, but every window row is in the window's own first page:
-  // the refetch must send only the Queries it refetches, with no repair.
+  // Query DB reports, but every window row is in the window's own first page.
+  // The tie the loader read belongs to the old end, so its rows prove
+  // nothing about rows that tie with the new end. The refetch sends the
+  // Queries it refetches and one tie request for the new end, with no
+  // repair. The loader releases the old end's tie, so the Query count stays
+  // the same and later refetches do not re-run a tie that proves nothing.
   it.each([1, 2] as const)(
     `a refetch of a window inside its first page starts no repair (%i order terms)`,
     async (terms) => {
@@ -1322,14 +1332,19 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         await run.apply({ type: `upsert`, id: 5, rank: 5 })
         await run.apply({ type: `flip`, id: 5 })
         const queries = run.cachedQueries()
+        const activeBefore = run.activeQueries()
         const requestsBefore = run.requests.length
         await run.apply({ type: `refetch` })
         expect(run.windowIds()).toEqual(
           expectedWindow(run.backend, run.markers, scenario),
         )
-        expect(run.requests.length - requestsBefore).toBeLessThanOrEqual(
-          queries,
-        )
+        const extra = run.requests.slice(requestsBefore + queries)
+        expect(extra).toHaveLength(1)
+        // A tie request reads equal leading values, with no order or cursor.
+        expect(extra[0]!.orderBy).toBeUndefined()
+        expect(extra[0]!.cursor).toBeUndefined()
+        expect(extra[0]!.where).toBeDefined()
+        expect(run.activeQueries()).toBe(activeBefore)
       } catch (error) {
         primary = error
       }
