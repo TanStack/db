@@ -33,7 +33,9 @@
  * `SourceCollectionIdReuseError` before any row from either source is
  * returned. Revisiting the same object is legal, and a new binding starts with
  * no claims. An input with a nonempty `queryKey` owns its identity and skips
- * both checks; an empty key is absent, as it is for a `DbClient` preload.
+ * both checks: a keyed step records no claim and checks none, so a claim
+ * made before it still binds a later derived step (maintainer decision
+ * 2026-10-23). An empty key is absent, as it is for a `DbClient` preload.
  *
  * A binding that compiles again whenever its reactive reads change (Vue,
  * Solid, Angular, and Svelte without a `DbClient`) compares no identity. It
@@ -234,6 +236,16 @@ export interface LiveQueryDriver {
    */
   mountControllable: <P>(
     build: (q: any, param: P) => any,
+    initial: P,
+  ) => ControllableHandle<P>
+  /**
+   * Mount a controllable query in the config-object form whose `queryKey` is
+   * `key(param)`, or none when that returns `undefined`. Every driver that
+   * compares query identity supplies it; a reactive binding has no keys.
+   */
+  mountKeyedControllable?: <P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
     initial: P,
   ) => ControllableHandle<P>
   /** Mount a pre-created collection passed directly to the hook. */

@@ -212,6 +212,31 @@ function mountControllable<P>(
   }
 }
 
+// The config-object form with a queryKey chosen per step; an undefined key
+// leaves the hook to derive the identity.
+function mountKeyedControllable<P>(
+  build: (q: any, param: P) => any,
+  key: (param: P) => ReadonlyArray<unknown> | undefined,
+  initial: P,
+): ControllableHandle<P> {
+  const hook = renderHook(
+    ({ param }: { param: P }) =>
+      useLiveQuery({
+        query: (q: any) => build(q, param),
+        queryKey: key(param),
+      } as any),
+    { initialProps: { param: initial } },
+  )
+  const handle = makeHandle(hook)
+  return {
+    ...handle,
+    async setParam(param: P) {
+      hook.rerender({ param })
+      await settle()
+    },
+  }
+}
+
 const preactDriver: LiveQueryDriver = {
   name: `preact`,
   // Each render re-runs the query input and compares its identity.
@@ -229,6 +254,7 @@ const preactDriver: LiveQueryDriver = {
   makeErrorSource,
   mount,
   mountControllable,
+  mountKeyedControllable,
   mountCollection,
   mountConfig,
   mountDisabled,

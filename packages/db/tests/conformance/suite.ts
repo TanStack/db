@@ -1336,6 +1336,136 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             ? `revisit after an intervening query`
             : undefined
         }
+        // Keyed dimension (comparing bindings only). A step may name its
+        // source through a nonempty queryKey: AK reads A(x) and BK reads B(x)
+        // under their own keys. A keyed step records no claim and checks
+        // none, so a claim made before it still binds a later derived step.
+        type KeyedPick = Pick | `AK` | `BK`
+        const objectOfKeyed = (pick: Exclude<KeyedPick, `D`>) =>
+          pick === `AK`
+            ? objectOf(`A`)
+            : pick === `BK`
+              ? objectOf(`B`)
+              : objectOf(pick)
+        const rowsOfKeyed = (pick: Exclude<KeyedPick, `D`>) =>
+          rowsOf[pick === `AK` ? `A` : pick === `BK` ? `B` : pick]
+        const isKeyed = (pick: KeyedPick) => pick === `AK` || pick === `BK`
+        const keyedCollides = (
+          history: ReadonlyArray<KeyedPick>,
+          next: KeyedPick,
+        ) =>
+          next !== `D` &&
+          !isKeyed(next) &&
+          history.some(
+            (prior) =>
+              prior !== `D` &&
+              !isKeyed(prior) &&
+              objectOfKeyed(prior) !== objectOfKeyed(next) &&
+              objectOfKeyed(prior).collection.id ===
+                objectOfKeyed(next).collection.id,
+          )
+        type KeyedReachState =
+          `claim crosses a keyed step` | `keyed step after a claim`
+        const keyedReach = createOracleReach<KeyedReachState>(
+          `source-id claim memory with keys`,
+          [`claim crosses a keyed step`, `keyed step after a claim`],
+        )
+        const runKeyedClaimGrammar = async () => {
+          const mountKeyed = driver.mountKeyedControllable
+          // Every comparing driver supplies the keyed form.
+          expect(mountKeyed).toBeDefined()
+          const keyedPicks: ReadonlyArray<KeyedPick> = [
+            `A`,
+            `B`,
+            `C`,
+            `D`,
+            `AK`,
+            `BK`,
+          ]
+          for (const first of [`A`, `C`, `AK`] as const) {
+            for (const second of keyedPicks) {
+              for (const third of keyedPicks) {
+                keyedReach.beginHistory()
+                const history: Array<KeyedPick> = [first]
+                const h = mountKeyed!<KeyedPick>(
+                  (q, pick) =>
+                    pick === `D`
+                      ? null
+                      : q
+                          .from({ items: objectOfKeyed(pick).collection })
+                          .select(({ items }: any) => ({ id: items.id })),
+                  (pick) => (isKeyed(pick) ? [`keyed`, pick] : undefined),
+                  first,
+                )
+                await h.flush()
+                expectUnorderedRows(h.current().data, rowsOfKeyed(first))
+                for (const next of [second, third]) {
+                  const sameIdPriors = history.filter(
+                    (prior) =>
+                      prior !== `D` &&
+                      next !== `D` &&
+                      objectOfKeyed(prior) !== objectOfKeyed(next) &&
+                      objectOfKeyed(prior).collection.id ===
+                        objectOfKeyed(next).collection.id,
+                  )
+                  // A claim crosses a keyed step when a keyed step lies
+                  // between the claiming step and the step it binds.
+                  let claimIndex = -1
+                  for (let index = history.length - 1; index >= 0; index--) {
+                    const prior = history[index]!
+                    if (
+                      prior !== `D` &&
+                      !isKeyed(prior) &&
+                      next !== `D` &&
+                      !isKeyed(next) &&
+                      objectOfKeyed(prior) !== objectOfKeyed(next) &&
+                      objectOfKeyed(prior).collection.id ===
+                        objectOfKeyed(next).collection.id
+                    ) {
+                      claimIndex = index
+                      break
+                    }
+                  }
+                  if (
+                    claimIndex >= 0 &&
+                    history.slice(claimIndex + 1).some(isKeyed)
+                  ) {
+                    keyedReach.reach(`claim crosses a keyed step`)
+                  }
+                  if (
+                    isKeyed(next) &&
+                    sameIdPriors.some((prior) => !isKeyed(prior))
+                  ) {
+                    keyedReach.reach(`keyed step after a claim`)
+                  }
+                  if (keyedCollides(history, next)) {
+                    await expectRejection(
+                      `SourceCollectionIdReuseError`,
+                      async () => {
+                        await h.setParam(next)
+                        return h.current()
+                      },
+                    )
+                    expectNoRowsAfterRejection(h)
+                    break
+                  }
+                  await h.setParam(next)
+                  history.push(next)
+                  if (next === `D`) {
+                    expectDisabledResult(
+                      h.current(),
+                      driver.disabledRepresentation,
+                    )
+                  } else {
+                    expectUnorderedRows(h.current().data, rowsOfKeyed(next))
+                  }
+                }
+                h.unmount()
+              }
+            }
+          }
+          keyedReach.assertReached()
+        }
         const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`, `D`]
         for (const first of [`A`, `C`] as const) {
           for (const second of picks) {
@@ -1384,6 +1514,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         }
         reach.assertReached()
 
+        if (comparesIdentity) await runKeyedClaimGrammar()
+
         // A new binding starts with no claims.
         const fresh = driver.mount((q) =>
           q
@@ -1394,8 +1526,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         expectUnorderedRows(fresh.current().data, [{ id: `8` }])
         fresh.unmount()
       },
-      // 32 histories of three steps each.
-      30_000,
+      // 32 histories of three steps each, and 108 keyed histories for a
+      // comparing binding.
+      60_000,
     )
 
     scenario(

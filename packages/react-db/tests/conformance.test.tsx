@@ -239,6 +239,41 @@ function makeHandle(hook: RenderHookResult<any, any>) {
   }
 }
 
+// The config-object form with a queryKey chosen per step; an undefined key
+// leaves the hook to derive the identity, or to follow the dependency list.
+const mountKeyedControllableWith = (path: IdentityPath) =>
+  function mountKeyedControllable<P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
+    initial: P,
+  ): ControllableHandle<P> {
+    const hook = renderHook(
+      ({ param }: { param: P }) => {
+        const config = {
+          query: (q: any) => build(q, param),
+          queryKey: key(param),
+        } as any
+        return path === `derived`
+          ? useLiveQuery(config)
+          : useLiveQuery(config, [param])
+      },
+      { initialProps: { param: initial } },
+    )
+    const guard = rejectReadsAfterRenderError(hook)
+    const handle = makeHandle(hook)
+    return {
+      ...handle,
+      async setParam(param: P) {
+        await guard(() =>
+          act(async () => {
+            hook.rerender({ param })
+          }),
+        )
+        await handle.flush()
+      },
+    }
+  }
+
 const reactDriver: LiveQueryDriver = {
   name: `react`,
   // Each render re-runs the query input and compares its identity.
@@ -256,6 +291,7 @@ const reactDriver: LiveQueryDriver = {
   makeErrorSource,
   mount,
   mountControllable: mountControllableWith(`derived`),
+  mountKeyedControllable: mountKeyedControllableWith(`derived`),
   mountCollection,
   mountConfig,
   mountDisabled,
@@ -270,6 +306,7 @@ runSuite({
   mount: mountWithDependencyList,
   mountConfig: mountConfigWithDependencyList,
   mountControllable: mountControllableWith(`dependency list`),
+  mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
 })
 it(`publishes a synchronous ordered limit in the first layout commit`, async () => {
   const source = makeSource([
