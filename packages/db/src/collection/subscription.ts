@@ -122,6 +122,9 @@ type SubsetDemand = {
   acquisition: SubsetAcquisitionRecord
   acquisitionState: `starting` | `active` | `detached`
   initialResult?: Deferred<void>
+  // A parked demand's wait in an open replay. An acquisition that replays
+  // it replaces the wait, which settles only with that replay.
+  parkedParticipant?: TruncateReplayParticipant
   // The demands this one replaces for its owner: their replay failures no
   // longer count once it loads (law 10: the latest load decides).
   replaces?: Array<SubsetDemand>
@@ -132,12 +135,17 @@ type TruncateReplayAttempt = {
   setupComplete: boolean
 }
 
+type TruncateReplayParticipant = {
+  demand: SubsetDemand
+  attempt: TruncateReplayAttempt
+}
+
 type TruncateReplayState = {
   syncRunGeneration: number
   publicationState: TruncatePublicationState
   /** Direct subscribers buffer the replacement here; delegated publication has no buffer. */
   privateRows: Map<string | number, object> | undefined
-  pending: Set<{ demand: SubsetDemand; attempt: TruncateReplayAttempt }>
+  pending: Set<TruncateReplayParticipant>
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
   failures: Map<SubsetDemand, Error>
@@ -550,6 +558,10 @@ export class CollectionSubscription
       }
     }
     const waiting = demand.initialResult
+    const parked = demand.parkedParticipant
+    demand.parkedParticipant = undefined
+    if (parked && replayState.pending.delete(parked))
+      parked.attempt.pendingCount--
     if (waiting) {
       // A replay discarded by a later reload leaves the caller waiting for
       // that reload's replay; cleanup rejects waiting callers itself.
@@ -625,7 +637,7 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
     result: LoadSubsetRequestResult,
-  ): void {
+  ): TruncateReplayParticipant | undefined {
     if (
       this.truncateReplayState !== replayState ||
       (replayState.currentAttempt !== attempt &&
@@ -633,7 +645,7 @@ export class CollectionSubscription
         attempt.pendingCount === 0) ||
       !(result instanceof Promise)
     ) {
-      return
+      return undefined
     }
 
     // An older attempt can still accept returning startup work while setup or
@@ -660,6 +672,7 @@ export class CollectionSubscription
         this.settleTruncateReplay(replayState, pending)
       },
     )
+    return pending
   }
 
   /** Stop obsolete logical demand from pinning a replay barrier. */
@@ -1142,7 +1155,7 @@ export class CollectionSubscription
       }
       void initialResult.promise.then(finish, finish)
       if (replayState && replayAttempt)
-        this.trackTruncateReplayParticipant(
+        demand.parkedParticipant = this.trackTruncateReplayParticipant(
           replayState,
           replayAttempt,
           demand,
