@@ -18,7 +18,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `sorted-map`,
     `key ascending descending`,
   ],
-  [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
+  [
+    `db/tests/replay-guard-calibration.fixture.test.ts`,
+    `oracle-replay`,
+    `calibration`,
+  ],
   [
     `db-ivm/tests/structural-identity-oracle.property.test.ts`,
     `structural-identity`,

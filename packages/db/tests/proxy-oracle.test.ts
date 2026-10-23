@@ -8,6 +8,7 @@ import {
   withArrayChangeTracking,
   withChangeTracking,
 } from '../src/proxy'
+import { oracleRuns } from './oracle-config'
 
 /**
  * # Does a draft behave like the native value it represents?
@@ -282,7 +283,7 @@ describe(`native array callback oracle`, () => {
           assertArrayCallbacks(observeArrayCallbacks(values, steps))
         }),
         {
-          numRuns: 200,
+          numRuns: oracleRuns(200),
           ...(seed === undefined ? {} : { seed }),
           ...(replayPath === undefined ? {} : { path: replayPath }),
         },

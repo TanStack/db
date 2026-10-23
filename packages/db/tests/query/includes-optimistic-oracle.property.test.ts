@@ -14,7 +14,11 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
+} from '../oracle-config.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
@@ -646,14 +650,14 @@ function optimisticProperty(
   name: string,
   run: (routes: RouteValues) => Promise<void>,
 ): void {
-  const { replayPath, replayProperty } = readOracleRunConfig()
-  if (replayPath !== undefined && replayProperty !== property) return
-
   const options = oraclePropertyOptions(12, property)
   // Both normal campaigns use the same arbitrary, driver, checker, and budget.
-  // A seed-and-path replay registers only its requested property and lane.
-  if (replayPath !== undefined) {
-    fcTest.prop([routeValuesArbitrary], options)(name, run)
+  // A path replay registers only its requested property, as its one lane.
+  if (oracleReplayRequested()) {
+    oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
+      name,
+      run,
+    )
     return
   }
 

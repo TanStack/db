@@ -16,7 +16,8 @@ import {
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
-  readOracleRunConfig,
+  oracleReplayRequested,
+  oracleReplayTest,
 } from '../../db/tests/oracle-config'
 import {
   managedTagPersistence,
@@ -94,8 +95,10 @@ import type { Message } from '@electric-sql/client'
 // TANSTACK_DB_ORACLE_SEED=20260917 TANSTACK_DB_ORACLE_PATH=0 \
 // TANSTACK_DB_ORACLE_PROPERTY=electric.sdk-snapshot-delivery \
 // pnpm --dir packages/electric-db-collection exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts -t 'replay'
-const { replayPath, replayProperty } = readOracleRunConfig()
-const fixedCase = replayPath === undefined ? it : it.skip
+// Ordinary tests stand aside during any path replay, which runs one property.
+const fixedCase = oracleReplayTest(it)
+// TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT is a fault-injection switch, not a
+// replay variable. It stays readable during replays.
 const replayFault = process.env.TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT
 if (
   replayFault !== undefined &&
@@ -120,9 +123,8 @@ function sdkCampaigns(
       throw violation.report(error)
     }
   }
-  if (replayPath !== undefined) {
-    if (replayProperty === propertyId)
-      it(`${name} (replay)`, () => runCampaign())
+  if (oracleReplayRequested()) {
+    oracleReplayTest(it, propertyId)(`${name} (replay)`, () => runCampaign())
     return
   }
   it(`${name} (fixed)`, () => runCampaign(fixedSeed))

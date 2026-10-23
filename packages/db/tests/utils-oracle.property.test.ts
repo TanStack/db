@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -29,56 +34,29 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
 // directly, for example with `vitest run tests/utils-oracle.property.test.ts`.
 const fixedSeed = 20260911
 const campaignRuns = 100
-const requestedProperty = process.env.UTILS_ORACLE_PROPERTY
-const replaySeed = process.env.UTILS_ORACLE_SEED
-const replayPath = process.env.UTILS_ORACLE_PATH
+// Each property registers as `utils.<number>`, in file order. A path replay
+// selects one with TANSTACK_DB_ORACLE_PROPERTY=utils.<number>.
 let nextPropertyId = 0
-
-if (
-  requestedProperty === undefined &&
-  (replaySeed !== undefined || replayPath !== undefined)
-) {
-  throw new Error(`utils oracle replay needs a property number`)
-}
 
 function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   [K in keyof Ts]: fc.Arbitrary<Ts[K]>
 }) {
   return (name: string, check: (...values: Ts) => void): void => {
-    const id = String(++nextPropertyId)
+    const id = ++nextPropertyId
+    const property = `utils.${id}`
     const label = `${id}: ${name}`
     // fast-check's variadic tuple overload widens a generic tuple to any[].
     // The mapped arbitraries preserve each position's Ts member.
     const argumentsArbitrary = fc.tuple(...arbitraries) as fc.Arbitrary<Ts>
 
-    if (requestedProperty !== undefined) {
-      if (requestedProperty !== id) {
-        it.skip(`${label} skipped for oracle replay`, () => {})
-        return
-      }
-      if (replaySeed === undefined || replayPath === undefined) {
-        throw new Error(`utils oracle replay needs a seed and shrink path`)
-      }
-      const seed = Number(replaySeed)
-      if (!Number.isSafeInteger(seed)) {
-        throw new Error(`utils oracle replay seed must be an integer`)
-      }
-      fcTest.prop([argumentsArbitrary], {
-        seed,
-        path: replayPath,
-        numRuns: campaignRuns,
-      })(`${label} replay`, (values) => check(...values))
-      return
-    }
-
-    fcTest.prop([argumentsArbitrary], {
+    oracleReplayTest(fcTest).prop([argumentsArbitrary], {
       seed: fixedSeed,
-      numRuns: campaignRuns,
+      numRuns: oracleRuns(campaignRuns),
     })(`${label} fixed`, (values) => check(...values))
-    fcTest.prop([argumentsArbitrary], { numRuns: campaignRuns })(
-      `${label} random`,
-      (values) => check(...values),
-    )
+    oracleReplayTest(fcTest, property).prop(
+      [argumentsArbitrary],
+      oraclePropertyOptions(campaignRuns, property),
+    )(`${label} random`, (values) => check(...values))
   }
 }
 
@@ -1339,13 +1317,3 @@ describe(`persisted-snapshot prototype equality`, () => {
     ).toBe(false)
   })
 })
-
-if (requestedProperty !== undefined) {
-  it(`selects a known utils oracle property`, () => {
-    const id = Number(requestedProperty)
-    expect(
-      Number.isSafeInteger(id) && id >= 1 && id <= nextPropertyId,
-      `unknown utils oracle property: ${requestedProperty}`,
-    ).toBe(true)
-  })
-}

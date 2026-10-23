@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createChangeProxy, withChangeTracking } from '../src/proxy.js'
+import { oracleRuns } from './oracle-config.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { CollectionConfig } from '../src/types.js'
 
@@ -505,7 +506,11 @@ describe(`Mutation result detachment`, () => {
             expect(original).toEqual({ payload: { before: true } })
           },
         ),
-        { seed, numRuns: 100, examples: [[`__proto__`, 1, false]] },
+        {
+          seed,
+          numRuns: oracleRuns(100),
+          examples: [[`__proto__`, 1, false]],
+        },
       )
     },
   )

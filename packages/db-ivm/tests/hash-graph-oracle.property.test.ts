@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 
 /**
  * Structural hash follows the reachable value graph, not object identity.
@@ -182,7 +183,7 @@ describe(`structural hash graph boundary`, () => {
           expectGraphHash(edges)
         }),
         {
-          numRuns: 300,
+          numRuns: oracleRuns(300),
           ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
           ...(campaign.path === undefined ? {} : { path: campaign.path }),
         },

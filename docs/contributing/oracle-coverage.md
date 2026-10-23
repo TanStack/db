@@ -2296,11 +2296,12 @@ properties have separate environment variables; inspect their test headers.
 Do not assume the core multiplier reaches them.
 
 The Node expression-index oracle runs matching fixed-seed and seedless-random
-campaigns by default. Supplying both replay values selects only the requested
-seed and shrink path:
+campaigns by default. A path replay of its property selects only the
+requested seed and shrink path:
 
 ```sh
-TANSTACK_DB_WS5A_SEED=1659005 TANSTACK_DB_WS5A_PATH=0 \
+TANSTACK_DB_ORACLE_SEED=1659005 TANSTACK_DB_ORACLE_PATH=0 \
+TANSTACK_DB_ORACLE_PROPERTY=sqlite-persistence.expression-index \
 pnpm --filter @tanstack/node-db-sqlite-persistence test:oracles
 ```
 

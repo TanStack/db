@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 import type { Arbitrary } from 'fast-check'
 
 /**
@@ -113,7 +114,7 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
         )
           throw new Error(`TANSTACK_DB_IVM_HASH_SEED must be a 32-bit integer`)
         fc.assert(property, {
-          numRuns: 100,
+          numRuns: oracleRuns(100),
           ...(seed === undefined ? {} : { seed }),
           ...(valueReplayPath === undefined ? {} : { path: valueReplayPath }),
         })

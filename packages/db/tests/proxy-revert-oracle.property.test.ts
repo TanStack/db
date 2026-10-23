@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
+import { oracleRuns } from './oracle-config'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
@@ -812,28 +813,28 @@ describe(`draft revert oracle`, () => {
       )
         throw new Error(`TANSTACK_DB_PROXY_REVERT_SEED must be an integer`)
       fc.assert(fc.property(historyArb, expectHistory), {
-        numRuns: 400,
+        numRuns: oracleRuns(400),
         ...(seed === undefined ? {} : { seed }),
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
     })
     it(`matches the model across generated nested round trips (${name})`, () => {
       fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
-        numRuns: 200,
+        numRuns: oracleRuns(200),
         ...(seed === undefined ? {} : { seed }),
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
     })
     it(`matches the model across generated URL and keyless writes (${name})`, () => {
       fc.assert(fc.property(classWriteArb, expectHistory), {
-        numRuns: 200,
+        numRuns: oracleRuns(200),
         ...(seed === undefined ? {} : { seed }),
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
     })
     it(`matches the model across generated partial reverts (${name})`, () => {
       fc.assert(fc.property(partialRevertArb, expectHistory), {
-        numRuns: 200,
+        numRuns: oracleRuns(200),
         ...(seed === undefined ? {} : { seed }),
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
@@ -1429,7 +1430,7 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
   for (const { name, seed } of campaigns) {
     it(`matches the model across generated native histories (${name})`, () => {
       fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
-        numRuns: 400,
+        numRuns: oracleRuns(400),
         ...(seed === undefined ? {} : { seed }),
       })
     })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { MultiSet } from '../src/multiset.js'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 import type { MultiSetArray } from '../src/multiset.js'
 
 /**
@@ -556,7 +557,7 @@ describe(`MultiSet consolidation oracle`, () => {
       fc.assert(
         fc.property(historyArb, (history) => expectConsolidation(history)),
         {
-          numRuns: 300,
+          numRuns: oracleRuns(300),
           ...(seed === undefined ? {} : { seed }),
           ...(replayPath === undefined ? {} : { path: replayPath }),
         },

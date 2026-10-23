@@ -33,7 +33,7 @@ import {
 
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), `..`)
 const repositoryDirectory = resolve(packageDirectory, `../..`)
-const fixture = `tests/oracle-replay.fixture.test.ts`
+const fixture = `tests/replay-guard-calibration.fixture.test.ts`
 
 function runReplay(
   args: Array<string> = [fixture],

@@ -10,6 +10,10 @@ import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IR, createCollection } from '@tanstack/db'
 import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+} from '../../db/tests/oracle-config.js'
+import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
   persistedCollectionOptions,
@@ -2527,138 +2531,136 @@ export function runSQLiteCoreAdapterContractSuite(
      * is removed after evidence capture. The failure reports first and reduced
      * histories plus a verified fast-check seed/path replay.
      */
-    it(`resets collection metadata with its persisted baseline across generated adapter reopen histories`, async () => {
-      const historyArbitrary = fc
-        .constantFrom<ResetResumeHistory[`transition`]>(
-          `compatible-reopen`,
-          `schema-reset`,
-          `partial-restore`,
-          `external-row-loss`,
-        )
-        .chain((transition) =>
-          fc.record<ResetResumeHistory>({
-            fromSchemaVersion: fc.integer({ min: 1, max: 4 }),
-            rows: fc
-              .uniqueArray(fc.integer({ min: 0, max: 20 }), {
-                minLength:
-                  transition === `partial-restore`
-                    ? 2
-                    : transition === `external-row-loss`
-                      ? 1
-                      : 0,
-                maxLength: 4,
-              })
-              .map((ids) =>
-                ids
-                  .sort((left, right) => left - right)
-                  .map((id) => ({
-                    id: String(id),
-                    title: `row-${id}`,
-                    createdAt: `2026-01-01T00:00:00.000Z`,
-                    score: id,
-                  })),
+    oracleReplayTest(it, `sqlite-resume.baseline-lineage`)(
+      `resets collection metadata with its persisted baseline across generated adapter reopen histories`,
+      async () => {
+        const historyArbitrary = fc
+          .constantFrom<ResetResumeHistory[`transition`]>(
+            `compatible-reopen`,
+            `schema-reset`,
+            `partial-restore`,
+            `external-row-loss`,
+          )
+          .chain((transition) =>
+            fc.record<ResetResumeHistory>({
+              fromSchemaVersion: fc.integer({ min: 1, max: 4 }),
+              rows: fc
+                .uniqueArray(fc.integer({ min: 0, max: 20 }), {
+                  minLength:
+                    transition === `partial-restore`
+                      ? 2
+                      : transition === `external-row-loss`
+                        ? 1
+                        : 0,
+                  maxLength: 4,
+                })
+                .map((ids) =>
+                  ids
+                    .sort((left, right) => left - right)
+                    .map((id) => ({
+                      id: String(id),
+                      title: `row-${id}`,
+                      createdAt: `2026-01-01T00:00:00.000Z`,
+                      score: id,
+                    })),
+                ),
+              resumeKind: fc.constantFrom(`none`, `reset`, `resume`),
+              transition: fc.constant(transition),
+              reopensBeforeTransition: fc.integer({ min: 0, max: 2 }),
+              reopensAfterTransition: fc.integer({ min: 0, max: 2 }),
+              unrelatedMetadataKeys: fc.uniqueArray(
+                fc.constantFrom(`gc`, `provider`, `custom`),
+                { maxLength: 3 },
               ),
-            resumeKind: fc.constantFrom(`none`, `reset`, `resume`),
-            transition: fc.constant(transition),
-            reopensBeforeTransition: fc.integer({ min: 0, max: 2 }),
-            reopensAfterTransition: fc.integer({ min: 0, max: 2 }),
-            unrelatedMetadataKeys: fc.uniqueArray(
-              fc.constantFrom(`gc`, `provider`, `custom`),
-              { maxLength: 3 },
-            ),
-          }),
+            }),
+          )
+
+        // A seed-only shared run reseeds this campaign. Ordinary runs keep the
+        // fixed seed 1659, and a path replay runs once from its recorded path.
+        const parameters = oraclePropertyOptions(
+          24,
+          `sqlite-resume.baseline-lineage`,
         )
 
-      const seedText =
-        process.env.TANSTACK_DB_SQLITE_ORACLE_SEED ?? String(1659)
-      const seed = Number(seedText)
-      const path = process.env.TANSTACK_DB_SQLITE_ORACLE_PATH
-      const runsText = process.env.TANSTACK_DB_SQLITE_ORACLE_RUNS ?? String(24)
-      const numRuns = Number(runsText)
-      if (!Number.isSafeInteger(seed)) {
-        throw new Error(`TANSTACK_DB_SQLITE_ORACLE_SEED must be an integer`)
-      }
-      if (!Number.isSafeInteger(numRuns) || numRuns < 1) {
-        throw new Error(`TANSTACK_DB_SQLITE_ORACLE_RUNS must be positive`)
-      }
-      if (path !== undefined && !/^\d+(?::\d+)*$/.test(path)) {
-        throw new Error(
-          `TANSTACK_DB_SQLITE_ORACLE_PATH must be a numeric shrink path`,
-        )
-      }
-
-      let originalFailure: ResetResumeOracleViolation | undefined
-      const property = fc.asyncProperty(historyArbitrary, async (history) => {
-        try {
-          await observeResetResumeHistory(history, harnessFactory)
-        } catch (error) {
-          if (
-            originalFailure === undefined &&
-            error instanceof ResetResumeOracleViolation
-          ) {
-            originalFailure = error
+        let originalFailure: ResetResumeOracleViolation | undefined
+        const property = fc.asyncProperty(historyArbitrary, async (history) => {
+          try {
+            await observeResetResumeHistory(history, harnessFactory)
+          } catch (error) {
+            if (
+              originalFailure === undefined &&
+              error instanceof ResetResumeOracleViolation
+            ) {
+              originalFailure = error
+            }
+            throw error
           }
-          throw error
+        })
+        const failure = await fc.check(property, {
+          ...parameters,
+          seed: parameters.seed ?? 1659,
+          ...(parameters.path === undefined ? {} : { endOnFailure: true }),
+        })
+        if (!failure.failed) return
+        if (
+          !(failure.errorInstance instanceof ResetResumeOracleViolation) ||
+          originalFailure === undefined ||
+          failure.counterexamplePath === null
+        ) {
+          throw failure.errorInstance
         }
-      })
-      const failure = await fc.check(property, {
-        seed,
-        numRuns,
-        ...(path === undefined ? {} : { path, endOnFailure: true }),
-      })
-      if (!failure.failed) return
-      if (
-        !(failure.errorInstance instanceof ResetResumeOracleViolation) ||
-        originalFailure === undefined ||
-        failure.counterexamplePath === null
-      ) {
-        throw failure.errorInstance
-      }
-      if (!hasSameResetResumeFailure(originalFailure, failure.errorInstance)) {
-        throw new Error(
-          `Shrinking changed the reset/resume law or observation checkpoint`,
-        )
-      }
+        if (
+          !hasSameResetResumeFailure(originalFailure, failure.errorInstance)
+        ) {
+          throw new Error(
+            `Shrinking changed the reset/resume law or observation checkpoint`,
+          )
+        }
 
-      const replay = await fc.check(
-        fc.asyncProperty(historyArbitrary, async (history) => {
-          await observeResetResumeHistory(history, harnessFactory)
-        }),
-        {
-          seed: failure.seed,
-          path: failure.counterexamplePath,
-          endOnFailure: true,
-        },
-      )
-      if (
-        !replay.failed ||
-        !(replay.errorInstance instanceof ResetResumeOracleViolation) ||
-        JSON.stringify(replay.counterexample) !==
-          JSON.stringify(failure.counterexample) ||
-        !hasSameResetResumeFailure(failure.errorInstance, replay.errorInstance)
-      ) {
-        throw new Error(
-          `Reset/resume oracle replay did not reproduce the intended violation`,
+        const replay = await fc.check(
+          fc.asyncProperty(historyArbitrary, async (history) => {
+            await observeResetResumeHistory(history, harnessFactory)
+          }),
+          {
+            seed: failure.seed,
+            path: failure.counterexamplePath,
+            endOnFailure: true,
+          },
         )
-      }
+        if (
+          !replay.failed ||
+          !(replay.errorInstance instanceof ResetResumeOracleViolation) ||
+          JSON.stringify(replay.counterexample) !==
+            JSON.stringify(failure.counterexample) ||
+          !hasSameResetResumeFailure(
+            failure.errorInstance,
+            replay.errorInstance,
+          )
+        ) {
+          throw new Error(
+            `Reset/resume oracle replay did not reproduce the intended violation`,
+          )
+        }
 
-      const reducedFailure = failure.errorInstance
-      throw new Error(
-        `Reset/resume baseline-lineage violation. ` +
-          `seed=${failure.seed} path=${failure.counterexamplePath} ` +
-          `law=${reducedFailure.law} ` +
-          `discriminant=${reducedFailure.discriminant} ` +
-          `checkpoint=${reducedFailure.observation.checkpoint} ` +
-          `originalTrace=${JSON.stringify(originalFailure.history)} ` +
-          `reducedTrace=${JSON.stringify(reducedFailure.history)} ` +
-          `expected=${JSON.stringify(reducedFailure.expected)} ` +
-          `actual=${JSON.stringify(reducedFailure.actual)} ` +
-          `observation=${JSON.stringify(reducedFailure.observation)} ` +
-          `replay=verified ` +
-          `cleanup=${reducedFailure.cleanupEvidence}`,
-        { cause: reducedFailure },
-      )
-    }, 120_000)
+        const reducedFailure = failure.errorInstance
+        throw new Error(
+          `Reset/resume baseline-lineage violation. ` +
+            `seed=${failure.seed} path=${failure.counterexamplePath} ` +
+            `law=${reducedFailure.law} ` +
+            `discriminant=${reducedFailure.discriminant} ` +
+            `checkpoint=${reducedFailure.observation.checkpoint} ` +
+            `originalTrace=${JSON.stringify(originalFailure.history)} ` +
+            `reducedTrace=${JSON.stringify(reducedFailure.history)} ` +
+            `expected=${JSON.stringify(reducedFailure.expected)} ` +
+            `actual=${JSON.stringify(reducedFailure.actual)} ` +
+            `observation=${JSON.stringify(reducedFailure.observation)} ` +
+            `replay=verified ` +
+            `cleanup=${reducedFailure.cleanupEvidence}`,
+          { cause: reducedFailure },
+        )
+      },
+      120_000,
+    )
 
     it(`leaves externally inconsistent metadata reachable for consumer validation`, async () => {
       const observation = await observeResetResumeHistory(
@@ -3539,9 +3541,10 @@ export function runSQLiteCoreAdapterContractSuite(
  * fails the public result/binding comparison. The legacy CLI test interpolates
  * literals, so it cannot exercise this boundary.
  *
- * Replay: pass `TANSTACK_DB_SQLITE_BINDING_SEED` and
- * `TANSTACK_DB_SQLITE_BINDING_PATH` together and select this test by
- * name. The normal package test runs fixed and random campaigns.
+ * Replay: `TANSTACK_DB_ORACLE_PATH` with `TANSTACK_DB_ORACLE_SEED` and
+ * `TANSTACK_DB_ORACLE_PROPERTY=sqlite-persistence.binding-capacity` replays the
+ * recorded random-campaign history. The normal package test runs fixed and
+ * random campaigns.
  */
 const BINDING_CAP = 999
 const BINDING_FIXED_SEED = 1_993_999
@@ -4261,27 +4264,8 @@ async function runCursorContext(): Promise<string | undefined> {
   return problem
 }
 
-const bindingReplaySeed = process.env.TANSTACK_DB_SQLITE_BINDING_SEED
-const bindingReplayPath = process.env.TANSTACK_DB_SQLITE_BINDING_PATH
-const bindingReplay =
-  bindingReplaySeed !== undefined && bindingReplayPath !== undefined
-if ((bindingReplaySeed === undefined) !== (bindingReplayPath === undefined)) {
-  throw new Error(`Binding oracle replay requires both seed and path`)
-}
-if (
-  bindingReplaySeed !== undefined &&
-  !Number.isSafeInteger(Number(bindingReplaySeed))
-) {
-  throw new Error(`Binding oracle replay seed must be an integer`)
-}
-if (
-  bindingReplayPath !== undefined &&
-  !/^\d+(?::\d+)*$/.test(bindingReplayPath)
-) {
-  throw new Error(`Binding oracle replay path must be numeric`)
-}
-
-const bindingFixedIt = bindingReplay ? it.skip : it
+const BINDING_PROPERTY = `sqlite-persistence.binding-capacity`
+const bindingFixedIt = oracleReplayTest(it)
 
 export function runSQLiteBindingCapacityOracleSuite(): void {
   describe(`SQLite subset binding-capacity oracle`, () => {
@@ -4399,7 +4383,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
 
     async function campaign(
       label: string,
-      parameters: { seed?: number; path?: string },
+      parameters: { numRuns: number; seed?: number; path?: string },
     ) {
       let firstFailure: Violation | undefined
       const property = fc.asyncProperty(generated, async (spec) => {
@@ -4413,10 +4397,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
           )
         }
       })
-      const details = await fc.check(property, {
-        numRuns: BINDING_RUNS,
-        ...parameters,
-      })
+      const details = await fc.check(property, parameters)
       const reduced = details.counterexample?.[0]
       const reducedProblem = reduced
         ? violation(reduced, await observe(reduced))
@@ -4435,20 +4416,24 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       ).toBe(false)
     }
 
-    if (bindingReplay) {
-      it(`replays the requested binding history directly`, async () => {
-        await campaign(`direct replay`, {
-          seed: Number(bindingReplaySeed),
-          path: bindingReplayPath,
+    bindingFixedIt(
+      `preserves exact rows across fixed-seed binding histories`,
+      async () => {
+        await campaign(`fixed seed`, {
+          numRuns: BINDING_RUNS,
+          seed: BINDING_FIXED_SEED,
         })
-      })
-    } else {
-      it(`preserves exact rows across fixed-seed binding histories`, async () => {
-        await campaign(`fixed seed`, { seed: BINDING_FIXED_SEED })
-      })
-      it(`preserves exact rows across random-seed binding histories`, async () => {
-        await campaign(`random seed`, {})
-      })
-    }
+      },
+    )
+    // Runs in ordinary and seed-only runs, and as the replay of its property.
+    oracleReplayTest(it, BINDING_PROPERTY)(
+      `preserves exact rows across random-seed binding histories`,
+      async () => {
+        await campaign(
+          `random seed`,
+          oraclePropertyOptions(BINDING_RUNS, BINDING_PROPERTY),
+        )
+      },
+    )
   })
 }

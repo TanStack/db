@@ -10,6 +10,12 @@ import {
   normalizeValue,
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleRuns,
+} from './oracle-config.js'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
@@ -74,9 +80,8 @@ const nullsLastOpts: CompareOptions = {
 // --configLoader runner tests/comparison-oracle.property.test.ts.
 const fixedSeed = 20260911
 const campaignRuns = 100
-const requestedProperty = process.env.COMPARISON_ORACLE_PROPERTY
-const replaySeed = process.env.COMPARISON_ORACLE_SEED
-const replayPath = process.env.COMPARISON_ORACLE_PATH
+// Each property registers as `comparison.<number>`, in file order. A path
+// replay selects one with TANSTACK_DB_ORACLE_PROPERTY=comparison.<number>.
 let nextPropertyId = 0
 
 type ComparisonFailure = { checkpoint: string; error: unknown }
@@ -161,45 +166,27 @@ function comparisonProperty<
   check: (...values: Ts) => void,
 ) => void {
   return (name: string, check: (...values: Ts) => void): void => {
-    const id = String(++nextPropertyId)
+    const id = ++nextPropertyId
+    const property = `comparison.${id}`
     const label = `${id}: ${name}`
     const arbitrary = fc.tuple<Ts>(...arbitraries)
     const checkValues = (values: Ts) => {
       check(...values)
     }
 
-    if (requestedProperty !== undefined) {
-      if (requestedProperty !== id) {
-        it.skip(`${label} replay not selected`, () => {})
-        return
-      }
-      if (replaySeed === undefined || replayPath === undefined) {
-        throw new Error(`comparison oracle replay needs a seed and shrink path`)
-      }
-      const seed = Number(replaySeed)
-      if (replaySeed.trim() === `` || !Number.isSafeInteger(seed)) {
-        throw new Error(`comparison oracle replay seed must be an integer`)
-      }
-      it(`${label} replay`, () => {
-        assertComparisonProperty(label, arbitrary, checkValues, {
-          seed,
-          path: replayPath,
-          numRuns: campaignRuns,
-        })
-      })
-      return
-    }
-
-    it(`${label} fixed`, () => {
+    it.skipIf(oracleReplayRequested())(`${label} fixed`, () => {
       assertComparisonProperty(label, arbitrary, checkValues, {
         seed: fixedSeed,
-        numRuns: campaignRuns,
+        numRuns: oracleRuns(campaignRuns),
       })
     })
-    it(`${label} random`, () => {
-      assertComparisonProperty(label, arbitrary, checkValues, {
-        numRuns: campaignRuns,
-      })
+    it.skipIf(oracleReplaySkips(property))(`${label} random`, () => {
+      assertComparisonProperty(
+        label,
+        arbitrary,
+        checkValues,
+        oraclePropertyOptions(campaignRuns, property),
+      )
     })
   }
 }
@@ -1302,11 +1289,3 @@ describe(`Temporal default-order refinement`, () => {
     expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
   })
 })
-
-if (requestedProperty !== undefined) {
-  it(`selects a registered comparison oracle property`, () => {
-    expect(requestedProperty).toMatch(/^\d+$/)
-    expect(Number(requestedProperty)).toBeGreaterThanOrEqual(1)
-    expect(Number(requestedProperty)).toBeLessThanOrEqual(nextPropertyId)
-  })
-}
