@@ -80,21 +80,28 @@ const markdown = [
   ),
 ]
 
-// Map each workspace package to its source entry.
+// Map each workspace package and its subpath exports to source. CI does not
+// build the packages, so an export that falls through to dist/ is missing.
 const paths = {}
 for (const pkg of readdirSync(join(root, `packages`))) {
   const manifest = join(root, `packages`, pkg, `package.json`)
   if (!existsSync(manifest)) continue
-  const { name, private: unpublished } = JSON.parse(
-    readFileSync(manifest, `utf8`),
-  )
+  const {
+    name,
+    private: unpublished,
+    exports = {},
+  } = JSON.parse(readFileSync(manifest, `utf8`))
   // Examples document published packages only.
   if (unpublished) continue
-  for (const entry of [`src/index.ts`, `src/index.tsx`]) {
-    if (existsSync(join(root, `packages`, pkg, entry))) {
-      paths[name] = [join(`packages`, pkg, entry)]
-      break
-    }
+  for (const subpath of Object.keys(exports)) {
+    if (subpath === `./package.json`) continue
+    // `.` is src/index; `./x` is src/x.ts or src/x/index.ts.
+    const stem = subpath === `.` ? `index` : subpath.slice(2)
+    const entry = [`${stem}.ts`, `${stem}.tsx`, `${stem}/index.ts`]
+      .map((file) => join(`packages`, pkg, `src`, file))
+      .find((file) => existsSync(join(root, file)))
+    if (!entry) throw new Error(`No source for ${name} export ${subpath}`)
+    paths[subpath === `.` ? name : `${name}/${stem}`] = [entry]
   }
 }
 
