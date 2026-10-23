@@ -2813,16 +2813,12 @@ async function checkStreamCut(
           ? `suspense-first`
           : `suspense-only`,
     )
-    reach.reach(
-      (history.ordinaryFirst || history.ordinaryLast) && history.splitHydration
-        ? `split-hydration`
-        : `together-hydration`,
-    )
-    reach.reach(
-      (history.ordinaryFirst || history.ordinaryLast) && history.browserWrite
-        ? `browser-different`
-        : `browser-same`,
-    )
+    if (history.ordinaryFirst || history.ordinaryLast) {
+      reach.reach(
+        history.splitHydration ? `split-hydration` : `together-hydration`,
+      )
+      reach.reach(history.browserWrite ? `browser-different` : `browser-same`)
+    }
   } finally {
     vi.stubGlobal(`window`, browserWindow)
     finishRouterRender()
