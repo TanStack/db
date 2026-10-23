@@ -146,6 +146,18 @@ async function captureError(fn: () => InfiniteQueryHandle): Promise<unknown> {
   }
 }
 
+/** A rejected input throws at mount, reconfiguration, flush, or read. */
+async function captureRejection(
+  run: () => Promise<unknown> | unknown,
+): Promise<unknown> {
+  try {
+    await run()
+    return undefined
+  } catch (error) {
+    return error
+  }
+}
+
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt++) {
     if (check()) return
@@ -179,7 +191,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
   }
   const driver: InfiniteQueryDriver = {
     ...rawDriver,
-    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
+    makeSource: (data, collectionId) =>
+      sources!.track(rawDriver.makeSource(data, collectionId)),
     makeOnDemandSource: (data, delay) =>
       sources!.track(rawDriver.makeOnDemandSource(data, delay)),
     makeLaggingOnDemandSource: (data) =>
@@ -1655,8 +1668,98 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       },
     )
 
+    // ---- query identity (1.0 law; see contract.ts) ----------------------
+    //
+    // Each history branches only on the driver's public identity policy, and
+    // both branches check pages: a comparing binding rejects, and a reactive
+    // binding pages the current input.
+
+    // `fn.where` runs a JavaScript predicate, so its IR has no stable hash.
+    const functionalRanks = (source: { collection: any }) => (q: any) =>
+      q
+        .from({ items: source.collection })
+        .fn.where(({ items }: any) => items.rank > 4)
+        .orderBy(({ items }: any) => items.rank, `desc`)
+
+    scenario(
+      `unhashable-query`,
+      `pages a query without a stable IR identity, needing queryKey only where the binding compares identity`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        if (driver.comparesQueryIdentity) {
+          const error = await captureError(() =>
+            driver.mount(functionalRanks(source), { pageSize: 3 }),
+          )
+          expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+        }
+        const handle = driver.mount(
+          functionalRanks(source),
+          driver.comparesQueryIdentity
+            ? { pageSize: 3, queryKey: [`ranks-above`, 4] }
+            : { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 4), 3)
+        expect(handle.current().hasNextPage).toBe(false)
+      },
+    )
+
+    scenario(
+      `source-id-reuse`,
+      `rejects or pages a different source under a Collection ID the binding read`,
+      async () => {
+        const first = driver.makeSource(rows(4))
+        const other = driver.makeSource(rows(2, `o`))
+        const reused = driver.makeSource(rows(3, `r`), first.collection.id)
+        const handle = driver.mountControllable(
+          (q, source: { collection: any }) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          first,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
+        // A fresh ID and a revisit of the claimed object are legal.
+        handle.setParamSync(other)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(2, `o`), 3)
+        handle.setParamSync(first)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
+        handle.setParamSync(other)
+        await handle.flush()
+        if (!driver.comparesQueryIdentity) {
+          handle.setParamSync(reused)
+          await handle.flush()
+          expectPageRows(handle.current(), rows(3, `r`), 3)
+          return
+        }
+        const error = await captureRejection(async () => {
+          handle.setParamSync(reused)
+          await handle.flush()
+          return handle.current()
+        })
+        expect(error).toMatchObject({ name: `SourceCollectionIdReuseError` })
+        // After a rejection, every read throws or holds no rows. Two reads
+        // catch a memo that throws once and then serves its previous value.
+        for (let read = 0; read < 2; read++) {
+          let data: unknown
+          try {
+            data = handle.current().data
+          } catch {
+            continue
+          }
+          expect(data).toEqual([])
+        }
+      },
+    )
+
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(39)
+      expect(registry.size).toBe(41)
     })
   })
 }

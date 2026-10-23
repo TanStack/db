@@ -17,7 +17,12 @@
  * entries must remain distinct, including before the first hook commits.
  * A rejected render must release any sync-start deferral it acquired for a
  * shared client descriptor, so a later direct reader can start that Collection.
- * This remains true when earlier deferred sync starts throw: each pending
+ * The release history grammar crosses every rejection cause (a source ID
+ * collision, a query without a stable IR identity, a descriptor factory that
+ * throws while the query binds its sources), every hook path (live and
+ * infinite, with derived identity or a dependency list), and both direct
+ * readers (another hook over the Collection, and `startSyncImmediate()`). The
+ * release must also hold when earlier deferred sync starts throw: each pending
  * Collection is attempted before the first startup error is rethrown.
  * The bounded histories below distinguish this law from a hash-only check,
  * which would miss A(id=x) -> C(id=y) -> B(id=x), a changed predicate, and
@@ -31,6 +36,7 @@
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
+  SourceCollectionIdReuseError,
   collectionOptions,
   createCollection,
   eq,
@@ -92,11 +98,201 @@ function checkRerender(
   rerender: () => void,
 ) {
   if (expectedCollision(history, next)) {
-    expect(rerender).toThrow(/source Collection .*same ID/i)
+    expect(rerender).toThrow(SourceCollectionIdReuseError)
   } else {
     expect(rerender).not.toThrow()
   }
 }
+
+/*
+ * Release law. A hook in one DbClient scope first reads only its own source,
+ * then rerenders into a rejected query that also reads a shared descriptor.
+ * The rejected render may defer the shared Collection's sync start, and it
+ * must release that deferral: the source stays unstarted until a direct
+ * reader asks, and that reader then starts it exactly once and reads its row.
+ */
+type ReleaseStep = { current: ReturnType<typeof source>; reject: boolean }
+
+const releaseCauses: Record<
+  string,
+  (
+    shared: any,
+    failing: any,
+  ) => {
+    rejected: (step: ReleaseStep) => ReleaseStep
+    query: (q: any, step: ReleaseStep, ordered: boolean) => any
+  }
+> = {
+  'a source ID collision': (shared) => ({
+    rejected: () => ({
+      current: source(`settings`, `replacement`),
+      reject: true,
+    }),
+    query: (q, step, ordered) =>
+      orderIf(
+        step.reject
+          ? q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              )
+          : q.from({ settings: step.current }),
+        ordered,
+      ),
+  }),
+  'a query without a stable IR identity': (shared) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    query: (q, step, ordered) =>
+      orderIf(
+        step.reject
+          ? q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              )
+              .fn.where(() => true)
+          : q.from({ settings: step.current }),
+        ordered,
+      ),
+  }),
+  'a descriptor factory that throws': (shared, failing) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    query: (q, step, ordered) =>
+      orderIf(
+        step.reject
+          ? q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              )
+              .join({ failing }, ({ settings, failing: row }: any) =>
+                eq(settings.id, row.id),
+              )
+          : q.from({ settings: step.current }),
+        ordered,
+      ),
+  }),
+}
+
+function orderIf(query: any, ordered: boolean) {
+  return ordered ? query.orderBy(({ settings }: any) => settings.rank) : query
+}
+
+const releaseHooks: Record<
+  string,
+  {
+    ordered: boolean
+    use: (query: (q: any) => any, deps: Array<unknown>) => void
+  }
+> = {
+  'useLiveQuery with derived identity': {
+    ordered: false,
+    use: (query) => void useLiveQuery(query),
+  },
+  'useLiveQuery with a dependency list': {
+    ordered: false,
+    use: (query, deps) => void useLiveQuery(query, deps),
+  },
+  'useLiveInfiniteQuery with derived identity': {
+    ordered: true,
+    use: (query) => void useLiveInfiniteQuery(query, { pageSize: 1 }),
+  },
+  'useLiveInfiniteQuery with a dependency list': {
+    ordered: true,
+    use: (query, deps) =>
+      void useLiveInfiniteQuery(query, { pageSize: 1 }, deps),
+  },
+}
+
+const releaseReaders: Record<
+  string,
+  (shared: ReturnType<typeof source>) => Promise<unknown>
+> = {
+  'another hook over the Collection': async (shared) => {
+    const reader = renderHook(() => useLiveQuery(shared))
+    await act(async () => {})
+    return reader.result.current.data[0]?.value
+  },
+  'startSyncImmediate()': async (shared) => {
+    shared.startSyncImmediate()
+    await act(async () => {})
+    return shared.toArray[0]?.value
+  },
+}
+
+describe(`React source ID reuse: rejected renders release deferred sync starts`, () => {
+  let sequence = 0
+  for (const [causeName, makeCause] of Object.entries(releaseCauses)) {
+    for (const [hookName, hook] of Object.entries(releaseHooks)) {
+      for (const [readerName, read] of Object.entries(releaseReaders)) {
+        it(`after ${causeName} in ${hookName}, ${readerName} starts the shared source`, async () => {
+          const client = new DbClient()
+          const id = `release-shared-${sequence++}`
+          let syncStarts = 0
+          const shared = collectionOptions(id, () => ({
+            id,
+            getKey: (row: Row) => row.id,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                syncStarts++
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `one`, value: `shared`, rank: 1 },
+                })
+                commit()
+                markReady()
+              },
+            },
+          }))
+          const failing = collectionOptions(`${id}-failing`, () => {
+            throw new Error(`descriptor factory failed`)
+          })
+          const cause = makeCause(shared, failing)
+          function View({ step }: { step: ReleaseStep }) {
+            hook.use(
+              (q) => cause.query(q, step, hook.ordered),
+              [step.current, step.reject],
+            )
+            return <div>Query</div>
+          }
+          const consoleError = vi
+            .spyOn(console, `error`)
+            .mockImplementation(() => {})
+          try {
+            const initial = {
+              current: source(`settings`, `first`),
+              reject: false,
+            }
+            const root = render(
+              <DbProvider client={client}>
+                <TestErrorBoundary>
+                  <View step={initial} />
+                </TestErrorBoundary>
+              </DbProvider>,
+            )
+            await act(async () => {})
+            root.rerender(
+              <DbProvider client={client}>
+                <TestErrorBoundary>
+                  <View step={cause.rejected(initial)} />
+                </TestErrorBoundary>
+              </DbProvider>,
+            )
+            expect(root.getByText(`Rejected`)).toBeDefined()
+            expect(syncStarts).toBe(0)
+
+            const value = await read(client.collection(shared) as any)
+            expect(value).toBe(`shared`)
+            expect(syncStarts).toBe(1)
+          } finally {
+            consoleError.mockRestore()
+          }
+        })
+      }
+    }
+  }
+})
 
 describe(`React source ID reuse`, () => {
   it(`releases a later shared source when earlier deferred sync starts fail`, async () => {
@@ -190,76 +386,6 @@ describe(`React source ID reuse`, () => {
     }
   })
 
-  it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
-    const client = new DbClient()
-    const first = source(`settings`, `first`)
-    const replacement = source(`settings`, `replacement`)
-    let syncStarts = 0
-    const descriptor = collectionOptions(`shared-after-collision`, () => ({
-      id: `shared-after-collision`,
-      getKey: (row: Row) => row.id,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          syncStarts++
-          begin()
-          write({
-            type: `insert`,
-            value: { id: `one`, value: `shared`, rank: 1 },
-          })
-          commit()
-          markReady()
-        },
-      },
-    }))
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    function View({
-      current,
-      includeShared,
-    }: {
-      current: typeof first
-      includeShared: boolean
-    }) {
-      useLiveQuery({
-        client,
-        query: (q) =>
-          includeShared
-            ? q
-                .from({ settings: current })
-                .join({ shared: descriptor }, ({ settings, shared }) =>
-                  eq(settings.id, shared.id),
-                )
-            : q.from({ settings: current }),
-      })
-      return <div>Query</div>
-    }
-
-    try {
-      const root = render(
-        <TestErrorBoundary>
-          <View current={first} includeShared={false} />
-        </TestErrorBoundary>,
-      )
-      await act(async () => {})
-      root.rerender(
-        <TestErrorBoundary>
-          <View current={replacement} includeShared={true} />
-        </TestErrorBoundary>,
-      )
-      expect(root.getByText(`Rejected`)).toBeDefined()
-      expect(syncStarts).toBe(0)
-
-      const shared = client.collection(descriptor)
-      const reader = renderHook(() => useLiveQuery(shared))
-      await act(async () => {})
-      expect(reader.result.current.status).toBe(`ready`)
-      expect(reader.result.current.data[0]?.value).toBe(`shared`)
-      expect(syncStarts).toBe(1)
-    } finally {
-      consoleError.mockRestore()
-    }
-  })
-
   it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
@@ -344,7 +470,7 @@ describe(`React source ID reuse`, () => {
               ),
         }),
       ),
-    ).toThrow(/source Collection .*same ID/i)
+    ).toThrow(SourceCollectionIdReuseError)
   })
 
   it(`keeps a mounted hook's ID binding after source cleanup`, async () => {
@@ -498,7 +624,7 @@ describe(`React source ID reuse`, () => {
           <View current={replacement} />
         </DbProvider>,
       ),
-    ).toThrow(/source Collection .*same ID/i)
+    ).toThrow(SourceCollectionIdReuseError)
   })
 
   it(`remembers each client scope when one mounted hook switches clients`, async () => {
@@ -687,77 +813,5 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
           </Suspense>,
         ),
     )
-  })
-
-  it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
-    const client = new DbClient()
-    const first = source(`settings`, `first`)
-    const replacement = source(`settings`, `replacement`)
-    let syncStarts = 0
-    const descriptor = collectionOptions(
-      `infinite-shared-after-collision`,
-      () => ({
-        id: `infinite-shared-after-collision`,
-        getKey: (row: Row) => row.id,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            syncStarts++
-            begin()
-            write({
-              type: `insert`,
-              value: { id: `one`, value: `shared`, rank: 1 },
-            })
-            commit()
-            markReady()
-          },
-        },
-      }),
-    )
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    function View({
-      current,
-      includeShared,
-    }: {
-      current: typeof first
-      includeShared: boolean
-    }) {
-      useLiveInfiniteQuery(
-        (q) =>
-          includeShared
-            ? q
-                .from({ settings: current })
-                .join({ shared: descriptor }, ({ settings, shared }) =>
-                  eq(settings.id, shared.id),
-                )
-                .orderBy(({ settings }) => settings.rank)
-            : q
-                .from({ settings: current })
-                .orderBy(({ settings }) => settings.rank),
-        { pageSize: 1, client },
-      )
-      return <div>Query</div>
-    }
-    try {
-      const root = render(
-        <TestErrorBoundary>
-          <View current={first} includeShared={false} />
-        </TestErrorBoundary>,
-      )
-      await act(async () => {})
-      root.rerender(
-        <TestErrorBoundary>
-          <View current={replacement} includeShared={true} />
-        </TestErrorBoundary>,
-      )
-      expect(root.getByText(`Rejected`)).toBeDefined()
-      expect(syncStarts).toBe(0)
-      const shared = client.collection(descriptor)
-      const reader = renderHook(() => useLiveQuery(shared))
-      await act(async () => {})
-      expect(reader.result.current.data[0]?.value).toBe(`shared`)
-      expect(syncStarts).toBe(1)
-    } finally {
-      consoleError.mockRestore()
-    }
   })
 })

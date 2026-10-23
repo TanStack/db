@@ -6,9 +6,11 @@ import {
   BaseQueryBuilder,
   UnhashableQueryIRError,
   createLiveQueryObserver,
+  createLiveQuerySourceIdClaims,
   getLiveQueryHash,
   getPublicCollection,
   getStableValueHash,
+  identifyLiveQuery,
   isCollection,
   isSingleResultCollection,
   prepareLiveQueryValue,
@@ -337,6 +339,9 @@ export function useLiveQuery(
   deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const contextDbClient = useOptionalDbClient()
+  // Source Collection IDs this hook's client-backed queries read, kept until
+  // it unmounts.
+  const sourceIdClaims = createLiveQuerySourceIdClaims()
 
   const resolved = $derived.by(() => {
     // First check if the original parameter might be a getter
@@ -405,16 +410,40 @@ export function useLiveQuery(
       ? toValue(configuredQueryKey)
       : undefined
 
+    // A DbClient matches preloaded and hydrated queries by identity hash, so
+    // a client-backed query without queryKey needs a stable IR identity and
+    // keeps each source Collection ID's object while the hook is mounted.
+    // Either rejection releases the sources this preparation deferred.
+    const derivedHash =
+      dbClient && !queryKey?.length
+        ? identifyLiveQuery(
+            preparedValue,
+            {
+              claims: sourceIdClaims,
+              client: dbClient,
+              bindingName: `useLiveQuery`,
+              deferredCollections,
+            },
+            getLiveQueryHash,
+          )
+        : undefined
+
     let queryHash: string | undefined
     try {
       queryHash =
         deps.length > 0 && !queryKey
           ? getStableValueHash(
-              [`deps`, dependencyValues, getLiveQueryHash(preparedValue)],
+              [
+                `deps`,
+                dependencyValues,
+                derivedHash ?? getLiveQueryHash(preparedValue),
+              ],
               `queryKey`,
             )
-          : getLiveQueryHash(preparedValue, queryKey)
+          : (derivedHash ?? getLiveQueryHash(preparedValue, queryKey))
     } catch (error) {
+      // A dependency value or a client-free query that cannot be hashed
+      // leaves hydration without a key; it does not reject the query.
       if (!(error instanceof UnhashableQueryIRError)) throw error
       if (queryKey !== undefined) throw error
     }
@@ -534,8 +563,13 @@ export function useLiveQuery(
     }
   })
 
+  // Every read goes through the compiled query, so a query the hook rejected
+  // throws on each read instead of serving the previous query's state.
+  const readResolved = () => resolved
+
   return {
     get state() {
+      readResolved()
       return state
     },
     get data() {
@@ -549,30 +583,39 @@ export function useLiveQuery(
       return getPublicCollection(resolved.collection)
     },
     get status() {
+      readResolved()
       return status as CollectionStatus
     },
     get isLoading() {
+      readResolved()
       return status === `loading`
     },
     get isReady() {
+      readResolved()
       return status === `ready` || status === `disabled`
     },
     get persistedStatus() {
+      readResolved()
       return persistedStatus
     },
     get isPersistedReady() {
+      readResolved()
       return persistedStatus === `ready`
     },
     get persistedError() {
+      readResolved()
       return persistedError
     },
     get isIdle() {
+      readResolved()
       return status === `idle`
     },
     get isError() {
+      readResolved()
       return status === `error`
     },
     get isCleanedUp() {
+      readResolved()
       return status === `cleaned-up`
     },
   }

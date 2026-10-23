@@ -4,22 +4,23 @@ import { useRef, useSyncExternalStore } from 'react'
 import {
   UnhashableQueryIRError,
   createLiveQueryObserver,
+  createLiveQuerySourceIdClaims,
   deepEquals,
-  getPreparedLiveQueryIdentity,
+  getLiveQueryKey,
+  getSourceObjectToken,
   getStableValueHash,
+  identifyLiveQuery,
   isCollection,
   prepareLiveQueryValue,
   resolveLiveQueryValue,
+  resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import { setLiveQueryResultInfo } from './live-query-internals'
 import { shouldWarnInDevelopment } from './development'
 import {
-  claimSourceIds,
-  createSourceIdBindings,
   getPreparedSources,
-  getSourceObjectToken,
-  resumeSyncStarts,
+  getUnboundDescriptorReporter,
 } from './source-id-bindings'
 import type {
   Collection,
@@ -31,8 +32,10 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryIdentityScope,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
+  LiveQuerySourceIdClaims,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -47,7 +50,6 @@ const DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD = 10
 const DERIVED_IDENTITY_TOTAL_WARN_MS = 50
 const warnedDepsCallsites = new Set<string>()
 const warnedDerivedIdentityCallsites = new Set<string>()
-const warnedUnhashableIdentityCallsites = new Set<string>()
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
 type SuspenseCollection = Collection<object, string | number, {}>
@@ -227,14 +229,6 @@ function warnDerivedIdentityHotPath(
   )
 }
 
-function getExplicitQueryKey(value: unknown): LiveQueryKey | undefined {
-  return value &&
-    typeof value === `object` &&
-    Array.isArray((value as { queryKey?: unknown }).queryKey)
-    ? (value as { queryKey: LiveQueryKey }).queryKey
-    : undefined
-}
-
 function getExplicitDbClient(value: unknown): DbClient | undefined {
   return value &&
     typeof value === `object` &&
@@ -252,43 +246,57 @@ export function prepareQueryValue(
   return prepareLiveQueryValue(value, dbClient, deferredCollections)
 }
 
-type DerivedQueryPreparation =
-  | {
-      status: `hashable`
-      value: unknown
-      identityDeps: Array<unknown>
-    }
-  | {
-      status: `unhashable`
-      value: unknown
-      error: UnhashableQueryIRError
-    }
+type DerivedQueryPreparation = {
+  value: unknown
+  identityDeps: Array<unknown>
+}
 
+type HookIdentityScope = LiveQueryIdentityScope & {
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>
+}
+
+/** How a hook checks a prepared query whose identity it compares. */
+export function getIdentityScope(
+  claims: LiveQuerySourceIdClaims | undefined,
+  dbClient: DbClient | undefined,
+  hookName: string,
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+): HookIdentityScope {
+  return {
+    claims,
+    client: dbClient,
+    bindingName: hookName,
+    deferredCollections,
+    onUnboundDescriptor: getUnboundDescriptorReporter(dbClient, hookName),
+  }
+}
+
+/**
+ * Prepare a query without `queryKey`, derive its identity, and claim its
+ * source Collection IDs. A query whose IR has no stable identity throws
+ * `UnhashableQueryIRError`; either rejection releases the render's deferred
+ * sync starts.
+ */
 export function prepareDerivedQuery(
   value: unknown,
-  dbClient: DbClient | undefined,
   profiler: DerivedIdentityProfiler,
-  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+  scope: HookIdentityScope,
 ): DerivedQueryPreparation {
   const shouldProfile =
     shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
     process.env.NODE_ENV !== `production`
   const start = shouldProfile ? getCurrentTime() : 0
-  const preparedValue = prepareQueryValue(value, dbClient, deferredCollections)
+  const preparedValue = prepareQueryValue(
+    value,
+    scope.client,
+    scope.deferredCollections,
+  )
 
   try {
-    const identity = getPreparedLiveQueryIdentity(preparedValue)
     return {
-      status: `hashable`,
       value: preparedValue,
-      identityDeps: [`derived`, identity],
+      identityDeps: [`derived`, identifyLiveQuery(preparedValue, scope)],
     }
-  } catch (error) {
-    if (error instanceof UnhashableQueryIRError) {
-      return { status: `unhashable`, value: preparedValue, error }
-    }
-
-    throw error
   } finally {
     if (shouldProfile) {
       const durationMs = getCurrentTime() - start
@@ -298,29 +306,6 @@ export function prepareDerivedQuery(
       warnDerivedIdentityHotPath(profiler, durationMs)
     }
   }
-}
-
-export function warnUnhashableDerivedIdentity(
-  error: UnhashableQueryIRError,
-): void {
-  if (!(
-    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
-    process.env.NODE_ENV !== `production`
-  )) {
-    return
-  }
-
-  const callsite = getWarningCallsite(4)
-  if (warnedUnhashableIdentityCallsites.has(callsite)) {
-    return
-  }
-  warnedUnhashableIdentityCallsites.add(callsite)
-
-  console.warn(
-    `[useLiveQuery] This query cannot derive a stable identity because ${error.reason} at ${error.path}. ` +
-      `It will keep the legacy mount-stable behavior for now. Add queryKey: [...] to make captured values reactive. ` +
-      `Unhashable queries without queryKey will throw in 1.0.`,
-  )
 }
 
 /**
@@ -730,7 +715,6 @@ function createHookInstance(dbClient: DbClient | undefined) {
     deps: null as Array<unknown> | null,
     config: null as unknown,
     client: dbClient,
-    legacyUnhashableIdentity: [`legacy-unhashable`] as Array<unknown>,
     derivedIdentityProfiler: {
       renderCount: 0,
       totalMs: 0,
@@ -740,7 +724,7 @@ function createHookInstance(dbClient: DbClient | undefined) {
     deferredCollections: new Set<
       CollectionImpl<any, string | number, any, any, any>
     >(),
-    sourceIds: createSourceIdBindings(),
+    sourceIds: createLiveQuerySourceIdClaims(),
     observer: null as LiveQueryObserver<object, string | number> | null,
     queryHash: undefined as string | undefined,
     suspenseKey: undefined as string | undefined,
@@ -765,10 +749,10 @@ function useLiveQueryImpl(
   const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
   const instance = (instanceRef.current ??= createHookInstance(dbClient))
   const resumeDeferredCollections = () =>
-    resumeSyncStarts(instance.deferredCollections)
+    resumeDeferredLiveQueryCollections(instance.deferredCollections)
 
   const queryKey = !inputIsCollection
-    ? getExplicitQueryKey(configOrQueryOrCollection)
+    ? getLiveQueryKey(configOrQueryOrCollection)
     : undefined
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
     unpreparedQueryValue
@@ -781,49 +765,45 @@ function useLiveQueryImpl(
     streamIdentity = [`queryKey`, queryKey]
   } else if (deps !== undefined) {
     identityDeps = resolvedDeps
-    // Deps decide reuse. Only hydration and Suspense read the query hash; the
-    // development warning about unhashable queries still derives it.
-    if (
-      dbClient ||
-      forSuspense ||
-      (shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
-        process.env.NODE_ENV !== `production`)
-    )
-      try {
-        preparedQueryValue = prepareQueryValue(
-          configOrQueryOrCollection,
-          dbClient,
-          instance.deferredCollections,
-        )
-        streamIdentity = [
-          `deps`,
-          resolvedDeps,
-          getPreparedLiveQueryIdentity(preparedQueryValue),
-        ]
-      } catch (error) {
-        if (!(error instanceof UnhashableQueryIRError)) throw error
-        warnUnhashableDerivedIdentity(error)
-        identityError = error
-      }
+    // Deps decide reuse. Only hydration and Suspense read the query hash
+    // before compiling; every compile checks the identity below.
+    if (dbClient || forSuspense) {
+      preparedQueryValue = prepareQueryValue(
+        configOrQueryOrCollection,
+        dbClient,
+        instance.deferredCollections,
+      )
+      streamIdentity = [
+        `deps`,
+        resolvedDeps,
+        identifyLiveQuery(
+          preparedQueryValue,
+          getIdentityScope(
+            undefined,
+            dbClient,
+            `useLiveQuery`,
+            instance.deferredCollections,
+          ),
+        ),
+      ]
+    }
   } else if (inputIsCollection) {
     identityDeps = []
     streamIdentity = [`collection`, configOrQueryOrCollection.id]
   } else {
     const preparation = prepareDerivedQuery(
       configOrQueryOrCollection,
-      dbClient,
       instance.derivedIdentityProfiler,
-      instance.deferredCollections,
+      getIdentityScope(
+        instance.sourceIds,
+        dbClient,
+        `useLiveQuery`,
+        instance.deferredCollections,
+      ),
     )
     preparedQueryValue = preparation.value
-    if (preparation.status === `hashable`) {
-      identityDeps = preparation.identityDeps
-      streamIdentity = preparation.identityDeps
-    } else {
-      warnUnhashableDerivedIdentity(preparation.error)
-      identityDeps = instance.legacyUnhashableIdentity
-      identityError = preparation.error
-    }
+    identityDeps = preparation.identityDeps
+    streamIdentity = preparation.identityDeps
   }
 
   let queryHash: string | undefined
@@ -842,20 +822,6 @@ function useLiveQueryImpl(
 
   if (deps !== undefined) {
     warnDeprecatedDepsArray()
-  }
-
-  if (
-    queryKey === undefined &&
-    deps === undefined &&
-    preparedQueryValue !== unpreparedQueryValue
-  ) {
-    claimSourceIds(
-      instance.sourceIds,
-      preparedQueryValue,
-      dbClient,
-      `useLiveQuery`,
-      resumeDeferredCollections,
-    )
   }
 
   const canReuseSuspenseKey =
@@ -946,6 +912,19 @@ function useLiveQueryImpl(
             configOrQueryOrCollection,
             dbClient,
             instance.deferredCollections,
+          )
+        }
+        if (queryKey === undefined && deps !== undefined) {
+          // A dependency list decides reuse, so check the query when it
+          // compiles: it needs a stable identity and keeps its sources' IDs.
+          identifyLiveQuery(
+            preparedQueryValue,
+            getIdentityScope(
+              instance.sourceIds,
+              dbClient,
+              `useLiveQuery`,
+              instance.deferredCollections,
+            ),
           )
         }
         if (!dbClient) {

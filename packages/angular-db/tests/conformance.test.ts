@@ -62,10 +62,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-angular-${sourceSeq++}`,
+      id: collectionId ?? `conformance-angular-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -231,6 +232,8 @@ function mountControllable<P>(
 
 const angularDriver: LiveQueryDriver = {
   name: `angular`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,

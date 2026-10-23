@@ -1,6 +1,6 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
-import { isCollection } from './live-query-adapter.js'
+import { isCollection } from './live-query-primitives.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
   createPooledLiveQuery,
@@ -31,6 +31,23 @@ export type LiveQueryOptions = LiveQueryCollectionConfig<any> & {
 export type DeferredLiveQueryCollections = Set<
   CollectionImpl<any, string | number, any, any, any>
 >
+
+/**
+ * Release the sync starts a rejected query input deferred, then rethrow its
+ * rejection. As for a `DbClient` preload, the rejection wins over a source
+ * whose resumed start fails; that source records its own failure.
+ */
+export function rejectLiveQueryInput(
+  collections: DeferredLiveQueryCollections | undefined,
+  rejection: unknown,
+): never {
+  try {
+    if (collections) resumeDeferredLiveQueryCollections(collections)
+  } catch {
+    // Report the rejection, not a later start failure.
+  }
+  throw rejection
+}
 
 /** Release every deferred source, then report the first startup failure. */
 export function resumeDeferredLiveQueryCollections(
@@ -86,13 +103,31 @@ function createCollectionResolver(
   }
 }
 
+/**
+ * Bind a query input's descriptor sources to `dbClient` and invoke its query
+ * callback. Sources materialized for a render defer their sync start into
+ * `deferredCollections`; a preparation that throws releases them, so a later
+ * reader can still start those sources.
+ */
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
   deferredCollections?: DeferredLiveQueryCollections,
 ): unknown {
+  try {
+    return prepareValue(value, dbClient, deferredCollections)
+  } catch (error) {
+    return rejectLiveQueryInput(deferredCollections, error)
+  }
+}
+
+function prepareValue(
+  value: unknown,
+  dbClient: DbClient | undefined,
+  deferredCollections?: DeferredLiveQueryCollections,
+): unknown {
   if (typeof value === `function`) {
-    return prepareLiveQueryValue(
+    return prepareValue(
       value(createInitialQueryBuilder()),
       dbClient,
       deferredCollections,
@@ -119,11 +154,7 @@ export function prepareLiveQueryValue(
       ...config
     } = value as PreparedLiveQueryConfigInput
 
-    const preparedQuery = prepareLiveQueryValue(
-      query,
-      dbClient,
-      deferredCollections,
-    )
+    const preparedQuery = prepareValue(query, dbClient, deferredCollections)
 
     if (preparedQuery === undefined || preparedQuery === null) {
       return preparedQuery
@@ -203,12 +234,6 @@ export function getLiveQueryHash(
   return getStableValueHash(identity, `queryKey`)
 }
 
-/**
- * Resolve an adapter's query value to what its observer watches: `null` for a
- * disabled query, an existing Collection with sync started, or a live query.
- * A query builder whose shape a shared partition can serve gets a pooled view
- * instead of its own live-query Collection.
- */
 // A config that names only its query and lifetime describes the same live
 // query as its builder. Any other option shapes its Collection, so compiles.
 function poolConfig(
@@ -226,6 +251,12 @@ function poolConfig(
   })
 }
 
+/**
+ * Resolve an adapter's query value to what its observer watches: `null` for a
+ * disabled query, an existing Collection with sync started, or a live query.
+ * A query builder whose shape a shared partition can serve gets a pooled view
+ * instead of its own live-query Collection.
+ */
 export function resolveLiveQueryValue(
   value: unknown,
   {

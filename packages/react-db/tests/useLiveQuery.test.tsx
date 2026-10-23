@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
+  UnhashableQueryIRError,
   coalesce,
   collectionOptions,
   count,
@@ -3262,8 +3263,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).not.toBe(firstCollection)
     })
 
-    it(`warns and preserves legacy behavior when a functional query has no queryKey`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    it(`throws when a functional query has no queryKey`, () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `derived-identity-functional-missing-key`,
@@ -3283,15 +3283,7 @@ describe(`Query Collections`, () => {
             }),
           { initialProps: { minAge: 25 } },
         ),
-      ).not.toThrow()
-
-      const warnings = warnSpy.mock.calls.filter(([message]) =>
-        String(message).includes(`cannot derive a stable identity`),
-      )
-      expect(warnings).toHaveLength(1)
-      expect(warnings[0]![0]).toContain(`queryKey`)
-      expect(warnings[0]![0]).toContain(`1.0`)
-      warnSpy.mockRestore()
+      ).toThrow(UnhashableQueryIRError)
     })
 
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
@@ -3326,41 +3318,6 @@ describe(`Query Collections`, () => {
       )
       expect(warnings).toHaveLength(0)
       warnSpy.mockRestore()
-    })
-
-    it(`does not emit identity warnings in production`, () => {
-      const previousNodeEnv = process.env.NODE_ENV
-      process.env.NODE_ENV = `production`
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `derived-identity-production-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      let unmount: (() => void) | undefined
-      try {
-        ;({ unmount } = renderHook(() =>
-          useLiveQuery({
-            query: (q) =>
-              q
-                .from({ people: collection })
-                .fn.where(({ people }) => people.age > 25),
-          }),
-        ))
-
-        expect(
-          warnSpy.mock.calls.some(([message]) =>
-            String(message).includes(`cannot derive a stable identity`),
-          ),
-        ).toBe(false)
-      } finally {
-        unmount?.()
-        process.env.NODE_ENV = previousNodeEnv
-        warnSpy.mockRestore()
-      }
     })
 
     it(`uses explicit queryKey for functional query variants`, async () => {

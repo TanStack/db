@@ -20,6 +20,7 @@ import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
+import { rejectReadsAfterRenderError } from './rejected-binding'
 import type { RenderHookResult } from '@testing-library/react'
 import type {
   InfiniteQueryConfig,
@@ -31,11 +32,14 @@ import type { QueryBuild } from '../../db/tests/conformance/contract'
 
 let sourceSequence = 0
 
-function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
+function makeSource<T extends { id: string }>(
+  initialData: ReadonlyArray<T>,
+  collectionId?: string,
+) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
-      id: `infinite-conformance-react-${sourceSequence++}`,
+      id: collectionId ?? `infinite-conformance-react-${sourceSequence++}`,
       getKey: (row) => row.id,
       initialData: [...initialData],
     }),
@@ -150,11 +154,12 @@ function mountControllable<P>(
       ),
     { initialProps: { param: initial } },
   )
+  const guard = rejectReadsAfterRenderError(hook)
   const handle = makeHandle(hook, log)
   return {
     ...handle,
     setParamSync(param: P) {
-      act(() => hook.rerender({ param }))
+      guard(() => act(() => hook.rerender({ param })))
     },
   }
 }
@@ -179,11 +184,12 @@ function mountCollectionControllable(
       useRecorded(useLiveInfiniteQuery(collection, config as any), log),
     { initialProps: { collection: initial } },
   )
+  const guard = rejectReadsAfterRenderError(hook)
   const handle = makeHandle(hook, log)
   return {
     ...handle,
     replaceCollectionSync(collection: any) {
-      act(() => hook.rerender({ collection }))
+      guard(() => act(() => hook.rerender({ collection })))
     },
   }
 }
@@ -198,11 +204,12 @@ function mountConfigControllable(
       useRecorded(useLiveInfiniteQuery(build as any, config as any), log),
     { initialProps: { config: initial } },
   )
+  const guard = rejectReadsAfterRenderError(hook)
   const handle = makeHandle(hook, log)
   return {
     ...handle,
     setConfigSync(config: InfiniteQueryConfig) {
-      act(() => hook.rerender({ config }))
+      guard(() => act(() => hook.rerender({ config })))
     },
   }
 }
@@ -229,17 +236,20 @@ function mountInputControllable(
       },
     },
   )
+  const guard = rejectReadsAfterRenderError(hook)
   const handle = makeHandle(hook, log)
   return {
     ...handle,
     setInputKindSync(kind: `collection` | `query`) {
-      act(() => hook.rerender({ kind }))
+      guard(() => act(() => hook.rerender({ kind })))
     },
   }
 }
 
 const reactInfiniteDriver: InfiniteQueryDriver = {
   name: `react`,
+  // Each render re-runs the query input and compares its identity.
+  comparesQueryIdentity: true,
   gt,
   makeSource,
   makeOnDemandSource: (data, delay) =>

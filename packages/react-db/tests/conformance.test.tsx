@@ -28,6 +28,7 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import { rejectReadsAfterRenderError } from './rejected-binding'
 import type { RenderHookResult } from '@testing-library/react'
 import type {
   ConformanceResult,
@@ -47,10 +48,13 @@ function writer<T extends { id: string }>(collection: any) {
   }
 }
 
-function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
+function makeSource<T extends { id: string }>(
+  initialData: ReadonlyArray<T>,
+  collectionId?: string,
+) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-react-${sourceSeq++}`,
+      id: collectionId ?? `conformance-react-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -158,13 +162,16 @@ function mountControllable<P>(
       useLiveQuery((q: any) => build(q, param), [param]),
     { initialProps: { param: initial } },
   )
+  const guard = rejectReadsAfterRenderError(hook)
   const handle = makeHandle(hook)
   return {
     ...handle,
     async setParam(param: P) {
-      await act(async () => {
-        hook.rerender({ param })
-      })
+      await guard(() =>
+        act(async () => {
+          hook.rerender({ param })
+        }),
+      )
       await handle.flush()
     },
   }
@@ -208,6 +215,8 @@ function makeHandle(hook: RenderHookResult<any, any>) {
 
 const reactDriver: LiveQueryDriver = {
   name: `react`,
+  // Each render re-runs the query input and compares its identity.
+  comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
@@ -272,13 +281,15 @@ it(`publishes a synchronous full-source ordered limit in the first layout commit
   ])
   const commits: Array<{ ids: Array<string>; status: string }> = []
   const hook = renderHook(() => {
-    const result = useLiveQuery((q) =>
-      q
-        .from({ row: source.collection })
-        .fn.where(({ row }) => row.rank > 0)
-        .orderBy(({ row }) => row.rank)
-        .limit(2),
-    )
+    const result = useLiveQuery({
+      queryKey: [`full-source-ordered-limit`],
+      query: (q) =>
+        q
+          .from({ row: source.collection })
+          .fn.where(({ row }) => row.rank > 0)
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
+    })
     useLayoutEffect(() => {
       commits.push({
         ids: result.data.map(({ id }) => id),

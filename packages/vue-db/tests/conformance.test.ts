@@ -51,10 +51,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-vue-${sourceSeq++}`,
+      id: collectionId ?? `conformance-vue-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -223,6 +224,8 @@ function mountControllable<P>(
 
 const vueDriver: LiveQueryDriver = {
   name: `vue`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,

@@ -35,6 +35,17 @@
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
  * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
+ *
+ * The query-identity scenarios (see `contract.ts`) run each history through
+ * both identity policies. A comparing binding rejects an unhashable query
+ * without `queryKey` (an empty key counts as none) at mount and at
+ * recompilation and accepts it with a key;
+ * a reactive binding runs it and recompiles when a captured value changes.
+ * The source-ID history distinguishes a remembered claim from a check against
+ * only the previous query: A(x) -> C(y) -> A(x) is legal, and a later
+ * C(y) -> B(x) rejects in a comparing binding and reads B in a reactive one.
+ * A new binding reads B after the first unmounts. Two same-ID objects in one
+ * query follow the same split: rejected, or each read.
  */
 import { describe, expect, it } from 'vitest'
 import { waitForPersistedInitialRender } from '@tanstack/db'
@@ -71,6 +82,43 @@ async function expectRetired(collection: ConformanceCollection): Promise<void> {
   await expect
     .poll(() => collection.status, { interval: 5, timeout: 500 })
     .toBe(`cleaned-up`)
+}
+
+/**
+ * A rejected query input throws at the adapter's compile point: from the
+ * mount or reconfiguration, or from the next result read.
+ */
+async function expectRejection(
+  name: string,
+  run: () => Promise<unknown> | unknown,
+): Promise<void> {
+  let rejection: unknown
+  try {
+    await run()
+  } catch (error) {
+    rejection = error
+  }
+  expect(rejection, `expected ${name}`).toMatchObject({ name })
+}
+
+/**
+ * After a rejection, every read throws or holds no rows. Two reads catch a
+ * memo that throws once and then serves its previous value.
+ */
+function expectNoRowsAfterRejection(h: LiveQueryHandle): void {
+  for (let read = 0; read < 2; read++) {
+    let result: ReturnType<LiveQueryHandle[`current`]>
+    try {
+      result = h.current()
+    } catch {
+      continue
+    }
+    const { data, state } = result
+    expect(
+      Array.isArray(data) ? data : data === undefined ? [] : [data],
+    ).toEqual([])
+    expect(state?.size ?? 0).toBe(0)
+  }
 }
 
 async function wait(ms: number): Promise<void> {
@@ -113,7 +161,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
   const driver: LiveQueryDriver = {
     ...rawDriver,
-    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
+    makeSource: (data, collectionId) =>
+      sources!.track(rawDriver.makeSource(data, collectionId)),
     makeDeferredSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
@@ -1092,6 +1141,185 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
 
+    // ---- Tier 2: query identity (1.0 law; see contract.ts) ---------------
+    //
+    // Each scenario runs one history and branches only on the driver's public
+    // `comparesQueryIdentity` policy: a comparing binding rejects, and a
+    // reactive binding publishes the current input's rows. Both branches
+    // check rows, so a reactive binding that kept the old source's rows fails
+    // as surely as a comparing binding that accepted the swap.
+
+    // `fn.where` runs a JavaScript predicate, so its IR has no stable hash.
+    const olderThan = (source: { collection: any }, age: number) => (q: any) =>
+      q
+        .from({ items: source.collection })
+        .fn.where(({ items }: any) => items.age > age)
+        .select(({ items }: any) => ({ id: items.id }))
+    const idsOf = (rows: ReadonlyArray<{ id: string }>) =>
+      rows.map(({ id }) => ({ id }))
+    const comparesIdentity = driver.comparesQueryIdentity
+
+    scenario(
+      `unhashable-query`,
+      `a query without a stable IR identity needs queryKey only where the binding compares identity`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const build = olderThan(source, 26)
+        for (const mount of [
+          () => driver.mount(build),
+          () => driver.mountConfig(build),
+        ]) {
+          if (comparesIdentity) {
+            await expectRejection(`UnhashableQueryIRError`, async () => {
+              const h = mount()
+              await h.flush()
+              return h.current()
+            })
+          } else {
+            const h = mount()
+            await h.flush()
+            expectUnorderedRows(h.current().data, [{ id: `1` }, { id: `3` }])
+            h.unmount()
+          }
+        }
+        if (comparesIdentity) {
+          // An empty key is absent, as it is for a DbClient preload, so the
+          // query still needs a derived identity.
+          await expectRejection(`UnhashableQueryIRError`, async () => {
+            const h = driver.mountConfig(build, { queryKey: [] })
+            await h.flush()
+            return h.current()
+          })
+          // A queryKey owns the identity, so the same query runs.
+          const h = driver.mountConfig(build, { queryKey: [`older-than`, 26] })
+          await h.flush()
+          expectUnorderedRows(h.current().data, [{ id: `1` }, { id: `3` }])
+          h.unmount()
+        }
+      },
+    )
+
+    scenario(
+      `unhashable-recompile`,
+      `recompiling to a query without a stable IR identity follows the binding's identity policy`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        // `null` selects the structured query; a number, the functional one.
+        const h = driver.mountControllable<number | null>(
+          (q, age) =>
+            age === null
+              ? q
+                  .from({ items: source.collection })
+                  .select(({ items }: any) => ({ id: items.id }))
+              : olderThan(source, age)(q),
+          null,
+        )
+        await h.flush()
+        expectUnorderedRows(h.current().data, idsOf(SEED))
+        if (comparesIdentity) {
+          await expectRejection(`UnhashableQueryIRError`, async () => {
+            await h.setParam(26)
+            return h.current()
+          })
+          expectNoRowsAfterRejection(h)
+          return
+        }
+        // A changed captured value recompiles, though no identity names it.
+        await h.setParam(26)
+        expectUnorderedRows(h.current().data, [{ id: `1` }, { id: `3` }])
+        await h.setParam(32)
+        expectUnorderedRows(h.current().data, [{ id: `3` }])
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `source-id-reuse`,
+      `a different source under a Collection ID the binding read is rejected or read as the new source`,
+      async () => {
+        const first = driver.makeSource(SEED)
+        const other = driver.makeSource([
+          { id: `9`, name: `Other`, age: 40, team: `c` },
+        ])
+        const reused = driver.makeSource(
+          [{ id: `8`, name: `Reused`, age: 50, team: `d` }],
+          first.collection.id,
+        )
+        expect(reused.collection.id).toBe(first.collection.id)
+        expect(reused.collection).not.toBe(first.collection)
+        const h = driver.mountControllable<{ collection: any }>(
+          (q, source) =>
+            q
+              .from({ items: source.collection })
+              .select(({ items }: any) => ({ id: items.id })),
+          first,
+        )
+        await h.flush()
+        expectUnorderedRows(h.current().data, idsOf(SEED))
+        // A fresh ID and a revisit of the claimed object are legal.
+        await h.setParam(other)
+        expectUnorderedRows(h.current().data, [{ id: `9` }])
+        await h.setParam(first)
+        expectUnorderedRows(h.current().data, idsOf(SEED))
+        // The claim outlives the query that made it: going through another
+        // ID first must not let a different object reuse the first ID.
+        await h.setParam(other)
+        if (comparesIdentity) {
+          await expectRejection(`SourceCollectionIdReuseError`, async () => {
+            await h.setParam(reused)
+            return h.current()
+          })
+          expectNoRowsAfterRejection(h)
+        } else {
+          await h.setParam(reused)
+          expectUnorderedRows(h.current().data, [{ id: `8` }])
+        }
+        h.unmount()
+
+        // A new binding starts with no claims.
+        const fresh = driver.mount((q) =>
+          q
+            .from({ items: reused.collection })
+            .select(({ items }: any) => ({ id: items.id })),
+        )
+        await fresh.flush()
+        expectUnorderedRows(fresh.current().data, [{ id: `8` }])
+        fresh.unmount()
+      },
+    )
+
+    scenario(
+      `source-id-reuse-in-one-query`,
+      `a query that reads two sources under one Collection ID is rejected or reads both`,
+      async () => {
+        const first = driver.makeSource(SEED)
+        const reused = driver.makeSource(SEED.slice(0, 2), first.collection.id)
+        const build = (q: any) =>
+          q
+            .from({ left: first.collection })
+            .join(
+              { right: reused.collection },
+              ({ left, right }: any) => ops.eq(left.id, right.id),
+              `inner`,
+            )
+            .select(({ left }: any) => ({ id: left.id }))
+        if (comparesIdentity) {
+          await expectRejection(`SourceCollectionIdReuseError`, async () => {
+            const h = driver.mount(build)
+            await h.flush()
+            return h.current()
+          })
+          return
+        }
+        const h = driver.mount(build)
+        await h.flush()
+        // The inner join matches only rows both objects hold, so a binding
+        // that read one object for both sides would publish all three.
+        expectUnorderedRows(h.current().data, idsOf(SEED.slice(0, 2)))
+        h.unmount()
+      },
+    )
+
     // ---- Tier 2: optimistic mutation -------------------------------------
 
     scenario(
@@ -1271,7 +1499,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(37)
+      expect(registry.size).toBe(41)
     })
   })
 }
