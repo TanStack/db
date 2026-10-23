@@ -1,6 +1,10 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
 import { isCollection } from './live-query-primitives.js'
+import {
+  DEFAULT_GC_TIME_MS,
+  UNSUBSCRIBED_GC_FLOOR_MS,
+} from './collection/lifecycle.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
   createPooledLiveQuery,
@@ -61,24 +65,35 @@ export function rejectLiveQueryInput(
  * A render that never commits, because a sibling threw or it suspended, leaves
  * its live query unsubscribed until garbage collection cleans it up; that
  * cleanup releases the starts, so a direct reader's demand, made before or
- * after, then starts the sources. Releases only the starts deferred so far,
- * not ones a later render of the same hook defers. Pass only a live query the
- * render built, and call the returned function when the render commits, so a
- * committed hook keeps no listener or copied sources.
+ * after, then starts the sources. A live query that garbage collection never
+ * reclaims, because its config disables GC or does not start its sync,
+ * releases after the unsubscribed GC floor instead. Releases only the starts
+ * deferred so far, not ones a later render of the same hook defers. Pass only
+ * a live query the render built, and call the returned function when the
+ * render commits, so a committed hook keeps no listener, timer, or copied
+ * sources.
  */
 export function releaseDeferredOnReclaim(
-  liveQuery: Pick<Collection<any, any, any>, `once`>,
+  liveQuery: Pick<Collection<any, any, any>, `once` | `config` | `status`>,
   deferredCollections: DeferredLiveQueryCollections,
 ): (() => void) | undefined {
   if (deferredCollections.size === 0) return undefined
   const pending: DeferredLiveQueryCollections = new Set(deferredCollections)
-  return liveQuery.once(`status:cleaned-up`, () => {
+  const release = () => {
     try {
       resumeDeferredLiveQueryCollections(pending)
     } catch {
       // A source whose resumed start fails records its own failure.
     }
-  })
+  }
+  // The lifecycle's own rule: GC reclaims only a started collection with a
+  // finite, positive gcTime.
+  const gcTime = liveQuery.config.gcTime ?? DEFAULT_GC_TIME_MS
+  if (gcTime > 0 && Number.isFinite(gcTime) && liveQuery.status !== `idle`) {
+    return liveQuery.once(`status:cleaned-up`, release)
+  }
+  const timer = setTimeout(release, UNSUBSCRIBED_GC_FLOOR_MS)
+  return () => clearTimeout(timer)
 }
 
 /** Release every deferred source, then report the first startup failure. */

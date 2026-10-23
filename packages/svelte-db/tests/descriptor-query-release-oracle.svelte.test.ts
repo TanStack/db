@@ -9,10 +9,11 @@
  * The model has independent source start counts. In the first history, the
  * first start throws after the Svelte effect asks for rows; the second count
  * must still become one and the failed effect must release its subscription.
- * The release grammar crosses five causes for a client-backed
+ * The release grammar crosses six causes for a client-backed
  * query (a descriptor factory that throws during preparation, a query without
  * a stable IR identity, a query the live query rejects when it compiles, a
- * setup that throws after the hook returns, and a different source object
+ * setup that throws after the hook returns (with the default gcTime, or with
+ * gcTime 0, which disables the reclaim), and a different source object
  * under a Collection ID the mounted hook already read), two source start policies, and three direct
  * readers (`preload()`, `startSyncImmediate()`, and another hook). After the
  * rejection, an eager (`startSync: true`) source has started once and a lazy
@@ -249,6 +250,28 @@ describe(`Svelte descriptor source release`, () => {
         expect(() => {
           dispose = $effect.root(() => {
             useLiveQuery({ client, query: new Query().from({ shared }) })
+            throw new Error(`setup failed`)
+          })
+        }).toThrow(`setup failed`)
+        return () => dispose?.()
+      },
+      releasedOnReclaim: true,
+    }),
+    // gcTime 0 disables GC, so the live query is never reclaimed; the setup
+    // must still release its deferral.
+    'a setup that throws after a hook whose live query keeps no GC': (
+      shared,
+      client,
+    ) => ({
+      run: () => {
+        let dispose: (() => void) | undefined
+        expect(() => {
+          dispose = $effect.root(() => {
+            useLiveQuery({
+              client,
+              query: new Query().from({ shared }),
+              gcTime: 0,
+            })
             throw new Error(`setup failed`)
           })
         }).toThrow(`setup failed`)

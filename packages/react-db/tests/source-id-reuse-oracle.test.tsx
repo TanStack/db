@@ -320,6 +320,27 @@ const releaseHooks: Record<string, ReleaseHook> = {
     use: (query, deps) =>
       void useLiveInfiniteQuery(query, { pageSize: 1 }, deps),
   },
+  // A config can turn off the reclaim: gcTime 0 or Infinity disables GC, and
+  // startSync false never arms it. A render that never commits must still
+  // release its deferral.
+  'useLiveQuery with gcTime 0': {
+    ordered: false,
+    suspense: false,
+    usesDeps: false,
+    use: (query) => void useLiveQuery({ query, gcTime: 0 }),
+  },
+  'useLiveQuery with gcTime Infinity': {
+    ordered: false,
+    suspense: false,
+    usesDeps: false,
+    use: (query) => void useLiveQuery({ query, gcTime: Infinity }),
+  },
+  'useLiveQuery with startSync false': {
+    ordered: false,
+    suspense: false,
+    usesDeps: false,
+    use: (query) => void useLiveQuery({ query, startSync: false }),
+  },
   'useLiveSuspenseQuery with derived identity': {
     ordered: false,
     suspense: true,
