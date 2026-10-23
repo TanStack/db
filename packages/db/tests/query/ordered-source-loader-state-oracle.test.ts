@@ -2561,6 +2561,15 @@ async function checkAuthorityCase(
   let ignoredReportsBeforeSettle = 0
   let ignoredReportsInsideFirstPage = 0
   let repairedReportsOnOwnPage = 0
+  // Steps that settle a request successfully, run a pass, report, or change
+  // joined work. None of them owes a repair.
+  const quietCommand = (command: AuthorityCommand) =>
+    (command.type === `settle` && command.ok) ||
+    command.type === `settleNewest` ||
+    command.type === `pass` ||
+    command.type === `report` ||
+    command.type === `joinedBusy` ||
+    command.type === `joinedIdle`
   // An unproven report whose pass pending joined work deferred: the ledger
   // index at the report and the window size it judged.
   let owedProof: { from: number; windowSize: number } | undefined
@@ -2796,6 +2805,9 @@ async function checkAuthorityCase(
     await flush()
     if (testCase.settledFirst && ledger[0]) await settle(ledger[0], true)
     for (const [step, command] of testCase.history.entries()) {
+      // An event outside the quiet set, such as a truncate, a failure, a
+      // move, or a disposal, can change or end what a deferred report owes.
+      if (owedProof && !quietCommand(command)) owedProof = undefined
       switch (command.type) {
         case `settle`: {
           const open = inflight()
@@ -2857,17 +2869,7 @@ async function checkAuthorityCase(
             !testCase.releaseTruncates &&
             !testCase.releaseDisposes &&
             !boundaryUnexpressible &&
-            testCase.history
-              .slice(0, step)
-              .every(
-                (earlier) =>
-                  (earlier.type === `settle` && earlier.ok) ||
-                  earlier.type === `settleNewest` ||
-                  earlier.type === `pass` ||
-                  earlier.type === `report` ||
-                  earlier.type === `joinedBusy` ||
-                  earlier.type === `joinedIdle`,
-              ) &&
+            testCase.history.slice(0, step).every(quietCommand) &&
             ledger.every(({ outcome }) => outcome !== `failed`)
           const windowSize = testCase.offset + info.limit
           const [first, ...later] = ledger
@@ -3681,6 +3683,29 @@ describe(`Ordered source request authority`, () => {
           { type: `settleNewest` },
           { type: `settleNewest` },
           { type: `settle`, pick: 3, ok: true },
+        ],
+      },
+    },
+    {
+      // A truncate after a deferred unproven report hands the window to its
+      // replay, so the pass after the joined work owes no repair or tie.
+      name: `an unproven report whose deferred pass a truncate replaces`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: true },
+          { type: `truncate` },
+          { type: `joinedIdle` },
         ],
       },
     },
