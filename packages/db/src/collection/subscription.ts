@@ -328,14 +328,19 @@ export class CollectionSubscription
 
   /**
    * @internal A reload retired the sync run. Its demand detaches from the
-   * retired run. On-demand demand replays through the new run at once, as
-   * after a truncate, so a consumer of an aborted load follows that replay.
-   * Without such demand, the retained rows stay published until the
-   * reload's first commit truncates them.
+   * retired run. A live query's on-demand demand replays through the new run
+   * at once, as after a truncate, so a consumer of an aborted load follows
+   * that replay. Every other subscription keeps its rows published until the
+   * reload's first commit truncates them, and replays then.
    */
   public retireSyncRun(): void {
     this.handleCollectionCleanup(true)
-    this.reloadReplayed = this.replaysDemand() && this.subsetDemands.length > 0
+    // A subscription that buffers a private replacement would publish it
+    // before the reload's truncate applies; it replays at that truncate.
+    this.reloadReplayed =
+      this.options.truncateReplayPublication !== undefined &&
+      this.replaysDemand() &&
+      this.subsetDemands.length > 0
     if (this.reloadReplayed) this.handleTruncate()
   }
 

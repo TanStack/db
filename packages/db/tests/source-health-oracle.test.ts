@@ -3764,7 +3764,50 @@ function applyDemandModel(model: DemandModel, step: DemandStep): void {
   }
 }
 
-async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
+// A direct subscriber with the initial state on an on-demand Collection.
+// Within one Collection lifetime its applied rows equal the Collection's rows
+// at every step, also while a reload's or a truncate's replay is in flight or
+// after it fails. The driver answers its own subset requests at once, with
+// no rows, and keeps them out of the model: it observes, it asks for nothing.
+// `boundary.owns` tells the loader which requests are the subscriber's.
+function watchDirectly(
+  collection: Collection<Row, number>,
+  boundary: { owns: (options: LoadSubsetOptions) => boolean },
+) {
+  const rows = new Map<number, number>()
+  const current: { subscription?: unknown } = {}
+  // Its requests during subscribeChanges() come before it returns.
+  boundary.owns = (options) =>
+    current.subscription === undefined ||
+    options.subscription === current.subscription
+  current.subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) rows.delete(change.key)
+        else rows.set(change.key, change.value.parentId)
+      }
+    },
+    { includeInitialState: true },
+  )
+  return {
+    check: (label: string) =>
+      expect(
+        [...rows].sort(([a], [b]) => a - b),
+        `${label}: direct subscriber rows`,
+      ).toEqual(
+        collection.toArray
+          .map((row): [number, number] => [row.id, row.parentId])
+          .sort(([a], [b]) => a - b),
+      ),
+    stop: () =>
+      (current.subscription as { unsubscribe: () => void }).unsubscribe(),
+  }
+}
+
+async function runDemandHistory(
+  steps: ReadonlyArray<DemandStep>,
+  directSubscriber = false,
+) {
   const model: DemandModel = {
     gate: `loading`,
     requestError: null,
@@ -3781,6 +3824,7 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
   }
   const loads: Array<ReturnType<typeof createDeferred<void>>> = []
   let params!: SyncParams
+  const boundary = { owns: (_options: LoadSubsetOptions) => false }
   const source = createCollection<Row, number>({
     id: `health-demand-${Math.random().toString(36).slice(2)}`,
     getKey: (row) => row.id,
@@ -3794,6 +3838,7 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
         next.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
+            if (boundary.owns(options)) return true
             const load = createDeferred<void>()
             loads.push(load)
             const end = options.limit === undefined ? 99 : model.offset + 2
@@ -3819,9 +3864,11 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
   )
   const consoleError = console.error
   console.error = () => {}
+  let watcher: ReturnType<typeof watchDirectly> | undefined
   try {
     void query.preload().catch(() => undefined)
     await flushPromises()
+    if (directSubscriber) watcher = watchDirectly(source, boundary)
     requestedLoads(model, loads.length)
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${step}`
@@ -3866,6 +3913,7 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
       requestedLoads(model, requested, step)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
+      watcher?.check(label)
       if (model.gate === `ready`) {
         expect(
           query.health.error?.message ?? null,
@@ -3896,6 +3944,7 @@ async function runDemandHistory(steps: ReadonlyArray<DemandStep>) {
     }
   } finally {
     console.error = consoleError
+    watcher?.stop()
     for (const load of loads.splice(0)) load.resolve()
     await query.cleanup()
     await source.cleanup({ dependents: true })
@@ -3967,11 +4016,12 @@ describe(`on-demand demand grammar`, () => {
     `crash`,
   )
   fcTest.prop(
-    [fc.array(step, { maxLength: 10 })],
+    [fc.array(step, { maxLength: 10 }), fc.boolean()],
     oraclePropertyOptions(60, `source-health.on-demand`),
   )(
     `generated demand histories refine the model`,
-    (steps) => withDeadline(runDemandHistory(steps)),
+    (steps, directSubscriber) =>
+      withDeadline(runDemandHistory(steps, directSubscriber)),
     120_000,
   )
 })
@@ -4342,10 +4392,14 @@ async function runLazyHistory(
     asyncChildReady = false,
     honorsAbort = true,
     holdChildReady = false,
+    directSubscriber = false,
+    withEffect = false,
   }: {
     asyncChildReady?: boolean
     honorsAbort?: boolean
     holdChildReady?: boolean
+    directSubscriber?: boolean
+    withEffect?: boolean
   } = {},
 ) {
   const model: LazyModel = {
@@ -4393,6 +4447,8 @@ async function runLazyHistory(
   let childParams!: SyncParams
   let forgetServed = () => {}
   let heldReady: (() => void) | undefined
+  const boundary = { owns: (_options: LoadSubsetOptions) => false }
+  let querySubscription: unknown
   // Loads that threw, by serial.
   const thrownLoads = new Set<number>()
   const parents = createCollection<Row, number>({
@@ -4427,6 +4483,15 @@ async function runLazyHistory(
         else params.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
+            // The query starts first, so its subscription makes the first
+            // request. The direct subscriber's and the Effect's requests are
+            // answered at once and stay out of the model.
+            querySubscription ??= options.subscription
+            if (
+              options.subscription !== querySubscription ||
+              boundary.owns(options)
+            )
+              return true
             const keys = requestedKeys(options)
             const serial = ++serials
             const thrown = throwNext
@@ -4546,10 +4611,39 @@ async function runLazyHistory(
       else deferred.reject(new Error(`child load ${++failures} failed`))
     }
   }
+  let watcher: ReturnType<typeof watchDirectly> | undefined
+  // An Effect over the same lazy join, with its delivered rows by key.
+  const effectRows = new Map<
+    string | number,
+    readonly [number, number | null]
+  >()
+  let effect: ReturnType<typeof createEffect> | undefined
   try {
     void query.preload().catch(() => undefined)
     await flushPromises()
     report()
+    if (directSubscriber) watcher = watchDirectly(children, boundary)
+    if (withEffect) {
+      effect = createEffect({
+        query: (q) =>
+          q
+            .from({ parent: parents })
+            .leftJoin({ child: children }, ({ parent, child }) =>
+              eq(parent.id, child.parentId),
+            ),
+        onBatch: (events) => {
+          for (const event of events) {
+            const row = event.value as { parent: Row; child?: Row }
+            if (event.type === `exit`) effectRows.delete(event.key)
+            else
+              effectRows.set(event.key, [row.parent.id, row.child?.id ?? null])
+          }
+        },
+        onSourceError: () => {},
+      })
+      await flushPromises()
+      report()
+    }
     let announcements = 0
     query.on(`health:change`, () => announcements++)
     for (const [index, step] of steps.entries()) {
@@ -4642,6 +4736,7 @@ async function runLazyHistory(
       deriveLazyGate(model)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
+      watcher?.check(label)
       expect(query.health, `${label}: stable read`).toBe(query.health)
       if (
         demandOnly &&
@@ -4687,10 +4782,19 @@ async function runLazyHistory(
             .sort((a, b) => a - b)
             .map((key) => [key, model.loaded.has(key) ? key * 10 : null]),
         )
+        // An Effect over the same query that a load failure has not ended
+        // has received the same rows by now.
+        if (effect && !effect.disposed && !model.replayActive)
+          expect(
+            [...effectRows.values()].sort((a, b) => a[0] - b[0]),
+            `${label}: effect rows`,
+          ).toEqual([...rows].sort((a, b) => a[0] - b[0]))
       }
     }
   } finally {
     console.error = consoleError
+    watcher?.stop()
+    await effect?.dispose()
     for (const { deferred } of loads.splice(0)) deferred.resolve()
     await query.cleanup()
     await parents.cleanup()
@@ -4938,13 +5042,28 @@ describe(`lazy join demand grammar`, () => {
       fc.boolean(),
       fc.boolean(),
       fc.boolean(),
+      fc.boolean(),
+      fc.boolean(),
     ],
     oraclePropertyOptions(60, `source-health.lazy-demand`),
   )(
     `generated lazy demand histories refine the model`,
-    (steps, asyncChildReady, honorsAbort, holdChildReady) =>
+    (
+      steps,
+      asyncChildReady,
+      honorsAbort,
+      holdChildReady,
+      directSubscriber,
+      withEffect,
+    ) =>
       withDeadline(
-        runLazyHistory(steps, { asyncChildReady, honorsAbort, holdChildReady }),
+        runLazyHistory(steps, {
+          asyncChildReady,
+          honorsAbort,
+          holdChildReady,
+          directSubscriber,
+          withEffect,
+        }),
       ),
     120_000,
   )
