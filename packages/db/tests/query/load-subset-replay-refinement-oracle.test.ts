@@ -2262,10 +2262,8 @@ describe(`Ordered windows across truncate replays`, () => {
           async (history, scenario) => {
             declared.beginHistory()
             const reach = await checkOrderedReplay(history, scenario)
-            for (const key of Object.keys(total) as Array<keyof OrderedReach>) {
-              total[key] += reach[key]
-              if (dimensions.includes(key) && reach[key] > 0)
-                declared.reach(key)
+            for (const key of dimensions) {
+              if (reach[key] > 0) declared.reach(key)
             }
           },
         ),

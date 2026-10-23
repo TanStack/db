@@ -1182,3 +1182,76 @@ SHA-256 identities for the repaired executable sources:
 | `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `34aec1038062a15957642c35de2fafe2576b2941a326f449c75b6a3b28cb9da1` |
 | `packages/db/tests/oracle-config.ts` | `a3464344b04bfdc59bc4ab42489eeea540aed1461f9fb440e2da0f5b0a0b0c46` |
 | `packages/db/tests/oracle-reach.ts` | `d38c86d0a2d197d566108cfb59cdd6cb624619df8ab570afa2c7e09b7f00ba63` |
+
+
+### Integration with merged PR #2233
+
+Oracle repair commit `a39a07d21` was followed by merge commit `e32ac735c`, which
+includes `origin/main` at `65d9ada50`. The authoring skill conflict retains both
+the oracle-first sequence and the branch's full-source reading requirement.
+The review skill retains both sets of instructions as well. Upstream's persisted
+readiness extraction merges with the observer ownership repair without a manual
+production edit. No branch history was rewritten.
+
+The first combined core command passed 2,808 runtime tests but failed with two
+test-source type errors. The filtered dimensions have a narrower union than
+`keyof OrderedReach`; the loop had continued to iterate all keys. Iterating the
+declared dimensions fixes those errors and removes the unused event aggregation.
+This does not alter generated histories, public judgments or reach minima.
+`integrated-core.log` is not a clean GREEN result. The final command in
+`integrated-core-fixed.log` passes all 2,808 tests in 55 files, including type
+checks, with no unhandled errors. The smaller earlier selection did not expose
+these test-source diagnostics.
+
+The merged React suite passes 458 tests in 23 files. The persistence readiness
+owner passes 64 runtime and type tests in two runner entries. Evidence:
+`integrated-react.log` and `integrated-persistence.log`. Scoped ESLint,
+Prettier, `git diff --check`, and the 418-name mangle-cache check pass.
+The complete repository command remains unrun.
+
+The source-wide, identity-blind and always-terminal mutants again fail both
+focused campaigns at the terminal-status assertion on the combined tree.
+Removing rank movement again fails reach. Ignoring ordinary failure again fails
+the positive terminality assertion. The `integrated-replay-*.log` files preserve
+these runs. Every production and test mutation was restored before the final
+checks. The direct seed/path replay passes all 26 selected tests
+(`integrated-direct-green.log`).
+
+Final normal core-run history counts follow. Fixed seeds and budgets are
+unchanged, and the minimum is one history for each declared state.
+
+| Property / declared state | Fixed | Random |
+| --- | ---: | ---: |
+| `replay.ordered-window-faults` / `settlementThrows` | 12 | 22 |
+| `replay.ordered-window-faults` / `throwsAfterReplay` | 50 | 46 |
+| `replay.ordered-window-faults` / `replayStartThrows` | 56 | 55 |
+| `replay.ordered-window-faults` / `heldAcrossTruncate` | 26 | 14 |
+| `replay.ordered-window-faults` / `failedLoads` | 9 | 12 |
+| `replay.ordered-window-faults` / `settledWindowChecks` | 246 | 245 |
+| `replay.ordered-window-faults` / `tiedWindows` | 15 | 13 |
+| `replay.ordered-window-faults` / `peerChecks` | 127 | 120 |
+| `replay.ordered-window-faults` / `windowMoves` | 92 | 88 |
+| `replay.ordered-window-faults` / `descendingRuns` | 139 | 141 |
+| `replay.ordered-window-faults` / `joinedRuns` | 225 | 230 |
+| `replay.ordered-window-faults` / `includeChecks` | 152 | 131 |
+| `replay.ordered-window-faults` / `markChanges` | 87 | 83 |
+| `replay.ordered-window-faults` / `antiJoinedRuns` | 76 | 70 |
+| `replay.ordered-window-faults` / `innerJoinedRuns` | 81 | 77 |
+| `replay.ordered-window-faults` / `markerLoads` | 132 | 138 |
+| `replay.ordered-window-faults` / `markerTruncates` | 80 | 80 |
+| `replay.subscription-demand-origin` / `new-demand-failed-during-marker-replay` | 9 | 9 |
+| `replay.subscription-demand-origin` / `settled-marker-demand-replay-failed` | 32 | 40 |
+
+Against merged main `65d9ada50`, `pnpm size:compare --packages db,react-db --files`
+reports db +139 gzip / +238 brotli bytes and React unchanged. Tree-shaken app
+scenarios range from +136 to +148 gzip bytes. This is the existing production
+repair's cost on the integrated baseline. The declared-reach audit adds zero
+production source lines or shipped bytes. `integrated-size-final.log` records
+the final matching-source cached comparison. Earlier bundle figures remain tied
+to their original bases.
+
+Final repaired replay-owner SHA-256:
+`7b47e515ce94ec26f60fd78b400ddb2ea104abd9eb3bd8978a098c5efd7662e8`.
+The six-part evidence block and the stated finite limits above still apply.
+The historical generated-RED chronology deviation, F02 decision and F07 evidence
+gap remain visible. Integration GREEN does not turn this into a ready verdict.
