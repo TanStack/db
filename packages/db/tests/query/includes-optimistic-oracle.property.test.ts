@@ -14,10 +14,7 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
