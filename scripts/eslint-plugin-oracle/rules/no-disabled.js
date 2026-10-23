@@ -8,33 +8,65 @@
  *   disables nothing, such as the test that a replay registers when it does
  *   not select its property.
  * - A test that skips itself through its context, as in `ctx.skip()`.
- * - `.skipIf(condition)` or `.runIf(condition)`, unless the call is exactly
- *   `.skipIf(oracleReplayRequested())`. A replay may stand a test aside, and
- *   nothing else may switch an oracle test off. The shared helper fixes the
- *   polarity, so a condition cannot turn the test off in ordinary runs.
+ * - `.skipIf(condition)` or `.runIf(condition)`, unless the call is
+ *   `.skipIf(oracleReplayRequested())` or `.skipIf(oracleReplaySkips(...))`.
+ *   A replay may stand a test aside, and nothing else may switch an oracle
+ *   test off. The shared helpers in oracle-config are false in an ordinary
+ *   run, so no condition built from them can turn a test off there.
+ * - A test modifier passed around as a value, as in
+ *   `const run = replaying ? it.skip : it`. The rule cannot see what such an
+ *   alias switches off. `oracleReplayTest(test, property)` selects a replay.
+ * - A test registered under a condition, or after an early `return`,
+ *   unless the condition is a shared replay helper or its negation. An early
+ *   `throw` fails the run loudly, so it guards nothing.
  * - Playwright's runtime `test.skip()` or `test.fixme()` inside a test,
  *   unless its condition is `browserName !== '<browser>'`: a control that
  *   only one browser supports.
  * - A generated property limited to one run that pins no history: a literal
  *   `numRuns` of 1 or 0, or a base of 1 passed to the run helpers. One random
- *   history is not a generated property. A replay pins its history with a
- *   `path` beside `numRuns`, and a witness with a seed that is a number
- *   literal or a constant bound to one. `oraclePropertyOptions` returns one
- *   run for a path replay, so a campaign needs no one-run option of its own.
+ *   history is not a generated property. A witness pins its history with a
+ *   recorded `path` (a literal, or a failure's `counterexamplePath`) or with
+ *   a seed that is a number literal or a constant bound to one. A replay from
+ *   configuration takes its options from `oraclePropertyOptions`, which
+ *   returns one run for a path replay.
+ * - A literal run count above 1 that pins no history. It does not scale with
+ *   `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER`, so `oracleRuns` must wrap it.
  *
  * The rule has no inline exception. A known gap is pinned with `it.fails` on
  * a fixed seed, not skipped.
  *
- * The rule cannot see a run count lowered to any value above 1, a `path` or
- * seed read from configuration that is absent in ordinary runs, a skip
- * reached through an alias such as `const run = it.skip`, or a registration
- * inside an `if`. Reviewers still check those.
+ * The rule cannot see a run count lowered to any value above 1, a seed read
+ * from configuration that is absent in ordinary runs, a test function renamed
+ * before its modifier is read (`const t = it; t.skip(...)`), or a call to a
+ * local helper that registers tests under a condition. Reviewers still check
+ * those.
  */
 
 const testRoots = new Set([`describe`, `fcTest`, `it`, `suite`, `test`])
 const disablingModifiers = new Set([`fixme`, `skip`, `todo`])
 const conditionalModifiers = new Set([`runIf`, `skipIf`])
-const replaySelection = `oracleReplayRequested`
+const aliasModifiers = new Set([
+  ...disablingModifiers,
+  ...conditionalModifiers,
+  `only`,
+])
+const replayConditions = new Set([`oracleReplayRequested`, `oracleReplaySkips`])
+// The members that keep a call a test registration. Playwright's `test` also
+// has calls such as `test.info()` and `test.step()` that register nothing.
+const registrationMembers = new Set([
+  ...aliasModifiers,
+  `concurrent`,
+  `describe`,
+  `each`,
+  `fails`,
+  `parallel`,
+  `prop`,
+  `sequential`,
+  `serial`,
+])
+// oracle-config implements replay selection, so its options may carry a
+// replay path from configuration.
+const replaySelectionModule = /(^|[/\\])oracle-config\.ts$/
 const runHelpers = new Set([
   `oraclePropertyOptions`,
   `oracleRandomParameters`,
@@ -94,27 +126,109 @@ function registrationCondition(callee) {
   return undefined
 }
 
-/** Exactly `.skipIf(oracleReplayRequested())`. */
-function isReplaySelection({ name, args }, sourceCode) {
-  const [condition] = args
+/**
+ * A call to one of the shared oracle-config helpers in `names`. The binding
+ * must be the import, not a local function with the same name.
+ */
+function isSharedHelperCall(node, names, sourceCode) {
   if (
-    name !== `skipIf` ||
-    args.length !== 1 ||
-    condition.type !== `CallExpression` ||
-    condition.callee.type !== `Identifier` ||
-    condition.callee.name !== replaySelection ||
-    condition.arguments.length > 0
+    node?.type !== `CallExpression` ||
+    node.callee.type !== `Identifier` ||
+    !names.has(node.callee.name)
   ) {
     return false
   }
-  // The helper must be the shared one, not a local function of that name.
-  const definition = findVariable(
-    sourceCode.getScope(condition),
-    replaySelection,
-  )?.defs[0]
+  const definition = findVariable(sourceCode.getScope(node), node.callee.name)
+    ?.defs[0]
   return (
     definition?.type === `ImportBinding` &&
     /(^|\/)oracle-config(\.js)?$/.test(definition.parent.source.value)
+  )
+}
+
+/** A shared replay condition, or its negation. */
+function isReplayCondition(node, sourceCode) {
+  const condition =
+    node.type === `UnaryExpression` && node.operator === `!`
+      ? node.argument
+      : node
+  return isSharedHelperCall(condition, replayConditions, sourceCode)
+}
+
+/** Exactly `.skipIf(<shared replay condition>)`, not negated. */
+function isReplaySelection({ name, args }, sourceCode) {
+  return (
+    name === `skipIf` &&
+    args.length === 1 &&
+    isSharedHelperCall(args[0], replayConditions, sourceCode)
+  )
+}
+
+/**
+ * Whether a statement always leaves its block without failing. A `throw`
+ * fails the run loudly, so it guards nothing.
+ */
+function exits(statement) {
+  if (statement === null || statement === undefined) return false
+  if (
+    statement.type === `ReturnStatement` ||
+    statement.type === `ContinueStatement` ||
+    statement.type === `BreakStatement`
+  ) {
+    return true
+  }
+  if (statement.type === `BlockStatement`) {
+    return exits(statement.body.at(-1))
+  }
+  if (statement.type === `IfStatement`) {
+    return exits(statement.consequent) && exits(statement.alternate)
+  }
+  return false
+}
+
+/**
+ * The conditions that decide whether `node` runs: every enclosing `if`,
+ * conditional, or logical branch, and every earlier `if` in an enclosing
+ * block that leaves the block.
+ */
+function guardingConditions(node) {
+  const conditions = []
+  let child = node
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (
+      (parent.type === `IfStatement` ||
+        parent.type === `ConditionalExpression`) &&
+      child !== parent.test
+    ) {
+      conditions.push(parent.test)
+    } else if (parent.type === `LogicalExpression` && child === parent.right) {
+      conditions.push(parent.left)
+    } else if (
+      parent.type === `BlockStatement` ||
+      parent.type === `Program` ||
+      parent.type === `SwitchCase`
+    ) {
+      const body =
+        parent.type === `SwitchCase` ? parent.consequent : parent.body
+      for (const statement of body.slice(0, body.indexOf(child))) {
+        if (statement.type === `IfStatement` && exits(statement.consequent)) {
+          conditions.push(statement.test)
+        }
+      }
+    }
+    child = parent
+  }
+  return conditions
+}
+
+/** A `path` that a witness recorded: a literal, or a failure's path. */
+function isRecordedPath(node) {
+  if (node.type === `TemplateLiteral`) return node.expressions.length === 0
+  if (node.type === `Literal`) return typeof node.value === `string`
+  return (
+    node.type === `MemberExpression` &&
+    !node.computed &&
+    node.property.name === `counterexamplePath`
   )
 }
 
@@ -197,9 +311,7 @@ function isPinnedOrObservation(object, sourceCode) {
   const option = (name) =>
     object.properties.find((property) => propertyName(property) === name)
   const path = option(`path`)
-  if (path !== undefined && sourceCode.getText(path.value) !== `undefined`) {
-    return true
-  }
+  if (path !== undefined && isRecordedPath(path.value)) return true
   const seed = option(`seed`)
   if (seed !== undefined && isFixedSeed(seed.value, sourceCode)) return true
   const { parent } = object
@@ -250,8 +362,11 @@ export default {
     messages: {
       only: `\`.only\` runs only this test, so every other law in the file stops running. Remove it before committing.`,
       skip: `\`.{{name}}\` stops this test from enforcing its law. Remove it. To keep a known gap visible, pin a failing history with \`it.fails\` and a fixed seed.`,
-      conditional: `\`.{{name}}\` can switch this test off in ordinary runs. Only \`.skipIf(oracleReplayRequested())\` may switch an oracle test off, so that a replay can stand it aside. Remove the condition.`,
-      singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions. A replay passes \`path\`, and a witness passes a seed that is a number literal or a constant.`,
+      conditional: `\`.{{name}}\` can switch this test off in ordinary runs. Only \`.skipIf(oracleReplayRequested())\` or \`.skipIf(oracleReplaySkips(property))\` may switch an oracle test off, so that a replay can stand it aside. Remove the condition.`,
+      alias: `\`.{{name}}\` is passed around as a value, so the rule cannot see what it switches off. Call it directly, or select a replay with \`oracleReplayTest(test, property)\` from oracle-config.`,
+      guarded: `This test registers only under a condition, so it can stop running in ordinary runs. Register it unconditionally. A replay selection uses \`oracleReplayRequested()\` or \`oracleReplaySkips(property)\` from oracle-config, or \`oracleReplayTest(test, property)\`.`,
+      singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions, which also selects a replay. A witness passes a recorded \`path\` or a seed that is a number literal or a constant.`,
+      literalRuns: `A literal run count does not scale with TANSTACK_DB_ORACLE_RUNS_MULTIPLIER. Wrap it in oracleRuns, or pass it to oraclePropertyOptions.`,
     },
   },
   create(context) {
@@ -292,7 +407,19 @@ export default {
           }
           return
         }
-        if (!testRoots.has(root)) return
+        if (
+          !testRoots.has(root) ||
+          !names.every((member) => registrationMembers.has(member))
+        ) {
+          return
+        }
+        const unguarded = guardingConditions(node).every((condition) =>
+          isReplayCondition(condition, sourceCode),
+        )
+        if (!unguarded) {
+          context.report({ node, messageId: `guarded` })
+          return
+        }
         if (names.includes(`only`)) {
           context.report({ node: node.callee, messageId: `only` })
           return
@@ -313,14 +440,42 @@ export default {
           context.report({ node, messageId: `skip`, data: { name: disabled } })
         }
       },
+      MemberExpression(node) {
+        // Report a chain such as `fcTest.skip` or `it.skip.prop` once, at its
+        // outermost member, when nothing calls it.
+        if (
+          node.parent.type === `MemberExpression` &&
+          node.parent.object === node
+        ) {
+          return
+        }
+        if (
+          node.parent.type === `CallExpression` &&
+          node.parent.callee === node
+        ) {
+          return
+        }
+        const { root, names } = calleeChain(node)
+        const name = names.find((member) => aliasModifiers.has(member))
+        if (testRoots.has(root) && name !== undefined) {
+          context.report({ node, messageId: `alias`, data: { name } })
+        }
+      },
       Property(node) {
         if (
-          propertyName(node) === `numRuns` &&
-          isSingleRunLiteral(node.value) &&
-          !isPinnedRunCount(node.value)
+          replaySelectionModule.test(context.filename) ||
+          propertyName(node) !== `numRuns` ||
+          !isNumberLiteral(node.value) ||
+          isPinnedRunCount(node.value)
         ) {
-          context.report({ node, messageId: `singleRun` })
+          return
         }
+        context.report({
+          node,
+          messageId: isSingleRunLiteral(node.value)
+            ? `singleRun`
+            : `literalRuns`,
+        })
       },
     }
   },

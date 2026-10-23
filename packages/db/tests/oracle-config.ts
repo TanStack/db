@@ -25,6 +25,52 @@ const staticOracleProperties = [
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,
   `opfs-worker.diagnostics`,
+  `indexeddb.cross-tab-history`,
+  `electric.adapter-failure-policy`,
+  `electric.design-convergence`,
+  `electric.durable-prefix`,
+  `electric.initial-tagged-move-outs`,
+  `electric.invalid-resume-partition`,
+  `electric.metadata-merge-complete-state`,
+  `electric.process-grammar`,
+  `electric.publication-before-persistence`,
+  `electric.queued-presence-order`,
+  `electric.resume-metadata-merge`,
+  `electric.retry-decision`,
+  `electric.subset-request-row-validity`,
+  `electric.synthetic-batch-partition`,
+  `electric.valid-batch-partition`,
+  `ivm.index-refinement`,
+  `offline.key-scheduler-fifo-ledger`,
+  `op-sqlite.columnar-sql-aliases`,
+  `op-sqlite.result-carrier-equivalence`,
+  `op-sqlite.write-marker-aliases`,
+  `pg-serializer.array-determinism`,
+  `pg-serializer.bigint-round-trip`,
+  `pg-serializer.bigint-text`,
+  `pg-serializer.boolean-array-contents`,
+  `pg-serializer.boolean-round-trip`,
+  `pg-serializer.boolean-tokens`,
+  `pg-serializer.date-iso`,
+  `pg-serializer.date-round-trip`,
+  `pg-serializer.double-round-trip`,
+  `pg-serializer.integer-array-contents`,
+  `pg-serializer.integer-array-format`,
+  `pg-serializer.integer-round-trip`,
+  `pg-serializer.integer-text`,
+  `pg-serializer.mixed-array-contents`,
+  `pg-serializer.nullish-array-contents`,
+  `pg-serializer.nullish-empty`,
+  `pg-serializer.scalar-determinism`,
+  `pg-serializer.string-array-contents`,
+  `pg-serializer.string-escaping`,
+  `pg-serializer.string-idempotent`,
+  `pg-serializer.string-passthrough`,
+  `sqlite-persistence.bigint-rejection`,
+  `sqlite-persistence.bigint-roundtrip`,
+  `sqlite-persistence.binding-capacity`,
+  `sqlite-persistence.expression-index`,
+  `sqlite-resume.baseline-lineage`,
   `sqlite-persistence.source-fifo-order`,
   `sqlite-persistence.abort-graph`,
   `sqlite-persistence.owner-isolation`,
@@ -216,6 +262,15 @@ const refinementProperties = Array.from(
   { length: 11 },
   (_, index) => `load-subset-refinement.${1_779_001 + index}`,
 )
+// utils-oracle and comparison-oracle number their properties in file order.
+const utilsProperties = Array.from(
+  { length: 40 },
+  (_, index) => `utils.${index + 1}`,
+)
+const comparisonProperties = Array.from(
+  { length: 39 },
+  (_, index) => `comparison.${index + 1}`,
+)
 const paginationMatrixProperties = [`window`, `state`].flatMap((family) =>
   Array.from(
     { length: 8 },
@@ -302,6 +357,8 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
   ...publicationProperties,
   ...refinementProperties,
+  ...utilsProperties,
+  ...comparisonProperties,
   ...paginationMatrixProperties,
   ...includesMatrixProperties,
 ])
@@ -427,15 +484,53 @@ export function oracleRandomParameters(
 const { multiplier, ...replay } = readOracleRunConfig()
 
 /**
- * Whether a path replay is selected. It replays one property's recorded
- * history, so a test that is not that property stands aside with
- * `it.skipIf(oracleReplayRequested())`. A seed without a path only reseeds
- * the random campaigns, so every test still runs. The `oracle/no-disabled`
- * lint rule accepts only this condition, so a replay selection cannot switch
- * an oracle test off in ordinary runs.
+ * Replay selection.
+ *
+ * A path replay runs one property's recorded history. Every other test
+ * stands aside, so the replay reports only that history. A seed without a
+ * path only reseeds the random campaigns, so every test still runs. These
+ * helpers are the only replay conditions that the `oracle/no-disabled` lint
+ * rule accepts. Each is false in an ordinary run, so no replay selection can
+ * switch an oracle test off there.
  */
+
+/** Whether a path replay is selected. */
 export function oracleReplayRequested(): boolean {
   return replay.replayPath !== undefined
+}
+
+/**
+ * Whether a path replay of a property outside `properties` is selected. A
+ * test that serves several properties' replays passes all of them.
+ */
+export function oracleReplaySkips(
+  ...properties: ReadonlyArray<string>
+): boolean {
+  for (const property of properties) assertRegisteredOracleProperty(property)
+  return (
+    replay.replayPath !== undefined &&
+    (replay.replayProperty === undefined ||
+      !properties.includes(replay.replayProperty))
+  )
+}
+
+/**
+ * The registration to use for a test that stands aside during another
+ * test's replay: its `skip` form while that replay runs, and itself
+ * otherwise. Without `properties`, the test stands aside during every path
+ * replay. With them, it runs only when no path replay is selected or the
+ * replay selects one of them.
+ */
+export function oracleReplayTest<TRegistration extends { skip: unknown }>(
+  registration: TRegistration,
+  ...properties: ReadonlyArray<string>
+): TRegistration {
+  const standsAside =
+    properties.length === 0
+      ? oracleReplayRequested()
+      : oracleReplaySkips(...properties)
+  // `skip` registers through the same API, so it has the registration's type.
+  return standsAside ? (registration.skip as TRegistration) : registration
 }
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
