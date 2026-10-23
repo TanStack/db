@@ -25,6 +25,13 @@ import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import prettier from 'prettier'
 import ts from 'typescript'
+import {
+  fingerprint,
+  misspelling,
+  parses,
+  selfTest,
+  tanstackImports,
+} from './doc-snippet-syntax.mjs'
 
 const root = fileURLToPath(new URL(`..`, import.meta.url))
 const verbose = process.argv.includes(`--verbose`)
@@ -33,39 +40,6 @@ const baselinePath = join(root, `scripts`, `doc-snippets-baseline.json`)
 const baseline = existsSync(baselinePath)
   ? JSON.parse(readFileSync(baselinePath, `utf8`))
   : {}
-// The tokens of an example, without the spacing, commas, and semicolons that
-// formatting changes, so a reformatted example keeps its baseline entry.
-// Parentheses stay, because moving one changes what the code calls, except
-// the ones formatting puts around multi-line JSX.
-function fingerprint(code) {
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true)
-  scanner.setText(code)
-  const skip = new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.SemicolonToken])
-  const wrapsJsx = []
-  const tokens = []
-  for (
-    let kind = scanner.scan();
-    kind !== ts.SyntaxKind.EndOfFileToken;
-    kind = scanner.scan()
-  ) {
-    if (kind === ts.SyntaxKind.OpenParenToken) {
-      const jsx = scanner.lookAhead(
-        () => scanner.scan() === ts.SyntaxKind.LessThanToken,
-      )
-      wrapsJsx.push(jsx)
-      if (jsx) continue
-    }
-    if (kind === ts.SyntaxKind.CloseParenToken && wrapsJsx.pop()) continue
-    if (!skip.has(kind))
-      tokens.push(
-        kind === ts.SyntaxKind.StringLiteral
-          ? JSON.stringify(scanner.getTokenValue())
-          : // Formatting also reflows the HTML in a component template.
-            scanner.getTokenText().replace(/\s+/g, ``),
-      )
-  }
-  return tokens.join(` `)
-}
 const hashOf = (code) =>
   createHash(`sha256`).update(code).digest(`hex`).slice(0, 16)
 
@@ -133,7 +107,12 @@ for (const file of markdown) {
   }
 }
 
-for (const snippet of snippets) snippet.hash = hashOf(fingerprint(snippet.code))
+selfTest()
+for (const snippet of snippets) {
+  const jsx = snippet.name.endsWith(`.tsx`)
+  snippet.hash = hashOf(fingerprint(snippet.code, jsx))
+  snippet.imports = tanstackImports(snippet.code, jsx)
+}
 
 if (process.env.SNIPPET_ONLY) {
   const keep = snippets.filter(
@@ -220,36 +199,6 @@ function packageFor(name, file) {
 
 const importsTanStack = (code) => /from ['"]@tanstack\//.test(code)
 
-const tanstackImports = (code) =>
-  [
-    ...code.matchAll(
-      /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]@tanstack\//g,
-    ),
-  ]
-    .flatMap((match) => match[1].split(`,`))
-    .map((name) =>
-      name
-        .trim()
-        .split(/\s+as\s+/)
-        .pop(),
-    )
-    .filter(Boolean)
-
-function editDistance(a, b) {
-  let previous = Array.from({ length: b.length + 1 }, (_, j) => j)
-  for (let i = 1; i <= a.length; i++) {
-    const row = [i]
-    for (let j = 1; j <= b.length; j++)
-      row[j] = Math.min(
-        previous[j] + 1,
-        row[j - 1] + 1,
-        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      )
-    previous = row
-  }
-  return previous[b.length]
-}
-
 function sourceOf(snippet, declared, autoImported) {
   const byPackage = new Map()
   for (const name of autoImported) {
@@ -317,11 +266,7 @@ for (let pass = 0; pass < 6; pass++) {
     if (!name) continue
     // A near miss of a TanStack name the example imports is a typo, not app
     // code. TypeScript stops suggesting spellings after a few, so compare here.
-    const suggestion = tanstackImports(snippets[index].code).find(
-      (imported) =>
-        name.length >= 4 &&
-        editDistance(name, imported) <= (name.length >= 6 ? 2 : 1),
-    )
+    const suggestion = misspelling(name, snippets[index].imports)
     if (suggestion !== undefined) misspelled[index].set(name, suggestion)
     if (exported.has(name)) {
       if (importsTanStack(snippets[index].code)) unimported[index].add(name)
@@ -351,7 +296,7 @@ snippets.forEach((snippet, i) => {
   )
   // An example that does not parse cannot be checked. Pseudo-code, such as
   // `...` placeholders, is marked nocheck.
-  if (ownDiagnostics.some((d) => d.code >= 1000 && d.code < 2000)) {
+  if (!parses(snippet.code, snippet.name.endsWith(`.tsx`))) {
     unparsable++
     failures.push({
       snippet,

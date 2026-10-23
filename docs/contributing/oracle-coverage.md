@@ -3796,7 +3796,19 @@ with `TANSTACK_DB_ORACLE_SEED=1593300187` (path `121:1:2:3:2:2`). The
 history is `hold`, `truncateMarkers`, `settle` with a load failure, over an
 ascending limit-one window on an on-demand marker source with includes. The
 convergence check sees a terminal error. Main at `65d9ada50` fails with the
-same counterexample, so the operator change did not introduce it. Owner: the
+same counterexample, so the operator change did not introduce it. A full
+suite run on the branch also found it with seed `-1005431615` (path `68:1:2`),
+which shrinks to the same history. The campaign reaches this defect in
+ordinary runs, so CI can fail on it intermittently until the defect is fixed. Owner: the
 load-subset replay owner. Needed witness: a decision whether a truncate
 during a held, then failed, load may end the window in a terminal error, and
 the fix or model change that follows.
+
+Open observation without a trace: during this change, one run of the random
+campaign in `packages/db/tests/query/includes-oracle.property.test.ts` failed
+on the branch. The run did not record its seed or counterexample. Five later
+dedicated runs and two full-suite runs on the branch passed, and the campaign
+was not run on `main` at that time. Owner: the includes oracle owner. Needed witness: the failing seed and
+path from a later run. Until then, this entry cannot tell an operator
+regression from an older defect. A later failure of that campaign must record
+its seed here before anyone calls it pre-existing.

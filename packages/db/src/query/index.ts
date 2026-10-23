@@ -43,6 +43,7 @@ export {
 
 // Grouping without aggregates
 export { groupKeys, type GroupKeys } from './builder/group-keys.js'
+export type { OperatorCallback } from './builder/types.js'
 
 // Join operators
 export {
@@ -51,6 +52,7 @@ export {
   innerJoin,
   fullJoin,
   joinOf,
+  type JoinCondition,
   type JoinOperator,
   type JoinType,
 } from './builder/join-operators.js'

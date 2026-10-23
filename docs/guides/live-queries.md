@@ -1530,6 +1530,16 @@ const departments = createLiveQueryCollection((q) =>
 )
 ```
 
+Like a [reusable join operator](#reusable-join-operators), `groupKeys()` built outside `.groupBy()` needs the query's context as a type argument. Without it, the callback is untyped:
+
+```ts
+import { groupKeys } from '@tanstack/db'
+import type { ContextFromSource } from '@tanstack/db'
+
+type UserQuery = ContextFromSource<{ user: typeof usersCollection }>
+export const byDepartment = groupKeys<UserQuery>(({ user }) => user.departmentId)
+```
+
 ### Method Signature
 
 ```ts

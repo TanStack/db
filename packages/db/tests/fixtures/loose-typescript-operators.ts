@@ -7,7 +7,11 @@ import {
   joinOf,
   leftJoin,
 } from '../../src/index.js'
-import type { Collection, ContextFromSource } from '../../src/index.js'
+import type {
+  Collection,
+  ContextFromSource,
+  JoinCondition,
+} from '../../src/index.js'
 
 type User = { id: number; name: string }
 type Post = { id: number; userId: number; title: string }
@@ -52,4 +56,20 @@ export const reused = createLiveQueryCollection((q) =>
     .from({ user: users })
     .join(withPosts)
     .select(({ user, post }) => ({ name: user.name, title: post.title })),
+)
+
+export const statusKeys = groupKeys<UserQuery>(({ user }) => user.name)
+export const regrouped = createLiveQueryCollection((q) =>
+  q
+    .from({ user: users })
+    .groupBy(statusKeys)
+    .select(({ user }) => ({ name: user.name })),
+)
+
+// A factory takes a condition of the exported type.
+export const withPostsOn = (
+  on: JoinCondition<UserQuery, { post: typeof posts }>,
+) => leftJoin<{ post: typeof posts }, UserQuery>({ post: posts }, on)
+export const factoryJoin = withPostsOn(({ user, post }) =>
+  eq(user.id, post.userId),
 )

@@ -13,13 +13,13 @@ Defined in: [packages/db/src/query/builder/group-keys.ts:14](https://github.com/
 
 ### TContext
 
-`TContext` *extends* [`Context`](../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md) = `any`
 
 ## Parameters
 
 ### callback
 
-[`GroupByCallback`](../type-aliases/GroupByCallback.md)\<`TContext`\>
+[`OperatorCallback`](../type-aliases/OperatorCallback.md)\<`TContext`, [`GroupByCallback`](../type-aliases/GroupByCallback.md)\<`TContext`\>\>
 
 ## Returns
 

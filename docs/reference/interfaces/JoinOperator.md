@@ -3,7 +3,7 @@ id: JoinOperator
 title: JoinOperator
 ---
 
-Defined in: [packages/db/src/query/builder/join-operators.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L17)
+Defined in: [packages/db/src/query/builder/join-operators.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L18)
 
 A join step for `query.join(...)`. Importing a join operator is what brings
 the join compiler into a bundle.
@@ -30,7 +30,7 @@ the join compiler into a bundle.
 on: JoinOnCallback<MergeContextForJoinCallback<TContext, { [K in string | number | symbol]: { [K in string | number | symbol]: TSource[K] extends CollectionImpl<any, any, any, any, any> ? InferCollectionType<any[any]> : TSource[K] extends CollectionOptionsIdentity<any, any, any, any, any> ? InferCollectionType<any[any]> : TSource[K] extends QueryBuilder<TContext> ? ResultValue<TContext> : never }[K] }>>;
 ```
 
-Defined in: [packages/db/src/query/builder/join-operators.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L23)
+Defined in: [packages/db/src/query/builder/join-operators.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L24)
 
 ***
 
@@ -40,7 +40,7 @@ Defined in: [packages/db/src/query/builder/join-operators.ts:23](https://github.
 runtime: object;
 ```
 
-Defined in: [packages/db/src/query/builder/join-operators.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L27)
+Defined in: [packages/db/src/query/builder/join-operators.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L28)
 
 #### compile()
 
@@ -241,7 +241,7 @@ readonly \[[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpr
 source: TSource;
 ```
 
-Defined in: [packages/db/src/query/builder/join-operators.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L22)
+Defined in: [packages/db/src/query/builder/join-operators.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L23)
 
 ***
 
@@ -251,4 +251,4 @@ Defined in: [packages/db/src/query/builder/join-operators.ts:22](https://github.
 type: TJoinType;
 ```
 
-Defined in: [packages/db/src/query/builder/join-operators.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L26)
+Defined in: [packages/db/src/query/builder/join-operators.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L27)

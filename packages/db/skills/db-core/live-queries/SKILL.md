@@ -167,7 +167,7 @@ q.from({ user: usersCollection }).join(withPosts)
 
 ### 3. Aggregation with groupBy + having
 
-Use `groupBy` to group rows, then aggregate in `select`. Filter groups with `having`. The `$selected` namespace lets `having` and `orderBy` reference fields defined in `select`. A `groupBy` with no aggregate wraps its keys in `groupKeys()`: `.groupBy(groupKeys(({ order }) => order.status))`; without it the query throws `GroupingOperatorRequiredError`.
+Use `groupBy` to group rows, then aggregate in `select`. Filter groups with `having`. The `$selected` namespace lets `having` and `orderBy` reference fields defined in `select`. A `groupBy` with no aggregate wraps its keys in `groupKeys()`: `.groupBy(groupKeys(({ order }) => order.status))`; without it the query throws `GroupingOperatorRequiredError`. A `groupKeys()` built outside `.groupBy()` takes the context as a type argument, `groupKeys<ContextFromSource<{ order: typeof ordersCollection }>>(...)`, as a reusable join does; without it the callback is untyped.
 
 ```ts
 import { count, sum, gt } from '@tanstack/db'

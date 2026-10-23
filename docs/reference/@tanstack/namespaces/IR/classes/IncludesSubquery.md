@@ -54,7 +54,7 @@ Defined in: [packages/db/src/query/ir.ts:293](https://github.com/TanStack/db/blo
 
 ###### materializeCompilation
 
-(`compilation`, `getRootKey?`, `reduceJoinedPublicKeys`) => `MaterializedRootCompilation`
+(`compilation`, `getRootKey?`) => `MaterializedRootCompilation`
 
 ##### parentFilters?
 
@@ -201,7 +201,7 @@ createBucketFacades: (...args) => BucketFacadeAdapter;
 #### materializeCompilation()
 
 ```ts
-materializeCompilation: (compilation, getRootKey?, reduceJoinedPublicKeys) => MaterializedRootCompilation;
+materializeCompilation: (compilation, getRootKey?) => MaterializedRootCompilation;
 ```
 
 Compiles inline includes into the same D2 graph as their parent relation.
@@ -217,10 +217,6 @@ adapter resolves those references after the graph reaches quiescence.
 ###### getRootKey?
 
 (`row`) => `unknown`
-
-###### reduceJoinedPublicKeys?
-
-`boolean` = `false`
 
 ##### Returns
 
