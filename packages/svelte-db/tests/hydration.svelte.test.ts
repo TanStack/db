@@ -40,4 +40,37 @@ describe(`Svelte hydration`, () => {
     })
     dispose()
   })
+
+  // An empty queryKey counts as none, so with a dependency list it must match
+  // the hydrated query exactly as an omitted key does.
+  it(`hydrates an empty queryKey with a dependency list as it hydrates no key`, async () => {
+    const firstRows: Array<unknown> = []
+    for (const queryKey of [undefined, []]) {
+      const { descriptor } = createPeopleDescriptor()
+      const serverClient = new DbClient({ runtime: `server` })
+      await serverClient.preloadLiveQuery(peopleQuery(descriptor))
+      const browserClient = new DbClient({ runtime: `browser` })
+      browserClient.hydrate(
+        serverClient.dehydrate({
+          shouldDehydrateCollection: () => false,
+          shouldDehydrateLiveQuery: () => true,
+        }),
+      )
+      let query!: ReturnType<typeof useLiveQuery>
+      const dispose = $effect.root(() => {
+        query = useLiveQuery(
+          {
+            ...peopleQuery(descriptor),
+            client: browserClient,
+            queryKey,
+          } as any,
+          [() => `dependency`],
+        )
+      })
+      flushSync()
+      firstRows.push(query.data)
+      dispose()
+    }
+    expect(firstRows[1]).toEqual(firstRows[0])
+  })
 })
