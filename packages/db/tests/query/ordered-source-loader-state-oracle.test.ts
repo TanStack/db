@@ -9,6 +9,7 @@ import {
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
@@ -3891,6 +3892,67 @@ describe(`Ordered source request authority`, () => {
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The unproven-report law needs a quiet history whose coverage is the
+  // loader's own first page, longer than the window, with no more rows to
+  // read, and then a report whose pass reacts. The broad grammar rarely lines
+  // these up, so each history here settles the first page, settles the read
+  // after it, and reports, over random case parameters, before a random
+  // suffix. A release that truncates or disposes would end the quiet history.
+  const unprovenReportProperty = `ordered-loader.unproven-report`
+  const unprovenReportCase: fc.Arbitrary<AuthorityCase> = fc
+    .tuple(authorityCaseArbitrary, fc.array(authorityCommand, { maxLength: 8 }))
+    .map(([testCase, rest]) => ({
+      ...testCase,
+      settledFirst: true,
+      requiresFullSource: false,
+      snapshotRows: 3,
+      needsMore: false,
+      releaseTruncates: false,
+      releaseDisposes: false,
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `report`, react: true },
+        ...rest,
+      ],
+    }))
+  const unprovenReportCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === unprovenReportProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(unprovenReportCampaigns)(
+    `reads the end's tie or repairs after an unproven report (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: histories where the unproven-report law judged a
+      // report over the loader's own first page.
+      const reach = createOracleReach(
+        unprovenReportProperty,
+        [`repairedReportsOnOwnPage`] as const,
+        { minimum: 20 },
+      )
+      await fc.assert(
+        fc.asyncProperty(unprovenReportCase, async (testCase) => {
+          reach.beginHistory()
+          const observation = await checkAuthorityCase(testCase)
+          if (observation.repairedReportsOnOwnPage > 0) {
+            reach.reach(`repairedReportsOnOwnPage`)
+          }
+        }),
+        campaign === `fixed`
+          ? { seed: 20261023, numRuns: oracleRuns(300) }
+          : {
+              ...oraclePropertyOptions(300, unprovenReportProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      reach.assertReached()
     },
     120_000,
   )

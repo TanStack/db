@@ -18,6 +18,7 @@ import {
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
@@ -5089,6 +5090,8 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   cooperativeCancels: number
   lateAnswers: number
   ignoredProvenReports: number
+  unindexedRefetchChecks: number
+  shortUnindexedRefills: number
 }> {
   const joined = isJoinedFilter(testCase)
   const fullJoin = testCase.filter === `full-joined`
@@ -5298,6 +5301,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // Reports that the first query's own page proved, so it owed no request,
   // and the first query's request count before the latest such report.
   let ignoredProvenReports = 0
+  // Signalling refetches of an unindexed plan where the full-source law
+  // applied, and where the documented short-prefix fallback excused it.
+  let unindexedRefetchChecks = 0
+  let shortUnindexedRefills = 0
   let provenReportRequestsBefore: number | undefined
   // Set by such a report until a step that can change source ordering, and
   // the first repair request the first query issued meanwhile.
@@ -6120,10 +6127,18 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         // an unindexed plan whose bounded prefix leaves the window short
         // (ARCHITECTURE.md, "an underfilled unindexed prefix retains the
         // established full-source fallback").
+        const shortRefill =
+          !testCase.indexed && prefixLeavesWindowShort(rows, shown)
+        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
+          if (!testCase.indexed) {
+            if (shortRefill) shortUnindexedRefills++
+            else unindexedRefetchChecks++
+          }
+        }
         if (
           signalsRefetch &&
           unexpressiblePageEnds === unexpressibleBefore &&
-          (testCase.indexed || !prefixLeavesWindowShort(rows, shown))
+          !shortRefill
         ) {
           expect(
             fullSourceRequests,
@@ -6392,6 +6407,8 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       cooperativeCancels,
       lateAnswers,
       ignoredProvenReports,
+      unindexedRefetchChecks,
+      shortUnindexedRefills,
     }
   } finally {
     unsubscribe?.()
@@ -8343,13 +8360,73 @@ describe(`eager indexed ordered windows`, () => {
     expect(proven, `reports a first page proved`).toBeGreaterThan(0)
   })
 
-  fcTest.prop(
-    [eagerProvenReportCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-proven-report`),
-  )(
-    `starts no repair for reports a window's own first page proves for a random or replayed seed`,
-    checkEagerWindow,
-  )
+  it(`starts no repair for reports a window's own first page proves for a random or replayed seed`, async () => {
+    const options = oracleRandomParameters(
+      runs,
+      replay,
+      `ordered-work.eager-proven-report`,
+    )
+    const reach = createOracleReach(`ordered-work.eager-proven-report`, [
+      `ignoredProvenReports`,
+    ] as const)
+    await fc.assert(
+      fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
+        reach.beginHistory()
+        const observed = await runEagerWindow(testCase)
+        if (observed.ignoredProvenReports > 0)
+          reach.reach(`ignoredProvenReports`)
+      }),
+      options,
+    )
+    reach.assertReached()
+  })
+
+  // The refetch law over unindexed joined windows behind a signalling
+  // provider. A repair must not read the full source, except for the
+  // documented refill of an unindexed plan whose bounded prefix leaves the
+  // window short. The campaign must reach both sides of that exception.
+  // Ineligible rows crowd the bounded prefix and leave the window short, so
+  // half the cases start with every row eligible, where the law applies.
+  const eagerUnindexedRefetchCase = fc
+    .tuple(eagerJoinedCase, fc.boolean())
+    .map(([testCase, allEligible]) => ({
+      ...testCase,
+      path: `on-demand` as const,
+      provider: `refetch-signal` as const,
+      indexed: false,
+      peer: false,
+      initial: allEligible
+        ? testCase.initial.map((row) => ({ ...row, eligible: true }))
+        : testCase.initial,
+    }))
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`reads the full source after a signalling refetch only for a short unindexed refill (${campaign} campaign)`, async () => {
+      const property = `ordered-work.eager-unindexed-refetch`
+      const reach = createOracleReach(
+        property,
+        [`unindexedRefetchChecks`, `shortUnindexedRefills`] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(eagerUnindexedRefetchCase, async (testCase) => {
+          reach.beginHistory()
+          const observed = await runEagerWindow(testCase)
+          for (const state of [
+            `unindexedRefetchChecks`,
+            `shortUnindexedRefills`,
+          ] as const) {
+            if (observed[state] > 0) reach.reach(state)
+          }
+        }),
+        campaign === `fixed`
+          ? // This seed kills a loader that repairs every report with a
+            // full-source read; about half of seeds do.
+            { numRuns: runs, seed: 2094 }
+          : oracleRandomParameters(runs, replay, property),
+      )
+      reach.assertReached()
+    })
+  }
 
   it(`keeps a window whose loads answer between live changes for a fixed seed`, async () => {
     // Chosen for reach after nullish ranks joined the row generator.
