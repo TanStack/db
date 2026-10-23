@@ -394,7 +394,7 @@ export class CollectionSyncManager<
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
             // The adapter's own truncate stays even if a reload ends early.
-            pendingTransaction.truncateOwner = `adapter`
+            pendingTransaction.adapterTruncate = true
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
@@ -549,10 +549,14 @@ export class CollectionSyncManager<
   public dropReloadReplacement(): void {
     this.state.reloadTruncatePending = false
     const open = this.state.pendingSyncedTransactions.find(
-      (transaction) =>
-        !transaction.committed && transaction.truncateOwner === `reload`,
+      (transaction) => !transaction.committed && transaction.reloadReplacement,
     )
     if (!open) return
+    open.reloadReplacement = false
+    if (open.adapterTruncate) {
+      this.state.refreshPendingSyncedProjection()
+      return
+    }
     open.truncate = false
     // The run wrote against no rows; on the kept rows, an insert of a kept
     // key replaces that row.
@@ -572,7 +576,7 @@ export class CollectionSyncManager<
   private markReloadTruncate(applied: { promise: Promise<void> }): void {
     this.state.reloadTruncatePending = false
     const transaction = this.state.pendingSyncedTransactions.at(-1)!
-    transaction.truncateOwner = `reload`
+    transaction.reloadReplacement = true
     transaction.truncate = true
     transaction.truncateMarkReady = false
     this.state.refreshPendingSyncedProjection()
@@ -603,7 +607,7 @@ export class CollectionSyncManager<
     reason?: Error,
   ): void {
     this.state.cancelPendingSyncedTransaction(transaction, reason)
-    if (transaction.truncateOwner === `reload` && this.lifecycle.reloading)
+    if (transaction.reloadReplacement && this.lifecycle.reloading)
       this.state.reloadTruncatePending = true
   }
 

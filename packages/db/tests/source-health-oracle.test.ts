@@ -151,7 +151,7 @@
  * Collections. Grammar exclusions are listed with the history grammar.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { createCollection, findProblems } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createEffect } from '../src/query/effect.js'
@@ -162,6 +162,7 @@ import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createDeferred } from '../src/deferred.js'
+import { createOracleReach } from './oracle-reach.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
@@ -1356,10 +1357,23 @@ async function withDeadline(work: Promise<void>): Promise<void> {
   }
 }
 
+// The states the main grammar's later laws depend on (ORC-015). Only the
+// generated property records them.
+const historyReachStates = [
+  `direct subscriber during a reload`,
+  `reload ends before its first commit`,
+  `untagged insert of a kept row`,
+  `retired cleanup rejects after a fresh start`,
+] as const
+type HistoryReach = ReturnType<
+  typeof createOracleReach<(typeof historyReachStates)[number]>
+>
+
 async function runHistory(
   shape: Shape,
   steps: ReadonlyArray<Step>,
   directSubscribers = true,
+  reach?: HistoryReach,
 ): Promise<void> {
   const sources = { A: createSource(`A`), B: createSource(`B`) }
   const { query, inner, start, size } = buildQuery(
@@ -1409,6 +1423,8 @@ async function runHistory(
   // only subscriber.
   const mirrors = { A: new Map<number, number>(), B: new Map<number, number>() }
   const mirrored = { A: false, B: false }
+  // A restart happened while a retired run's cleanup was still pending.
+  const freshSinceRetire = { A: false, B: false }
   const mirrorSubscriptions: Partial<
     Record<SourceName, { unsubscribe: () => void }>
   > = {}
@@ -1507,6 +1523,33 @@ async function runHistory(
               cleaning: model.sources[step.source].cleaning,
             }
           : undefined
+      if (
+        reach &&
+        `source` in step &&
+        shapeSources[shape].includes(step.source)
+      ) {
+        const source = model.sources[step.source]
+        if (source.reloading && mirrored[step.source])
+          reach.reach(`direct subscriber during a reload`)
+        if (source.reloading && (step.kind === `fail` || step.kind === `crash`))
+          reach.reach(`reload ends before its first commit`)
+        if (
+          step.kind === `write` &&
+          step.untagged &&
+          source.rows.has(step.key) &&
+          !expectedBaseline(source).has(step.key)
+        )
+          reach.reach(`untagged insert of a kept row`)
+        if (
+          step.kind === `retired-cleanup-rejects` &&
+          source.retiredCleanup &&
+          freshSinceRetire[step.source]
+        )
+          reach.reach(`retired cleanup rejects after a fresh start`)
+      }
+      if (step.kind === `restart`)
+        for (const name of [`A`, `B`] as const)
+          if (model.sources[name].retiredCleanup) freshSinceRetire[name] = true
       const queryEndedBefore = model.queryEnded
       const expected = applyModel(shape, model, step)
       // The write tag the model gave this step, if it wrote.
@@ -1834,6 +1877,15 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`ready`, `A`),
     on(`retired-cleanup-rejects`, `A`),
   ],
+  "a canceled reload commit with the adapter's own truncate keeps the replacement armed":
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`reload`, `A`),
+      { kind: `write`, source: `A`, key: 1, untagged: true },
+      { kind: `truncate`, source: `A`, markReady: false },
+      on(`cancel`, `A`),
+    ],
   "a failed reload's open insert of a kept row replaces it": [
     on(`ready`, `A`),
     on(`ready`, `B`),
@@ -2157,19 +2209,57 @@ describe(`source failure and health oracle`, () => {
         .map(([kind, source]) => on(kind, source)),
     },
   )
+  // Prefixes that enter a declared reach state that random steps alone rarely
+  // reach at the base run count; random steps follow each one.
+  const reachPrefixes: ReadonlyArray<ReadonlyArray<Step>> = [
+    // A reload's open insert of a row the Collection keeps.
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`reload`, `A`),
+      { kind: `write`, source: `A`, key: 1, untagged: true },
+    ],
+    // A retired run's cleanup that rejects after a cleanup and a fresh start.
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`reload-cleanup-held`, `A`),
+      { kind: `restart` },
+      on(`ready`, `A`),
+      on(`retired-cleanup-rejects`, `A`),
+    ],
+  ]
+  const historyReach = createOracleReach(
+    `source-health.history`,
+    historyReachStates,
+  )
+  let historiesRan = false
   fcTest.prop(
     [
       fc.constantFrom(...shapes),
-      fc.array(stepArb, { maxLength: 12 }),
+      fc
+        .tuple(
+          fc.option(fc.constantFrom(...reachPrefixes), { freq: 3 }),
+          fc.array(stepArb, { maxLength: 12 }),
+        )
+        .map(([prefix, rest]): Array<Step> => [...(prefix ?? []), ...rest]),
       fc.boolean(),
     ],
     oraclePropertyOptions(60, `source-health.history`),
   )(
     `generated histories refine the model`,
-    (shape, steps, directSubscribers) =>
-      withDeadline(runHistory(shape, steps, directSubscribers)),
+    (shape, steps, directSubscribers) => {
+      historiesRan = true
+      historyReach.beginHistory()
+      return withDeadline(
+        runHistory(shape, steps, directSubscribers, historyReach),
+      )
+    },
     120_000,
   )
+  afterAll(() => {
+    if (historiesRan) historyReach.assertReached()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -3804,9 +3894,20 @@ function watchDirectly(
   }
 }
 
+// The states the window grammar's later laws depend on (ORC-015). Only the
+// generated property records them.
+const demandReachStates = [
+  `window move waits for a replay`,
+  `direct subscriber during a replay`,
+] as const
+type DemandReach = ReturnType<
+  typeof createOracleReach<(typeof demandReachStates)[number]>
+>
+
 async function runDemandHistory(
   steps: ReadonlyArray<DemandStep>,
   directSubscriber = false,
+  reach?: DemandReach,
 ) {
   const model: DemandModel = {
     gate: `loading`,
@@ -3873,6 +3974,10 @@ async function runDemandHistory(
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${step}`
       applyDemandModel(model, step)
+      if (model.moveWaitsForReplay)
+        reach?.reach(`window move waits for a replay`)
+      if (directSubscriber && model.replayPending)
+        reach?.reach(`direct subscriber during a replay`)
       let requested = 0
       const before = loads.length
       if (step === `window`) {
@@ -4015,13 +4120,43 @@ describe(`on-demand demand grammar`, () => {
     `fail`,
     `crash`,
   )
+  const demandReach = createOracleReach(
+    `source-health.on-demand`,
+    demandReachStates,
+  )
+  let demandHistoriesRan = false
+  afterAll(() => {
+    if (demandHistoriesRan) demandReach.assertReached()
+  })
+  // A prefix that enters a declared reach state that random steps alone
+  // rarely reach at the base run count; random steps follow it.
+  const demandReachPrefixes: ReadonlyArray<ReadonlyArray<DemandStep>> = [
+    [`settle-ok`, `reload`, `window`],
+    [`settle-ok`, `reload`, `settle-fail`, `window`],
+  ]
   fcTest.prop(
-    [fc.array(step, { maxLength: 10 }), fc.boolean()],
+    [
+      fc
+        .tuple(
+          fc.option(fc.constantFrom(...demandReachPrefixes), { freq: 2 }),
+          fc.array(step, { maxLength: 10 }),
+        )
+        .map(([prefix, rest]): Array<DemandStep> => [
+          ...(prefix ?? []),
+          ...rest,
+        ]),
+      fc.boolean(),
+    ],
     oraclePropertyOptions(60, `source-health.on-demand`),
   )(
     `generated demand histories refine the model`,
-    (steps, directSubscriber) =>
-      withDeadline(runDemandHistory(steps, directSubscriber)),
+    (steps, directSubscriber) => {
+      demandHistoriesRan = true
+      demandReach.beginHistory()
+      return withDeadline(
+        runDemandHistory(steps, directSubscriber, demandReach),
+      )
+    },
     120_000,
   )
 })
@@ -4103,6 +4238,12 @@ type LazyModel = {
   // Keys a replay load failed for; the replay reports the failure once all
   // its loads settle, if the query still needs one of them then.
   replayFailedKeys: Set<number>
+  // Replay loads that failed in the current attempt, by serial; the replay
+  // judges them when it settles.
+  replayFailedLoads: Map<number, Set<number>>
+  // A load of the current replay attempt succeeded, and the keys it loaded.
+  replayLoaded: boolean
+  replayLoadedKeys: Set<number>
   // Aborted loads the current run may still finish: their rows apply.
   obsolete: Map<number, Set<number>>
   // Loads a reload retired that are still in flight at the adapter. As for a
@@ -4172,6 +4313,13 @@ function settleLazyLoad(
   if (succeeded) {
     for (const key of load.keys) {
       model.loaded.add(key)
+      // A replay load's success clears its key's error only when the whole
+      // replay succeeds (law 16: its success clears only the errors of
+      // demands it loaded again).
+      if (load.replay) {
+        model.replayLoadedKeys.add(key)
+        continue
+      }
       // A key loaded: its failure clears, unless a newer load of it failed
       // and this load no longer holds the key (the query aborted it).
       if (
@@ -4180,7 +4328,7 @@ function settleLazyLoad(
       )
         model.failed.delete(key)
     }
-    if (load.replay) model.replayFailed = false
+    if (load.replay) model.replayLoaded = true
     settleReplay(model)
     return
   }
@@ -4194,9 +4342,10 @@ function settleLazyLoad(
     if (needed.length > 0) model.gate = `error`
     return
   }
-  if (load.replay) {
-    for (const key of needed) model.replayFailedKeys.add(key)
-  } else for (const key of needed) model.failed.set(key, load.serial)
+  // Law 9 judges a replay when it settles, against the demand held then: a
+  // failed replay load counts for each key it is then the latest load of.
+  if (load.replay) model.replayFailedLoads.set(load.serial, load.keys)
+  else for (const key of needed) model.failed.set(key, load.serial)
   settleReplay(model)
 }
 
@@ -4219,12 +4368,36 @@ function settleReplay(model: LazyModel): void {
     entry.replay &&
     (!entry.superseded || [...entry.keys].some((key) => model.parents.has(key)))
   if (model.pending.some(holds)) return
+  const settling = model.replayActive
   model.replayActive = false
-  const failed = [...model.replayFailedKeys].some((key) =>
-    model.parents.has(key),
+  for (const [serial, keys] of model.replayFailedLoads)
+    for (const key of keys)
+      if (model.parents.has(key) && latestLoadFor(model, key) === serial)
+        model.replayFailedKeys.add(key)
+  model.replayFailedLoads = new Map()
+  // ARCHITECTURE.md law 9: replay failure is scoped to the logical demand
+  // that failed. A failed key stays failed while the query holds it; once
+  // the query retires it, its failure cannot poison a successful
+  // replacement for the remaining demand.
+  model.replayFailedKeys = new Set(
+    [...model.replayFailedKeys].filter((key) => model.parents.has(key)),
   )
-  model.replayFailedKeys = new Set()
-  if (!failed) return
+  const failed = model.replayFailedKeys.size > 0
+  const loadedSome = model.replayLoaded
+  const loadedKeys = model.replayLoadedKeys
+  model.replayLoaded = false
+  model.replayLoadedKeys = new Set()
+  if (!failed) {
+    // The replacement succeeded: its request error clears, and so do the
+    // errors of the keys it loaded again. A replay whose participants were
+    // all released, with none loaded, is aborted instead (law 9: the last
+    // logical demand retired), and its error stays.
+    if (settling && loadedSome) {
+      model.replayFailed = false
+      for (const key of loadedKeys) model.failed.delete(key)
+    }
+    return
+  }
   if (model.gate === `loading`) model.gate = `error`
   else model.replayFailed = true
 }
@@ -4306,6 +4479,7 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
         if (!fromReplay) model.retiredInFlight.set(serial, keys)
       // A replay this reload discards reports nothing.
       model.replayFailedKeys = new Set()
+      model.replayFailedLoads = new Map()
       model.pending = []
       model.obsolete = new Map()
       // The new run's first commit replaces every child row. Without a held
@@ -4321,6 +4495,14 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
       // and its rows apply if it succeeds. A failed replay's error stays
       // until a later replay succeeds.
       if (model.source.crashed || model.source.stopped) return
+      // Before a reload's first commit, the adapter's truncate commits in
+      // the reload's first transaction: it is the replacement the reload
+      // already replays, and no replay row has applied yet.
+      if (model.source.replacementPending) {
+        model.source.replacementPending = false
+        model.loaded = new Set()
+        return
+      }
       for (const load of model.pending) {
         if (load.replay) load.superseded = true
         else {
@@ -4329,6 +4511,7 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
         }
       }
       model.replayFailedKeys = new Set()
+      model.replayFailedLoads = new Map()
       model.pending = model.pending.filter((load) => load.superseded)
       model.requested = new Map()
       model.loaded = new Set()
@@ -4379,6 +4562,21 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
   }
 }
 
+// The states the lazy grammar's later laws depend on (ORC-015). Only the
+// generated property records them.
+const lazyReachStates = [
+  `reload during the first load`,
+  `truncate while a reload is in flight`,
+  `replay load fails`,
+  `superseded replay load`,
+  `direct subscriber during a replay`,
+  `effect compared at a quiet checkpoint`,
+  `request error shown`,
+] as const
+type LazyReach = ReturnType<
+  typeof createOracleReach<(typeof lazyReachStates)[number]>
+>
+
 // `asyncChildReady`: the child Collection's reload calls markReady() after
 // sync() returns, so its loads in flight settle before the replay exists.
 // `honorsAbort`: the loader rejects a request whose signal aborts; one that
@@ -4394,12 +4592,14 @@ async function runLazyHistory(
     holdChildReady = false,
     directSubscriber = false,
     withEffect = false,
+    reach,
   }: {
     asyncChildReady?: boolean
     honorsAbort?: boolean
     holdChildReady?: boolean
     directSubscriber?: boolean
     withEffect?: boolean
+    reach?: LazyReach
   } = {},
 ) {
   const model: LazyModel = {
@@ -4411,6 +4611,9 @@ async function runLazyHistory(
     replayFailed: false,
     pending: [],
     replayFailedKeys: new Set(),
+    replayLoaded: false,
+    replayLoadedKeys: new Set(),
+    replayFailedLoads: new Map(),
     obsolete: new Map(),
     retiredInFlight: new Map(),
     requested: new Map(),
@@ -4553,11 +4756,9 @@ async function runLazyHistory(
       model.pending = model.pending.filter((load) => !retired(load))
       for (const serial of aborted) model.requested.delete(serial)
     }
-    // A demand change releases the loads it retires before it requests new
-    // ones, so releasing a replay's last pending load settles the replay
-    // first.
-    retireAborted()
-    if (!replayMade) settleReplay(model)
+    // Law 9: a demand change is one step. The loads it starts join an open
+    // replay before the loads it retires stop counting, so the replay settles
+    // once, after the whole change.
     // A request a new demand makes during a replay joins the replay, but one
     // that throws fails at once; one the replay makes fails with the replay.
     // Every request is recorded before a thrown one settles, so the replay's
@@ -4566,12 +4767,17 @@ async function runLazyHistory(
       const load: LazyLoad = {
         serial: request.serial,
         keys: request.keys,
-        replay: model.replayActive && (replayMade || !request.thrown),
+        // Law 9: new demand joins the private replacement of an open replay,
+        // also one whose current attempt failed.
+        replay:
+          (model.replayActive || model.replayFailed) &&
+          (replayMade || !request.thrown),
         fromReplay: replayMade,
         superseded: false,
       }
       model.requested.set(load.serial, load.keys)
       model.pending.push(load)
+      if (load.replay) model.replayActive = true
       return { load, thrown: request.thrown }
     })
     for (const { load, thrown } of reported)
@@ -4659,6 +4865,12 @@ async function runLazyHistory(
       // Open (see the request error check below): a demand change during a
       // replay can show a request error and clear it at once.
       const replayBefore = model.replayActive
+      if (step.kind === `reload` && model.gate === `loading`)
+        reach?.reach(`reload during the first load`)
+      if (step.kind === `truncate` && model.source.reloadInFlight)
+        reach?.reach(`truncate while a reload is in flight`)
+      const truncateIsReloadCommit =
+        step.kind === `truncate` && model.source.replacementPending
       applyLazyModel(model, step)
       if (step.kind === `parent` || step.kind === `unparent`) {
         parentParams.begin()
@@ -4722,6 +4934,7 @@ async function runLazyHistory(
       // request for every key the query still needs.
       if (
         step.kind === `truncate` &&
+        !truncateIsReloadCommit &&
         (model.gate === `ready` || model.gate === `loading`) &&
         !model.source.stopped
       )
@@ -4737,6 +4950,17 @@ async function runLazyHistory(
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
       watcher?.check(label)
+      if (watcher && model.replayActive)
+        reach?.reach(`direct subscriber during a replay`)
+      if (model.replayFailedKeys.size > 0 || model.replayFailed)
+        reach?.reach(`replay load fails`)
+      if (model.pending.some((load) => load.superseded))
+        reach?.reach(`superseded replay load`)
+      if (
+        model.gate === `ready` &&
+        (model.failed.size > 0 || model.replayFailed)
+      )
+        reach?.reach(`request error shown`)
       expect(query.health, `${label}: stable read`).toBe(query.health)
       if (
         demandOnly &&
@@ -4784,6 +5008,8 @@ async function runLazyHistory(
         )
         // An Effect over the same query that a load failure has not ended
         // has received the same rows by now.
+        if (effect && !effect.disposed && !model.replayActive)
+          reach?.reach(`effect compared at a quiet checkpoint`)
         if (effect && !effect.disposed && !model.replayActive)
           expect(
             [...effectRows.values()].sort((a, b) => a[0] - b[0]),
@@ -4927,7 +5153,7 @@ describe(`lazy join demand grammar`, () => {
       { kind: `reload` },
       { kind: `settle-ok` },
     ]))
-  it(`releasing a replay's last pending load settles the replay`, () =>
+  it(`a demand change that asks for a failed key again keeps its replay open`, () =>
     runLazyHistory(
       [
         { kind: `reload` },
@@ -5021,6 +5247,55 @@ describe(`lazy join demand grammar`, () => {
       ],
       { honorsAbort: false },
     ))
+  it(`a reload after a truncate keeps the first load waiting for its replay`, () =>
+    runLazyHistory(
+      [
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-ok` },
+        { kind: `truncate` },
+        { kind: `unparent`, key: 1 },
+        { kind: `reload` },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a truncate replay clears the error of a key whose retry is still pending`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `truncate` },
+        { kind: `settle-last-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a failed replay succeeds for the demand left after its failed demand retires`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-ok` },
+        { kind: `settle-fail` },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a demand change's replacement keeps a reload's replay open in the first load`, () =>
+    runLazyHistory(
+      [
+        { kind: `reload` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-first-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+      ],
+      { holdChildReady: true },
+    ))
   it(`a first load waits for a source reload's whole replay`, () =>
     runLazyHistory(
       [
@@ -5036,9 +5311,50 @@ describe(`lazy join demand grammar`, () => {
     runLazyHistory([{ kind: `reload` }, { kind: `settle-ok` }], {
       asyncChildReady: true,
     }))
+  const lazyReach = createOracleReach(
+    `source-health.lazy-demand`,
+    lazyReachStates,
+  )
+  let lazyHistoriesRan = false
+  afterAll(() => {
+    if (lazyHistoriesRan) lazyReach.assertReached()
+  })
+  // Prefixes that enter a declared reach state that random steps alone rarely
+  // reach at the base run count, with the driver options the state needs.
+  // Random steps follow each one.
+  const lazyReachPrefixes: ReadonlyArray<{
+    steps: ReadonlyArray<LazyStep>
+    holdChildReady?: boolean
+    honorsAbort?: boolean
+  }> = [
+    { steps: [{ kind: `reload` }, { kind: `truncate` }], holdChildReady: true },
+    {
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+      ],
+    },
+    {
+      steps: [{ kind: `truncate` }, { kind: `truncate` }],
+      honorsAbort: false,
+    },
+    {
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+      ],
+    },
+  ]
   fcTest.prop(
     [
-      fc.array(step, { maxLength: 10 }),
+      fc
+        .tuple(
+          fc.option(fc.constantFrom(...lazyReachPrefixes), { freq: 2 }),
+          fc.array(step, { maxLength: 10 }),
+        )
+        .map(([prefix, rest]) => ({ prefix, rest })),
       fc.boolean(),
       fc.boolean(),
       fc.boolean(),
@@ -5049,22 +5365,29 @@ describe(`lazy join demand grammar`, () => {
   )(
     `generated lazy demand histories refine the model`,
     (
-      steps,
+      { prefix, rest },
       asyncChildReady,
-      honorsAbort,
-      holdChildReady,
+      generatedHonorsAbort,
+      generatedHoldChildReady,
       directSubscriber,
       withEffect,
-    ) =>
-      withDeadline(
+    ) => {
+      const steps = [...(prefix?.steps ?? []), ...rest]
+      const honorsAbort = prefix?.honorsAbort ?? generatedHonorsAbort
+      const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady
+      lazyHistoriesRan = true
+      lazyReach.beginHistory()
+      return withDeadline(
         runLazyHistory(steps, {
           asyncChildReady,
           honorsAbort,
           holdChildReady,
           directSubscriber,
           withEffect,
+          reach: lazyReach,
         }),
-      ),
+      )
+    },
     120_000,
   )
 })

@@ -58,10 +58,12 @@ interface PendingSyncedTransaction<
   layoutChanged: boolean
   operations: Array<PendingSyncOperation<T, TKey>>
   truncate?: boolean
-  // Who made the transaction replace every row: a reload's first
-  // transaction, or the adapter's own truncate(). A reload that ends early
-  // drops only its own.
-  truncateOwner?: `reload` | `adapter`
+  // Why the transaction replaces every row. A reload's first transaction
+  // replaces them, and the adapter's own truncate() can too, in the same
+  // transaction. A reload that ends early drops only its own replacement; a
+  // canceled one moves to the run's next transaction.
+  reloadReplacement?: boolean
+  adapterTruncate?: boolean
   truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   /** The last explicit write per key, after `position` operations. */
@@ -1294,7 +1296,7 @@ export class CollectionStateManager<
           }
 
           // Emit truncate event so subscriptions can reset their cursor tracking state
-          this.emittingReloadTruncate = transaction.truncateOwner === `reload`
+          this.emittingReloadTruncate = transaction.reloadReplacement === true
           try {
             this._events.emit(`truncate`, {
               type: `truncate`,

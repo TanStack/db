@@ -1427,7 +1427,10 @@ snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
 replacement. Replay failure is scoped to the logical demand that failed. If
 that demand retires, its failure cannot poison a successful replacement for the
-remaining demand. If the last logical demand retires, the now-unreachable source
+remaining demand. A demand change is one step: the demand it starts and the
+demand it retires count together, so a change that asks for data again does not
+retire the last logical demand, and its new demand joins the open replay. If the
+last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
 graph; unrelated parent or sibling changes may then publish. A direct
 subscriber's replay whose current attempt has not failed instead publishes the
@@ -1738,7 +1741,8 @@ every row before the top-K (a recorded limit).
    started by its active replay demands settles; failure keeps the prior public
    result and later partial source changes private until an authoritative replay
    succeeds. A failed replay with no remaining logical demand cannot gate other
-   graph work.
+   graph work. A demand change counts as one step, so a change that asks for
+   data again leaves the replay its new demand.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered and every eager source is ready; obsolete demand does not block
     it, and an on-demand source's own Collection readiness does not gate it.

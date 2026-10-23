@@ -333,13 +333,15 @@ export class CollectionSubscription
    * reload's first commit truncates them, and replays then.
    */
   public retireSyncRun(): void {
-    this.handleCollectionCleanup(true)
     // A subscription that buffers a private replacement would publish it
     // before the reload's truncate applies; it replays at that truncate.
     this.reloadReplayed =
       this.options.truncateReplayPublication !== undefined &&
       this.replaysDemand() &&
       this.subsetDemands.length > 0
+    // The replacement stays pending from the old replay to the new one, so
+    // nothing that runs during the detach sees a settled source.
+    this.handleCollectionCleanup(true, this.reloadReplayed)
     if (this.reloadReplayed) this.handleTruncate()
   }
 
@@ -354,8 +356,12 @@ export class CollectionSubscription
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */
-  private handleCollectionCleanup(keepWaitingCallers = false): void {
+  private handleCollectionCleanup(
+    keepWaitingCallers = false,
+    holdReplacement = false,
+  ): void {
     this.discardTruncateReplay()
+    this.truncateReplacementPending = holdReplacement
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
 

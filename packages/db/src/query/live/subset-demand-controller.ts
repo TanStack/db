@@ -58,8 +58,10 @@ export class SubsetDemandController {
   settleReplay(): Array<string> {
     const loaded: Array<string> = []
     for (const [planId, state] of this.states) {
+      // Every segment the subscription holds was loaded again, also one whose
+      // own retry is still pending. A load that threw holds no demand.
       for (const segment of state.segments)
-        if (segment.state === `failed` && !segment.thrown)
+        if (!segment.thrown)
           for (const key of segment.keys.keys()) state.failedKeys.delete(key)
       if (state.failedKeys.size === 0) loaded.push(planId)
     }
@@ -114,22 +116,19 @@ export class SubsetDemandController {
     }
     this.states.set(plan.id, state)
 
-    // A failed segment is released first, so a replay judged during this
-    // change does not fail for the demand the change requests again. Release
-    // every retired segment even if subscriber code that a release runs
-    // throws, then report the first error.
-    retired.sort(
-      (a, b) => Number(b.state === `failed`) - Number(a.state === `failed`),
-    )
-    runAllCallbacks(
-      retired.map((segment) => () => releaseSegment(subscription, segment)),
-    )
-    if (this.states.get(plan.id) !== state) {
-      return { changed: false, empty: false, ready: true }
-    }
+    // Law 9: a demand change is one step. Start its new demand before it
+    // releases the retired segments, so an open replay keeps the new demand
+    // and is not judged in between. Release every retired segment even if
+    // subscriber code that a release runs throws, then report the first
+    // error.
+    const release = () =>
+      runAllCallbacks(
+        retired.map((segment) => () => releaseSegment(subscription, segment)),
+      )
 
     if (nextKeys.size === 0) {
       this.states.delete(plan.id)
+      release()
       return { changed: true, empty: true, ready: true }
     }
 
@@ -148,47 +147,54 @@ export class SubsetDemandController {
     // A replacement alone decides the demand: the segments it supersedes are
     // released, and aborted, once it settles.
     let replacement: DemandSegment | undefined
-    if (requestedKeys.size > 0) {
-      const segment = createSegment(plan, requestedKeys)
-      if (replace) {
-        segment.replaces = [...segments]
-        replacement = segment
-      }
-      segments.push(segment)
-      let started: boolean
-      try {
-        started = startSegment(
-          subscription,
-          segment,
-          () => this.warnUnoptimized(plan),
-          (succeeded) => this.recordOutcome(plan.id, segment, succeeded),
-        )
-      } catch (error) {
-        // A load that throws failed its keys, as one that rejects does.
-        segment.state = `failed`
-        segment.thrown = true
-        this.recordOutcome(plan.id, segment, false)
-        throw error
-      }
-      if (this.states.get(plan.id) !== state) {
-        return { changed: false, empty: false, ready: true }
-      }
-      if (!started)
-        throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `Subset demand snapshot did not start`
-            : codedMessage(159),
-        )
-      if (replace) {
-        if (segment.ready instanceof Promise) {
-          void segment.ready.then(
-            () => this.finishReplacement(subscription, plan.id, segment),
-            () => {},
+    try {
+      if (requestedKeys.size > 0) {
+        const segment = createSegment(plan, requestedKeys)
+        if (replace) {
+          segment.replaces = [...segments]
+          replacement = segment
+        }
+        segments.push(segment)
+        let started: boolean
+        try {
+          started = startSegment(
+            subscription,
+            segment,
+            () => this.warnUnoptimized(plan),
+            (succeeded) => this.recordOutcome(plan.id, segment, succeeded),
           )
-        } else {
-          this.finishReplacement(subscription, plan.id, segment)
+        } catch (error) {
+          // A load that throws failed its keys, as one that rejects does.
+          segment.state = `failed`
+          segment.thrown = true
+          this.recordOutcome(plan.id, segment, false)
+          throw error
+        }
+        if (this.states.get(plan.id) !== state) {
+          return { changed: false, empty: false, ready: true }
+        }
+        if (!started)
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Subset demand snapshot did not start`
+              : codedMessage(159),
+          )
+        if (replace) {
+          if (segment.ready instanceof Promise) {
+            void segment.ready.then(
+              () => this.finishReplacement(subscription, plan.id, segment),
+              () => {},
+            )
+          } else {
+            this.finishReplacement(subscription, plan.id, segment)
+          }
         }
       }
+    } finally {
+      release()
+    }
+    if (this.states.get(plan.id) !== state) {
+      return { changed: false, empty: false, ready: true }
     }
 
     const pending = (replacement ? [replacement] : state.segments)
