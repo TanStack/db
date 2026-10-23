@@ -173,7 +173,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       (sourceIdsRef.current ??= createLiveQuerySourceIdClaims()),
       dbClient,
       `useLiveInfiniteQuery`,
-      deferredCollections,
     )
 
   const queryKey = getLiveQueryKey(config)
@@ -209,6 +208,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           queryFnOrCollection,
           derivedIdentityProfilerRef.current,
           identityScope(),
+          deferredCollections,
         )
         preparedQueryValue = preparation.value
         derivedQuery = queryFnOrCollection

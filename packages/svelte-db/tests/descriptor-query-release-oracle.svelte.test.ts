@@ -177,10 +177,7 @@ describe(`Svelte descriptor source release`, () => {
   // rejection that needs an earlier, accepted query.
   const causes: Record<
     string,
-    (
-      shared: any,
-      client: DbClient,
-    ) => { rejected: Error | string; run: () => () => void }
+    (shared: any, client: DbClient) => { run: () => () => void }
   > = {
     'a descriptor factory that throws during preparation': (shared, client) => {
       const failing = collectionOptions(`${shared.id}-failing`, () => {
@@ -195,7 +192,6 @@ describe(`Svelte descriptor source release`, () => {
           .select(({ failing: row }: any) => ({ id: row.id })),
       )
       return {
-        rejected: `descriptor factory failed`,
         run: () => {
           let dispose: (() => void) | undefined
           expect(() => {
@@ -208,7 +204,6 @@ describe(`Svelte descriptor source release`, () => {
       }
     },
     'a query without a stable IR identity': (shared, client) => ({
-      rejected: `UnhashableQueryIRError`,
       run: () => {
         let dispose: (() => void) | undefined
         expect(() => {
@@ -223,7 +218,6 @@ describe(`Svelte descriptor source release`, () => {
       },
     }),
     'a query the live query rejects when it compiles': (shared, client) => ({
-      rejected: `UnsupportedRootScalarSelectError`,
       run: () => {
         let dispose: (() => void) | undefined
         expect(() => {
@@ -241,7 +235,6 @@ describe(`Svelte descriptor source release`, () => {
       },
     }),
     'a reused source Collection ID': (shared, client) => ({
-      rejected: `SourceCollectionIdReuseError`,
       run: () => {
         const first = createCollection<Row>({
           id: `${shared.id}-settings`,

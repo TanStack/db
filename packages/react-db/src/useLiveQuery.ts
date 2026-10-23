@@ -253,22 +253,16 @@ type DerivedQueryPreparation = {
   identityDeps: Array<unknown>
 }
 
-type HookIdentityScope = LiveQueryIdentityScope & {
-  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>
-}
-
 /** How a hook checks a prepared query whose identity it compares. */
 export function getIdentityScope(
   claims: LiveQuerySourceIdClaims | undefined,
   dbClient: DbClient | undefined,
   hookName: string,
-  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
-): HookIdentityScope {
+): LiveQueryIdentityScope {
   return {
     claims,
     client: dbClient,
     bindingName: hookName,
-    deferredCollections,
     onUnboundDescriptor: getUnboundDescriptorReporter(dbClient, hookName),
   }
 }
@@ -276,13 +270,14 @@ export function getIdentityScope(
 /**
  * Prepare a query without `queryKey`, derive its identity, and claim its
  * source Collection IDs. A query whose IR has no stable identity throws
- * `UnhashableQueryIRError`; either rejection releases the render's deferred
- * sync starts.
+ * `UnhashableQueryIRError`. The hook's render boundary releases the sync
+ * starts a rejected render deferred.
  */
 export function prepareDerivedQuery(
   value: unknown,
   profiler: DerivedIdentityProfiler,
-  scope: HookIdentityScope,
+  scope: LiveQueryIdentityScope,
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
 ): DerivedQueryPreparation {
   const shouldProfile =
     shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
@@ -291,7 +286,7 @@ export function prepareDerivedQuery(
   const preparedValue = prepareQueryValue(
     value,
     scope.client,
-    scope.deferredCollections,
+    deferredCollections,
   )
 
   try {
@@ -789,12 +784,8 @@ function useLiveQueryImpl(
       const preparation = prepareDerivedQuery(
         configOrQueryOrCollection,
         instance.derivedIdentityProfiler,
-        getIdentityScope(
-          instance.sourceIds,
-          dbClient,
-          `useLiveQuery`,
-          instance.deferredCollections,
-        ),
+        getIdentityScope(instance.sourceIds, dbClient, `useLiveQuery`),
+        instance.deferredCollections,
       )
       preparedQueryValue = preparation.value
       identityDeps = preparation.identityDeps
@@ -916,12 +907,7 @@ function useLiveQueryImpl(
           // cache: it needs a stable identity and keeps its sources' IDs.
           identifyLiveQuery(
             preparedQueryValue,
-            getIdentityScope(
-              instance.sourceIds,
-              dbClient,
-              `useLiveQuery`,
-              instance.deferredCollections,
-            ),
+            getIdentityScope(instance.sourceIds, dbClient, `useLiveQuery`),
             // Reuse the identity this render derived for hydration.
             depsQueryIdentity === unpreparedQueryValue
               ? undefined
