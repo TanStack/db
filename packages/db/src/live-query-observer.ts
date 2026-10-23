@@ -200,6 +200,7 @@ class LiveQueryObserverImpl<
   private readonly persistedSources:
     ReadonlyArray<PersistedSourceEntry> | undefined
   private readonly onPreload: (() => void) | undefined
+  private readonly usesSettledHydration: boolean
   private visibleStatus: CollectionStatus | undefined
   private cachedEntries: Array<[TKey, T]> | undefined
   private cachedCollectionRevision: number | undefined
@@ -246,6 +247,7 @@ class LiveQueryObserverImpl<
     client: DbClient | undefined,
     queryHash: string | undefined,
     onPreload: (() => void) | undefined,
+    suspendUntilReady: boolean,
   ) {
     this.collection = collection
     this.wholesale = wholesale
@@ -255,14 +257,15 @@ class LiveQueryObserverImpl<
       ? collectPersistedReadinessSources(collection)
       : undefined
     this.onPreload = onPreload
+    this.usesSettledHydration = suspendUntilReady
     this.registerClientResource()
   }
 
-  getSnapshot(): LiveQuerySnapshot<T, TKey> {
+  getSnapshot(forServerSnapshot = false): LiveQuerySnapshot<T, TKey> {
     const collection = this.collection
     if (!collection) return DISABLED_SNAPSHOT
 
-    this.syncHydrationState()
+    this.syncHydrationState(forServerSnapshot)
     if (!this.attached) this.refreshDetachedState(collection)
 
     const local = this.readPersistedReadiness()
@@ -334,7 +337,25 @@ class LiveQueryObserverImpl<
   }
 
   getServerSnapshot(preloadRequested = false): LiveQuerySnapshot<T, TKey> {
-    const snapshot = this.getSnapshot()
+    if (
+      typeof window !== `undefined` &&
+      !this.liveResultIsAuthoritative &&
+      this.client &&
+      this.queryHash
+    ) {
+      const query = this.client._getLiveQuery(this.queryHash, true)
+      const snapshot = this.usesSettledHydration
+        ? query?.snapshot
+        : (query?.initialSnapshot ?? query?.snapshot)
+      // A later boundary may hydrate before its result promise arrives.
+      // Local rows cannot substitute for the missing server-rendered view.
+      if (query?.status === `pending` && !snapshot) {
+        if (this.usesSettledHydration)
+          this.preloadForInitialRender().catch(() => {})
+        throw query.promise
+      }
+    }
+    const snapshot = this.getSnapshot(true)
     const collection = this.collection
     if (
       !this.client ||
@@ -381,7 +402,7 @@ class LiveQueryObserverImpl<
       },
       sources,
     )
-    return this.getSnapshot()
+    return this.getSnapshot(true)
   }
 
   getError(): unknown {
@@ -441,12 +462,12 @@ class LiveQueryObserverImpl<
     return this.cachedEntries ?? this.captureEntries(collection).entries
   }
 
-  private syncHydrationState(): boolean {
+  private syncHydrationState(forServerSnapshot = false): boolean {
     if (!this.client || !this.queryHash || this.liveResultIsAuthoritative) {
       return false
     }
 
-    const query = this.client._getLiveQuery(this.queryHash)
+    const query = this.client._getLiveQuery(this.queryHash, forServerSnapshot)
     if (!query) return false
 
     if (
@@ -467,7 +488,8 @@ class LiveQueryObserverImpl<
       return changed
     }
 
-    const snapshot = query.initialSnapshot ?? query.snapshot
+    const snapshot =
+      (!this.usesSettledHydration && query.initialSnapshot) || query.snapshot
     if (
       !snapshot ||
       (this.hydrationSeed && this.hydrationSeed.snapshot === snapshot)
@@ -1177,6 +1199,8 @@ export interface CreateLiveQueryObserverOptions {
   queryHash?: string
   /** Resume framework-deferred query sources before a server preload. */
   onPreload?: () => void
+  /** Read the completed stream rather than an earlier ordinary loading view. */
+  suspendUntilReady?: boolean
 }
 
 /**
@@ -1201,5 +1225,6 @@ export function createLiveQueryObserver<
     options.client,
     options.queryHash,
     options.onPreload,
+    options.suspendUntilReady === true,
   )
 }

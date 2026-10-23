@@ -111,6 +111,7 @@ import { fc } from '@fast-check/vitest'
 import { Component, Suspense } from 'react'
 import { renderToPipeableStream, renderToString } from 'react-dom/server'
 import { hydrateRoot } from 'react-dom/client'
+import { routerWithDbClient } from '../../react-router-with-db/src'
 import {
   expectedSsrSnapshot,
   ssrSnapshotExamples,
@@ -130,6 +131,7 @@ import {
   modelSubscriberStartCleanup,
   subscriberStartCleanupHistories,
 } from '../../db/tests/collection-subscription-lifecycle-grammar-oracle'
+import type { DehydratedRouterDbState } from '../../react-router-with-db/src'
 import type { SsrSnapshotHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
 import type {
   Context,
@@ -2587,8 +2589,20 @@ describe(`infinite hydration identity`, () => {
 // Streaming must capture the view it actually renders, even when the adapter
 // publishes again in the microtask before its preload promise captures a result.
 // This metamorphic observation compares the final host markup with transport.
+// An ordinary sibling may already have rendered loading before Suspense starts
+// the same query. Each reader owes its own rendered view during hydration;
+// preserving the earlier view cannot prevent the explicit preload completing.
+// Synchronous act permits the ordinary sibling's effects before React hydrates
+// its Suspense boundary. That sibling must not consume another reader's seed.
 async function checkStreamCut(
-  history: { count: number; writes: number },
+  history: {
+    count: number
+    writes: number
+    ordinaryFirst?: boolean
+    ordinaryLast?: boolean
+    browserWrite?: boolean
+    splitHydration?: boolean
+  },
   reach: ReturnType<typeof createStreamReach>,
 ) {
   reach.beginHistory()
@@ -2596,20 +2610,25 @@ async function checkStreamCut(
     id: String(i),
     name: `first ${i}`,
   }))
-  const descriptor = collectionOptions(`stream-render-cut`, () => ({
+  const client = new DbClient({ runtime: `server` })
+  const descriptor = collectionOptions(`stream-render-cut`, (owner) => ({
     id: `stream-render-cut`,
     getKey: (row: { id: string; name: string }) => row.id,
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
         begin()
-        for (const row of authoredRows) write({ type: `insert`, value: row })
+        const rows =
+          owner !== client && history.browserWrite
+            ? [{ id: `0`, name: `browser only` }]
+            : authoredRows
+        for (const row of rows) write({ type: `insert`, value: row })
         commit()
         markReady()
         queueMicrotask(() => {
           for (let i = 0; i < history.writes; i++) {
             begin()
             write({
-              type: history.count || i ? `update` : `insert`,
+              type: rows.length || i ? `update` : `insert`,
               value: { id: `0`, name: `later ${i}` },
             })
             commit()
@@ -2618,14 +2637,53 @@ async function checkStreamCut(
       },
     },
   }))
-  const client = new DbClient()
   client._setSsrStreamingEnabled(true)
+  let finishRouterRender = () => {}
+  const router: {
+    isServer: boolean
+    options: {
+      context: { dbClient: DbClient }
+      dehydrate?: () => Promise<DehydratedRouterDbState>
+    }
+    serverSsr: {
+      isDehydrated: () => boolean
+      onRenderFinished: (callback: () => void) => void
+    }
+  } = {
+    isServer: true,
+    options: { context: { dbClient: client } },
+    serverSsr: {
+      isDehydrated: () => true,
+      onRenderFinished: (callback) => {
+        finishRouterRender = callback
+      },
+    },
+  }
+  // The real Router adapter supplies the transport for the same generated law.
+  // Its SSR callback is controlled; this is not a deployed Start host witness.
+  Reflect.apply(routerWithDbClient, undefined, [router, client])
+  const initialRouterState = await router.options.dehydrate!()
   const query = new Query()
     .from({ row: descriptor })
     .select(({ row }) => ({ name: row.name }))
+  const ordinaryReads: Array<{ status: string; names: Array<string> }> = []
+  const suspenseReads: Array<Array<string>> = []
   function Consumer() {
     const result = useLiveSuspenseQuery({ query })
+    suspenseReads.push(result.data.map((row) => row.name))
     return <span>{result.data.map((row) => row.name).join(`,`)}</span>
+  }
+  function OrdinaryConsumer() {
+    const result = useLiveQuery({ query })
+    ordinaryReads.push({
+      status: result.status,
+      names: result.data.map((row) => row.name),
+    })
+    return (
+      <output data-status={result.status}>
+        {result.data.map((row) => row.name).join(`,`)}
+      </output>
+    )
   }
   const browserWindow = globalThis.window
   vi.stubGlobal(`window`, undefined)
@@ -2643,9 +2701,11 @@ async function checkStreamCut(
       sink.on(`error`, reject)
       const stream = renderToPipeableStream(
         <DbProvider client={client}>
+          {history.ordinaryFirst && <OrdinaryConsumer />}
           <Suspense fallback={<span>loading</span>}>
             <Consumer />
           </Suspense>
+          {history.ordinaryLast && <OrdinaryConsumer />}
         </DbProvider>,
         {
           onAllReady() {
@@ -2670,10 +2730,102 @@ async function checkStreamCut(
       snapshot?.rows.map((row) => (row.value as { name: string }).name),
       `stream transport reproduces its rendered view`,
     ).toEqual(authoredRows.map((row) => row.name))
+    if (history.ordinaryFirst || history.ordinaryLast) {
+      const firstServerRead = ordinaryReads[0]
+      ordinaryReads.length = 0
+      const firstSuspenseRead = suspenseReads[0]
+      suspenseReads.length = 0
+      vi.stubGlobal(`window`, browserWindow)
+      const browser = new DbClient({ runtime: `browser` })
+      browser.hydrate(initialRouterState.dehydratedDbClient)
+      const reader = initialRouterState.dbStream.getReader()
+      finishRouterRender()
+      try {
+        for (;;) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          browser.hydrate({
+            ...chunk.value,
+            liveQueries: chunk.value.liveQueries?.map(
+              ({ promise, ...data }) => ({
+                ...JSON.parse(JSON.stringify(data)),
+                ...(promise
+                  ? {
+                      promise: promise.then((value) =>
+                        JSON.parse(JSON.stringify(value)),
+                      ),
+                    }
+                  : {}),
+              }),
+            ),
+          })
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      const host = document.createElement(`div`)
+      host.innerHTML = html
+      let root: Root | undefined
+      const hydrationErrors: Array<unknown> = []
+      try {
+        const hydrate = () => {
+          root = hydrateRoot(
+            host,
+            <DbProvider client={browser}>
+              {history.ordinaryFirst && <OrdinaryConsumer />}
+              <Suspense fallback={<span>loading</span>}>
+                <Consumer />
+              </Suspense>
+              {history.ordinaryLast && <OrdinaryConsumer />}
+            </DbProvider>,
+            { onRecoverableError: (error) => hydrationErrors.push(error) },
+          )
+        }
+        await act(
+          history.splitHydration
+            ? hydrate
+            : async () => {
+                hydrate()
+                await Promise.resolve()
+              },
+        )
+        expect(ordinaryReads[0], `ordinary first hydration view`).toEqual(
+          firstServerRead,
+        )
+        expect(suspenseReads[0], `Suspense first hydration view`).toEqual(
+          firstSuspenseRead,
+        )
+        expect(hydrationErrors).toEqual([])
+      } finally {
+        await act(async () => {
+          root?.unmount()
+          await Promise.resolve()
+        })
+        await browser.cleanup()
+      }
+    }
     reach.reach(history.count ? `nonempty` : `empty`)
     reach.reach(history.writes ? `later-publication` : `unchanged`)
+    reach.reach(
+      history.ordinaryFirst
+        ? `ordinary-first`
+        : history.ordinaryLast
+          ? `suspense-first`
+          : `suspense-only`,
+    )
+    reach.reach(
+      (history.ordinaryFirst || history.ordinaryLast) && history.splitHydration
+        ? `split-hydration`
+        : `together-hydration`,
+    )
+    reach.reach(
+      (history.ordinaryFirst || history.ordinaryLast) && history.browserWrite
+        ? `browser-different`
+        : `browser-same`,
+    )
   } finally {
     vi.stubGlobal(`window`, browserWindow)
+    finishRouterRender()
     await client.cleanup()
   }
 }
@@ -2683,8 +2835,36 @@ const createStreamReach = () =>
     `nonempty`,
     `later-publication`,
     `unchanged`,
+    `ordinary-first`,
+    `suspense-first`,
+    `suspense-only`,
+    `browser-different`,
+    `browser-same`,
+    `split-hydration`,
+    `together-hydration`,
   ])
 describe(`stream render snapshot cut`, () => {
+  it(`keeps an ordinary reader from blocking a shared Suspense preload`, () =>
+    checkStreamCut(
+      { count: 1, writes: 0, ordinaryFirst: true, browserWrite: true },
+      createStreamReach(),
+    ))
+  it(`hydrates an ordinary reader rendered after its Suspense sibling`, () =>
+    checkStreamCut(
+      { count: 1, writes: 0, ordinaryLast: true, browserWrite: true },
+      createStreamReach(),
+    ))
+  it(`retains the Suspense view after its ordinary sibling commits`, () =>
+    checkStreamCut(
+      {
+        count: 1,
+        writes: 0,
+        ordinaryFirst: true,
+        browserWrite: true,
+        splitHydration: true,
+      },
+      createStreamReach(),
+    ))
   for (const history of [
     { count: 0, writes: 1 },
     { count: 1, writes: 1 },
@@ -2697,10 +2877,19 @@ describe(`stream render snapshot cut`, () => {
       const reach = createStreamReach()
       await fc.assert(
         fc.asyncProperty(
-          fc.record({
-            count: fc.integer({ min: 0, max: 3 }),
-            writes: fc.integer({ min: 0, max: 3 }),
-          }),
+          fc
+            .record({
+              count: fc.integer({ min: 0, max: 3 }),
+              writes: fc.integer({ min: 0, max: 3 }),
+              ordinaryFirst: fc.boolean(),
+              ordinaryLast: fc.boolean(),
+              browserWrite: fc.boolean(),
+              splitHydration: fc.boolean(),
+            })
+            .map((history) => ({
+              ...history,
+              ordinaryLast: !history.ordinaryFirst && history.ordinaryLast,
+            })),
           (history) => checkStreamCut(history, reach),
         ),
         campaign === `fixed`

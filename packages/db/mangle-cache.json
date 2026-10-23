@@ -417,5 +417,7 @@
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
   "startSyncForSubscriber": "gT",
-  "snapshotFrom": "gV"
+  "snapshotFrom": "gV",
+  "usesSettledHydration": "gU",
+  "hydratedLiveQueries": "gW"
 }

@@ -1020,6 +1020,7 @@ function useLiveQueryImpl(
       client: dbClient,
       queryHash: instance.queryHash,
       onPreload: resumeDeferredCollections,
+      suspendUntilReady: forSuspense,
     })
   }
   const observer = instance.observer!

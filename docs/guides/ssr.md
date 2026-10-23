@@ -330,6 +330,14 @@ browser writes before hydration do not change that initial view. Browser commit
 starts acquisition and publishes the live status normally. A loading capture
 does not complete an explicit data preload.
 
+An ordinary hook can render loading before a Suspense sibling completes the
+same query. Each hook retains its own server-rendered view during hydration.
+The Router stream forwards a newer result for that query without replacing the
+ordinary hook's earlier view. A later boundary waits for its missing streamed
+result instead of substituting browser rows. DbClient retains transported server
+snapshots until cleanup, so one reader's commit cannot consume another
+boundary's initial view. New ordinary browser reads still use live results.
+
 Streaming `useLiveSuspenseQuery` discovers and prepares its result during render,
 including when another query already warmed the source. Ordinary hooks require
 explicit preparation to render that data. Opaque SSR queries require a serializable

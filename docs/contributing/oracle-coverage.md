@@ -641,7 +641,18 @@ Collection and callback-returned Collection inputs. The latter callback path is
 JavaScript runtime coverage; it has no TypeScript overload. A separate React
 streaming property crosses zero to three rows and zero to three microtask source
 publications before preload settlement. It compares transported rows with the
-view actually rendered, including empty and unchanged controls. The
+view actually rendered, including empty and unchanged controls. Its mixed-reader
+histories place an ordinary hook before or after a Suspense sibling, or omit it.
+Real React hydration receives JSON-copied snapshots and streamed promises from
+the real Router adapter under its controlled SSR callback. It compares each
+hook's first browser view with its own server view, even when local browser rows
+differ. Mandatory reach distinguishes both reader orders, Suspense alone, and
+same/different browser rows. It crosses async hydration with a synchronous
+React act cut that permits ordinary commit before Suspense hydration, while
+transported promises can still be pending. Both schedules must preserve each
+reader's first projected rows and readiness. The Router's focused receiving test separately
+checks that a replacement record reaches the stream after an initial loading
+record. The
 [SSR review audit](oracle-reviews/2026-10-23-ssr-review.md) records RED on unchanged
 production, GREEN, narrow mutants, and exact receiving replays.
 The separate `live-query-observer-snapshot-oracle.property.test.ts` owner checks
@@ -657,7 +668,7 @@ release; first-party event listeners report their failures asynchronously.
 Limits: the generated sources are synchronous and eager with zero to three rows.
 Infinite receiving coverage uses a one-row initial page and its peek-ahead row.
 Arbitrary asynchronous providers, later page-shape changes during a pending
-hydration stream, persistence readiness, mixed Suspense/plain streaming schedules,
+hydration stream, persistence readiness, arbitrary concurrent-root hydration schedules,
 custom dehydration filters, and the real Start/Electric host remain open paths
 for these same receiving owners. There is no demonstrated counterexample in
 these unexercised paths. Transport deliberately discarding required state and

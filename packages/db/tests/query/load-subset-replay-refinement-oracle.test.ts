@@ -2375,10 +2375,7 @@ describe(`subscription-specific replay demand`, () => {
         }),
         campaign === `fixed`
           ? { seed: 2233, numRuns: oracleRuns(75) }
-          : {
-              ...oraclePropertyOptions(75, replayDemandProperty),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(75, replayDemandProperty),
       )
       console.info(
         replayDemandProperty,
