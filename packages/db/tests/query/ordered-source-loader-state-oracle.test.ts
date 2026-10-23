@@ -2561,6 +2561,22 @@ async function checkAuthorityCase(
   let ignoredReportsBeforeSettle = 0
   let ignoredReportsInsideFirstPage = 0
   let repairedReportsOnOwnPage = 0
+  // An unproven report whose pass pending joined work deferred: the ledger
+  // index at the report and the window size it judged.
+  let owedProof: { from: number; windowSize: number } | undefined
+  const expectProofRequest = (from: number, windowSize: number) => {
+    const issued = ledger
+      .slice(from)
+      .some(
+        ({ authoritative, options }) =>
+          authoritative || tieValue(options) === windowSize,
+      )
+    if (!issued) {
+      throw new Error(
+        `unproven report: a report over a first page that no row it read proves issued no repair and no tie of its end`,
+      )
+    }
+  }
   let truncates = 0
   let replayFailures = 0
   let optimisticDepartures = 0
@@ -2893,7 +2909,9 @@ async function checkAuthorityCase(
           await flush()
           // A report the loader cannot prove covers nothing it could change
           // owes a repair, which its next pass starts, or a tie request for
-          // the page's end, which completes the proof.
+          // the page's end, which completes the proof. Pending joined work
+          // defers ordinary loading, so the pass that runs when that work
+          // finishes owes the request instead.
           if (
             command.react &&
             quiet &&
@@ -2901,18 +2919,12 @@ async function checkAuthorityCase(
             ownFirstPage &&
             !insideFirstPage
           ) {
-            const issued = ledger
-              .slice(before)
-              .some(
-                ({ authoritative, options }) =>
-                  authoritative || tieValue(options) === windowSize,
-              )
-            if (!issued) {
-              throw new Error(
-                `unproven report: a report over a first page that no row it read proves issued no repair and no tie of its end`,
-              )
+            if (joinedPending && testCase.joined) {
+              owedProof = { from: before, windowSize }
+            } else {
+              expectProofRequest(before, windowSize)
+              repairedReportsOnOwnPage++
             }
-            repairedReportsOnOwnPage++
           }
           if (quiet && (beforeSettle || insideFirstPage)) {
             const issued = ledger
@@ -2965,6 +2977,11 @@ async function checkAuthorityCase(
           joinedPending = false
           graphPass()
           await flush()
+          if (owedProof) {
+            expectProofRequest(owedProof.from, owedProof.windowSize)
+            owedProof = undefined
+            repairedReportsOnOwnPage++
+          }
           break
         case `truncate`:
           truncate()
@@ -3664,6 +3681,31 @@ describe(`Ordered source request authority`, () => {
           { type: `settleNewest` },
           { type: `settleNewest` },
           { type: `settle`, pick: 3, ok: true },
+        ],
+      },
+    },
+    {
+      // Pending joined work defers the pass after an unproven report, so the
+      // repair or tie that the report owes waits for that work. The pass that
+      // runs when it finishes must start it. A random campaign found the law
+      // judging the deferred pass instead.
+      name: `an unproven report while joined work defers loading`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
         ],
       },
     },
