@@ -351,10 +351,7 @@ describe(`cursor adapter through production pagination`, () => {
           ),
           campaign === `fixed`
             ? { seed: 20261012, numRuns: oracleRuns(50) }
-            : {
-                ...oraclePropertyOptions(50, manualWriteProperty),
-                ...(campaign === `replay` ? { numRuns: 1 } : {}),
-              },
+            : oraclePropertyOptions(50, manualWriteProperty),
         )
       } catch (error) {
         lawFailure = error

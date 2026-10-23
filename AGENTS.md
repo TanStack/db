@@ -125,6 +125,20 @@ includes this block:
 - **Limits:** the states, paths, and observations that the evidence does not
   cover.
 
+### Lint feedback while you work
+
+The `oracle/` lint rules in `scripts/eslint-plugin-oracle/` report the
+shortcuts that a syntactic check can see. The repository's agent hooks
+(`.claude/`, `.codex/`, `.gemini/`, and `.github/hooks/`) return the reports
+after each edit and at the end of each turn. A hook sees only the edits that
+the harness's own edit tools make. After an edit through a shell command, or
+in a harness without these hooks, run `pnpm lint:changed` before you finish.
+
+Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
+pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
+true exception needs a maintainer to change the rule in a reviewed pull
+request.
+
 ## Required reading: live-query materialization
 
 Before reading, analyzing, or modifying correlated live-query materialization

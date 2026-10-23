@@ -201,7 +201,8 @@ describe(`guarded oracle replay`, () => {
       const result = runReplay(files)
       expect(result.status, result.output).toBe(0)
       expect(result.output).toContain(`"executions":1`)
-      expect(result.output).toContain(`"numRuns":3`)
+      // A path replay runs its recorded counterexample once.
+      expect(result.output).toContain(`"numRuns":1`)
     },
     40_000,
   )
@@ -298,6 +299,22 @@ describe(`oracle replay reporting`, () => {
     expect(oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)).toEqual(
       {},
     )
+  })
+
+  it(`runs a path replay once, and only for its selected property`, () => {
+    vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
+    const replay = {
+      replaySeed: 42,
+      replayPath: `3`,
+      replayProperty: `oracle-replay.calibration`,
+    }
+    expect(
+      oracleRandomParameters(5, replay, `oracle-replay.calibration`),
+    ).toEqual({ numRuns: 1, seed: 42, path: `3` })
+    expect(oracleRandomParameters(5, replay, `cursor.exact-width`)).toEqual({
+      numRuns: 5,
+      seed: 42,
+    })
   })
 
   it.each([false, true])(

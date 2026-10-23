@@ -462,10 +462,7 @@ describe(`structuralIdentity`, () => {
     )
     if (options.seed === undefined)
       await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
-    await fc.assert(
-      property,
-      options.path === undefined ? options : { ...options, numRuns: 1 },
-    )
+    await fc.assert(property, options)
   })
 
   // Named replays of counterexamples the random campaign found. Nested `deep`
@@ -625,9 +622,6 @@ describe(`structuralIdentity`, () => {
     )
     if (options.seed === undefined)
       await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
-    await fc.assert(
-      property,
-      options.path === undefined ? options : { ...options, numRuns: 1 },
-    )
+    await fc.assert(property, options)
   })
 })
