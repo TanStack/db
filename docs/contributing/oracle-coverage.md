@@ -324,6 +324,17 @@ retired-route publication; and
 checks before, during, and after-commit abort boundaries with applied receipts.
 These fixtures do not establish real-provider cancellation or framework timing.
 
+The ordered replay owner distinguishes replay renewal from an ordinary lazy
+demand created during another subscription's replay. Its adapter records the
+leases held at truncate, then matches subscription identity and independently
+evaluated key predicates once per renewed lease. New owners and different keys
+remain ordinary demand. Terminal-error assertions run after each history action
+and at convergence. Named neighbors require a new include demand's failure to
+be terminal and a settled joined demand's failed replay to remain nonterminal.
+The CI seed `-1751969525`, path `67:11:10:12:1:8:7:7`, reaches the former.
+This projection covers the grammar's five numeric keys and one-level includes;
+it does not establish arbitrary predicates or provider-driven replay schedules.
+
 The ordered-work owner has a 96-cell optimistic-departure matrix over source,
 joined, and anti-joined filters; update and delete; Collection and Effect;
 acknowledgement and rollback; one- and two-row windows; and indexed and

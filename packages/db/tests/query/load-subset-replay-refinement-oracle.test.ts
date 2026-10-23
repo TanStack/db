@@ -1100,7 +1100,9 @@ describe(`loadSubset replay refinement`, () => {
  *   first becomes ready is fatal too (an initial load failure), except on
  *   a lazy join source, which owns its demand. So a query may end in
  *   `error` only after a demand load issued outside a replay failed, or a
- *   load failed while the query was still loading.
+ *   load failed while the query was still loading. Replay renews demand held
+ *   by that subscription before the truncate. A new subscription's first
+ *   demand remains ordinary even if another subscription is replaying.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
@@ -1335,6 +1337,7 @@ async function checkOrderedReplay(
   type Load = { epoch: number; outcome: `pending` | `ok` | `failed` }
   const loads: Array<Load> = []
   const acquired = new Map<LoadSubsetOptions, number>()
+  const markerRequests = new WeakSet<LoadSubsetOptions>()
   const held: Array<(ok: boolean) => void> = []
   let holding = false
   let truncates = 0
@@ -1345,8 +1348,37 @@ async function checkOrderedReplay(
   let truncating = false
   let anyLoadFailed = false
   let earlyThrowSinceTruncate = false
-  // A marker truncate's commit starts its replay loads synchronously.
-  let markerReplaying = false
+  // Replay renews the leases held at its boundary. The adapter's subscription
+  // token identifies an owner; evaluating its immutable predicate on this
+  // finite key domain identifies the demand independently of production replay
+  // state. Consume each captured lease once, so a new owner or different keys
+  // cannot inherit another demand's replay classification.
+  const demandKey = (options: LoadSubsetOptions, marker: boolean) =>
+    JSON.stringify(
+      [1, 2, 3, 4, 5].filter((id) =>
+        options.where
+          ? evaluateReferenceExpression(
+              options.where,
+              marker ? { id, rowId: id } : truth.get(id)!,
+            ) === true
+          : true,
+      ),
+    )
+  const replayDemands = {
+    source: [] as Array<LoadSubsetOptions>,
+    marker: [] as Array<LoadSubsetOptions>,
+  }
+  const isReplayDemand = (options: LoadSubsetOptions, marker: boolean) => {
+    const previous = marker ? replayDemands.marker : replayDemands.source
+    const index = previous.findIndex(
+      (previousOptions) =>
+        previousOptions.subscription === options.subscription &&
+        demandKey(previousOptions, marker) === demandKey(options, marker),
+    )
+    if (index < 0) return false
+    previous.splice(index, 1)
+    return true
+  }
   let demandFailed = false
   // A failed initial load is fatal too (error 229). The queries are created
   // below; a load can only fail after they start.
@@ -1426,11 +1458,13 @@ async function checkOrderedReplay(
           // Marker loads share the history's held and failing loads, so
           // joined work can stay pending or fail.
           loadSubset: async (options) => {
+            const replay = isReplayDemand(options, true)
+            markerRequests.add(options)
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
             reach.markerLoads++
-            const demand = !markerReplaying && isDemand(options)
+            const demand = !replay && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
@@ -1491,10 +1525,11 @@ async function checkOrderedReplay(
         sync.markReady()
         return {
           loadSubset: async (options) => {
+            const replay = isReplayDemand(options, false)
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
-            const demand = !truncating && isDemand(options)
+            const demand = !replay && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
@@ -1661,6 +1696,11 @@ async function checkOrderedReplay(
     throw new Error(`held loads did not drain`)
   }
   const truncate = async () => {
+    replayDemands.source = [...acquired].flatMap(([options, count]) =>
+      count > 0 && !markerRequests.has(options)
+        ? Array.from({ length: count }, () => options)
+        : [],
+    )
     truncates++
     earlyThrowSinceTruncate = false
     if (held.length > 0) reach.heldAcrossTruncate++
@@ -1679,6 +1719,11 @@ async function checkOrderedReplay(
   // An eager marker source rewrites its rows; an on-demand one replays the
   // demand it retains.
   const truncateMarkers = async () => {
+    replayDemands.marker = [...acquired].flatMap(([options, count]) =>
+      count > 0 && markerRequests.has(options)
+        ? Array.from({ length: count }, () => options)
+        : [],
+    )
     installedMarkers.clear()
     markerSync.begin()
     markerSync.truncate()
@@ -1688,13 +1733,7 @@ async function checkOrderedReplay(
         installedMarkers.add(id)
       }
     }
-    markerReplaying = true
-    let receipt: true | Promise<void>
-    try {
-      receipt = markerSync.commit()
-    } finally {
-      markerReplaying = false
-    }
+    const receipt = markerSync.commit()
     if (receipt !== true) await receipt
   }
   try {
@@ -1819,6 +1858,15 @@ async function checkOrderedReplay(
         swallow(error)
       }
       await flushPromises()
+      replayDemands.source = []
+      replayDemands.marker = []
+      // Classify terminal errors at the failing history cut, before final
+      // recovery can hide an incorrect transition.
+      for (const shown of queries) {
+        if (shown.status === `error`) {
+          expect(fatalLoadFailed(), `history: terminal error`).toBe(true)
+        }
+      }
     }
     holding = false
     throwNextUnload = false
@@ -2028,6 +2076,39 @@ describe(`Ordered windows across truncate replays`, () => {
       reaches: `terminalErrors`,
     },
     {
+      name: `a new include demand during another subscription's replay`,
+      history: [
+        { type: `hold` },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      terminal: true,
+    },
+    {
+      name: `a failed replay of settled joined demand`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `some`,
+        markerMode: `on-demand`,
+      },
+      terminal: false,
+    },
+    {
       name: `two window moves while a load is held`,
       history: [
         { type: `hold` },
@@ -2086,10 +2167,14 @@ describe(`Ordered windows across truncate replays`, () => {
     history: Array<OrderedCommand>
     scenario?: OrderedScenario
     reaches?: keyof OrderedReach
+    terminal?: boolean
   }>)(
     `keeps the ordered window for $name (generated replay)`,
     async ({ history, scenario, ...replay }) => {
       const reach = await checkOrderedReplay(history, scenario)
+      if (`terminal` in replay) {
+        expect(reach.terminalErrors > 0).toBe(replay.terminal)
+      }
       const reaches: keyof OrderedReach | undefined =
         `reaches` in replay ? replay.reaches : undefined
       if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)

@@ -942,3 +942,91 @@ Source identities for this follow-up on `da37bc9bb` (SHA-256):
 | --- | --- |
 | `packages/db/src/collection/changes.ts` | `4d0849637a03e8012ee965191d9ed9332957e0bdf07b19d25d4deb0e400e9d34` |
 | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` | `0198add12e3c185aaa70a378bdfe115632686f864a178a42cbaa934809d387bd` |
+
+
+## Final-head CI: subscription-specific replay classification
+
+Core shard 1 at `e852b0accf9971f61348066277290b010a7b016e` found CI-01 in
+`replay.ordered-window-faults`: seed `-1751969525`, shrink path
+`67:11:10:12:1:8:7:7`. The five-action reduction holds work, moves row 1 to
+rank 1, truncates markers, then settles one request successfully and one with
+failure. The query is ascending, offset zero, limit one, with an anti-join,
+on-demand markers and an inline include. No peer participates.
+
+### Law and competing accounts
+
+A failed ordinary lazy demand is terminal. A failed truncate replay retains the
+last complete publication until a later authoritative replay succeeds. Authority
+is the architecture's demand, replay and publication contracts and this owner's
+stated terminal-error law. Those contracts apply to each subscription's demand;
+a shared source's replay does not classify every other subscription's load.
+
+The existing grammar already generated the case. Its source-wide
+`markerReplaying` flag mistook a new include subscription's first request for
+renewal of an older demand. The real adapter diagnostic reaches a new lexical
+subscription without a replay hold. Its ordinary request fails and the query
+correctly enters terminal error. The oracle rejected that allowed result.
+The same exact seed fails with all six changed production files restored to
+`16824f67`, so this classifier defect predates the eight-item repairs.
+
+An initial hypothesis blamed production's lazy-demand failure path. A guard
+experiment did not repair the failure and was removed. It supplies no GREEN
+credit. A trial that inspected a nonpublic Collection property could not
+classify provider ownership and was also discarded. A test-name selection that
+matched zero tests supplies no evidence. Final evidence below uses only adapter
+inputs, recorded lease ownership, semantic predicates and public query status.
+
+### Model, observations and calibration
+
+Before truncate, the adapter records its held leases. A new acquisition renews
+one captured lease only when its subscription token and independently evaluated
+key predicate match. Each lease is consumed once. A new owner or different keys
+remain ordinary demand even during another owner's replay. Separate source and
+marker snapshots retain the provider boundary; a WeakSet records which adapter
+received each options object. The five-key grammar makes predicate membership a
+complete finite demand projection here. No production replay classifier or
+private state computes the expected result.
+
+Terminal-error assertions now run after each history action, before final
+recovery, as well as at convergence. The named CI reduction requires terminal
+error. A settled joined-demand replay neighbor requires nonterminal recovery.
+Existing fixed and random campaigns use the unchanged generators and 300-run
+budget. The direct seed/path replay still runs without a normal campaign.
+
+| Experiment | Result | Log in existing scratch root |
+| --- | --- | --- |
+| Original final-head seed replay | One convergence assertion fails; 23 controls pass | final-db1-replay-current.log |
+| Reviewed-head production replay | Same convergence assertion fails; 23 controls pass; all six files byte-restored | final-db1-replay-16824.log |
+| Added intermediate cut and pinned reduction, old classifier | Two terminal-error assertions fail; 23 controls pass | final-db1-expanded-red.log |
+| Subscription-specific classifier, direct replay | 26 tests pass, no type errors | final-db1-classifier-second.log |
+| Owner-blind classifier mutant | New-include assertion fails, replay neighbor passes; no type or setup error | final-db1-mutant-owner-blind.log |
+| Production mutant makes every subset error terminal | Replay-neighbor assertion fails, ordinary-failure neighbor passes; no type or setup error | final-db1-mutant-fatal-replay.log |
+| Final surrounding selection | Three files, 962 tests pass; includes both normal campaigns; no type errors | final-db1-classifier-surrounding-final.log |
+
+All mutant source bytes were restored and verified. This correction changes no
+production file. The original eight-item dispositions and S01–S04 remain intact.
+CI-01 is `fixed-now` as an oracle-classification defect, with the generated
+witness, distinguishing neighbors and calibration retained in the primary owner.
+No product contract or approved cleanup policy changed.
+
+ORC-001–014: the law and finite projection are stated above and in the owner;
+expected classification uses adapter-observed ownership and an independent
+predicate evaluator (001–003/009). Existing generated domains, exclusions,
+fixed/random parity and replay interface are unchanged; the CI reduction and
+settled-demand neighbor supply reconstruction and ablation controls (004/007).
+The driver invokes real Collections and checks status at each action and
+convergence, with no missing-input hypothesis for this controlled boundary
+(005/013). The two assertion failures calibrate owner identity and replay
+terminality separately (006). Captured ownership and provider identity are
+necessary to distinguish a new demand from renewal of an existing one (008).
+Existing cleanup fidelity is unchanged; experimental mutations restore bytes
+(010). No additional shared-fault hypothesis calls for a second formulation
+(011). This versioned record and source identity supply 012. No provider or
+framework handoff claim is made (014).
+
+Limits remain five numeric keys, one-level includes and controlled adapter
+schedules. This is self-review. The coverage map names the expanded observation
+cuts. F02's initial-snapshot decision and F07's application fixture remain
+separate readiness obligations.
+
+Oracle source SHA-256 at this follow-up: `86f652fadc3ddeddfd5188d18b049969293209efdda51641e28ec38122884ea2`.
