@@ -27,6 +27,7 @@ export {
   getPreparedLiveQuerySources,
   prepareLiveQueryValue,
   rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from './live-query-options.js'

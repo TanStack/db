@@ -21,7 +21,9 @@
  * collision, a query without a stable IR identity, a descriptor factory that
  * throws while the query binds its sources, a query the live query rejects
  * when it compiles, a single-result query in an infinite hook, which pages
- * many rows, and a Suspense query that cannot stream during SSR), every hook
+ * many rows, a Suspense query that cannot stream during SSR, a sibling that
+ * throws after the hook returns, and a render that suspends and never
+ * commits), every hook
  * path (live, infinite, and Suspense, each with derived identity or a
  * dependency list), and both direct
  * readers (another hook over the Collection, and `startSyncImmediate()`). The
@@ -140,6 +142,12 @@ const releaseCauses: Record<
     setup?: (client: DbClient) => void
     /** Render the rejected step first, for a cause only a mount reaches. */
     atMount?: boolean
+    /**
+     * What the component does after the hook returns in the rejected step:
+     * throw to an error boundary, or suspend on a promise that never settles.
+     * Either way the render never commits; the hook itself rejected nothing.
+     */
+    afterHook?: `throw` | `suspend`
   }
 > = {
   'a source ID collision': (shared) => ({
@@ -238,6 +246,41 @@ const releaseCauses: Record<
     rejectsIn: (hook) => hook.suspense && hook.usesDeps,
     atMount: true,
   }),
+  'a sibling that throws after the hook returns': (shared) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    query: (q, step, ordered) =>
+      orderIf(
+        step.reject
+          ? q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              )
+          : q.from({ settings: step.current }),
+        ordered,
+      ),
+    afterHook: `throw`,
+    // A Suspense hook that returns has already preloaded its query, which
+    // starts its sources, so no deferral is left to release.
+    rejectsIn: (hook) => !hook.suspense,
+  }),
+  'a render that suspends and never commits': (shared) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    query: (q, step, ordered) =>
+      orderIf(
+        step.reject
+          ? q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              )
+          : q.from({ settings: step.current }),
+        ordered,
+      ),
+    afterHook: `suspend`,
+    // As above: a Suspense hook's own read is a preload.
+    rejectsIn: (hook) => !hook.suspense,
+  }),
 }
 
 function orderIf(query: any, ordered: boolean) {
@@ -291,19 +334,22 @@ const releaseHooks: Record<string, ReleaseHook> = {
   },
 }
 
+// Each reader asks for the source once and returns a read of its row. A
+// render that never commits releases its deferral when its live query is
+// reclaimed, so the row may arrive after the reader asked.
 const releaseReaders: Record<
   string,
-  (shared: ReturnType<typeof source>) => Promise<unknown>
+  (shared: ReturnType<typeof source>) => Promise<() => unknown>
 > = {
   'another hook over the Collection': async (shared) => {
     const reader = renderHook(() => useLiveQuery(shared))
     await act(async () => {})
-    return reader.result.current.data[0]?.value
+    return () => reader.result.current.data[0]?.value
   },
   'startSyncImmediate()': async (shared) => {
     shared.startSyncImmediate()
     await act(async () => {})
-    return shared.toArray[0]?.value
+    return () => shared.toArray[0]?.value
   },
 }
 
@@ -346,11 +392,16 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
           })
           const cause = makeCause(shared, failing)
           cause.setup?.(client)
+          const never = new Promise<void>(() => {})
           function View({ step }: { step: ReleaseStep }) {
             hook.use(
               (q) => cause.query(q, step, hook.ordered),
               cause.deps?.(step) ?? [step.current, step.reject],
             )
+            if (step.reject && cause.afterHook === `throw`) {
+              throw new Error(`sibling failed`)
+            }
+            if (step.reject && cause.afterHook === `suspend`) throw never
             return <div>Query</div>
           }
           const tree = (step: ReleaseStep) => (
@@ -375,14 +426,18 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
             )
             await act(async () => {})
             if (!cause.atMount) root.rerender(tree(cause.rejected(initial)))
-            expect(root.getByText(`Rejected`)).toBeDefined()
+            expect(
+              root.getByText(
+                cause.afterHook === `suspend` ? `Loading` : `Rejected`,
+              ),
+            ).toBeDefined()
             // Declared reach: the rejected render materialized the shared
             // descriptor, so it held a deferral the law must release.
             expect(materialized).toBe(1)
             expect(syncStarts).toBe(0)
 
             const value = await read(client.collection(shared) as any)
-            expect(value).toBe(`shared`)
+            await waitFor(() => expect(value()).toBe(`shared`))
             expect(syncStarts).toBe(1)
           } finally {
             consoleError.mockRestore()

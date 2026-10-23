@@ -6,4 +6,4 @@ Collect the helpers the framework adapters share into one adapter layer, exporte
 
 Add `SourceCollectionIdReuseError`, which a mounted hook that compares query identity throws when a different source Collection appears under a Collection ID it already read.
 
-Add `rejectLiveQueryInput`, which a framework hook calls at its render boundary. It releases the sync starts that a rejected render deferred and rethrows the rejection. Each released source follows its own start policy, so `startSyncImmediate()` or another hook can still start it.
+Add `rejectLiveQueryInput` and `releaseDeferredOnReclaim` for framework hooks. The first releases the sync starts a rejected query deferred and rethrows the rejection. The second releases a render's deferred sync starts when garbage collection reclaims the live query it built, so a render that never commits, because a sibling threw or it suspended, does not keep its sources deferred. Each released source follows its own start policy, so `startSyncImmediate()` or another hook can still start it.

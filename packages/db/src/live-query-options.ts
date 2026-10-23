@@ -54,6 +54,30 @@ export function rejectLiveQueryInput(
   throw rejection
 }
 
+/**
+ * Release a render's deferred sync starts when the live query it built is
+ * reclaimed. A render that commits releases them first, when it subscribes.
+ * A render that never commits, because a sibling threw or it suspended, leaves
+ * its live query unsubscribed until garbage collection cleans it up; that
+ * cleanup releases the starts, so a direct reader's demand, made before or
+ * after, then starts the sources. Releases only the starts deferred so far,
+ * not ones a later render of the same hook defers.
+ */
+export function releaseDeferredOnReclaim(
+  liveQuery: Pick<Collection<any, any, any>, `once`>,
+  deferredCollections: DeferredLiveQueryCollections,
+): void {
+  if (deferredCollections.size === 0) return
+  const pending: DeferredLiveQueryCollections = new Set(deferredCollections)
+  liveQuery.once(`status:cleaned-up`, () => {
+    try {
+      resumeDeferredLiveQueryCollections(pending)
+    } catch {
+      // A source whose resumed start fails records its own failure.
+    }
+  })
+}
+
 /** Release every deferred source, then report the first startup failure. */
 export function resumeDeferredLiveQueryCollections(
   collections: DeferredLiveQueryCollections,

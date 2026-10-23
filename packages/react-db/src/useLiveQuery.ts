@@ -14,6 +14,7 @@ import {
   isCollection,
   prepareLiveQueryValue,
   rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
@@ -974,6 +975,14 @@ function useLiveQueryImpl(
             }
             suspenseCollections.set(suspenseKey, entry)
           }
+        }
+        // A render that never commits releases its deferred sync starts when
+        // garbage collection reclaims the live query it bound.
+        if (instance.collection) {
+          releaseDeferredOnReclaim(
+            instance.collection,
+            instance.deferredCollections,
+          )
         }
         instance.config = configOrQueryOrCollection
         instance.deps = [...identityDeps]

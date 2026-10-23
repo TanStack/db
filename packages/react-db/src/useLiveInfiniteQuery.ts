@@ -10,6 +10,7 @@ import {
   isCollection,
   readLiveQueryWindowPageShape,
   rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
@@ -271,6 +272,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (binding.supplied) renderedRef.current = null
     else if (newCollection && binding.ownsCollection) {
       renderedRef.current = currentRenderState
+      // A render that never commits releases its deferred sync starts when
+      // garbage collection reclaims the window collection it built.
+      releaseDeferredOnReclaim(binding.collection, deferredCollections)
     }
   }
   const renderState = currentRenderState!

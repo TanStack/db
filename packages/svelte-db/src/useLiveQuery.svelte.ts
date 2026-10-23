@@ -14,6 +14,7 @@ import {
   isSingleResultCollection,
   prepareLiveQueryValue,
   rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
@@ -463,6 +464,9 @@ export function useLiveQuery(
         })
       }
 
+      // A setup that never subscribes releases its deferred sync starts when
+      // garbage collection reclaims the live query it built.
+      if (collection) releaseDeferredOnReclaim(collection, deferredCollections)
       return {
         collection,
         client: dbClient,

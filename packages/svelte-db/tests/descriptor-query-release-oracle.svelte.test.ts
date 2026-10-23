@@ -9,11 +9,11 @@
  * The model has independent source start counts. In the first history, the
  * first start throws after the Svelte effect asks for rows; the second count
  * must still become one and the failed effect must release its subscription.
- * The release grammar crosses four rejection causes for a client-backed
+ * The release grammar crosses five causes for a client-backed
  * query (a descriptor factory that throws during preparation, a query without
- * a stable IR identity, a query the live query rejects when it compiles, and
- * a different source object under a Collection ID the mounted hook already
- * read), two source start policies, and three direct
+ * a stable IR identity, a query the live query rejects when it compiles, a
+ * setup that throws after the hook returns, and a different source object
+ * under a Collection ID the mounted hook already read), two source start policies, and three direct
  * readers (`preload()`, `startSyncImmediate()`, and another hook). After the
  * rejection, an eager (`startSync: true`) source has started once and a lazy
  * source has not started; after the reader, each has started exactly once
@@ -34,7 +34,7 @@
  * query ran the shared descriptor's factory once before the reader. A history
  * that rejects before it binds the shared source therefore fails.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DbClient,
   Query,
@@ -177,7 +177,14 @@ describe(`Svelte descriptor source release`, () => {
   // rejection that needs an earlier, accepted query.
   const causes: Record<
     string,
-    (shared: any, client: DbClient) => { run: () => () => void }
+    (
+      shared: any,
+      client: DbClient,
+    ) => {
+      run: () => () => void
+      /** The hook never rejected; its deferral waits for the reclaim. */
+      releasedOnReclaim?: boolean
+    }
   > = {
     'a descriptor factory that throws during preparation': (shared, client) => {
       const failing = collectionOptions(`${shared.id}-failing`, () => {
@@ -233,6 +240,21 @@ describe(`Svelte descriptor source release`, () => {
         }).toThrow(UnsupportedRootScalarSelectError)
         return () => dispose?.()
       },
+    }),
+    'a setup that throws after the hook returns': (shared, client) => ({
+      run: () => {
+        let dispose: (() => void) | undefined
+        // The hook rejected nothing; later setup code failed, so the
+        // subscribing effect never runs.
+        expect(() => {
+          dispose = $effect.root(() => {
+            useLiveQuery({ client, query: new Query().from({ shared }) })
+            throw new Error(`setup failed`)
+          })
+        }).toThrow(`setup failed`)
+        return () => dispose?.()
+      },
+      releasedOnReclaim: true,
     }),
     'a reused source Collection ID': (shared, client) => ({
       run: () => {
@@ -325,15 +347,23 @@ describe(`Svelte descriptor source release`, () => {
           const client = new DbClient()
           let dispose: (() => void) | undefined
           try {
-            dispose = makeCause(shared, client).run()
+            const cause = makeCause(shared, client)
+            dispose = cause.run()
             // Declared reach: the rejected query materialized the shared
             // descriptor, so it held a deferral the law must release.
             expect(materialized).toBe(1)
-            expect(starts).toBe(policy === `eager` ? 1 : 0)
+            // A rejection releases at once, so an eager source starts now. A
+            // setup that never subscribes releases at the reclaim, so nothing
+            // has started yet.
+            expect(starts).toBe(
+              policy === `eager` && !cause.releasedOnReclaim ? 1 : 0,
+            )
             const direct = client.collection(shared)
             await read(direct)
+            // A setup that never subscribes releases its deferral when its
+            // live query is reclaimed, which may follow the reader's demand.
+            await vi.waitFor(() => expect(direct.status).toBe(`ready`))
             expect(starts).toBe(1)
-            expect(direct.status).toBe(`ready`)
           } finally {
             dispose?.()
             await client.cleanup()
