@@ -9,6 +9,7 @@ import {
   eq,
   gt,
   toArray,
+  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import {
   For,
@@ -2317,6 +2318,7 @@ describe(`Query Collections`, () => {
           {
             value: {
               networkTimeoutMs,
+              waitForInitialRender: waitForPersistedInitialRender,
               getOrStartNetworkDeadline: () =>
                 (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
               getSnapshot: () => ({ status: persistedStatus }),

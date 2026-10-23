@@ -8,6 +8,7 @@ import {
   createLiveQueryWindowController,
   normalizeLiveQueryWindowPageSize,
 } from '../src/live-query-window-controller.js'
+import { waitForPersistedInitialRender } from '../src/persisted-readiness.js'
 import { mockSyncCollectionOptions } from './utils.js'
 import { evaluateReferenceExpression } from './reference-expression-oracle.js'
 import type { Collection } from '../src/collection/index.js'
@@ -95,6 +96,7 @@ describe(`createLiveQueryWindowController`, () => {
       {
         value: {
           networkTimeoutMs: 0,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now(),
           getSnapshot: () => ({ status: persistedStatus }),
           subscribe: (listener: () => void) => {

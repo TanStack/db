@@ -1054,103 +1054,31 @@ class LiveQueryObserverImpl<
     if (this.initialRenderPromise) return this.initialRenderPromise
 
     const network = this.preload()
-    const clientQuery =
+    const currentClientQuery = () =>
       this.client && this.queryHash
         ? this.client._getLiveQuery(this.queryHash)
         : undefined
-    const clientStream =
-      clientQuery?.promise === network ? clientQuery : undefined
     if (this.collection) INITIAL_RENDER_PRELOADS.add(this.collection)
 
-    const unsubscribers: Array<() => void> = []
-    let cancel!: () => void
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const initialRender = new Promise<void>((resolve, reject) => {
-      let networkReady = false
-      // React can start a new observer after the client stream has failed.
-      let failedClientStream =
-        clientQuery?.status === `error` ? clientQuery : undefined
-      let networkFailed = failedClientStream !== undefined
-      let networkError: unknown = failedClientStream?.error
-      let settled = false
-      const finish = (failure?: { error: unknown }) => {
-        if (settled) return
-        settled = true
-        if (failure) reject(failure.error)
-        else {
+    // The persistence adapter supplies the network-first wait with its
+    // readiness, so an app with no persisted source does not ship it.
+    const { promise: initialRender, cancel } =
+      sources[0]!.readiness.waitForInitialRender({
+        sources,
+        network,
+        clientQuery: currentClientQuery(),
+        currentClientQuery,
+        collectionStatus: () => this.collection?.status,
+        readPersisted: () => this.readPersistedReadiness(),
+        onReady: () => {
           this.initialRenderReady = true
-          resolve()
-        }
-      }
-      cancel = () => finish({ error: new LiveQueryObserverDisposedError() })
-      this.cancelInitialRenderWait = cancel
-      const check = () => {
-        if (settled) return
-        if (timer !== undefined) {
-          clearTimeout(timer)
-          timer = undefined
-        }
-        if (networkReady) {
-          finish()
-          return
-        }
-        const persisted = this.readPersistedReadiness()
-        const networkDeadlineAt = Math.max(
-          ...sources.map((source) =>
-            source.readiness.getOrStartNetworkDeadline(),
-          ),
-        )
-        const remainingNetworkMs = Math.max(0, networkDeadlineAt - Date.now())
-        const deadlinePassed = remainingNetworkMs === 0
-        const sourceFailed = sources.some(
-          (source) => source.collection.status === `error`,
-        )
-        const clientStreamFailed =
-          failedClientStream !== undefined &&
-          this.client !== undefined &&
-          this.queryHash !== undefined &&
-          this.client._getLiveQuery(this.queryHash) === failedClientStream
-        if (
-          networkFailed &&
-          !sourceFailed &&
-          (this.collection?.status === `error` || !clientStreamFailed)
-        ) {
-          finish({ error: networkError })
-        } else if (
-          (deadlinePassed || networkFailed) &&
-          persisted.status === `ready`
-        ) {
-          finish()
-        } else if (networkFailed && persisted.status === `error`) {
-          finish({ error: networkError ?? persisted.error })
-        } else if (!deadlinePassed && !networkFailed) {
-          timer = setTimeout(check, remainingNetworkMs)
-        }
-      }
-      for (const source of sources) {
-        unsubscribers.push(source.readiness.subscribe(check))
-      }
-      void network.then(
-        () => {
-          networkReady = true
-          check()
         },
-        (error) => {
-          networkFailed = true
-          networkError = error
-          failedClientStream =
-            clientStream?.status === `error` ? clientStream : undefined
-          check()
-        },
-      )
-      check()
-    })
+      })
+    this.cancelInitialRenderWait = cancel
     const promise = initialRender.finally(() => {
       if (this.cancelInitialRenderWait === cancel) {
         this.cancelInitialRenderWait = undefined
       }
-      unsubscribers.forEach((unsubscribe) => unsubscribe())
-      if (timer !== undefined) clearTimeout(timer)
       if (this.initialRenderPromise === promise) {
         this.initialRenderPromise = undefined
       }

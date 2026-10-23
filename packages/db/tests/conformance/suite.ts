@@ -37,6 +37,7 @@
  * inputs, error status, and order-only moves.
  */
 import { describe, expect, it } from 'vitest'
+import { waitForPersistedInitialRender } from '@tanstack/db'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
@@ -148,6 +149,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       {
         value: {
           networkTimeoutMs: 0,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now(),
           getSnapshot: () => snapshot,
           subscribe: (listener: () => void) => {
