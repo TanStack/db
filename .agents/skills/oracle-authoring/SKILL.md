@@ -19,15 +19,20 @@ first. Auditors check the order of your work and penalize shortcuts.
 Work in this order when a production change is part of the task:
 
 1. State the law and its authority.
-2. Extend the history grammar, driver, or observation until generated
+2. Inventory the materially affected public receiving paths and their promised
+   observation cuts. Include required real-host receiving witnesses in this
+   pre-edit gate; a controlled core witness does not supply their evidence.
+3. Extend the history grammar, driver, or observation until generated
    histories reach the state where the law matters. Declare that state with
-   `createOracleReach` (ORC-015).
-3. Run the extended oracle on the unchanged production code and record the RED
-   failure.
-4. Change production, with the oracle running after each attempt.
-5. Record the GREEN result and a hostile mutant that fails.
+   `createOracleReach` (ORC-015) for each required receiving path.
+4. Run those comparisons on unchanged production. Record the defect's RED
+   result and the neighboring guarantees' results. A setup failure or missing
+   required witness blocks production edits; repair the test path first.
+5. Change production, with the oracle running after each attempt.
+6. Record the GREEN result and a hostile mutant that fails.
 
-Do not change production before step 3. If a model rule disagrees with
+Do not change production before step 4. Retrospective runs or a documented
+process gap do not satisfy this gate. If a model rule disagrees with
 production, find its authority before you edit either one. A rule that you
 change only so that it matches production output is model hacking.
 

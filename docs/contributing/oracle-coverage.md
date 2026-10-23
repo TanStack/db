@@ -148,8 +148,13 @@ The ten-finding high review adds generated error-provenance and partial-setup
 histories to the existing owners. The deferred-acquisition owner crosses ready,
 returned-error and thrown starts, before/during handoff, with defined/absent
 causes. Its independent start-handoff judgment also feeds real React ordinary
-and infinite hook drivers, which compare readable error/boundary behavior and
-ownership immediately after unmount. Explicit DbClient preload continues to
+and infinite hook drivers. Each hook now has independent fixed/random campaigns
+and reach minima for returned/thrown source failures before/during commit,
+including absent causes. They compare readable error/boundary behavior after
+commit, one source start, and ownership immediately after unmount, before GC.
+Independent startup owns a pre-commit throw; the later hook reads error status.
+The restored broad-rethrow defect fails both observations for each hook.
+Explicit DbClient preload continues to
 report source startup failures. Pooled lifecycle histories add released
 partitions whose synchronous late cleanup callback returns or throws, including
 1–3 healthy status peers. Observer histories add early capability or sync

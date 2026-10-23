@@ -1613,3 +1613,108 @@ The historical audit prefix remains byte-identical. The changeset now records
 readable source errors and partial-attachment release. No published commit
 was amended or rebased. The production changes preserve the approved cleanup
 rejection policy. The loss totals and non-ready verdict above still apply.
+
+### Current receiving-gate enforcement — 2026-10-23
+
+This pass starts at `1d1ac0170d5520ff21b54aee90c006382841150d` and changes no
+production source. It strengthens the current receiving comparisons before
+considering any further repair. It does not repair historical work order.
+
+**Law and authority.** The shared conformance contract exposes recorded source
+errors as readable React status. The shared `expectedStartHandoff` judgment
+permits an exception only from startup performed by that handoff. Both hooks
+must release every subscriber after unmount, before GC can conceal ownership.
+Explicit preload failure reporting and abandoned-render zero-start cuts remain
+neighboring guarantees in their existing owners.
+
+The pre-edit inventory names both public hooks, failure before/during commit,
+returned `markError`/thrown startup, defined/absent causes, error/boundary after
+commit, and ownership immediately after unmount. Each hook now has independent
+fixed/random campaigns and reach minima. Independent DbClient startup supplies
+the earlier-failure premise: its throw is observed before render, the source
+already reports error, and commit must not start it again. No model rule or
+production expectation changes.
+
+**Reach.** Each row contains 30 histories. Columns count returned errors before
+and during commit, thrown starts before and during commit, and absent causes.
+Every minimum is one; counts are per history, not callback count.
+
+| Hook / observation / campaign | Returned before | Returned during | Thrown before | Thrown during | Absent cause |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ordinary / error-surface / fixed | 7 | 9 | 8 | 6 | 14 |
+| ordinary / error-surface / random | 10 | 10 | 6 | 4 | 15 |
+| ordinary / ownership / fixed | 7 | 9 | 8 | 6 | 14 |
+| ordinary / ownership / random | 5 | 6 | 8 | 11 | 15 |
+| infinite / error-surface / fixed | 7 | 9 | 8 | 6 | 14 |
+| infinite / error-surface / random | 5 | 4 | 9 | 12 | 19 |
+| infinite / ownership / fixed | 7 | 9 | 8 | 6 | 14 |
+| infinite / ownership / random | 7 | 6 | 8 | 9 | 14 |
+
+**RED and mutant.** Temporarily removing `reportSourceErrors &&` from the helper
+restores the reviewed defect. After rebuilding db, all eight receiving campaigns
+fail at the intended comparisons. Error-surface campaigns observe one boundary
+error instead of a readable result. Ownership campaigns observe one retained
+subscriber after unmount instead of zero. These are assertion failures, not
+setup errors. The mutation is restored byte for byte and db rebuilt.
+This calibration tests current enforcement; it is not a new pre-fix RED claim.
+
+Four new guarded replays preserve the changed grammar. The property IDs remain
+`react.descriptor-error-surface` and `react.descriptor-ownership`; the additional
+`-t 'ordinary '` or `-t 'infinite '` selects the receiving hook independently.
+The runner's manifest still selects the random lane. All four exact witnesses
+execute and pass after restoration:
+
+| Hook / observation | Seed | Path |
+| --- | ---: | --- |
+| ordinary / error-surface | -2062994310 | `0` |
+| infinite / error-surface | -1755367813 | `4` |
+| ordinary / ownership | -44638460 | `5:0` |
+| infinite / ownership | -938612395 | `3` |
+
+**GREEN.** The full React package passes 466 tests in 23 files, including type
+checks. The deferred-acquisition owner and DbClient pass 580 tests in two files.
+The four guarded replays pass. Scoped ESLint and Prettier pass. All three edited
+skills validate with `quick_validate.py`, using cached PyYAML. A broader replay-
+protocol run was interrupted; its partial output is not a clean GREEN claim.
+The protocol itself is unchanged, and its previous results remain historical.
+
+The first surrounding React run exposed a real-clock test gap: a nominal
+10-millisecond wait overshot the abandoned-render GC cut under load. The two
+infinite-query GC tests now advance a controlled clock by exactly 10 milliseconds,
+check the same live-state expectation, then run pending timers and check cleanup.
+All 12 tests in that file pass separately and in the full package. No status
+comparison was relaxed and no product behavior changed.
+
+**Grammar and limits.** Both hooks independently sample the same bounded
+2 × 2 × 2 failure grammar. Removing timing loses the unrelated-error case;
+removing either hook loses its host path; absent causes distinguish a missing
+error value from absence of failure. The grammar reconstructs the original
+returned-error/during-commit witness. The driver excludes a claimed pre-commit
+failure without prior startup by checking source error and one start before
+render. Healthy startup retains its core-owner coverage. Source startup is
+synchronous and eager. This does not prove
+arbitrary React schedules, asynchronous outages, error recovery, Suspense error
+policy, or another framework's receiving boundary.
+
+For ORC-001–015, authority/model independence and canonical terms remain
+unchanged (001/002/009). Prose, generated timing, real receiving drivers and
+commit/unmount assertions are colocated (003–005). The eight intended assertion
+failures calibrate the checker (006); paired campaigns and exact guarded replays
+satisfy 007. No reference-model state changes (008). Cleanup exceptions remain
+outside this grammar (010), and no new shared semantic-fault hypothesis requires
+a second formulation (011). This versioned entry records the evidence (012).
+Before/during timing distinguishes the exception boundary (013), both real hooks
+receive the startup premise (014), and each path has mandatory reach (015).
+The coverage map identifies the same owner and finite limits.
+
+The oracle-authoring, oracle-review and personal evaluate-review instructions
+now require the receiving-path inventory and comparisons before production edits.
+Missing required witnesses and setup failures block that gate. Aggregate reach
+cannot substitute for each receiving path. Retrospective verification and a
+recorded deviation cannot satisfy the gate.
+
+The React owner SHA-256 is
+`e9bff514ae6bf023ec5d310a7848fb6b817132dad6fb9cc2dc1848d5d3ecd550`.
+Production remains pinned to the starting head. All 26 CI checks passed on that
+head; later-head CI must be assessed separately. F02's initial-snapshot decision
+still prevents a ready verdict. H04/H08 and F07 retain their evidence gaps.

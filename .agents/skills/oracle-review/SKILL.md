@@ -68,6 +68,10 @@ Report each one as a finding:
 
 - A production change without a RED result from the extended oracle on the
   parent commit.
+- Required public receiving paths tested only after the production repair,
+  or aggregate reach that hides an unexercised receiving path. Check the
+  pre-edit inventory, actual comparison results, and their order. Retrospective
+  evidence or documentation of a gap does not satisfy the pre-edit gate.
 - A model rule that changed to match production output without an authority.
 - A claim about a state that no declared reach shows generated histories enter.
 - A skipped, narrowed, or relaxed comparison without a coverage-map entry and a

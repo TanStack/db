@@ -1687,9 +1687,11 @@ describe(`standalone descriptor query binding`, () => {
  * The shared conformance contract exposes ordinary hook errors as a readable
  * status. The start-handoff judgment distinguishes a returned markError from
  * a synchronous throw; neither permits a failed commit to retain ownership.
- * The grammar varies both hooks, defined/absent causes, and callback return/
- * throw. We observe the boundary and result after commit, and Collection
- * ownership immediately after unmount, before Collection GC can hide a leak.
+ * Each hook has independent campaigns and reach checks. The grammar varies
+ * defined/absent causes, callback return/throw, and failure before/during commit.
+ * Before-commit failures come from independent DbClient startup, whose throw
+ * belongs to that caller. We observe the boundary and result after commit,
+ * and Collection ownership immediately after unmount, before GC can hide a leak.
  */
 describe(`descriptor error handoff at React commit`, () => {
   class Boundary extends Component<
@@ -1711,129 +1713,153 @@ describe(`descriptor error handoff at React commit`, () => {
     'error-surface': `react.descriptor-error-surface`,
     ownership: `react.descriptor-ownership`,
   } as const
-  for (const observation of [`error-surface`, `ownership`] as const) {
-    for (const campaign of [`fixed`, `random`] as const) {
-      it(`${observation} after descriptor failure (${campaign})`, async () => {
-        const reach = createOracleReach(`react-error-handoff`, [
-          `ordinary`,
-          `infinite`,
-          `mark-error`,
-          `throw`,
-          `undefined-cause`,
-        ])
-        await fc.assert(
-          fc.asyncProperty(
-            fc.record({
-              hook: fc.constantFrom(`ordinary` as const, `infinite` as const),
-              outcome: fc.constantFrom(`mark-error` as const, `throw` as const),
-              cause: fc.constantFrom(`error` as const, `undefined` as const),
-            }),
-            async (history) => {
-              reach.beginHistory()
-              const failure =
-                history.cause === `error`
-                  ? new Error(`source startup`)
-                  : undefined
-              const client = new DbClient()
-              const descriptor = collectionOptions(
-                `react-handoff-error`,
-                () => ({
-                  id: `react-handoff-error`,
-                  syncMode: `eager`,
-                  autoIndex: `eager`,
-                  defaultIndexType: BTreeIndex,
-                  getKey: (row: Row) => row.id,
-                  startSync: true,
-                  gcTime: 0,
-                  sync: {
-                    sync: ({ markError }) => {
-                      if (history.outcome === `throw`) throw failure
-                      markError(failure)
+  for (const hook of [`ordinary`, `infinite`] as const) {
+    for (const observation of [`error-surface`, `ownership`] as const) {
+      for (const campaign of [`fixed`, `random`] as const) {
+        it(`${hook} ${observation} after descriptor failure (${campaign})`, async () => {
+          const reach = createOracleReach(`react-error-handoff-${hook}`, [
+            `mark-error-before-release`,
+            `mark-error-during-release`,
+            `throw-before-release`,
+            `throw-during-release`,
+            `undefined-cause`,
+          ])
+          await fc.assert(
+            fc.asyncProperty(
+              fc.record({
+                outcome: fc.constantFrom(
+                  `mark-error` as const,
+                  `throw` as const,
+                ),
+                cause: fc.constantFrom(`error` as const, `undefined` as const),
+                timing: fc.constantFrom(
+                  `before-release` as const,
+                  `during-release` as const,
+                ),
+              }),
+              async (history) => {
+                reach.beginHistory()
+                const failure =
+                  history.cause === `error`
+                    ? new Error(`source startup`)
+                    : undefined
+                const client = new DbClient()
+                let starts = 0
+                const descriptor = collectionOptions(
+                  `react-handoff-error`,
+                  () => ({
+                    id: `react-handoff-error`,
+                    syncMode: `eager`,
+                    autoIndex: `eager`,
+                    defaultIndexType: BTreeIndex,
+                    getKey: (row: Row) => row.id,
+                    startSync: true,
+                    gcTime: 0,
+                    sync: {
+                      sync: ({ markError }) => {
+                        starts++
+                        if (history.outcome === `throw`) throw failure
+                        markError(failure)
+                      },
                     },
-                  },
-                }),
-              )
-              const query = new Query()
-                .from({ item: descriptor })
-                .orderBy(({ item }) => item.id)
-              const caught: Array<unknown> = []
-              let current:
-                | {
-                    isError?: boolean
-                    status: string
-                    collection?: {
-                      subscriberCount: number
-                      cleanup: () => Promise<void>
+                  }),
+                )
+                const query = new Query()
+                  .from({ item: descriptor })
+                  .orderBy(({ item }) => item.id)
+                const caught: Array<unknown> = []
+                let current:
+                  | {
+                      isError?: boolean
+                      status: string
+                      collection?: {
+                        subscriberCount: number
+                        cleanup: () => Promise<void>
+                      }
+                    }
+                  | undefined
+                function Consumer() {
+                  current =
+                    hook === `ordinary`
+                      ? useLiveQuery({ query })
+                      : useLiveInfiniteQuery(() => query, { pageSize: 1 })
+                  return null
+                }
+                const consoleError = vi
+                  .spyOn(console, `error`)
+                  .mockImplementation(() => {})
+                let mounted: ReturnType<typeof render> | undefined
+                try {
+                  if (history.timing === `before-release`) {
+                    let threw = false
+                    try {
+                      client.collection(descriptor)
+                    } catch (error) {
+                      threw = true
+                      expect(error).toBe(failure)
+                    }
+                    expect(
+                      threw,
+                      `independent startup owns its exception`,
+                    ).toBe(history.outcome === `throw`)
+                    expect(client.collection(descriptor).status).toBe(`error`)
+                    expect(starts).toBe(1)
+                  }
+                  mounted = render(
+                    <DbProvider client={client}>
+                      <Boundary caught={caught}>
+                        <Consumer />
+                      </Boundary>
+                    </DbProvider>,
+                  )
+                  await act(async () => {})
+                  expect(starts, `commit does not repeat source startup`).toBe(
+                    expectedStartHandoff(history).starts,
+                  )
+                  reach.reach(`${history.outcome}-${history.timing}`)
+                  if (history.cause === `undefined`)
+                    reach.reach(`undefined-cause`)
+                  if (observation === `error-surface`) {
+                    const expected = expectedStartHandoff(history)
+                    if (!expected.throws) {
+                      expect(caught, `ordinary errors remain readable`).toEqual(
+                        [],
+                      )
+                      expect(current?.status).toBe(expected.status)
+                      expect(current?.isError).toBe(true)
+                    } else {
+                      expect(
+                        caught,
+                        `a thrown start remains fail-fast`,
+                      ).toHaveLength(1)
                     }
                   }
-                | undefined
-              function Consumer() {
-                current =
-                  history.hook === `ordinary`
-                    ? useLiveQuery({ query })
-                    : useLiveInfiniteQuery(() => query, { pageSize: 1 })
-                return null
-              }
-              const consoleError = vi
-                .spyOn(console, `error`)
-                .mockImplementation(() => {})
-              let mounted: ReturnType<typeof render> | undefined
-              try {
-                mounted = render(
-                  <DbProvider client={client}>
-                    <Boundary caught={caught}>
-                      <Consumer />
-                    </Boundary>
-                  </DbProvider>,
-                )
-                await act(async () => {})
-                reach.reach(history.hook)
-                reach.reach(history.outcome)
-                if (history.cause === `undefined`)
-                  reach.reach(`undefined-cause`)
-                if (observation === `error-surface`) {
-                  const expected = expectedStartHandoff({
-                    ...history,
-                    timing: `during-release`,
-                  })
-                  if (!expected.throws) {
-                    expect(caught, `ordinary errors remain readable`).toEqual(
-                      [],
-                    )
-                    expect(current?.status).toBe(`error`)
-                    expect(current?.isError).toBe(true)
-                  } else {
+                  mounted.unmount()
+                  expect(current?.collection).toBeDefined()
+                  if (current?.collection)
                     expect(
-                      caught,
-                      `a thrown start remains fail-fast`,
-                    ).toHaveLength(1)
-                  }
+                      current.collection.subscriberCount,
+                      `commit/unmount releases every hook owner`,
+                    ).toBe(0)
+                } finally {
+                  mounted?.unmount()
+                  consoleError.mockRestore()
+                  await current?.collection?.cleanup()
+                  await client.cleanup()
                 }
-                mounted.unmount()
-                expect(current?.collection).toBeDefined()
-                if (current?.collection)
-                  expect(
-                    current.collection.subscriberCount,
-                    `commit/unmount releases every hook owner`,
-                  ).toBe(0)
-              } finally {
-                mounted?.unmount()
-                consoleError.mockRestore()
-                await current?.collection?.cleanup()
-                await client.cleanup()
-              }
-            },
-          ),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(30), seed: 2229 }
-            : oraclePropertyOptions(30, properties[observation]),
-        )
-        reach.assertReached()
-        console.info(
-          `react-error-handoff ${observation} ${campaign}`,
-          Object.fromEntries(reach.counts()),
-        )
-      })
+              },
+            ),
+            campaign === `fixed`
+              ? { numRuns: oracleRuns(30), seed: 2229 }
+              : oraclePropertyOptions(30, properties[observation]),
+          )
+          reach.assertReached()
+          console.info(
+            `react-error-handoff ${hook} ${observation} ${campaign}`,
+            Object.fromEntries(reach.counts()),
+          )
+        })
+      }
     }
   }
 })
