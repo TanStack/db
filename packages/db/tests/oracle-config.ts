@@ -427,13 +427,15 @@ export function oracleRandomParameters(
 const { multiplier, ...replay } = readOracleRunConfig()
 
 /**
- * Whether a replay campaign is selected. A test that is not the replayed
- * property stands aside with `it.skipIf(oracleReplayRequested())`. The
- * `oracle/no-disabled` lint rule accepts only this condition, so a replay
- * selection cannot switch an oracle test off in ordinary runs.
+ * Whether a path replay is selected. It replays one property's recorded
+ * history, so a test that is not that property stands aside with
+ * `it.skipIf(oracleReplayRequested())`. A seed without a path only reseeds
+ * the random campaigns, so every test still runs. The `oracle/no-disabled`
+ * lint rule accepts only this condition, so a replay selection cannot switch
+ * an oracle test off in ordinary runs.
  */
 export function oracleReplayRequested(): boolean {
-  return replay.replaySeed !== undefined
+  return replay.replayPath !== undefined
 }
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */

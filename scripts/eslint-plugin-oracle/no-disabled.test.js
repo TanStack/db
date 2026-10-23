@@ -18,7 +18,14 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     // Playwright's runtime skip for a control that one browser supports.
     `test.skip(browserName !== 'chromium', 'Chromium-only control')`,
     // A replay campaign stands the other tests aside.
-    `it.skipIf(oracleReplayRequested())('checks the history', () => check())`,
+    {
+      code: `import { oracleReplayRequested } from '../../db/tests/oracle-config.js'\nit.skipIf(oracleReplayRequested())('checks the history', () => check())`,
+      languageOptions: { sourceType: `module` },
+    },
+    {
+      code: `import { oracleReplayRequested } from './oracle-config'\nit.skipIf(oracleReplayRequested())('checks the history', () => check())`,
+      languageOptions: { sourceType: `module` },
+    },
     `fc.assert(property, oraclePropertyOptions(12, 'cleanup-queue.history'))`,
     `fc.assert(property, { numRuns: oracleRuns(20) })`,
     // A replay passes the recorded path, and a witness a fixed seed.
@@ -35,6 +42,9 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     `it.fails('checks the fixed history', () => fc.assert(property, { seed: 2128, numRuns: oracleRuns(12) }))`,
     // A skip on something other than the test context is not a test skip.
     `it('reads a page', (ctx) => { const cursor = open(); cursor.skip() })`,
+    // An inner variable that shadows the context is not the test context.
+    `it('reads a page', (ctx) => { pages.forEach((ctx) => ctx.skip()) })`,
+    `it('reads a page', (_, ctx) => { ctx.skip() })`,
   ],
   invalid: [
     {
@@ -148,6 +158,19 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     {
       code: `it('checks the history', (ctx) => { ctx.skip(); check() })`,
       errors: [{ messageId: `skip` }],
+    },
+    {
+      code: `it('checks the history', (ctx) => { steps.forEach(() => ctx.skip()) })`,
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      // A local function with the helper's name is not the shared helper.
+      code: `const oracleReplayRequested = () => process.env.CI === 'true'\nit.skipIf(oracleReplayRequested())('checks the history', () => check())`,
+      errors: [{ messageId: `conditional` }],
+    },
+    {
+      code: `it.skipIf(oracleReplayRequested())('checks the history', () => check())`,
+      errors: [{ messageId: `conditional` }],
     },
     {
       // Only the shared helper may select a replay: its polarity is fixed.

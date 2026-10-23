@@ -1,6 +1,7 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  oraclePropertyOptions,
   oracleReplayRequested,
   oracleRuns,
   readOracleRunConfig,
@@ -148,18 +149,30 @@ const diagnosticInput = fc.record({
 })
 
 const diagnosticProperty = `opfs-worker.diagnostics`
+const diagnosticRuns = 40
+// A path replay runs only the selected property's recorded history, once. A
+// seed without a path reseeds the random campaign and keeps the fixed one.
 const replay = readOracleRunConfig()
-const diagnosticSeed = replay.replaySeed ?? 1846
-const diagnosticRuns = oracleRuns(40)
-const diagnosticPath =
-  replay.replayProperty === diagnosticProperty ? replay.replayPath : undefined
-const replayRequested = oracleReplayRequested()
-const campaigns = replayRequested
-  ? [{ name: `replay`, seed: diagnosticSeed }]
-  : [
-      { name: `fixed`, seed: diagnosticSeed },
-      { name: `random`, seed: undefined },
-    ]
+const campaigns =
+  replay.replayPath === undefined
+    ? [
+        {
+          name: `fixed`,
+          options: { seed: 1846, numRuns: oracleRuns(diagnosticRuns) },
+        },
+        {
+          name: `random`,
+          options: oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
+        },
+      ]
+    : replay.replayProperty === diagnosticProperty
+      ? [
+          {
+            name: `replay`,
+            options: oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
+          },
+        ]
+      : []
 
 const diagnosticExamples: Array<[DiagnosticInput]> = [
   [
@@ -253,7 +266,7 @@ TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
 describe(`OPFS worker diagnostics oracle`, () => {
-  if (!replayRequested) {
+  if (!oracleReplayRequested()) {
     it.each(diagnosticExamples)(
       `preserves the pinned open-failure diagnostic (%#)`,
       checkDiagnostic,
@@ -280,11 +293,9 @@ describe(`OPFS worker diagnostics oracle`, () => {
 
   it.each(campaigns)(
     `matches the independent diagnostic formatter ($name campaign)`,
-    async ({ seed }) => {
+    async ({ options }) => {
       await fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
-        ...(seed === undefined ? {} : { seed }),
-        numRuns: diagnosticRuns,
-        ...(diagnosticPath ? { path: diagnosticPath } : {}),
+        ...options,
         verbose: true,
       })
     },

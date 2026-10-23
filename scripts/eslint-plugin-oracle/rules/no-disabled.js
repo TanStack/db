@@ -95,15 +95,26 @@ function registrationCondition(callee) {
 }
 
 /** Exactly `.skipIf(oracleReplayRequested())`. */
-function isReplaySelection({ name, args }) {
+function isReplaySelection({ name, args }, sourceCode) {
   const [condition] = args
+  if (
+    name !== `skipIf` ||
+    args.length !== 1 ||
+    condition.type !== `CallExpression` ||
+    condition.callee.type !== `Identifier` ||
+    condition.callee.name !== replaySelection ||
+    condition.arguments.length > 0
+  ) {
+    return false
+  }
+  // The helper must be the shared one, not a local function of that name.
+  const definition = findVariable(
+    sourceCode.getScope(condition),
+    replaySelection,
+  )?.defs[0]
   return (
-    name === `skipIf` &&
-    args.length === 1 &&
-    condition.type === `CallExpression` &&
-    condition.callee.type === `Identifier` &&
-    condition.callee.name === replaySelection &&
-    condition.arguments.length === 0
+    definition?.type === `ImportBinding` &&
+    /(^|\/)oracle-config(\.js)?$/.test(definition.parent.source.value)
   )
 }
 
@@ -203,7 +214,7 @@ function isPinnedOrObservation(object, sourceCode) {
  * Whether a call skips the test that it runs in through the test context,
  * as in `it('law', (ctx) => { ctx.skip() })`.
  */
-function isContextSkip(node) {
+function isContextSkip(node, sourceCode) {
   const { callee } = node
   if (
     callee.type !== `MemberExpression` ||
@@ -213,12 +224,13 @@ function isContextSkip(node) {
   ) {
     return false
   }
-  let fn = node.parent
-  while (fn && !isFunction(fn)) fn = fn.parent
-  const [context] = fn?.params ?? []
-  if (context?.type !== `Identifier` || context.name !== callee.object.name) {
-    return false
-  }
+  // Resolve the binding, so a context captured by a nested callback counts
+  // and an unrelated variable of the same name does not.
+  const definition = findVariable(sourceCode.getScope(node), callee.object.name)
+    ?.defs[0]
+  if (definition?.type !== `Parameter`) return false
+  const fn = definition.node
+  if (fn.params[0] !== definition.name) return false
   const registration = fn.parent
   return (
     registration.type === `CallExpression` &&
@@ -266,7 +278,7 @@ export default {
         ) {
           return
         }
-        if (isContextSkip(node)) {
+        if (isContextSkip(node, sourceCode)) {
           context.report({ node, messageId: `skip`, data: { name: `skip` } })
           return
         }
@@ -287,7 +299,7 @@ export default {
         }
         const conditional = registrationCondition(node.callee)
         if (conditional !== undefined) {
-          if (!isReplaySelection(conditional)) {
+          if (!isReplaySelection(conditional, sourceCode)) {
             context.report({
               node,
               messageId: `conditional`,
