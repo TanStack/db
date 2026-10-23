@@ -53,6 +53,11 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   pnpm lint
   ```
 
+  `pnpm lint:changed` lints only the files that your branch changes. If you
+  work with a coding agent, the repository's hooks return oracle lint reports
+  to it as it edits. Codex and Gemini CLI run project hooks only after you
+  trust them in `/hooks`; review them again when they change.
+
 - Implement your changes and tests in the relevant package or example.
 - For a production change that adds, removes, or changes observable behavior,
   extend the primary oracle when it can express the governing law. A focused

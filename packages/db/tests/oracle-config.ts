@@ -46,7 +46,6 @@ const staticOracleProperties = [
   `sqlite-reload.class`,
   `sqlite-reload.class.electron`,
   `persistence.generation-notice`,
-  `persistence.follower-generation-notice`,
   `persistence.follower-remote-demand`,
   `sqlite-ordinary.write-history`,
   `sqlite-ordinary.independent-work`,
