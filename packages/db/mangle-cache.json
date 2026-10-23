@@ -416,5 +416,6 @@
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
   "loadMovedEndTie": "gN",
-  "ownPrefixEnd": "gT"
+  "ownPrefixEnd": "gT",
+  "awaitsSiblingReplays": "gU"
 }

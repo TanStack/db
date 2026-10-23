@@ -421,6 +421,8 @@ export class CollectionSubscriber<
       start: () => {
         onStart?.()
       },
+      siblingReplays: () =>
+        this.collectionConfigBuilder.siblingReplays(this.sourceId),
       succeed: () => {
         if (
           syncRunGeneration !==

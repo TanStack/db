@@ -20,6 +20,7 @@ import type {
   ChangeMessage,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
+  SubscribeChangesOptions,
   Subscription,
   SubscriptionEvents,
   SubscriptionLoadSubsetErrorEvent,
@@ -89,10 +90,9 @@ type CollectionSubscriptionOptions = {
   onResumeAcquisition?: () => void
 }
 
-type TruncateReplayPublicationControl = Readonly<{
-  start: () => void
-  succeed: () => void
-}>
+type TruncateReplayPublicationControl = NonNullable<
+  SubscribeChangesOptions[`truncateReplayPublication`]
+>
 
 type TruncatePublicationState = {
   loadedInitialState: boolean
@@ -616,6 +616,22 @@ export class CollectionSubscription
     }
   }
 
+  /**
+   * A graph's subscriptions to one collection share a barrier. While another
+   * one's replay still loads, this replay stays open, so demand this one
+   * starts meanwhile joins it; it finishes once those replays settle.
+   */
+  private awaitsSiblingReplays(
+    replayState: TruncateReplayState,
+    finish: () => void,
+  ): boolean {
+    const siblings = this.options.truncateReplayPublication?.siblingReplays()
+    void siblings?.then(() => {
+      if (this.truncateReplayState === replayState) finish()
+    })
+    return siblings !== undefined
+  }
+
   /** Publish only after every overlapping replay attempt has settled. */
   private checkTruncateReplayComplete(replayState: TruncateReplayState): void {
     if (this.truncateReplayState !== replayState) return
@@ -628,6 +644,12 @@ export class CollectionSubscription
       if (activeFailure) {
         this.abandonTruncateReplay(replayState, activeFailure[1])
       } else {
+        if (
+          this.awaitsSiblingReplays(replayState, () =>
+            this.checkTruncateReplayComplete(replayState),
+          )
+        )
+          return
         this.flushTruncateReplay(replayState)
       }
     } finally {
@@ -820,6 +842,15 @@ export class CollectionSubscription
     attempt.setupComplete = true
     replayState.pendingSetups--
     this.checkTruncateReplayComplete(replayState)
+  }
+
+  /** Whether this subscription's replay still waits on its own work. */
+  public get hasTruncateReplayWork(): boolean {
+    const replayState = this.truncateReplayState
+    return (
+      replayState !== undefined &&
+      (replayState.pendingSetups > 0 || replayState.pending.size > 0)
+    )
   }
 
   public get hasPendingTruncateReplacement(): boolean {
@@ -1384,6 +1415,8 @@ export class CollectionSubscription
       this.flushTruncateReplay(replayState)
       return
     }
+    if (this.awaitsSiblingReplays(replayState, () => this.retireEmptyReplay()))
+      return
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()

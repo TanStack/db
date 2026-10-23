@@ -1460,7 +1460,12 @@ from an on-demand source therefore opens a replay at every truncate, even when
 it holds no demand. A replay without demand starts no recovery work and reports
 no loading state. Lazy demand that the graph starts while that replay is open
 belongs to it, including demand started after the replay failed while it still
-holds publication. A rejection of an aborted lazy demand request is obsolete demand,
+holds publication. A live query's subscriptions to one collection, such as a
+join and an include of the same source, share one publication barrier. None
+of their replays publishes, and none whose last demand retired closes, while
+another of them still has replay work. So demand that any of them starts
+meanwhile joins its own open replay instead of falling outside recovery.
+A rejection of an aborted lazy demand request is obsolete demand,
 not a load failure, as for the subscription. When a truncate supersedes the
 acquisition, its replay decides the demand, even if the replay settles before
 the aborted request rejects. A segment that newer coverage replaced settles. A

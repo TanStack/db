@@ -644,6 +644,24 @@ export class CollectionConfigBuilder<
       : undefined
   }
 
+  /** Replays of other subscriptions to a source's collection that still load. */
+  siblingReplays(sourceId: string): Promise<unknown> | undefined {
+    const collection = this.collectionSources.find(
+      (source) => source.sourceId === sourceId,
+    )?.collection
+    const pending = this.collectionSources.flatMap((source) => {
+      const subscription = this.subscriptions[source.sourceId]
+      // A replay whose completion already settled cannot be waited on.
+      return source.sourceId !== sourceId &&
+        source.collection === collection &&
+        subscription?.hasTruncateReplayWork &&
+        subscription.pendingTruncateReplacement
+        ? [subscription.pendingTruncateReplacement]
+        : []
+    })
+    return pending.length > 0 ? Promise.allSettled(pending) : undefined
+  }
+
   private hasFailedSourceRecovery(): boolean {
     return Object.values(this.subscriptions).some(
       (subscription) => subscription.hasFailedTruncateReplacement,
