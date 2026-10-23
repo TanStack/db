@@ -84,6 +84,7 @@ import type {
   Source,
   WhereCallback,
   WithResult,
+  WithoutBareSubquery,
 } from './types.js'
 
 const UNION_ALL_SOURCE_CONTEXT = `unionAll clause` satisfies SourceClauseContext
@@ -547,7 +548,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     ) => NonScalarSelectObject<TSelectObject>,
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>>
   select<TSelectValue extends ScalarSelectValue>(
-    callback: (refs: RefsForContext<TContext>) => TSelectValue,
+    callback: (
+      refs: RefsForContext<TContext>,
+    ) => WithoutBareSubquery<TSelectValue>,
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>>>
   select(
     callback: (

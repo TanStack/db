@@ -314,10 +314,36 @@ type IsScalarSelectLike<T> = T extends BasicExpression | Aggregate
         ? false
         : true
       : false
+// A select value must not hold a bare subquery: it needs include(), toArray(),
+// or materialize(). The open ref and user-value shapes cannot express this, so
+// both select overloads check it. The check stops at wrappers and expressions,
+// which hold builders of their own, and a few levels deep.
+type ContainsQueryBuilder<
+  T,
+  TDepth extends Array<unknown> = [],
+> = TDepth[`length`] extends 4
+  ? false
+  : IsAny<T> extends true
+    ? false
+    : T extends QueryBuilder<any>
+      ? true
+      : T extends BasicExpression | Aggregate | { readonly __brand: string }
+        ? false
+        : T extends object
+          ? true extends {
+              [K in keyof T]-?: ContainsQueryBuilder<T[K], [...TDepth, 0]>
+            }[keyof T]
+            ? true
+            : false
+          : false
+
+export type WithoutBareSubquery<T> =
+  ContainsQueryBuilder<T> extends true ? never : T
+
 export type NonScalarSelectObject<T> = T extends SelectObject
   ? IsScalarSelectLike<T> extends true
     ? never
-    : T
+    : WithoutBareSubquery<T>
   : never
 
 export type ResultTypeFromSelectValue<TSelectValue> =

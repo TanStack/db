@@ -7,7 +7,7 @@ title: ApplyJoinOptionalityToMergedSchema
 type ApplyJoinOptionalityToMergedSchema<TExistingSchema, TNewSchema, TJoinType, TFromSourceNames> = { [K in keyof TExistingSchema]: K extends TFromSourceNames ? TJoinType extends "right" | "full" ? TExistingSchema[K] | undefined : TExistingSchema[K] : TExistingSchema[K] } & { [K in keyof TNewSchema]: TJoinType extends "left" | "full" ? TNewSchema[K] | undefined : TNewSchema[K] };
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1038](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1038)
+Defined in: [packages/db/src/query/builder/types.ts:1064](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1064)
 
 ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
 

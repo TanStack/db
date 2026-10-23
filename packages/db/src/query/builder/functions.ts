@@ -396,9 +396,11 @@ export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
  * ```ts
  * caseWhen(gt(user.age, 18), {
  *   ...user,
- *   posts: q
- *     .from({ post: postsCollection })
- *     .where(({ post }) => eq(post.userId, user.id)),
+ *   posts: include(
+ *     q
+ *       .from({ post: postsCollection })
+ *       .where(({ post }) => eq(post.userId, user.id)),
+ *   ),
  * })
  * ```
  */

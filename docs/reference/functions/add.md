@@ -7,7 +7,7 @@ title: add
 function add<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:615](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L615)
+Defined in: [packages/db/src/query/builder/functions.ts:617](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L617)
 
 ## Type Parameters
 

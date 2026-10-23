@@ -7,4 +7,4 @@ title: OperatorName
 type OperatorName = typeof operators[number];
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:760](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L760)
+Defined in: [packages/db/src/query/builder/functions.ts:762](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L762)

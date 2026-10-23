@@ -7,7 +7,7 @@ title: QueryResult
 type QueryResult<T> = GetResult<ExtractContext<T>>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:1796](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1796)
+Defined in: [packages/db/src/query/builder/index.ts:1799](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1799)
 
 ## Type Parameters
 

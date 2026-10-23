@@ -118,13 +118,16 @@ non-null value.
 Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Joins take an imported operator: `.join(leftJoin(source, on))`, and likewise `innerJoin`, `rightJoin`, `fullJoin`, and `joinOf(type, source, on)`. The `.join(source, on)` call shape and the `.leftJoin()` methods are removed and throw `JoinOperatorRequiredError`.
 
 ```ts
-import { eq, innerJoin } from '@tanstack/db'
+import { createLiveQueryCollection, eq, innerJoin } from '@tanstack/db'
 
 const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join(innerJoin({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId)))
+    .join(
+      innerJoin({ post: postsCollection }, ({ user, post }) =>
+        eq(user.id, post.userId),
+      ),
+    )
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
@@ -136,9 +139,16 @@ Multiple joins:
 
 ```ts
 q.from({ user: usersCollection })
-  .join(leftJoin({ post: postsCollection }, ({ user, post }) => eq(user.id, post.userId)))
-  .join(leftJoin({ comment: commentsCollection }, ({ post, comment }) =>
-    eq(post.id, comment.postId)))
+  .join(
+    leftJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
+    ),
+  )
+  .join(
+    leftJoin({ comment: commentsCollection }, ({ post, comment }) =>
+      eq(post.id, comment.postId),
+    ),
+  )
 ```
 
 ### 3. Aggregation with groupBy + having
@@ -188,8 +198,11 @@ const activeUsers = createLiveQueryCollection((q) =>
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: activeUsers })
-    .join(leftJoin({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId)))
+    .join(
+      leftJoin({ post: postsCollection }, ({ user, post }) =>
+        eq(user.id, post.userId),
+      ),
+    )
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
@@ -243,18 +256,20 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: include(q
-      .from({ i: issuesCollection })
-      .where(({ i }) => eq(i.projectId, p.id))
-      .select(({ i }) => ({
-        id: i.id,
-        title: i.title,
-      }))),
+    issues: include(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+        })),
+    ),
   })),
 )
 
 // Each row's `issues` is a live Collection
-for (const project of projectsWithIssues) {
+for (const project of projectsWithIssues.toArray) {
   console.log(project.name, project.issues.toArray)
 }
 ```
@@ -529,9 +544,11 @@ q.from({ order: ordersCollection })
 ```ts
 import { and, eq, leftJoin } from '@tanstack/db'
 
-q.from({ product: productsCollection }).join(leftJoin({ stock: stockCollection },
-  ({ product, stock }) =>
-    and(eq(product.sku, stock.sku), eq(product.region, stock.region))))
+q.from({ product: productsCollection }).join(
+  leftJoin({ stock: stockCollection }, ({ product, stock }) =>
+    and(eq(product.sku, stock.sku), eq(product.region, stock.region)),
+  ),
+)
 ```
 
 All equalities must match. A nullish component never matches, and outer joins
@@ -563,12 +580,18 @@ The differential dataflow join operator supports a single equality or nested `an
 
 ```ts
 // WRONG
-q.from({ user: usersCollection }).join(leftJoin({ post: postsCollection },
-  ({ user, post }) => gt(user.id, post.userId)))
+q.from({ user: usersCollection }).join(
+  leftJoin({ post: postsCollection }, ({ user, post }) =>
+    gt(user.id, post.userId),
+  ),
+)
 
 // CORRECT
-q.from({ user: usersCollection }).join(leftJoin({ post: postsCollection },
-  ({ user, post }) => eq(user.id, post.userId)))
+q.from({ user: usersCollection }).join(
+  leftJoin({ post: postsCollection }, ({ user, post }) =>
+    eq(user.id, post.userId),
+  ),
+)
 ```
 
 ### MEDIUM: Passing source directly instead of {alias: collection}

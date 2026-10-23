@@ -557,3 +557,24 @@ describe(`includes subquery types`, () => {
     })
   })
 })
+
+describe(`a subquery in select needs an include function`, () => {
+  test(`rejects a bare subquery field, also when nested`, () => {
+    const projects = createProjectsCollection()
+    const issues = createIssuesCollection()
+    createLiveQueryCollection((q) =>
+      // @ts-expect-error A bare subquery field needs include().
+      q.from({ p: projects }).select(({ p }) => ({
+        issues: q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+      })),
+    )
+    createLiveQueryCollection((q) =>
+      // @ts-expect-error A nested bare subquery field needs include().
+      q.from({ p: projects }).select(({ p }) => ({
+        detail: {
+          issues: q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
+        },
+      })),
+    )
+  })
+})

@@ -1192,7 +1192,7 @@ In this example, the `activeUsers` subquery is used twice but executed only once
 Build complex queries with multiple levels of nesting:
 
 ```ts
-import { count, leftJoin } from '@tanstack/db'
+import { count, createCollection, eq, leftJoin, liveQueryCollectionOptions } from '@tanstack/db'
 
 const topUsers = createCollection(liveQueryCollectionOptions({
   query: (q) => {
@@ -1216,7 +1216,7 @@ const topUsers = createCollection(liveQueryCollectionOptions({
         name: user.name,
         postCount: postCount.count,
       }))
-      .orderBy(({ userStats }) => userStats.postCount, 'desc')
+      .orderBy(({ $selected }) => $selected.postCount, 'desc')
       .limit(10)
     
     // Use the user stats subquery in the main query
@@ -1419,13 +1419,13 @@ const tree = createLiveQueryCollection((q) =>
       .select(({ i }) => ({
         id: i.id,
         title: i.title,
-        comments: q
+        comments: include(q
           .from({ c: commentsCollection })
           .where(({ c }) => eq(c.issueId, i.id))
           .select(({ c }) => ({
             id: c.id,
             body: c.body,
-          })),
+          }))),
       }))),
   })),
 )
@@ -2121,7 +2121,7 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 You can use the `Query` class to create reusable query definitions. This is useful for building complex queries where you want to reuse the same query builder instance multiple times throughout your application.
 
 ```ts
-import { eq, leftJoin, Query } from '@tanstack/db'
+import { createLiveQueryCollection, eq, leftJoin, Query } from '@tanstack/db'
 
 // Create a reusable query builder
 const userQuery = new Query()
