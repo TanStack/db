@@ -1291,11 +1291,51 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           )
         // Declared reach: the states where a claim must outlive the query
         // that made it.
-        const reach = createOracleReach(`source-id claim memory`, [
+        const reach = createOracleReach<ReachState>(`source-id claim memory`, [
           `swap after an intervening query`,
           `swap after a disabled step`,
           `revisit after an intervening query`,
         ])
+        type ReachState =
+          | `swap after an intervening query`
+          | `swap after a disabled step`
+          | `revisit after an intervening query`
+        // A state names what lies between the step that made a claim and the
+        // step that tests it, so a direct swap or a revisit after only a
+        // disabled step does not count as an intervening query.
+        const reachedState = (
+          history: ReadonlyArray<Pick>,
+          next: Pick,
+        ): ReachState | undefined => {
+          if (next === `D`) return undefined
+          const lastIndex = (match: (pick: Pick) => boolean) => {
+            for (let index = history.length - 1; index >= 0; index--) {
+              if (match(history[index]!)) return index
+            }
+            return -1
+          }
+          const between = (index: number) => history.slice(index + 1)
+          const conflict = lastIndex(
+            (prior) =>
+              prior !== `D` &&
+              prior !== next &&
+              objectOf(prior).collection.id === objectOf(next).collection.id,
+          )
+          if (conflict >= 0) {
+            const steps = between(conflict)
+            if (steps.some((pick) => pick !== `D`)) {
+              return `swap after an intervening query`
+            }
+            return steps.includes(`D`)
+              ? `swap after a disabled step`
+              : undefined
+          }
+          const revisit = lastIndex((prior) => prior === next)
+          return revisit >= 0 &&
+            between(revisit).some((pick) => pick !== `D` && pick !== next)
+            ? `revisit after an intervening query`
+            : undefined
+        }
         const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`, `D`]
         for (const first of [`A`, `C`] as const) {
           for (const second of picks) {
@@ -1314,20 +1354,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
               await h.flush()
               expectUnorderedRows(h.current().data, rowsOf[first])
               for (const next of [second, third]) {
-                const previous = history[history.length - 1]!
-                if (collides(history, next)) {
-                  reach.reach(
-                    previous === `D`
-                      ? `swap after a disabled step`
-                      : `swap after an intervening query`,
-                  )
-                } else if (
-                  next !== `D` &&
-                  next !== previous &&
-                  history.includes(next)
-                ) {
-                  reach.reach(`revisit after an intervening query`)
-                }
+                const state = reachedState(history, next)
+                if (state) reach.reach(state)
                 if (comparesIdentity && collides(history, next)) {
                   await expectRejection(
                     `SourceCollectionIdReuseError`,
@@ -1374,8 +1402,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       `source-id-reuse-in-one-query`,
       `a query that reads two sources under one Collection ID is rejected or reads both`,
       async () => {
+        // The objects hold overlapping but different rows, so a binding that
+        // read either object for both sides would publish another id set.
         const first = driver.makeSource(SEED)
-        const reused = driver.makeSource(SEED.slice(0, 2), first.collection.id)
+        const reused = driver.makeSource(
+          [...SEED.slice(1), { id: `4`, name: `Fourth`, age: 45, team: `b` }],
+          first.collection.id,
+        )
         const build = (q: any) =>
           q
             .from({ left: first.collection })
@@ -1395,9 +1428,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         }
         const h = driver.mount(build)
         await h.flush()
-        // The inner join matches only rows both objects hold, so a binding
-        // that read one object for both sides would publish all three.
-        expectUnorderedRows(h.current().data, idsOf(SEED.slice(0, 2)))
+        // The inner join matches only ids both objects hold: 2 and 3. Reading
+        // the first object for both sides gives 1-3; the second gives 2-4.
+        expectUnorderedRows(h.current().data, [{ id: `2` }, { id: `3` }])
         h.unmount()
       },
     )

@@ -903,33 +903,34 @@ function useLiveQueryImpl(
         instance.collection = configOrQueryOrCollection
         instance.config = configOrQueryOrCollection
       } else {
+        if (preparedQueryValue === unpreparedQueryValue) {
+          preparedQueryValue = prepareQueryValue(
+            configOrQueryOrCollection,
+            dbClient,
+            instance.deferredCollections,
+          )
+        }
+        if (queryKey === undefined && deps !== undefined) {
+          // A dependency list decides reuse, so check the query whenever the
+          // hook binds a live query, compiled or taken from the Suspense
+          // cache: it needs a stable identity and keeps its sources' IDs.
+          identifyLiveQuery(
+            preparedQueryValue,
+            getIdentityScope(
+              instance.sourceIds,
+              dbClient,
+              `useLiveQuery`,
+              instance.deferredCollections,
+            ),
+            // Reuse the identity this render derived for hydration.
+            depsQueryIdentity === unpreparedQueryValue
+              ? undefined
+              : () => depsQueryIdentity,
+          )
+        }
         if (suspenseCollection) {
           instance.collection = suspenseCollection
         } else {
-          if (preparedQueryValue === unpreparedQueryValue) {
-            preparedQueryValue = prepareQueryValue(
-              configOrQueryOrCollection,
-              dbClient,
-              instance.deferredCollections,
-            )
-          }
-          if (queryKey === undefined && deps !== undefined) {
-            // A dependency list decides reuse, so check the query when it
-            // compiles: it needs a stable identity and keeps its sources' IDs.
-            identifyLiveQuery(
-              preparedQueryValue,
-              getIdentityScope(
-                instance.sourceIds,
-                dbClient,
-                `useLiveQuery`,
-                instance.deferredCollections,
-              ),
-              // Reuse the identity this render derived for hydration.
-              depsQueryIdentity === unpreparedQueryValue
-                ? undefined
-                : () => depsQueryIdentity,
-            )
-          }
           if (!dbClient) {
             getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
           }

@@ -139,6 +139,20 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   )
 }
 
+// An empty dependency list compiles the query once, at mount.
+function mountWithDependencyList(
+  build: QueryBuild,
+  config: InfiniteQueryConfig = {},
+) {
+  const log: Observations = []
+  return makeHandle(
+    renderHook(() =>
+      useRecorded(useLiveInfiniteQuery(build as any, config as any, []), log),
+    ),
+    log,
+  )
+}
+
 // React compares query identity on two production paths: the identity derived
 // from the query IR on every render (the 1.0 form), and a deprecated
 // dependency list. The suite runs once per path.
@@ -287,6 +301,7 @@ runInfiniteQuerySuite(reactInfiniteDriver)
 runInfiniteQuerySuite({
   ...reactInfiniteDriver,
   name: `react (dependency list)`,
+  mount: mountWithDependencyList,
   mountControllable: mountControllableWith(`dependency list`),
 })
 

@@ -432,7 +432,7 @@ export function useLiveQuery(
       let queryHash: string | undefined
       try {
         queryHash =
-          deps.length > 0 && !queryKey
+          deps.length > 0 && !queryKey?.length
             ? getStableValueHash(
                 [
                   `deps`,

@@ -1809,8 +1809,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       `source-id-reuse-in-one-query`,
       `rejects or pages one query that reads two sources under one Collection ID`,
       async () => {
+        // Overlapping but different rows: ids 1-4 and 3-6.
         const first = driver.makeSource(rows(4))
-        const reused = driver.makeSource(rows(2), first.collection.id)
+        const reused = driver.makeSource(rows(6).slice(2), first.collection.id)
         const build: QueryBuild = (q) =>
           q
             .from({ items: first.collection })
@@ -1828,15 +1829,14 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           expect(error).toMatchObject({ name: `SourceCollectionIdReuseError` })
           return
         }
-        // The inner join matches only the ids both objects hold, so a binding
-        // that read one object for both sides would page all four rows.
+        // The inner join matches only ids both objects hold: 3 and 4.
+        // Reading the first object for both sides pages 1-3; the second, 3-5.
         const handle = driver.mount(build, { pageSize: 3 })
         await handle.flush()
-        expect(handle.current().data.map((row: any) => row.id)).toEqual(
-          rows(4)
-            .filter((row) => row.id === `1` || row.id === `2`)
-            .map((row) => row.id),
-        )
+        expect(handle.current().data.map((row: any) => row.id)).toEqual([
+          `3`,
+          `4`,
+        ])
       },
     )
 

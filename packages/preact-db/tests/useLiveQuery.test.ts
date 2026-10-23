@@ -139,4 +139,27 @@ describe(`useLiveQuery identity`, () => {
     expect(rendered).toEqual([`b`])
     expect(collection).not.toBe(first)
   })
+
+  // A nonempty queryKey owns the identity, so the hook claims no source IDs.
+  it(`lets a keyed query swap a source under its ID when the key changes`, async () => {
+    const first = makeSource(`keyed-swap`, [{ id: `a`, team: `x` }])
+    const replacement = makeSource(`keyed-swap`, [{ id: `b`, team: `x` }])
+    let rendered: Array<string> = []
+    function Reader({ source }: { source: typeof first }) {
+      const result = useLiveQuery({
+        queryKey: [`keyed-swap`, source === first ? 1 : 2],
+        query: (q) => q.from({ row: source }),
+      })
+      rendered = result.data.map((row) => row.id)
+      return null
+    }
+
+    const container = mountRoot(h(Reader, { source: first }))
+    await settle()
+    expect(rendered).toEqual([`a`])
+
+    act(() => render(h(Reader, { source: replacement }), container))
+    await settle()
+    expect(rendered).toEqual([`b`])
+  })
 })

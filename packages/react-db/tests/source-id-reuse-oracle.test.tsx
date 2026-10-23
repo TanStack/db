@@ -33,8 +33,10 @@
  *
  * Driver and observation: render the public hook, then rerender it with each
  * source. At the rerender boundary, compare a thrown error or the public row.
- * This does not assert a process-wide Collection registry, legacy dependency
- * arrays, or explicit-key semantics; explicit queryKey callers own their key.
+ * A nonempty queryKey owns its identity, so a keyed query skips the claim: a
+ * same-ID swap under a changed key reads the new source. The release grammar
+ * below runs dependency-list hook paths too. This does not assert a
+ * process-wide Collection registry or other explicit-key semantics.
  */
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
@@ -607,6 +609,124 @@ describe(`React source ID reuse`, () => {
     await waitFor(() =>
       expect(newHook.result.current.data[0]?.value).toBe(`second`),
     )
+  })
+
+  it(`lets a keyed query swap a source under its ID when the key changes`, async () => {
+    const first = source(`settings`, `first`)
+    const replacement = source(`settings`, `replacement`)
+    const hook = renderHook(
+      ({ current }: { current: typeof first }) =>
+        useLiveQuery({
+          queryKey: [`settings`, current === first ? 1 : 2],
+          query: (q) => q.from({ settings: current }),
+        }),
+      { initialProps: { current: first } },
+    )
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`first`),
+    )
+    hook.rerender({ current: replacement })
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`replacement`),
+    )
+  })
+
+  // A Suspense mount suspends before it commits, so its retry render may
+  // reuse the cached Suspense collection instead of compiling again. With a
+  // dependency list, that retry must still claim the source's ID.
+  it(`claims a Suspense query's source when a dependency-list retry reuses its cached collection`, async () => {
+    let markFirstReady!: () => void
+    const first = createCollection<Row>({
+      id: `suspense-settings`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `one`, value: `first`, rank: 1 },
+          })
+          commit()
+          markFirstReady = markReady
+        },
+      },
+    })
+    const replacement = source(`suspense-settings`, `replacement`)
+    const labels = new Map<object, string>([
+      [first, `first`],
+      [replacement, `replacement`],
+    ])
+    const View = ({ current }: { current: typeof first }) => {
+      // A hashable dependency keys the Suspense cache; a Collection cannot.
+      const { data } = useLiveSuspenseQuery(
+        (q) => q.from({ settings: current }),
+        [labels.get(current)],
+      )
+      return <div>{data[0]?.value}</div>
+    }
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      const root = render(
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={first} />
+          </Suspense>
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Loading`)).toBeDefined()
+      await act(async () => markFirstReady())
+      await waitFor(() => expect(root.getByText(`first`)).toBeDefined())
+
+      root.rerender(
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={replacement} />
+          </Suspense>
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Rejected`)).toBeDefined()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it(`claims a Suspense query's source when a dependency-list hook mounts from a sibling's cached collection`, async () => {
+    const first = source(`sibling-suspense`, `first`)
+    const replacement = source(`sibling-suspense`, `replacement`)
+    const labels = new Map<object, string>([
+      [first, `first`],
+      [replacement, `replacement`],
+    ])
+    const View = ({ current }: { current: typeof first }) => {
+      // A hashable dependency keys the Suspense cache; a Collection cannot.
+      const { data } = useLiveSuspenseQuery(
+        (q) => q.from({ settings: current }),
+        [labels.get(current)],
+      )
+      return <div>{data[0]?.value}</div>
+    }
+    const tree = (second: typeof first) => (
+      <>
+        <Suspense fallback={<div>Loading</div>}>
+          <View current={first} />
+        </Suspense>
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={second} />
+          </Suspense>
+        </TestErrorBoundary>
+      </>
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      const root = render(tree(first))
+      await waitFor(() => expect(root.getAllByText(`first`)).toHaveLength(2))
+      root.rerender(tree(replacement))
+      expect(root.getByText(`Rejected`)).toBeDefined()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it(`permits independent client scopes to use the same ID`, async () => {

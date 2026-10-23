@@ -9,7 +9,7 @@
  * The model has independent source start counts. In the first history, the
  * first start throws after the Svelte effect asks for rows; the second count
  * must still become one and the failed effect must release its subscription.
- * The release grammar crosses three rejection causes for a client-backed
+ * The release grammar crosses four rejection causes for a client-backed
  * query (a descriptor factory that throws during preparation, a query without
  * a stable IR identity, a query the live query rejects when it compiles, and
  * a different source object under a Collection ID the mounted hook already
@@ -271,10 +271,14 @@ describe(`Svelte descriptor source release`, () => {
         flushSync()
         step = { current: replacement, join: true }
         expect(() => flushSync()).toThrow(SourceCollectionIdReuseError)
-        // Each field, read on its own, rejects instead of serving the
-        // previous query's rows or readiness.
-        for (const field of [`data`, `state`, `status`, `isReady`] as const) {
-          expect(() => result[field]).toThrow(SourceCollectionIdReuseError)
+        // Each public field, read on its own, rejects instead of serving the
+        // previous query's rows or state.
+        const fields = Object.keys(result) as Array<keyof typeof result>
+        expect(fields.length).toBeGreaterThanOrEqual(12)
+        for (const field of fields) {
+          expect(() => result[field], field).toThrow(
+            SourceCollectionIdReuseError,
+          )
         }
         return dispose
       },

@@ -50,9 +50,11 @@
  * each `current()` throws or holds none, so a framework whose memo throws once
  * cannot fall back to the previous query's rows. Each driver releases any
  * native scope that a rejected mount acquired. In the current drivers this
- * check cannot fail: React and Preact unmount a hook whose render throws, so
- * their drivers rethrow on later reads, and reactive drivers do not reject
- * here. It guards a future driver whose binding stays mounted. The one such
+ * check cannot fail, and reactive drivers do not reject here. React unmounts
+ * a tree whose render throws, so its driver rethrows on later reads. Preact
+ * keeps a component whose render throws mounted, so its driver mounts the hook
+ * under an error boundary, as an application must to recover, and rethrows on
+ * later reads. A Preact component without a boundary is outside this cut. It guards a future driver whose binding stays mounted. The one such
  * binding today, a `DbClient`-backed Svelte query, has its own witness in the
  * Svelte descriptor release oracle, which reads each field after a rejection.
  *

@@ -146,6 +146,23 @@ function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
   return makeHandle(hook)
 }
 
+// An empty dependency list compiles the query once, at mount, where the hook
+// checks its identity and claims its sources.
+function mountWithDependencyList(build: QueryBuild) {
+  const hook = renderHook(() => useLiveQuery(build as any, []))
+  return makeHandle(hook)
+}
+
+function mountConfigWithDependencyList(
+  build: QueryBuild,
+  opts?: { gcTime?: number },
+) {
+  const hook = renderHook(() =>
+    useLiveQuery({ query: build as any, ...opts } as any, []),
+  )
+  return makeHandle(hook)
+}
+
 function mountDisabled() {
   // React's disabled convention: the query callback returns null.
   const hook = renderHook(() => useLiveQuery(() => null as any))
@@ -250,6 +267,8 @@ runSuite(reactDriver)
 runSuite({
   ...reactDriver,
   name: `react (dependency list)`,
+  mount: mountWithDependencyList,
+  mountConfig: mountConfigWithDependencyList,
   mountControllable: mountControllableWith(`dependency list`),
 })
 it(`publishes a synchronous ordered limit in the first layout commit`, async () => {
