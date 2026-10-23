@@ -9,7 +9,8 @@
 //
 //   node scripts/check-doc-snippets.mjs [--verbose] [--update-baseline]
 //
-// Mark a fence ```ts nocheck to skip an example that is not meant to compile.
+// An example that does not parse fails too. Mark a fence ```ts nocheck to
+// skip an example that is not meant to compile.
 //
 // `doc-snippets-baseline.json` lists examples that already failed when the
 // check began, by file and a hash of their code. Editing one changes its
@@ -32,23 +33,29 @@ const baselinePath = join(root, `scripts`, `doc-snippets-baseline.json`)
 const baseline = existsSync(baselinePath)
   ? JSON.parse(readFileSync(baselinePath, `utf8`))
   : {}
-// The tokens of an example, without the punctuation and spacing that
+// The tokens of an example, without the spacing, commas, and semicolons that
 // formatting changes, so a reformatted example keeps its baseline entry.
+// Parentheses stay, because moving one changes what the code calls, except
+// the ones formatting puts around multi-line JSX.
 function fingerprint(code) {
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, true)
   scanner.setText(code)
-  const skip = new Set([
-    ts.SyntaxKind.CommaToken,
-    ts.SyntaxKind.SemicolonToken,
-    ts.SyntaxKind.OpenParenToken,
-    ts.SyntaxKind.CloseParenToken,
-  ])
+  const skip = new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.SemicolonToken])
+  const wrapsJsx = []
   const tokens = []
   for (
     let kind = scanner.scan();
     kind !== ts.SyntaxKind.EndOfFileToken;
     kind = scanner.scan()
-  )
+  ) {
+    if (kind === ts.SyntaxKind.OpenParenToken) {
+      const jsx = scanner.lookAhead(
+        () => scanner.scan() === ts.SyntaxKind.LessThanToken,
+      )
+      wrapsJsx.push(jsx)
+      if (jsx) continue
+    }
+    if (kind === ts.SyntaxKind.CloseParenToken && wrapsJsx.pop()) continue
     if (!skip.has(kind))
       tokens.push(
         kind === ts.SyntaxKind.StringLiteral
@@ -56,6 +63,7 @@ function fingerprint(code) {
           : // Formatting also reflows the HTML in a component template.
             scanner.getTokenText().replace(/\s+/g, ``),
       )
+  }
   return tokens.join(` `)
 }
 const hashOf = (code) =>
@@ -212,6 +220,36 @@ function packageFor(name, file) {
 
 const importsTanStack = (code) => /from ['"]@tanstack\//.test(code)
 
+const tanstackImports = (code) =>
+  [
+    ...code.matchAll(
+      /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]@tanstack\//g,
+    ),
+  ]
+    .flatMap((match) => match[1].split(`,`))
+    .map((name) =>
+      name
+        .trim()
+        .split(/\s+as\s+/)
+        .pop(),
+    )
+    .filter(Boolean)
+
+function editDistance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i]
+    for (let j = 1; j <= b.length; j++)
+      row[j] = Math.min(
+        previous[j] + 1,
+        row[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      )
+    previous = row
+  }
+  return previous[b.length]
+}
+
 function sourceOf(snippet, declared, autoImported) {
   const byPackage = new Map()
   for (const name of autoImported) {
@@ -237,6 +275,7 @@ function sourceOf(snippet, declared, autoImported) {
 const declared = snippets.map(() => new Set())
 const unimported = snippets.map(() => new Set())
 const autoImported = snippets.map(() => new Set())
+const misspelled = snippets.map(() => new Map())
 const unknownName = new Set([2304, 2552, 18004, 2749, 2693])
 // Docs often show alternatives side by side in one block, and leave
 // callback parameters unannotated where an app would annotate them.
@@ -276,6 +315,14 @@ for (let pass = 0; pass < 6; pass++) {
       .flattenDiagnosticMessageText(diagnostic.messageText, ``)
       .match(/'([^']+)'/)?.[1]
     if (!name) continue
+    // A near miss of a TanStack name the example imports is a typo, not app
+    // code. TypeScript stops suggesting spellings after a few, so compare here.
+    const suggestion = tanstackImports(snippets[index].code).find(
+      (imported) =>
+        name.length >= 4 &&
+        editDistance(name, imported) <= (name.length >= 6 ? 2 : 1),
+    )
+    if (suggestion !== undefined) misspelled[index].set(name, suggestion)
     if (exported.has(name)) {
       if (importsTanStack(snippets[index].code)) unimported[index].add(name)
       else if (!autoImported[index].has(name)) {
@@ -302,9 +349,14 @@ snippets.forEach((snippet, i) => {
   const ownDiagnostics = diagnostics.filter(
     (d) => d.file?.fileName === snippet.name,
   )
-  // Pseudo-code, such as `...` placeholders, is not meant to compile.
+  // An example that does not parse cannot be checked. Pseudo-code, such as
+  // `...` placeholders, is marked nocheck.
   if (ownDiagnostics.some((d) => d.code >= 1000 && d.code < 2000)) {
     unparsable++
+    failures.push({
+      snippet,
+      text: `${snippet.file}:${snippet.line}\n  does not parse; mark the fence nocheck if it is pseudo-code`,
+    })
     return
   }
   const offset =
@@ -319,6 +371,8 @@ snippets.forEach((snippet, i) => {
     })
   for (const name of unimported[i])
     messages.push(`  uses \`${name}\` without importing it`)
+  for (const [name, suggestion] of misspelled[i])
+    messages.push(`  uses \`${name}\`; did you mean \`${suggestion}\`?`)
   if (messages.length)
     failures.push({
       snippet,
@@ -362,7 +416,7 @@ if (updateBaseline && !process.env.SNIPPET_ONLY) {
       `\n${stale.length} baseline entries now pass or no longer exist; run with --update-baseline:\n${stale.join(`\n`)}`,
     )
   console.log(
-    `\n${snippets.length} examples in ${markdown.length} files: ${newFailures.length} new failures, ${failures.length - newFailures.length} known, ${unparsable} skipped as pseudo-code`,
+    `\n${snippets.length} examples in ${markdown.length} files: ${newFailures.length} new failures, ${failures.length - newFailures.length} known, ${unparsable} of them do not parse`,
   )
   process.exitCode =
     newFailures.length || (stale.length && !process.env.SNIPPET_ONLY) ? 1 : 0

@@ -910,16 +910,12 @@ export class CollectionConfigBuilder<
     )
 
     // Includes bring the materializer. A joined query with a custom key
-    // also reduces its public keys, so its join operator brings it too.
+    // reduces its public keys, so its join operator brings the reduction.
     const includesRuntime = compilation.includes?.[0]?.runtime
     const joinClause = this.findJoinClause(this.query)
     const getKey = this.config.getKey
     const materialized = includesRuntime
-      ? includesRuntime.materializeCompilation(
-          compilation,
-          getKey,
-          joinClause !== undefined,
-        )
+      ? includesRuntime.materializeCompilation(compilation, getKey)
       : getKey && joinClause
         ? joinClause.runtime.reducePublicKeys(compilation, getKey)
         : { pipeline: compilation.pipeline, facades: undefined }

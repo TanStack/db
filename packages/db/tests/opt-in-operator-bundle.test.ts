@@ -15,9 +15,12 @@ import { describe, expect, it } from 'vitest'
  * this bundles small apps from source as an app's build would and reads which
  * modules reach the output.
  *
- * Each operator has a positive control: importing its value must bring its
- * modules in. Without the controls, a module renamed or moved would make the
- * absence checks pass vacuously.
+ * The check runs every operator value alone, so each one is a positive control
+ * for its own modules: without them, a module renamed or moved would make the
+ * absence checks pass vacuously. It also runs every combination of operator
+ * families, each family named by one of its values in turn, so a module that
+ * only a combination reaches is checked too. The modules shared by joins and
+ * includes must arrive exactly when an app imports one of the two.
  */
 const index = fileURLToPath(new URL(`../src/index.ts`, import.meta.url))
 
@@ -27,7 +30,10 @@ const modules = {
     `src/query/compiler/join-runtime.ts`,
     `src/query/optimizer-joins.ts`,
   ],
-  grouping: [`src/query/compiler/grouping.ts`],
+  grouping: [
+    `src/query/compiler/grouping.ts`,
+    `src/query/compiler/group-by.ts`,
+  ],
   includes: [
     `src/query/live/bucket-facade-adapter.ts`,
     `src/query/live/includes-runtime.ts`,
@@ -35,10 +41,20 @@ const modules = {
   ],
   pooling: [`src/query/pooled-live-query.ts`],
 } as const
+type Family = keyof typeof modules
+
+/** The values that bring each family's code in. */
+const values: Record<Family, ReadonlyArray<string>> = {
+  joins: [`leftJoin`, `innerJoin`, `rightJoin`, `fullJoin`, `joinOf`],
+  grouping: [`count`, `sum`, `avg`, `min`, `max`, `groupKeys`],
+  includes: [`include`, `toArray`, `materialize`],
+  pooling: [`pooledLiveQueries`],
+}
 
 // Joins and includes share public-key reduction; an app with neither keeps it
 // out.
 const shared = [`src/query/live/public-key-reduction.ts`]
+const families = Object.keys(modules) as Array<Family>
 
 /** Bundles an app that exports `names` and returns its modules' output bytes. */
 async function bundledModules(names: Array<string>) {
@@ -68,38 +84,58 @@ async function bundledModules(names: Array<string>) {
   return bytes
 }
 
+// `concat` and `caseWhen` build select values but bring no operator code.
 const typicalApp = [
   `createLiveQueryCollection`,
   `eq`,
   `and`,
+  `concat`,
+  `caseWhen`,
   `createCollection`,
 ]
 
+/** The law: an operator's modules are in the bundle exactly when it is imported. */
+function expectOperators(
+  bytes: ReadonlyMap<string, number>,
+  imported: ReadonlySet<Family>,
+) {
+  for (const family of families)
+    for (const file of modules[family])
+      expect(bytes.has(file), `${family}: ${file}`).toBe(imported.has(family))
+  for (const file of shared)
+    expect(bytes.has(file), file).toBe(
+      imported.has(`joins`) || imported.has(`includes`),
+    )
+}
+
 describe(`opt-in operator bundles`, () => {
-  it(`keeps every operator out of an app that imports none`, async () => {
-    const bytes = await bundledModules(typicalApp)
-    for (const files of Object.values(modules)) {
-      for (const file of files) expect(bytes.has(file), file).toBe(false)
-    }
-    for (const file of shared) expect(bytes.has(file), file).toBe(false)
-    // Aggregate detection stays in core; the grouping compiler does not.
-    expect(bytes.get(`src/query/compiler/group-by.ts`) ?? 0).toBeLessThan(1000)
+  it.each(
+    Object.entries(values).flatMap(([family, names]) =>
+      names.map((name) => [name, family as Family] as const),
+    ),
+  )(`brings in only what %s needs (%s)`, async (name, family) => {
+    expectOperators(
+      await bundledModules([...typicalApp, name]),
+      new Set([family]),
+    )
   })
 
-  it.each([
-    [`joins`, [`leftJoin`]],
-    [`grouping`, [`count`]],
-    [`grouping`, [`groupKeys`]],
-    [`includes`, [`include`]],
-    [`includes`, [`toArray`]],
-    [`pooling`, [`pooledLiveQueries`]],
-  ] as const)(`brings in %s with %s`, async (operator, names) => {
-    const bytes = await bundledModules([...typicalApp, ...names])
-    for (const file of modules[operator])
-      expect(bytes.has(file), file).toBe(true)
-    for (const [other, files] of Object.entries(modules)) {
-      if (other === operator) continue
-      for (const file of files) expect(bytes.has(file), file).toBe(false)
-    }
+  // Every subset of families, the empty one included. Subset i names each
+  // family by its value at position i, so the combinations rotate values.
+  const subsets = Array.from({ length: 2 ** families.length }, (_, i) =>
+    families.filter((_family, bit) => i & (1 << bit)),
+  )
+  it.each(
+    subsets.map(
+      (subset, i) => [subset.join(` + `) || `none`, subset, i] as const,
+    ),
+  )(`keeps the law for %s`, async (_label, subset, i) => {
+    const names = subset.map(
+      (family) => values[family][i % values[family].length]!,
+    )
+    expectOperators(
+      await bundledModules([...typicalApp, ...names]),
+      new Set(subset),
+    )
   })
 })

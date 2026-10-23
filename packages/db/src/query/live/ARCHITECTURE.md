@@ -99,7 +99,8 @@ operators and a few boundary adapters:
 | Architectural role                         | Concrete implementation                                                                                |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | Compile relation IDs and demand plans      | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
-| Reduce public keys and build routes        | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Reduce public keys                         | `packages/db/src/query/live/public-key-reduction.ts`                                                   |
+| Build include routes                       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
 | Run the graph and publish root rows        | `packages/db/src/query/live/collection-config-builder.ts`                                              |
 | Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                        |
 | Publish Collection-valued buckets          | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
@@ -109,15 +110,16 @@ operators and a few boundary adapters:
 Operator values carry their compilers, so an app bundles only the operators it
 imports. `include()`, `toArray()`, and `materialize()` carry the materializer
 and the Collection-facade adapter (`includes-runtime.ts`); join operators carry
-the join compiler, the optimizer's join pushdown, and the materializer for key
-reduction; aggregates and `groupKeys()` carry the grouping compiler. A query
+the join compiler, the optimizer's join pushdown, and public-key reduction
+(`public-key-reduction.ts`), without the include materializer; aggregates and `groupKeys()` carry the grouping compiler. A query
 that uses an operator always holds the value that carries it, so compilation
 stays synchronous.
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
 function: its possible duplicate contributors still pass through the keyed
-reduction that enforces public-key congruence and multiplicity.
+reduction that enforces public-key congruence and multiplicity. The include
+materializer uses the same reduction for its root rows.
 
 ### Loading handoffs
 

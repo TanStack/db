@@ -654,6 +654,17 @@ export type GroupByCallback<TContext extends Context> = (
 ) => any
 
 /**
+ * A callback that an operator value receives before the query supplies its
+ * context. Without noImplicitAny, TypeScript skips that inference and the
+ * context is `any`; the callback is then untyped, as other unannotated
+ * callbacks are in that mode.
+ */
+export type OperatorCallback<
+  TContext extends Context,
+  TCallback,
+> = 0 extends 1 & TContext ? (refs: any) => any : TCallback
+
+/**
  * JoinOnCallback - Type for join condition callback functions
  *
  * These callbacks receive refs for all available tables (including the newly

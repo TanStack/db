@@ -83,12 +83,8 @@ let nextBucketFacadeEdgeId = 0
 export function materializeCompilation(
   compilation: CompilationResult,
   getRootKey?: (row: any) => unknown,
-  reduceJoinedPublicKeys = false,
 ): MaterializedRootCompilation {
-  if (
-    !compilation.includes?.length &&
-    !(getRootKey && reduceJoinedPublicKeys)
-  ) {
+  if (!compilation.includes?.length) {
     return { pipeline: compilation.pipeline, facades: undefined }
   }
 

@@ -1106,6 +1106,30 @@ const userPostComments = createLiveQueryCollection((q) =>
 )
 ```
 
+### Reusable Join Operators
+
+A join operator is a value, so you can build one once and use it in many queries. Inside `.join()`, the operator gets the query's sources from the query. An operator built outside `.join()` does not see the query, so give it the query's context explicitly. Otherwise its condition is untyped, and a wrong field name compiles without an error:
+
+```ts
+import { createLiveQueryCollection, eq, leftJoin } from '@tanstack/db'
+import type { ContextFromSource } from '@tanstack/db'
+
+// The sources that queries using this operator start from.
+type UserQuery = ContextFromSource<{ user: typeof usersCollection }>
+
+export const withPosts = leftJoin<{ post: typeof postsCollection }, UserQuery>(
+  { post: postsCollection },
+  ({ user, post }) => eq(user.id, post.userId),
+)
+
+const usersWithPosts = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .join(withPosts)
+    .select(({ user, post }) => ({ name: user.name, title: post.title })),
+)
+```
+
 ## Subqueries
 
 Subqueries allow you to use the result of one query as input to another, they are embedded within the query itself and are compile to a single query pipeline. They are very similar to SQL subqueries that are executed as part of a single operation.

@@ -364,7 +364,7 @@ export function getNullableJoinSources(query: QueryIR): Set<string> {
  * @param query - The QueryIR to optimize
  * @returns A new QueryIR with optimizations applied
  */
-export function applyRecursiveOptimization(query: QueryIR): QueryIR {
+function applyRecursiveOptimization(query: QueryIR): QueryIR {
   // First, recursively optimize any existing subqueries
   const subqueriesOptimized = {
     ...query,

@@ -115,7 +115,7 @@ non-null value.
 
 ### 2. Joining two collections
 
-Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Joins take an imported operator: `.join(leftJoin(source, on))`, and likewise `innerJoin`, `rightJoin`, `fullJoin`, and `joinOf(type, source, on)`. The `.join(source, on)` call shape and the `.leftJoin()` methods are removed and throw `JoinOperatorRequiredError`.
+Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Joins take an imported operator: `.join(leftJoin(source, on))`, and likewise `innerJoin`, `rightJoin`, `fullJoin`, and `joinOf(type, source, on)`. The `.join(source, on)` call shape throws `JoinOperatorRequiredError`. The `.leftJoin()`, `.innerJoin()`, `.rightJoin()`, and `.fullJoin()` methods are removed.
 
 ```ts
 import { createLiveQueryCollection, eq, innerJoin } from '@tanstack/db'
@@ -149,6 +149,20 @@ q.from({ user: usersCollection })
       eq(post.id, comment.postId),
     ),
   )
+```
+
+A reusable operator built outside `.join()` needs the query's context as a type argument. Without it, the condition is untyped:
+
+```ts
+import { eq, leftJoin } from '@tanstack/db'
+import type { ContextFromSource } from '@tanstack/db'
+
+type UserQuery = ContextFromSource<{ user: typeof usersCollection }>
+export const withPosts = leftJoin<{ post: typeof postsCollection }, UserQuery>(
+  { post: postsCollection },
+  ({ user, post }) => eq(user.id, post.userId),
+)
+q.from({ user: usersCollection }).join(withPosts)
 ```
 
 ### 3. Aggregation with groupBy + having

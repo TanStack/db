@@ -110,7 +110,7 @@ export function canonicalizeByPublicKey(
   ) as ResultStream
 }
 
-export function assertCongruentContributors(
+function assertCongruentContributors(
   left: CanonicalResult,
   right: CanonicalResult,
 ): void {

@@ -850,47 +850,6 @@ function evaluateWrappedAggregates(
 }
 
 /**
- * Checks whether an expression contains an aggregate anywhere in its tree.
- * Returns true for a top-level Aggregate, or a Func whose args (recursively)
- * contain an Aggregate. Safely returns false for nested Select objects.
- */
-export function containsAggregate(
-  expr: BasicExpression | Aggregate | Select | { type: string },
-): boolean {
-  if (isConditionalSelect(expr)) {
-    const branchHasAggregate = expr.branches.some(
-      (branch) =>
-        containsAggregate(branch.condition) || containsAggregate(branch.value),
-    )
-
-    return (
-      branchHasAggregate ||
-      (expr.defaultValue !== undefined && containsAggregate(expr.defaultValue))
-    )
-  }
-
-  if (isNestedSelectObject(expr)) {
-    return Object.values(expr).some((value) =>
-      containsAggregate(value as BasicExpression | Aggregate | Select),
-    )
-  }
-
-  if (!isExpressionLike(expr)) {
-    return false
-  }
-
-  if (expr.type === `agg`) {
-    return true
-  }
-  if (expr.type === `func` && `args` in expr) {
-    return (expr.args as Array<BasicExpression | Aggregate>).some(
-      (arg: BasicExpression | Aggregate) => containsAggregate(arg),
-    )
-  }
-  return false
-}
-
-/**
  * Walks an expression tree containing nested aggregates.
  * Each Aggregate node is extracted, assigned a synthetic alias (__agg_N),
  * and replaced with PropRef(["$selected", "__agg_N"]) so the wrapper

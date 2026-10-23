@@ -1,12 +1,13 @@
-// Compiled by join-typescript-modes.test.ts with noImplicitAny on and off.
+// Compiled by operator-typescript-modes.test.ts with noImplicitAny on and off.
 import {
   createLiveQueryCollection,
   eq,
+  groupKeys,
   innerJoin,
   joinOf,
   leftJoin,
 } from '../../src/index.js'
-import type { Collection } from '../../src/index.js'
+import type { Collection, ContextFromSource } from '../../src/index.js'
 
 type User = { id: number; name: string }
 type Post = { id: number; userId: number; title: string }
@@ -30,5 +31,25 @@ export const joined = createLiveQueryCollection((q) =>
         eq(user.id, third.userId),
       ),
     )
+    .select(({ user, post }) => ({ name: user.name, title: post.title })),
+)
+
+export const grouped = createLiveQueryCollection((q) =>
+  q
+    .from({ user: users })
+    .groupBy(groupKeys(({ user }) => user.name))
+    .select(({ user }) => ({ name: user.name })),
+)
+
+// A reusable operator built outside `.join()` passes its context explicitly.
+type UserQuery = ContextFromSource<{ user: typeof users }>
+export const withPosts = leftJoin<{ post: typeof posts }, UserQuery>(
+  { post: posts },
+  ({ user, post }) => eq(user.id, post.userId),
+)
+export const reused = createLiveQueryCollection((q) =>
+  q
+    .from({ user: users })
+    .join(withPosts)
     .select(({ user, post }) => ({ name: user.name, title: post.title })),
 )

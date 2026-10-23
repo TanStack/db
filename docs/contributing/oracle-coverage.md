@@ -3773,11 +3773,14 @@ Joins, grouping, includes, and pooling ship only with the value that names
 them: a join operator, an aggregate or `groupKeys`, an include function, or
 `pooledLiveQueries`. `packages/db/tests/opt-in-operator-bundle.test.ts` owns
 that law. It bundles small apps from source with esbuild and reads which
-modules reach the output: an app that imports none keeps every operator out,
-and each operator's value brings its modules in without the others. The
-positive controls keep a renamed or moved module from passing the absence
-checks. A mutant that statically imports `BucketFacadeAdapter` into the
-live-query builder fails the absence checks.
+modules reach the output. Each of the 15 operator values runs alone, and every
+one of the 16 combinations of operator families runs with rotating values. An
+operator's modules must be present exactly when the app imports one of its
+values, and public-key reduction exactly when it imports a join or an include.
+The single-value runs are positive controls, so a renamed or moved module
+cannot pass the absence checks. A mutant that statically imports
+`BucketFacadeAdapter` into the live-query builder, and one that uses a
+`group-by.ts` helper from the live-query Collection builder, fail it.
 
 The owner checks module reachability only, not byte budgets; `pnpm
 size:compare` measures bytes. It bundles `@tanstack/db` alone, with other
@@ -3785,3 +3788,15 @@ packages external, so it does not check db-ivm operators or framework
 adapters. Query results under the new API are owned by the existing query and
 includes oracles, which run with migrated queries; no oracle compares a
 query's old and new spellings on one input.
+
+Open counterexample, not fixed by this change: the ordered-window random
+campaign in
+`packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` fails
+with `TANSTACK_DB_ORACLE_SEED=1593300187` (path `121:1:2:3:2:2`). The
+history is `hold`, `truncateMarkers`, `settle` with a load failure, over an
+ascending limit-one window on an on-demand marker source with includes. The
+convergence check sees a terminal error. Main at `65d9ada50` fails with the
+same counterexample, so the operator change did not introduce it. Owner: the
+load-subset replay owner. Needed witness: a decision whether a truncate
+during a held, then failed, load may end the window in a terminal error, and
+the fix or model change that follows.

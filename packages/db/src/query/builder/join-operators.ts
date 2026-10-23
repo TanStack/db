@@ -4,6 +4,7 @@ import type {
   Context,
   JoinOnCallback,
   MergeContextForJoinCallback,
+  OperatorCallback,
   SchemaFromSource,
   Source,
 } from './types.js'
@@ -37,18 +38,20 @@ export type JoinOperatorFunction<TJoinType extends JoinType> = <
 ) => JoinOperator<TContext, TSource, TJoinType>
 
 /**
- * A join condition. `.join()` supplies the query's context; when TypeScript
- * runs without noImplicitAny it skips that inference, and the condition is
- * then untyped, as other unannotated callbacks are in that mode.
+ * A join condition. `.join()` supplies the query's context. A reusable
+ * operator built outside `.join()` passes it explicitly:
+ * `leftJoin<{ post: typeof posts }, ContextFromSource<{ user: typeof users }>>(...)`.
+ * Without it, the condition is untyped.
  */
 export type JoinCondition<
   TContext extends Context,
   TSource extends Source,
-> = 0 extends 1 & TContext
-  ? (refs: any) => any
-  : JoinOnCallback<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
-    >
+> = OperatorCallback<
+  TContext,
+  JoinOnCallback<
+    MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+  >
+>
 
 function joinOperator<TJoinType extends JoinType>(
   type: TJoinType,

@@ -226,9 +226,7 @@ function poolConfig(
 ): Collection<any, any, any> | undefined {
   if (
     !(config.query instanceof BaseQueryBuilder) ||
-    !Object.keys(config).every(
-      (key) => key === `query` || key === `gcTime` || key === `pool`,
-    )
+    !Object.keys(config).every((key) => key === `query` || key === `gcTime`)
   ) {
     return undefined
   }
