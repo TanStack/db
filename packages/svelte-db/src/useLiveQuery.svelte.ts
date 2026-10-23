@@ -398,80 +398,80 @@ export function useLiveQuery(
     // Reference deps to make computed reactive to them
     const dependencyValues = deps.map((dep) => toValue(dep))
     const deferredCollections: DeferredLiveQueryCollections = new Set()
-    const preparedValue = prepareLiveQueryValue(
-      unwrappedParam,
-      dbClient,
-      deferredCollections,
-    )
-    const configuredQueryKey = (
-      unwrappedParam as { queryKey?: MaybeGetter<LiveQueryKey> } | null
-    )?.queryKey
-    const queryKey = configuredQueryKey
-      ? toValue(configuredQueryKey)
-      : undefined
-
-    // A DbClient matches preloaded and hydrated queries by identity hash, so
-    // a client-backed query without queryKey needs a stable IR identity and
-    // keeps each source Collection ID's object while the hook is mounted.
-    // Either rejection releases the sources this preparation deferred.
-    const derivedHash =
-      dbClient && !queryKey?.length
-        ? identifyLiveQuery(
-            preparedValue,
-            {
-              claims: sourceIdClaims,
-              client: dbClient,
-              bindingName: `useLiveQuery`,
-              deferredCollections,
-            },
-            getLiveQueryHash,
-          )
+    // The compile boundary: a query rejected anywhere after preparation
+    // releases the sync starts it deferred, so a later reader can start them.
+    try {
+      const preparedValue = prepareLiveQueryValue(
+        unwrappedParam,
+        dbClient,
+        deferredCollections,
+      )
+      const configuredQueryKey = (
+        unwrappedParam as { queryKey?: MaybeGetter<LiveQueryKey> } | null
+      )?.queryKey
+      const queryKey = configuredQueryKey
+        ? toValue(configuredQueryKey)
         : undefined
 
-    let queryHash: string | undefined
-    try {
-      queryHash =
-        deps.length > 0 && !queryKey
-          ? getStableValueHash(
-              [
-                `deps`,
-                dependencyValues,
-                derivedHash ?? getLiveQueryHash(preparedValue),
-              ],
-              `queryKey`,
+      // A DbClient matches preloaded and hydrated queries by identity hash, so
+      // a client-backed query without queryKey needs a stable IR identity and
+      // keeps each source Collection ID's object while the hook is mounted.
+      const derivedHash =
+        dbClient && !queryKey?.length
+          ? identifyLiveQuery(
+              preparedValue,
+              {
+                claims: sourceIdClaims,
+                client: dbClient,
+                bindingName: `useLiveQuery`,
+              },
+              getLiveQueryHash,
             )
-          : (derivedHash ?? getLiveQueryHash(preparedValue, queryKey))
-    } catch (error) {
-      // A dependency value or a client-free query that cannot be hashed
-      // leaves hydration without a key; it does not reject the query.
-      if (!(error instanceof UnhashableQueryIRError)) throw error
-      if (queryKey !== undefined) throw error
-    }
+          : undefined
 
-    let collection: Collection<any, any, any> | null
-    if (preparedValue === undefined || preparedValue === null) {
-      collection = null
-    } else if (isCollection(preparedValue)) {
-      collection = preparedValue
-    } else {
+      let queryHash: string | undefined
       try {
+        queryHash =
+          deps.length > 0 && !queryKey
+            ? getStableValueHash(
+                [
+                  `deps`,
+                  dependencyValues,
+                  derivedHash ?? getLiveQueryHash(preparedValue),
+                ],
+                `queryKey`,
+              )
+            : (derivedHash ?? getLiveQueryHash(preparedValue, queryKey))
+      } catch (error) {
+        // A dependency value or a client-free query that cannot be hashed
+        // leaves hydration without a key; it does not reject the query. An
+        // empty key counts as none; a nonempty one must hash.
+        if (!(error instanceof UnhashableQueryIRError)) throw error
+        if (queryKey?.length) throw error
+      }
+
+      let collection: Collection<any, any, any> | null
+      if (preparedValue === undefined || preparedValue === null) {
+        collection = null
+      } else if (isCollection(preparedValue)) {
+        collection = preparedValue
+      } else {
         // Hydration keys the live-query Collection by identity.
         collection = resolveLiveQueryValue(preparedValue, {
           gcTime: DEFAULT_GC_TIME_MS,
           pool: !dbClient,
         })
-      } catch (error) {
-        // A query the live query rejects keeps no sync-start deferral.
-        rejectLiveQueryInput(deferredCollections, error)
       }
-    }
 
-    return {
-      collection,
-      client: dbClient,
-      queryHash,
-      resumeDeferredCollections: () =>
-        resumeDeferredLiveQueryCollections(deferredCollections),
+      return {
+        collection,
+        client: dbClient,
+        queryHash,
+        resumeDeferredCollections: () =>
+          resumeDeferredLiveQueryCollections(deferredCollections),
+      }
+    } catch (error) {
+      return rejectLiveQueryInput(deferredCollections, error)
     }
   })
 

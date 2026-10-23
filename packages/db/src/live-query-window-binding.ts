@@ -133,7 +133,8 @@ export function bindLiveQueryWindow(
       ? `collection`
       : `query`
     : undefined
-  const dependencies = supplied ? undefined : (update.dependencies ?? [])
+  // A snapshot: a caller may change its dependency array in place.
+  const dependencies = supplied ? undefined : [...(update.dependencies ?? [])]
 
   const change = compareUpdate(previous, update, dependencies)
   const needsNewCollection =

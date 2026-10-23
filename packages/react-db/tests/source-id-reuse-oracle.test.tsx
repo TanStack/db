@@ -20,9 +20,10 @@
  * The release history grammar crosses every rejection cause (a source ID
  * collision, a query without a stable IR identity, a descriptor factory that
  * throws while the query binds its sources, a query the live query rejects
- * when it compiles, and a single-result query in an infinite hook, which
- * pages many rows), every hook path (live and
- * infinite, with derived identity or a dependency list), and both direct
+ * when it compiles, a single-result query in an infinite hook, which pages
+ * many rows, and a Suspense query that cannot stream during SSR), every hook
+ * path (live, infinite, and Suspense, each with derived identity or a
+ * dependency list), and both direct
  * readers (another hook over the Collection, and `startSyncImmediate()`). The
  * release must also hold when earlier deferred sync starts throw: each pending
  * Collection is attempted before the first startup error is rethrown.
@@ -129,8 +130,14 @@ const releaseCauses: Record<
   ) => {
     rejected: (step: ReleaseStep) => ReleaseStep
     query: (q: any, step: ReleaseStep, ordered: boolean) => any
-    /** Whether the cause rejects in an unordered or ordered (infinite) hook. */
-    rejectsIn?: (ordered: boolean) => boolean
+    /** Which hook paths the cause rejects in; all of them by default. */
+    rejectsIn?: (hook: ReleaseHook) => boolean
+    /** The dependency values for a hook with a dependency list. */
+    deps?: (step: ReleaseStep) => Array<unknown>
+    /** Prepare the client, for a cause that depends on its mode. */
+    setup?: (client: DbClient) => void
+    /** Render the rejected step first, for a cause only a mount reaches. */
+    atMount?: boolean
   }
 > = {
   'a source ID collision': (shared) => ({
@@ -213,7 +220,21 @@ const releaseCauses: Record<
       return step.reject ? query.findOne() : query
     },
     // A live query may read one row; an infinite query must page many.
-    rejectsIn: (ordered) => ordered,
+    rejectsIn: (hook) => hook.ordered,
+  }),
+  'a Suspense query that cannot stream during SSR': (shared) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    query: (q, step) =>
+      q
+        .from({ settings: step.current })
+        .join({ shared }, ({ settings, shared: row }: any) =>
+          eq(settings.id, row.id),
+        ),
+    // A function dependency gives the stream no stable key.
+    deps: (step) => [step.current, () => step.reject],
+    setup: (client) => client._setSsrStreamingEnabled(true),
+    rejectsIn: (hook) => hook.suspense && hook.usesDeps,
+    atMount: true,
   }),
 }
 
@@ -221,29 +242,50 @@ function orderIf(query: any, ordered: boolean) {
   return ordered ? query.orderBy(({ settings }: any) => settings.rank) : query
 }
 
-const releaseHooks: Record<
-  string,
-  {
-    ordered: boolean
-    use: (query: (q: any) => any, deps: Array<unknown>) => void
-  }
-> = {
+type ReleaseHook = {
+  ordered: boolean
+  suspense: boolean
+  usesDeps: boolean
+  use: (query: (q: any) => any, deps: Array<unknown>) => void
+}
+
+const releaseHooks: Record<string, ReleaseHook> = {
   'useLiveQuery with derived identity': {
     ordered: false,
+    suspense: false,
+    usesDeps: false,
     use: (query) => void useLiveQuery(query),
   },
   'useLiveQuery with a dependency list': {
     ordered: false,
+    suspense: false,
+    usesDeps: true,
     use: (query, deps) => void useLiveQuery(query, deps),
   },
   'useLiveInfiniteQuery with derived identity': {
     ordered: true,
+    suspense: false,
+    usesDeps: false,
     use: (query) => void useLiveInfiniteQuery(query, { pageSize: 1 }),
   },
   'useLiveInfiniteQuery with a dependency list': {
     ordered: true,
+    suspense: false,
+    usesDeps: true,
     use: (query, deps) =>
       void useLiveInfiniteQuery(query, { pageSize: 1 }, deps),
+  },
+  'useLiveSuspenseQuery with derived identity': {
+    ordered: false,
+    suspense: true,
+    usesDeps: false,
+    use: (query) => void useLiveSuspenseQuery(query),
+  },
+  'useLiveSuspenseQuery with a dependency list': {
+    ordered: false,
+    suspense: true,
+    usesDeps: true,
+    use: (query, deps) => void useLiveSuspenseQuery(query, deps),
   },
 }
 
@@ -268,7 +310,7 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
   for (const [causeName, makeCause] of Object.entries(releaseCauses)) {
     for (const [hookName, hook] of Object.entries(releaseHooks)) {
       const probe = makeCause(undefined, undefined)
-      if (probe.rejectsIn && !probe.rejectsIn(hook.ordered)) continue
+      if (probe.rejectsIn && !probe.rejectsIn(hook)) continue
       for (const [readerName, read] of Object.entries(releaseReaders)) {
         it(`after ${causeName} in ${hookName}, ${readerName} starts the shared source`, async () => {
           const client = new DbClient()
@@ -301,13 +343,23 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
             throw new Error(`descriptor factory failed`)
           })
           const cause = makeCause(shared, failing)
+          cause.setup?.(client)
           function View({ step }: { step: ReleaseStep }) {
             hook.use(
               (q) => cause.query(q, step, hook.ordered),
-              [step.current, step.reject],
+              cause.deps?.(step) ?? [step.current, step.reject],
             )
             return <div>Query</div>
           }
+          const tree = (step: ReleaseStep) => (
+            <DbProvider client={client}>
+              <TestErrorBoundary>
+                <Suspense fallback={<div>Loading</div>}>
+                  <View step={step} />
+                </Suspense>
+              </TestErrorBoundary>
+            </DbProvider>
+          )
           const consoleError = vi
             .spyOn(console, `error`)
             .mockImplementation(() => {})
@@ -317,20 +369,10 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
               reject: false,
             }
             const root = render(
-              <DbProvider client={client}>
-                <TestErrorBoundary>
-                  <View step={initial} />
-                </TestErrorBoundary>
-              </DbProvider>,
+              tree(cause.atMount ? cause.rejected(initial) : initial),
             )
             await act(async () => {})
-            root.rerender(
-              <DbProvider client={client}>
-                <TestErrorBoundary>
-                  <View step={cause.rejected(initial)} />
-                </TestErrorBoundary>
-              </DbProvider>,
-            )
+            if (!cause.atMount) root.rerender(tree(cause.rejected(initial)))
             expect(root.getByText(`Rejected`)).toBeDefined()
             // Declared reach: the rejected render materialized the shared
             // descriptor, so it held a deferral the law must release.

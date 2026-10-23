@@ -14,6 +14,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -138,31 +139,40 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   )
 }
 
-function mountControllable<P>(
-  build: (q: any, param: P) => any,
-  initial: P,
-  config: InfiniteQueryConfig = {},
-) {
-  const log: Observations = []
-  const hook = renderHook(
-    ({ param }: { param: P }) =>
-      useRecorded(
-        useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
-          param,
-        ]),
-        log,
-      ),
-    { initialProps: { param: initial } },
-  )
-  const guard = rejectReadsAfterRenderError(hook)
-  const handle = makeHandle(hook, log)
-  return {
-    ...handle,
-    setParamSync(param: P) {
-      guard(() => act(() => hook.rerender({ param })))
-    },
+// React compares query identity on two production paths: the identity derived
+// from the query IR on every render (the 1.0 form), and a deprecated
+// dependency list. The suite runs once per path.
+type IdentityPath = `derived` | `dependency list`
+
+const mountControllableWith = (path: IdentityPath) =>
+  function mountControllable<P>(
+    build: (q: any, param: P) => any,
+    initial: P,
+    config: InfiniteQueryConfig = {},
+  ) {
+    const log: Observations = []
+    const hook = renderHook(
+      ({ param }: { param: P }) =>
+        useRecorded(
+          path === `derived`
+            ? // The callback captures param, so its IR identity changes with it.
+              useLiveInfiniteQuery((q: any) => build(q, param), config as any)
+            : useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
+                param,
+              ]),
+          log,
+        ),
+      { initialProps: { param: initial } },
+    )
+    const guard = rejectReadsAfterRenderError(hook)
+    const handle = makeHandle(hook, log)
+    return {
+      ...handle,
+      setParamSync(param: P) {
+        guard(() => act(() => hook.rerender({ param })))
+      },
+    }
   }
-}
 
 function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
   const log: Observations = []
@@ -251,6 +261,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
@@ -264,7 +275,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,
-  mountControllable,
+  mountControllable: mountControllableWith(`derived`),
   mountCollection,
   mountCollectionControllable,
   mountConfigControllable,
@@ -273,6 +284,11 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
 }
 
 runInfiniteQuerySuite(reactInfiniteDriver)
+runInfiniteQuerySuite({
+  ...reactInfiniteDriver,
+  name: `react (dependency list)`,
+  mountControllable: mountControllableWith(`dependency list`),
+})
 
 it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {
   const source = makeSource(

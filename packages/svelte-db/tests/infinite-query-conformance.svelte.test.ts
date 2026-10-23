@@ -11,6 +11,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import { flushSync, untrack } from 'svelte'
@@ -249,6 +250,7 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),

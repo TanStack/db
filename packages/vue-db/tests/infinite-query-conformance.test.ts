@@ -10,6 +10,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import {
@@ -257,6 +258,7 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),

@@ -111,6 +111,7 @@ export interface InfiniteQueryDriver {
   /** Whether the binding compares query identity; see `contract.ts`. */
   comparesQueryIdentity: boolean
   gt: (a: any, b: any) => any
+  eq: (a: any, b: any) => any
   /** Pass `collectionId` to create another source object under an existing ID. */
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,

@@ -41,14 +41,19 @@
  * without `queryKey` (an empty key counts as none) at mount and at
  * recompilation and accepts it with a key;
  * a reactive binding runs it and recompiles when a captured value changes.
- * The source-ID history distinguishes a remembered claim from a check against
- * only the previous query: A(x) -> C(y) -> A(x) is legal, and a later
- * C(y) -> B(x) rejects in a comparing binding and reads B in a reactive one.
+ * The source-ID grammar enumerates every three-step history over A(x), B(x)
+ * (another object under A's ID), C(y), and a disabled step, judged by a
+ * pairwise model. It distinguishes a remembered claim from a check against
+ * only the previous query: A(x) -> C(y) -> B(x) and A(x) -> disabled -> B(x)
+ * reject in a comparing binding and read B in a reactive one, while
+ * A(x) -> C(y) -> A(x) is legal everywhere. It declares reach for each of
+ * those states.
  * A new binding reads B after the first unmounts. Two same-ID objects in one
  * query follow the same split: rejected, or each read.
  */
 import { describe, expect, it } from 'vitest'
 import { waitForPersistedInitialRender } from '@tanstack/db'
+import { createOracleReach } from '../oracle-reach'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
@@ -103,7 +108,9 @@ async function expectRejection(
 
 /**
  * After a rejection, every read throws or holds no rows. Two reads catch a
- * memo that throws once and then serves its previous value.
+ * memo that throws once and then serves its previous value. No current driver
+ * can fail this check (see `contract.ts`); it guards a driver whose binding
+ * stays mounted after a rejection.
  */
 function expectNoRowsAfterRejection(h: LiveQueryHandle): void {
   for (let read = 0; read < 2; read++) {
@@ -219,6 +226,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     key: string,
     name: string,
     fn: () => Promise<void> | void,
+    // A generated grammar runs many histories, each through the driver's cut.
+    timeoutMs?: number,
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
@@ -240,7 +249,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         sources = null
       }
     }
-    it(label, run)
+    it(label, run, timeoutMs)
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
@@ -1182,6 +1191,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             h.unmount()
           }
         }
+        if (!comparesIdentity) {
+          // An empty key counts as none, so it changes nothing here either.
+          const h = driver.mountConfig(build, { queryKey: [] })
+          await h.flush()
+          expectUnorderedRows(h.current().data, [{ id: `1` }, { id: `3` }])
+          h.unmount()
+        }
         if (comparesIdentity) {
           // An empty key is absent, as it is for a DbClient preload, so the
           // query still needs a derived identity.
@@ -1237,44 +1253,108 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       `source-id-reuse`,
       `a different source under a Collection ID the binding read is rejected or read as the new source`,
       async () => {
-        const first = driver.makeSource(SEED)
-        const other = driver.makeSource([
-          { id: `9`, name: `Other`, age: 40, team: `c` },
-        ])
+        // Claim memory grammar. A history mounts one controllable binding on
+        // A(x) or C(y), then applies two actions. An action selects A(x), B(x)
+        // (another object under A's ID), C(y), or D, which disables the query.
+        // The model judges each step from the history alone, pairwise and
+        // independent of production: in a comparing binding, a step rejects
+        // when an earlier step of the same binding read another object under
+        // its ID, and the rejection ends the history because the failed hook
+        // unmounts. A reactive binding never rejects and shows the rows of
+        // the source the step selects.
+        const sourcesByPick = {
+          A: driver.makeSource(SEED),
+          C: driver.makeSource([
+            { id: `9`, name: `Other`, age: 40, team: `c` },
+          ]),
+        }
         const reused = driver.makeSource(
           [{ id: `8`, name: `Reused`, age: 50, team: `d` }],
-          first.collection.id,
+          sourcesByPick.A.collection.id,
         )
-        expect(reused.collection.id).toBe(first.collection.id)
-        expect(reused.collection).not.toBe(first.collection)
-        const h = driver.mountControllable<{ collection: any }>(
-          (q, source) =>
-            q
-              .from({ items: source.collection })
-              .select(({ items }: any) => ({ id: items.id })),
-          first,
-        )
-        await h.flush()
-        expectUnorderedRows(h.current().data, idsOf(SEED))
-        // A fresh ID and a revisit of the claimed object are legal.
-        await h.setParam(other)
-        expectUnorderedRows(h.current().data, [{ id: `9` }])
-        await h.setParam(first)
-        expectUnorderedRows(h.current().data, idsOf(SEED))
-        // The claim outlives the query that made it: going through another
-        // ID first must not let a different object reuse the first ID.
-        await h.setParam(other)
-        if (comparesIdentity) {
-          await expectRejection(`SourceCollectionIdReuseError`, async () => {
-            await h.setParam(reused)
-            return h.current()
-          })
-          expectNoRowsAfterRejection(h)
-        } else {
-          await h.setParam(reused)
-          expectUnorderedRows(h.current().data, [{ id: `8` }])
+        expect(reused.collection).not.toBe(sourcesByPick.A.collection)
+        type Pick = `A` | `B` | `C` | `D`
+        const objectOf = (pick: Exclude<Pick, `D`>) =>
+          pick === `B` ? reused : sourcesByPick[pick]
+        const rowsOf: Record<Exclude<Pick, `D`>, Array<{ id: string }>> = {
+          A: idsOf(SEED),
+          B: [{ id: `8` }],
+          C: [{ id: `9` }],
         }
-        h.unmount()
+        const collides = (history: ReadonlyArray<Pick>, next: Pick) =>
+          next !== `D` &&
+          history.some(
+            (prior) =>
+              prior !== `D` &&
+              prior !== next &&
+              objectOf(prior).collection.id === objectOf(next).collection.id,
+          )
+        // Declared reach: the states where a claim must outlive the query
+        // that made it.
+        const reach = createOracleReach(`source-id claim memory`, [
+          `swap after an intervening query`,
+          `swap after a disabled step`,
+          `revisit after an intervening query`,
+        ])
+        const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`, `D`]
+        for (const first of [`A`, `C`] as const) {
+          for (const second of picks) {
+            for (const third of picks) {
+              reach.beginHistory()
+              const history: Array<Pick> = [first]
+              const h = driver.mountControllable<Pick>(
+                (q, pick) =>
+                  pick === `D`
+                    ? null
+                    : q
+                        .from({ items: objectOf(pick).collection })
+                        .select(({ items }: any) => ({ id: items.id })),
+                first,
+              )
+              await h.flush()
+              expectUnorderedRows(h.current().data, rowsOf[first])
+              for (const next of [second, third]) {
+                const previous = history[history.length - 1]!
+                if (collides(history, next)) {
+                  reach.reach(
+                    previous === `D`
+                      ? `swap after a disabled step`
+                      : `swap after an intervening query`,
+                  )
+                } else if (
+                  next !== `D` &&
+                  next !== previous &&
+                  history.includes(next)
+                ) {
+                  reach.reach(`revisit after an intervening query`)
+                }
+                if (comparesIdentity && collides(history, next)) {
+                  await expectRejection(
+                    `SourceCollectionIdReuseError`,
+                    async () => {
+                      await h.setParam(next)
+                      return h.current()
+                    },
+                  )
+                  expectNoRowsAfterRejection(h)
+                  break
+                }
+                await h.setParam(next)
+                history.push(next)
+                if (next === `D`) {
+                  expectDisabledResult(
+                    h.current(),
+                    driver.disabledRepresentation,
+                  )
+                } else {
+                  expectUnorderedRows(h.current().data, rowsOf[next])
+                }
+              }
+              h.unmount()
+            }
+          }
+        }
+        reach.assertReached()
 
         // A new binding starts with no claims.
         const fresh = driver.mount((q) =>
@@ -1286,6 +1366,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         expectUnorderedRows(fresh.current().data, [{ id: `8` }])
         fresh.unmount()
       },
+      // 32 histories of three steps each.
+      30_000,
     )
 
     scenario(

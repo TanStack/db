@@ -4,6 +4,7 @@ import {
   createLiveQuerySourceIdClaims,
   fetchNextLiveQueryWindowPage,
   getLiveQueryHash,
+  getLiveQueryKey,
   identifyLiveQuery,
   prepareLiveQueryValue,
   readLiveQueryWindowPageShape,
@@ -109,8 +110,9 @@ export function useLiveInfiniteQuery(
   let preparedValue: unknown
   let identity: string | undefined
   if (typeof queryFnOrCollection === `function`) {
-    if (config.queryKey?.length) {
-      identity = getLiveQueryHash(undefined, config.queryKey)
+    const queryKey = getLiveQueryKey(config)
+    if (queryKey) {
+      identity = getLiveQueryHash(undefined, queryKey)
     } else {
       preparedValue = prepareLiveQueryValue(queryFnOrCollection, undefined)
       identity = identifyLiveQuery(

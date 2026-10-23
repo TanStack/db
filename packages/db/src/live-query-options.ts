@@ -34,8 +34,11 @@ export type DeferredLiveQueryCollections = Set<
 
 /**
  * Release the sync starts a rejected query input deferred, then rethrow its
- * rejection. As for a `DbClient` preload, the rejection wins over a source
- * whose resumed start fails; that source records its own failure.
+ * rejection. A framework binding calls this at its render boundary, so a
+ * render that throws anywhere after preparation leaves no source deferred and
+ * a later reader can start it. As for a `DbClient` preload, the rejection wins
+ * over a source whose resumed start fails; that source records its own
+ * failure.
  */
 export function rejectLiveQueryInput(
   collections: DeferredLiveQueryCollections | undefined,
@@ -103,31 +106,13 @@ function createCollectionResolver(
   }
 }
 
-/**
- * Bind a query input's descriptor sources to `dbClient` and invoke its query
- * callback. Sources materialized for a render defer their sync start into
- * `deferredCollections`; a preparation that throws releases them, so a later
- * reader can still start those sources.
- */
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
   deferredCollections?: DeferredLiveQueryCollections,
 ): unknown {
-  try {
-    return prepareValue(value, dbClient, deferredCollections)
-  } catch (error) {
-    return rejectLiveQueryInput(deferredCollections, error)
-  }
-}
-
-function prepareValue(
-  value: unknown,
-  dbClient: DbClient | undefined,
-  deferredCollections?: DeferredLiveQueryCollections,
-): unknown {
   if (typeof value === `function`) {
-    return prepareValue(
+    return prepareLiveQueryValue(
       value(createInitialQueryBuilder()),
       dbClient,
       deferredCollections,
@@ -154,7 +139,11 @@ function prepareValue(
       ...config
     } = value as PreparedLiveQueryConfigInput
 
-    const preparedQuery = prepareValue(query, dbClient, deferredCollections)
+    const preparedQuery = prepareLiveQueryValue(
+      query,
+      dbClient,
+      deferredCollections,
+    )
 
     if (preparedQuery === undefined || preparedQuery === null) {
       return preparedQuery

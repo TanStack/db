@@ -24,6 +24,7 @@ import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
 } from './infinite-contract'
+import type { QueryBuild } from './contract'
 
 interface InfiniteRow {
   id: string
@@ -1687,10 +1688,16 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       async () => {
         const source = driver.makeSource(rows(8))
         if (driver.comparesQueryIdentity) {
-          const error = await captureError(() =>
-            driver.mount(functionalRanks(source), { pageSize: 3 }),
-          )
-          expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          // An empty key is absent, as it is for a DbClient preload.
+          for (const config of [
+            { pageSize: 3 },
+            { pageSize: 3, queryKey: [] },
+          ]) {
+            const error = await captureError(() =>
+              driver.mount(functionalRanks(source), config),
+            )
+            expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          }
         }
         const handle = driver.mount(
           functionalRanks(source),
@@ -1758,8 +1765,83 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       },
     )
 
+    scenario(
+      `unhashable-recompile`,
+      `recompiling to a query without a stable IR identity follows the binding's identity policy`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        // `null` selects the structured query; a number, the functional one
+        // that keeps ranks at or below it.
+        const handle = driver.mountControllable(
+          (q, atMost: number | null) => {
+            const query = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return atMost === null
+              ? query
+              : query.fn.where(({ items }: any) => items.rank <= atMost)
+          },
+          null as number | null,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        if (driver.comparesQueryIdentity) {
+          const error = await captureRejection(async () => {
+            handle.setParamSync(4)
+            await handle.flush()
+            return handle.current()
+          })
+          expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          return
+        }
+        // A changed captured value recompiles, though no identity names it.
+        handle.setParamSync(4)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(4, 7), 3)
+        handle.setParamSync(2)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(6, 8), 3)
+      },
+    )
+
+    scenario(
+      `source-id-reuse-in-one-query`,
+      `rejects or pages one query that reads two sources under one Collection ID`,
+      async () => {
+        const first = driver.makeSource(rows(4))
+        const reused = driver.makeSource(rows(2), first.collection.id)
+        const build: QueryBuild = (q) =>
+          q
+            .from({ items: first.collection })
+            .join(
+              { other: reused.collection },
+              ({ items, other }: any) => driver.eq(items.id, other.id),
+              `inner`,
+            )
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .select(({ items }: any) => ({ ...items }))
+        if (driver.comparesQueryIdentity) {
+          const error = await captureError(() =>
+            driver.mount(build, { pageSize: 3 }),
+          )
+          expect(error).toMatchObject({ name: `SourceCollectionIdReuseError` })
+          return
+        }
+        // The inner join matches only the ids both objects hold, so a binding
+        // that read one object for both sides would page all four rows.
+        const handle = driver.mount(build, { pageSize: 3 })
+        await handle.flush()
+        expect(handle.current().data.map((row: any) => row.id)).toEqual(
+          rows(4)
+            .filter((row) => row.id === `1` || row.id === `2`)
+            .map((row) => row.id),
+        )
+      },
+    )
+
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(41)
+      expect(registry.size).toBe(43)
     })
   })
 }

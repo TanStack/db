@@ -49,7 +49,12 @@
  * the next `current()` read. After a rejection, no later read exposes rows:
  * each `current()` throws or holds none, so a framework whose memo throws once
  * cannot fall back to the previous query's rows. Each driver releases any
- * native scope that a rejected mount acquired.
+ * native scope that a rejected mount acquired. In the current drivers this
+ * check cannot fail: React and Preact unmount a hook whose render throws, so
+ * their drivers rethrow on later reads, and reactive drivers do not reject
+ * here. It guards a future driver whose binding stays mounted. The one such
+ * binding today, a `DbClient`-backed Svelte query, has its own witness in the
+ * Svelte descriptor release oracle, which reads each field after a rejection.
  *
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.

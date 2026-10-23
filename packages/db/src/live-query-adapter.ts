@@ -3,13 +3,9 @@ import { isCollection } from './live-query-primitives.js'
 import {
   getPreparedLiveQueryIdentity,
   getPreparedLiveQuerySources,
-  rejectLiveQueryInput,
 } from './live-query-options.js'
 import type { DbClient } from './client.js'
-import type {
-  DeferredLiveQueryCollections,
-  LiveQueryKey,
-} from './live-query-options.js'
+import type { LiveQueryKey } from './live-query-options.js'
 
 /**
  * The adapter layer: what the first-party framework adapters
@@ -126,8 +122,6 @@ export interface LiveQueryIdentityScope {
   claims?: LiveQuerySourceIdClaims
   client: DbClient | undefined
   bindingName: string
-  /** Sync starts the query's preparation deferred. */
-  deferredCollections?: DeferredLiveQueryCollections
   /** Report a descriptor source that no client bound. */
   onUnboundDescriptor?: (alias: string) => never
 }
@@ -135,9 +129,9 @@ export interface LiveQueryIdentityScope {
 /**
  * Identify a prepared query for a binding that compares query identity. The
  * identity throws `UnhashableQueryIRError` for IR without a stable identity,
- * then the query's sources claim their Collection IDs. Either rejection
- * releases the sync starts the preparation deferred, so a later reader, such
- * as another hook over the same Collection, can still start those sources.
+ * then the query's sources claim their Collection IDs. The binding's render
+ * boundary releases the sync starts a rejected render deferred; see
+ * `rejectLiveQueryInput`.
  */
 export function identifyLiveQuery<TIdentity = unknown>(
   preparedValue: unknown,
@@ -148,18 +142,14 @@ export function identifyLiveQuery<TIdentity = unknown>(
     preparedValue: unknown,
   ) => TIdentity,
 ): TIdentity {
-  try {
-    const identity = identify(preparedValue)
-    if (scope.claims) {
-      claimLiveQuerySourceIds(
-        scope.claims,
-        getPreparedLiveQuerySources(preparedValue, scope.onUnboundDescriptor),
-        scope.client,
-        scope.bindingName,
-      )
-    }
-    return identity
-  } catch (error) {
-    return rejectLiveQueryInput(scope.deferredCollections, error)
+  const identity = identify(preparedValue)
+  if (scope.claims) {
+    claimLiveQuerySourceIds(
+      scope.claims,
+      getPreparedLiveQuerySources(preparedValue, scope.onUnboundDescriptor),
+      scope.client,
+      scope.bindingName,
+    )
   }
+  return identity
 }

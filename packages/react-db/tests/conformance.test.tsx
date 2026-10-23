@@ -152,30 +152,39 @@ function mountDisabled() {
   return makeHandle(hook)
 }
 
-function mountControllable<P>(
-  build: (q: any, param: P) => any,
-  initial: P,
-): ControllableHandle<P> {
-  const hook = renderHook(
-    ({ param }: { param: P }) =>
-      // Param goes in the dependency list so the hook recompiles when it changes.
-      useLiveQuery((q: any) => build(q, param), [param]),
-    { initialProps: { param: initial } },
-  )
-  const guard = rejectReadsAfterRenderError(hook)
-  const handle = makeHandle(hook)
-  return {
-    ...handle,
-    async setParam(param: P) {
-      await guard(() =>
-        act(async () => {
-          hook.rerender({ param })
-        }),
-      )
-      await handle.flush()
-    },
+// React compares query identity on two production paths: the identity derived
+// from the query IR on every render (the 1.0 form), and a deprecated
+// dependency list, which decides reuse and checks identity when the query
+// compiles. The suite runs once per path.
+type IdentityPath = `derived` | `dependency list`
+
+const mountControllableWith = (path: IdentityPath) =>
+  function mountControllable<P>(
+    build: (q: any, param: P) => any,
+    initial: P,
+  ): ControllableHandle<P> {
+    const hook = renderHook(
+      ({ param }: { param: P }) =>
+        path === `derived`
+          ? // The callback captures param, so its IR identity changes with it.
+            useLiveQuery((q: any) => build(q, param))
+          : useLiveQuery((q: any) => build(q, param), [param]),
+      { initialProps: { param: initial } },
+    )
+    const guard = rejectReadsAfterRenderError(hook)
+    const handle = makeHandle(hook)
+    return {
+      ...handle,
+      async setParam(param: P) {
+        await guard(() =>
+          act(async () => {
+            hook.rerender({ param })
+          }),
+        )
+        await handle.flush()
+      },
+    }
   }
-}
 
 function makeHandle(hook: RenderHookResult<any, any>) {
   return {
@@ -229,7 +238,7 @@ const reactDriver: LiveQueryDriver = {
   makePrecreated,
   makeErrorSource,
   mount,
-  mountControllable,
+  mountControllable: mountControllableWith(`derived`),
   mountCollection,
   mountConfig,
   mountDisabled,
@@ -238,6 +247,11 @@ const reactDriver: LiveQueryDriver = {
 }
 
 runSuite(reactDriver)
+runSuite({
+  ...reactDriver,
+  name: `react (dependency list)`,
+  mountControllable: mountControllableWith(`dependency list`),
+})
 it(`publishes a synchronous ordered limit in the first layout commit`, async () => {
   const source = makeSource([
     { id: `1`, rank: 1 },

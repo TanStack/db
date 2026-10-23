@@ -5,6 +5,7 @@ import {
   bindLiveQueryWindow,
   createLiveQuerySourceIdClaims,
   fetchNextLiveQueryWindowPage,
+  getLiveQueryKey,
   identifyLiveQuery,
   isCollection,
   readLiveQueryWindowPageShape,
@@ -175,8 +176,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       deferredCollections,
     )
 
-  // An empty key is absent, as it is for a DbClient preload.
-  const queryKey = config.queryKey?.length ? config.queryKey : undefined
+  const queryKey = getLiveQueryKey(config)
   const usesLegacyDeps =
     !inputIsCollection && queryKey === undefined && deps !== undefined
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
@@ -184,52 +184,55 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   let dependencies: ReadonlyArray<unknown> | undefined
   let derivedQuery: unknown = undefined
 
-  if (!inputIsCollection) {
-    if (queryKey !== undefined) {
-      dependencies = queryKey
-    } else if (usesLegacyDeps) {
-      dependencies = deps
-      warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
-    } else if (
-      committed !== null &&
-      committed.derivedQuery === queryFnOrCollection &&
-      committed.binding.scope === dbClient
-    ) {
-      // The same callback in the same client scope keeps its identity.
-      derivedQuery = queryFnOrCollection
-      dependencies = committed.binding.dependencies
-    } else {
-      const preparation = prepareDerivedQuery(
-        queryFnOrCollection,
-        derivedIdentityProfilerRef.current,
-        identityScope(),
-      )
-      preparedQueryValue = preparation.value
-      derivedQuery = queryFnOrCollection
-      dependencies = preparation.identityDeps
-    }
-  }
-
-  // The binding calls this only when it compiles a new window collection.
-  const compileQuery = () => {
-    if (preparedQueryValue === unpreparedQueryValue) {
-      preparedQueryValue = prepareQueryValue(
-        queryFnOrCollection,
-        dbClient,
-        deferredCollections,
-      )
-      if (usesLegacyDeps) {
-        // A dependency list decides reuse, so check the query when it
-        // compiles: it needs a stable identity and keeps its sources' IDs.
-        identifyLiveQuery(preparedQueryValue, identityScope())
-      }
-    }
-    return preparedQueryValue
-  }
-
   const rendered = renderedRef.current
   let binding: LiveQueryWindowBinding
+  // The render boundary: a render that throws anywhere after preparation,
+  // such as an unhashable, single-result, or uncompilable query, never
+  // commits, so it releases the sync starts it deferred here.
   try {
+    if (!inputIsCollection) {
+      if (queryKey !== undefined) {
+        dependencies = queryKey
+      } else if (usesLegacyDeps) {
+        dependencies = deps
+        warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
+      } else if (
+        committed !== null &&
+        committed.derivedQuery === queryFnOrCollection &&
+        committed.binding.scope === dbClient
+      ) {
+        // The same callback in the same client scope keeps its identity.
+        derivedQuery = queryFnOrCollection
+        dependencies = committed.binding.dependencies
+      } else {
+        const preparation = prepareDerivedQuery(
+          queryFnOrCollection,
+          derivedIdentityProfilerRef.current,
+          identityScope(),
+        )
+        preparedQueryValue = preparation.value
+        derivedQuery = queryFnOrCollection
+        dependencies = preparation.identityDeps
+      }
+    }
+
+    // The binding calls this only when it compiles a new window collection.
+    const compileQuery = () => {
+      if (preparedQueryValue === unpreparedQueryValue) {
+        preparedQueryValue = prepareQueryValue(
+          queryFnOrCollection,
+          dbClient,
+          deferredCollections,
+        )
+        if (usesLegacyDeps) {
+          // A dependency list decides reuse, so check the query when it
+          // compiles: it needs a stable identity and keeps its sources' IDs.
+          identifyLiveQuery(preparedQueryValue, identityScope())
+        }
+      }
+      return preparedQueryValue
+    }
+
     binding = bindLiveQueryWindow(
       committed?.binding ?? null,
       {
@@ -245,8 +248,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       rendered?.binding,
     )
   } catch (error) {
-    // A window query the binding rejects, such as a single-result or
-    // uncompilable query, keeps no sync-start deferral.
     rejectLiveQueryInput(deferredCollections, error)
   }
 

@@ -23,6 +23,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -230,6 +231,7 @@ const preactInfiniteDriver: InfiniteQueryDriver = {
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
