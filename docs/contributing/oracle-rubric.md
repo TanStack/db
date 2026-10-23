@@ -291,6 +291,23 @@ presence of a preferred heading, class, comment template, or helper.
   whose claim is explicitly limited to the controlled boundary does not need a
   real-provider witness to satisfy this requirement.
 
+### ORC-015: Declared reach
+
+- **Trigger:** A pull request adds or changes an important generated property,
+  its history grammar, or its production driver, or cites one as evidence for a
+  bug-class repair.
+- **Obligation:** The property MUST declare the states that its changed or
+  cited laws depend on, and MUST fail when generated histories reach a declared
+  state fewer times than its stated minimum. Use
+  [`createOracleReach`](../../packages/db/tests/oracle-reach.ts) or an
+  equivalent counter that fails the property. A passing run count does not
+  satisfy this requirement.
+- **Acceptance evidence:** The pull request reports each declared state and how
+  many histories reached it in the normal test run. A state that only a larger
+  run budget reaches is reported as such.
+- **Not required:** A declared state for every modeled transition. Declare the
+  states that the cited laws need, so that reach stays honest about scope.
+
 ## A quick start
 
 One way to supply that judgment is a small reference model. For a simple stateful test, choose a legal action, apply it to production and the reference, and compare the promised result at the agreed point. “After the action returns” may be the right point for one API; a callback during that action may matter for another.
