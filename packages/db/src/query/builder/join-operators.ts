@@ -32,7 +32,20 @@ export interface JoinOperator<
   validate: typeof validateJoinConditions
 }
 
-function joinOperator<TJoinType extends JoinType>(type: TJoinType) {
+/** A function that builds one join type's operator. */
+export type JoinOperatorFunction<TJoinType extends JoinType> = <
+  TContext extends Context,
+  TSource extends Source,
+>(
+  source: TSource,
+  on: JoinOnCallback<
+    MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+  >,
+) => JoinOperator<TContext, TSource, TJoinType>
+
+function joinOperator<TJoinType extends JoinType>(
+  type: TJoinType,
+): JoinOperatorFunction<TJoinType> {
   return <TContext extends Context, TSource extends Source>(
     source: TSource,
     on: JoinOnCallback<
@@ -49,10 +62,10 @@ function joinOperator<TJoinType extends JoinType>(type: TJoinType) {
   })
 }
 
-export const leftJoin = joinOperator(`left`)
-export const rightJoin = joinOperator(`right`)
-export const innerJoin = joinOperator(`inner`)
-export const fullJoin = joinOperator(`full`)
+export const leftJoin: JoinOperatorFunction<`left`> = joinOperator(`left`)
+export const rightJoin: JoinOperatorFunction<`right`> = joinOperator(`right`)
+export const innerJoin: JoinOperatorFunction<`inner`> = joinOperator(`inner`)
+export const fullJoin: JoinOperatorFunction<`full`> = joinOperator(`full`)
 
 /** A join whose type is chosen at run time. */
 export function joinOf<

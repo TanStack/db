@@ -26,7 +26,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
@@ -106,7 +106,7 @@ export interface UseLiveQueryReturnWithCollection<
 type MaybeGetter<T> = T | (() => T)
 
 export type UseLiveQueryConfig<TContext extends Context> =
-  LiveQueryCollectionConfig<TContext> & {
+  LiveQueryHookConfig<TContext> & {
     queryKey?: MaybeGetter<LiveQueryKey>
     client?: DbClient
   }

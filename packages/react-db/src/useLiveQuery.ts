@@ -34,6 +34,7 @@ import type {
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
+  PooledLiveQueries,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
@@ -119,6 +120,11 @@ type UseLiveQueryConfigOptions<TContext extends Context> = Omit<
   queryKey?: LiveQueryKey
   /** Override the nearest DbProvider for this query. */
   client?: DbClient
+  /**
+   * Pass `pooledLiveQueries` to share one partition among equality-filtered
+   * queries of one shape. Suspense and DbClient queries never pool.
+   */
+  pool?: PooledLiveQueries
 }
 
 type ConfiguredQueryBuilder<TContext extends Context> = Extract<

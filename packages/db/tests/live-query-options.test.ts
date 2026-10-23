@@ -473,3 +473,19 @@ describe(`pooling is opt-in`, () => {
     ).toBeDefined()
   })
 })
+
+describe(`pool does not change a DbClient query's identity`, () => {
+  it(`hashes a preload and a pooling hook config alike`, () => {
+    const client = new DbClient()
+    const rows = createCollection<{ id: number; group: number }>({
+      id: `pool-identity-${Math.random()}`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const query = (q: any) =>
+      q.from({ row: rows }).where(({ row }: any) => eq(row.group, 1))
+    const hash = (value: unknown) =>
+      getLiveQueryHash(prepareLiveQueryValue(value, client))
+    expect(hash({ query, pool: pooledLiveQueries })).toBe(hash({ query }))
+  })
+})

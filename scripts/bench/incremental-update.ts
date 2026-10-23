@@ -11,11 +11,25 @@ import {
   eq,
   materialize,
 } from '../../packages/db/src/index.js'
+import * as db from '../../packages/db/src/index.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   Collection,
   SyncConfig,
 } from '../../packages/db/src/index.js'
+
+// CI runs this script against the base commit too. Before join operators,
+// `.join()` took the source and condition directly.
+// Before include(), a bare subquery in select was a Collection include.
+const includeWith = (builder: any): any =>
+  typeof (db as { include?: unknown }).include === `function`
+    ? (db as any).include(builder)
+    : builder
+
+const joinWith = (builder: any, source: object, on: (refs: any) => any): any =>
+  typeof (db as { leftJoin?: unknown }).leftJoin === `function`
+    ? builder.join((db as any).leftJoin(source, on))
+    : builder.join(source, on)
 
 type Issue = {
   id: number
@@ -200,15 +214,16 @@ const queryCases: Array<QueryCase> = [
     scenario: `visible author update`,
     createQuery: ({ issues, users }) =>
       createLiveQueryCollection((q) =>
-        q
-          .from({ issue: issues })
-          .where(({ issue }) => eq(issue.status, `open`))
-          .join({ author: users }, ({ issue, author }) =>
-            eq(issue.authorId, author.id),
-          )
-          .orderBy(({ issue }) => issue.createdAt, `desc`)
+        joinWith(
+          q
+            .from({ issue: issues })
+            .where(({ issue }) => eq(issue.status, `open`)),
+          { author: users },
+          ({ issue, author }: any) => eq(issue.authorId, author.id),
+        )
+          .orderBy(({ issue }: any) => issue.createdAt, `desc`)
           .limit(50)
-          .select(({ issue, author }) => ({
+          .select(({ issue, author }: any) => ({
             id: issue.id,
             title: issue.title,
             createdAt: issue.createdAt,
@@ -254,16 +269,18 @@ const queryCases: Array<QueryCase> = [
           .select(({ issue }) => ({
             id: issue.id,
             title: issue.title,
-            recentComments: q
-              .from({ comment: comments })
-              .where(({ comment }) => eq(comment.issueId, issue.id))
-              .orderBy(({ comment }) => comment.createdAt, `desc`)
-              .limit(3)
-              .select(({ comment }) => ({
-                id: comment.id,
-                body: comment.body,
-                createdAt: comment.createdAt,
-              })),
+            recentComments: includeWith(
+              q
+                .from({ comment: comments })
+                .where(({ comment }) => eq(comment.issueId, issue.id))
+                .orderBy(({ comment }) => comment.createdAt, `desc`)
+                .limit(3)
+                .select(({ comment }) => ({
+                  id: comment.id,
+                  body: comment.body,
+                  createdAt: comment.createdAt,
+                })),
+            ),
           })),
       ) as unknown as BenchmarkCollection,
     write: insertVisibleComment,
@@ -279,15 +296,17 @@ const queryCases: Array<QueryCase> = [
           .select(({ issue }) => ({
             id: issue.id,
             title: issue.title,
-            comments: q
-              .from({ comment: comments })
-              .where(({ comment }) => eq(comment.issueId, issue.id))
-              .orderBy(({ comment }) => comment.createdAt, `desc`)
-              .select(({ comment }) => ({
-                id: comment.id,
-                body: comment.body,
-                createdAt: comment.createdAt,
-              })),
+            comments: includeWith(
+              q
+                .from({ comment: comments })
+                .where(({ comment }) => eq(comment.issueId, issue.id))
+                .orderBy(({ comment }) => comment.createdAt, `desc`)
+                .select(({ comment }) => ({
+                  id: comment.id,
+                  body: comment.body,
+                  createdAt: comment.createdAt,
+                })),
+            ),
           })),
       ) as unknown as BenchmarkCollection,
     write: insertSelectedIssueComment,

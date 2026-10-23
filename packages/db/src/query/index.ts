@@ -112,7 +112,10 @@ export {
 // One-shot query execution
 export { queryOnce, type QueryOnceConfig } from './query-once.js'
 
-export { type LiveQueryCollectionConfig } from './live/types.js'
+export {
+  type LiveQueryCollectionConfig,
+  type LiveQueryHookConfig,
+} from './live/types.js'
 export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 export {
   UnhashableQueryIRError,
