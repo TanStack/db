@@ -16,10 +16,10 @@ beforeEach(() => {
   if (fault === `setup`) throw new Error(`replay setup sentinel`)
 })
 
-const options = oraclePropertyOptions(
-  fault === `zero` ? 0 : 3,
-  `oracle-replay.calibration`,
-)
+// A path replay runs once, so the zero-run fault overrides the run count
+// after the replay options are chosen, like the seed and path faults.
+const options = oraclePropertyOptions(3, `oracle-replay.calibration`)
+if (fault === `zero`) options.numRuns = 0
 if (fault === `seed`) options.seed = 43
 if (fault === `path`) options.path = `1`
 const propertyTest =

@@ -15,26 +15,26 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     // A replay that does not select this property registers an empty test.
     `it.skip('runs only when its replay property is selected', () => {})`,
     `it.todo('loads every subset from one generation')`,
-    // Playwright's runtime skip, conditioned on the environment.
+    // Playwright's runtime skip for a control that one browser supports.
     `test.skip(browserName !== 'chromium', 'Chromium-only control')`,
-    `test.skip(isMobile)`,
-    `test.skip(false, 'kept for a later browser')`,
-    // A replay selection may switch a test off.
-    `it.skipIf(replayRequested)('checks the history', () => check())`,
-    `it.runIf(replay.replayPath === undefined)('checks the history', () => check())`,
+    // A replay campaign stands the other tests aside.
+    `it.skipIf(oracleReplayRequested())('checks the history', () => check())`,
     `fc.assert(property, oraclePropertyOptions(12, 'cleanup-queue.history'))`,
     `fc.assert(property, { numRuns: oracleRuns(20) })`,
-    // A pinned replay or mutant witness runs one fixed history.
+    // A replay passes the recorded path, and a witness a fixed seed.
+    `fc.check(property, { seed: failed.seed, path: failed.counterexamplePath, numRuns: 1 })`,
     `fc.check(property, { seed: 205203, numRuns: 1 })`,
-    `fc.check(property, { seed: fixedSeed, numRuns: 1 })`,
+    `fc.check(property, { seed: -1659005, numRuns: 1 })`,
+    `const fixedSeed = 1657019\nfc.check(property, { seed: fixedSeed, numRuns: 1 })`,
     `fc.assert(property, { seed: 2128, numRuns: oracleRuns(1) })`,
-    `fc.assert(property, replayRequested ? { numRuns: oracleRuns(1) } : {})`,
-    `fc.assert(property, campaign === 'replay' ? { numRuns: 1 } : {})`,
-    `fc.assert(property, options.path === undefined ? options : { ...options, numRuns: 1 })`,
-    // An expectation about a recorded run is not a run option.
+    // An expectation about a recorded run is not a run option, and a sample
+    // runs no property.
     `expect(report).toMatchObject({ numRuns: 1, failed: true })`,
+    `fc.sample(historyArbitrary, { numRuns: 1 })`,
     // A known gap is pinned as failing on a fixed seed, not skipped.
     `it.fails('checks the fixed history', () => fc.assert(property, { seed: 2128, numRuns: oracleRuns(12) }))`,
+    // A skip on something other than the test context is not a test skip.
+    `it('reads a page', (ctx) => { const cursor = open(); cursor.skip() })`,
   ],
   invalid: [
     {
@@ -123,6 +123,75 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     },
     {
       code: `fc.assert(property, { numRuns: oracleRuns(0) })`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `test.skip(isMobile)`,
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      code: `test.skip(process.env.CI === 'true', 'flaky')`,
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      code: `test.fixme('checks the history', check)`,
+      errors: [{ messageId: `skip`, data: { name: `fixme` } }],
+    },
+    {
+      code: `test.describe.fixme('cleanup queue', () => { test('a', check) })`,
+      errors: [{ messageId: `skip`, data: { name: `fixme` } }],
+    },
+    {
+      code: `test.fixme()`,
+      errors: [{ messageId: `skip`, data: { name: `fixme` } }],
+    },
+    {
+      code: `it('checks the history', (ctx) => { ctx.skip(); check() })`,
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      // Only the shared helper may select a replay: its polarity is fixed.
+      code: `it.skipIf(replayRequested)('checks the history', () => check())`,
+      errors: [{ messageId: `conditional` }],
+    },
+    {
+      code: `it.runIf(replay.replayPath === undefined)('checks the history', () => check())`,
+      errors: [{ messageId: `conditional`, data: { name: `runIf` } }],
+    },
+    {
+      code: `it.runIf(replay.replayPath !== undefined)('checks the history', check)`,
+      errors: [{ messageId: `conditional` }],
+    },
+    {
+      code: `describe.skipIf(!oracleReplayRequested())('cleanup queue', () => { it('a', () => check()) })`,
+      errors: [{ messageId: `conditional` }],
+    },
+    {
+      code: `describe.skipIf(path.sep === '\\\\')('cleanup queue', () => { it('a', () => check()) })`,
+      errors: [{ messageId: `conditional` }],
+    },
+    {
+      code: `fc.assert(property, replayRequested ? {} : { numRuns: 1 })`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `fc.assert(property, campaign === 'replay' ? { numRuns: 1 } : {})`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `fc.assert(property, { seed: process.env.SEED, numRuns: 1 })`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `fc.assert(property, { seed: replay.replaySeed, numRuns: 1 })`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `let seed = 1\nfc.assert(property, { seed, numRuns: 1 })`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `fc.assert(property, { seed: replay.replaySeed, path: undefined, numRuns: 1 })`,
       errors: [{ messageId: `singleRun` }],
     },
     {

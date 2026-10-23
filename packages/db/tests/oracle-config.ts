@@ -24,6 +24,7 @@ const staticOracleProperties = [
   `oracle-replay.calibration`,
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,
+  `opfs-worker.diagnostics`,
   `sqlite-persistence.source-fifo-order`,
   `sqlite-persistence.abort-graph`,
   `sqlite-persistence.owner-isolation`,
@@ -408,10 +409,14 @@ export function oracleRandomParameters(
   return {
     numRuns,
     seed: replaySeed,
+    // A path replays one recorded counterexample, so the replay runs once.
+    // From a path with one segment, fast-check would otherwise run `numRuns`
+    // histories that start at that index.
     ...(property !== undefined &&
     replayPath !== undefined &&
     replayProperty === property
       ? {
+          numRuns: 1,
           path: replayPath,
           ...oracleReplayReporter(property, replaySeed, replayPath),
         }
@@ -420,6 +425,16 @@ export function oracleRandomParameters(
 }
 
 const { multiplier, ...replay } = readOracleRunConfig()
+
+/**
+ * Whether a replay campaign is selected. A test that is not the replayed
+ * property stands aside with `it.skipIf(oracleReplayRequested())`. The
+ * `oracle/no-disabled` lint rule accepts only this condition, so a replay
+ * selection cannot switch an oracle test off in ordinary runs.
+ */
+export function oracleReplayRequested(): boolean {
+  return replay.replaySeed !== undefined
+}
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
 export function oracleRuns(baseRuns: number): number {

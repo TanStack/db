@@ -34,12 +34,12 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
-import oraclePlugin, { oracleFiles } from './eslint-plugin-oracle/index.js'
+import oraclePlugin from './eslint-plugin-oracle/index.js'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
 
@@ -61,23 +61,49 @@ if (![`edit`, `stop`].includes(options.event)) {
 }
 const isHook = options.format !== `text`
 
-/** Every file that the branch adds or changes, including uncommitted work. */
-function changedFiles() {
-  const git = (...args) =>
-    execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
-  let base = `HEAD`
-  try {
-    base = git(`merge-base`, `HEAD`, `origin/main`)
-  } catch {
-    // Without origin/main, the uncommitted work is the change.
-  }
-  return [
-    git(`diff`, `--name-only`, `--diff-filter=ACMR`, base),
-    git(`ls-files`, `--others`, `--exclude-standard`),
-  ]
+function git(...args) {
+  return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
+}
+
+function repositoryFiles(...outputs) {
+  return outputs
     .flatMap((output) => output.split(`\n`))
     .filter(Boolean)
     .map((file) => join(root, file))
+}
+
+/**
+ * Every tracked oracle file. Git leaves out builds and untracked checkouts,
+ * such as other branches' worktrees under `.worktrees/`.
+ */
+function trackedOracleFiles() {
+  return repositoryFiles(git(`ls-files`, `*oracle*.ts`, `*oracle*.tsx`))
+}
+
+/**
+ * Every file that the branch adds or changes, including uncommitted work.
+ * Without a main branch to compare against, the branch's own commits cannot
+ * be found, so this fails instead of linting only the uncommitted work.
+ */
+function changedFiles() {
+  const base = [`origin/main`, `main`]
+    .map((branch) => {
+      try {
+        return git(`merge-base`, `HEAD`, branch)
+      } catch {
+        return undefined
+      }
+    })
+    .find((commit) => commit !== undefined)
+  if (base === undefined) {
+    throw new Error(
+      `Cannot find origin/main or main to compare this branch against. Run \`git fetch origin main\`.`,
+    )
+  }
+  return repositoryFiles(
+    git(`diff`, `--name-only`, `--diff-filter=ACMR`, base),
+    git(`ls-files`, `--others`, `--exclude-standard`),
+  )
 }
 
 const pathKeys = /^(file_?path|filePath|path|absolute_path|target_file)$/i
@@ -136,19 +162,17 @@ function createLinter() {
   })
 }
 
-/** Lints the oracle files among `files`, or every oracle file without them. */
+/** Lints the oracle files among `files`. */
 async function lint(eslint, files) {
   const lintable = []
-  for (const file of new Set(files ?? [])) {
+  for (const file of new Set(files)) {
     if (!existsSync(file) || relative(root, file).startsWith(`..`)) continue
-    if (!/oracle[^/]*\.tsx?$/.test(file)) continue
+    if (!/oracle.*\.tsx?$/.test(basename(file))) continue
     if (await eslint.isPathIgnored(file)) continue
     lintable.push(file)
   }
-  if (files !== undefined && lintable.length === 0) return []
-  const results = await eslint.lintFiles(
-    files === undefined ? oracleFiles : lintable,
-  )
+  if (lintable.length === 0) return []
+  const results = await eslint.lintFiles(lintable)
   // Keep oracle reports and files that cannot be parsed. This drops the
   // notices that the ignored directives have no effect.
   return results.map((result) => ({
@@ -228,7 +252,7 @@ function respond(report, input, scope) {
 
 /** The files to lint: named on the command line, edited, or changed. */
 function selectFiles(input) {
-  if (options.all) return { scope: `all`, files: undefined }
+  if (options.all) return { scope: `all`, files: trackedOracleFiles() }
   if (positionals.length > 0) {
     return { scope: `named`, files: positionals.map((file) => resolve(file)) }
   }

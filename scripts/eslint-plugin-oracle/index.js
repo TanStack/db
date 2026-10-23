@@ -12,7 +12,7 @@ import noDisabled from './rules/no-disabled.js'
  * directives.
  */
 
-export const oracleFiles = [`**/*oracle*.ts`, `**/*oracle*.tsx`]
+const oracleFiles = [`**/*oracle*.ts`, `**/*oracle*.tsx`]
 
 const plugin = {
   meta: { name: `eslint-plugin-oracle` },

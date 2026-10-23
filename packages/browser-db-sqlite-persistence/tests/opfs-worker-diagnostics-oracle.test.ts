@@ -1,5 +1,10 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  oracleReplayRequested,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config'
 import type {
   BrowserOPFSWorkerRequest,
   BrowserOPFSWorkerResponse,
@@ -142,13 +147,13 @@ const diagnosticInput = fc.record({
   ),
 })
 
-const replaySeed = process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_SEED
-const diagnosticSeed = Number(replaySeed ?? 1846)
-const diagnosticRuns = Number(
-  process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_RUNS ?? 40,
-)
-const diagnosticPath = process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_PATH
-const replayRequested = replaySeed !== undefined || diagnosticPath !== undefined
+const diagnosticProperty = `opfs-worker.diagnostics`
+const replay = readOracleRunConfig()
+const diagnosticSeed = replay.replaySeed ?? 1846
+const diagnosticRuns = oracleRuns(40)
+const diagnosticPath =
+  replay.replayProperty === diagnosticProperty ? replay.replayPath : undefined
+const replayRequested = oracleReplayRequested()
 const campaigns = replayRequested
   ? [{ name: `replay`, seed: diagnosticSeed }]
   : [
@@ -243,8 +248,9 @@ cause; the absent-cause examples reject an invented cause. Pinned examples run
 separately so both generated campaigns share one property and budget, and a
 reported shrink path selects its generated case directly. Verbose FastCheck
 output retains original/reduced traces. Set
-TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_SEED and
-TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_PATH for direct replay.
+TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
+TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
+TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
 describe(`OPFS worker diagnostics oracle`, () => {
   if (!replayRequested) {
@@ -254,7 +260,7 @@ describe(`OPFS worker diagnostics oracle`, () => {
     )
   }
 
-  it.skipIf(replayRequested)(
+  it.skipIf(oracleReplayRequested())(
     `rejects a diagnostic that drops an exposed VFS cause`,
     async () => {
       const input = diagnosticExamples[4]![0]
