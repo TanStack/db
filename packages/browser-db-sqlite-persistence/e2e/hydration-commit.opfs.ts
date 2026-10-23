@@ -300,26 +300,34 @@ async function run(): Promise<void> {
       admitOrdinary()
       return result
     }
-    const cRegular = cAdapter.runInRegularScope!.bind(cAdapter)
-    cAdapter.runInRegularScope = (task) => {
-      const result = cRegular((scoped) => {
-        observePeerWork(`ordinary-scope`)
-        return task(scoped)
-      })
-      admitOrdinary()
-      return result
-    }
+    const cScope = cAdapter.runInRegularScope!
+    const cRegular = cScope.bind(cAdapter)
+    cAdapter.runInRegularScope = Object.assign(
+      <T>(task: (adapter: HydrationPersistenceAdapter) => Promise<T>) => {
+        const result = cRegular((scoped) => {
+          observePeerWork(`ordinary-scope`)
+          return task(scoped)
+        })
+        admitOrdinary()
+        return result
+      },
+      { afterQueuedWork: cScope.afterQueuedWork },
+    )
     const nested = new Set<string>()
     const tailTransactions = new Set<string>()
     let tailStarted = false
     const tailScheduling: HydrationCommitObservation[`tailScheduling`] = []
-    const aRegular = adapter.runInRegularScope!.bind(adapter)
-    adapter.runInRegularScope = (task) => {
-      const result = aRegular(task)
-      if (tailStarted && tailTransactions.size > 0)
-        tailScheduling.push(`regular-scope`)
-      return result
-    }
+    const aScope = adapter.runInRegularScope!
+    const aRegular = aScope.bind(adapter)
+    adapter.runInRegularScope = Object.assign(
+      <T>(task: (adapter: HydrationPersistenceAdapter) => Promise<T>) => {
+        const result = aRegular(task)
+        if (tailStarted && tailTransactions.size > 0)
+          tailScheduling.push(`regular-scope`)
+        return result
+      },
+      { afterQueuedWork: aScope.afterQueuedWork },
+    )
     const request = resolved.coordinator!.requestApplyCommittedTx.bind(
       resolved.coordinator!,
     )
