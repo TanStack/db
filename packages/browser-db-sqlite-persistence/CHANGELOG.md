@@ -1,5 +1,16 @@
 # @tanstack/browser-db-sqlite-persistence
 
+## 0.2.38
+
+### Patch Changes
+
+- Add `SQLiteConnectionClosedError`. A browser OPFS connection now rejects requests made after close starts with this error instead of `InvalidPersistedCollectionConfigError`. ([#2213](https://github.com/TanStack/db/pull/2213))
+
+- Reject pending OPFS requests when closing the SQLite connection, including when the worker reports a close error. Close now stops accepting requests when it starts, and concurrent `close()` calls share one outcome. The OPFS worker handles one request at a time, so close waits for earlier queries instead of failing while one waits for the OPFS access handle. ([#2213](https://github.com/TanStack/db/pull/2213))
+
+- Updated dependencies [[`205ab71`](https://github.com/TanStack/db/commit/205ab7158d81680c3cc4f06cd9ebe62b30911a5a), [`37b8fc2`](https://github.com/TanStack/db/commit/37b8fc2c5abd08e9128ec3606c6534aaec3ae67e), [`205ab71`](https://github.com/TanStack/db/commit/205ab7158d81680c3cc4f06cd9ebe62b30911a5a), [`b052e91`](https://github.com/TanStack/db/commit/b052e91c79201ee376771f99503566e736e3d0dd)]:
+  - @tanstack/db-sqlite-persistence-core@0.5.0
+
 ## 0.2.37
 
 ### Patch Changes
