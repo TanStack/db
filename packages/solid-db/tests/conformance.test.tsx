@@ -211,11 +211,18 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const [param, setParam] = createSignal<P>(initial)
   const { getResult, dispose } = inRoot(() =>
-    // Reading param() inside the query fn makes Solid recompute on change.
-    useLiveQuery((q: any) => build(q, param())),
+    opts?.pool
+      ? // Reading param() in the config accessor makes Solid recompute on change.
+        useLiveQuery(() => {
+          const value = param()
+          return { query: (q: any) => build(q, value), pool: opts.pool }
+        })
+      : // Reading param() inside the query fn makes Solid recompute on change.
+        useLiveQuery((q: any) => build(q, param())),
   )
   const handle = makeHandle(getResult, dispose)
   return {

@@ -34,7 +34,8 @@
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
  * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
- * inputs, error status, and order-only moves.
+ * inputs, opt-in pooling in each input form, error status, and order-only
+ * moves.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -127,8 +128,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       sources!.track(rawDriver.makePrecreated(build, options)),
     makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
     mount: (build) => track(rawDriver.mount(build)),
-    mountControllable: (build, initial) =>
-      track(rawDriver.mountControllable(build, initial)),
+    mountControllable: (build, initial, options) =>
+      track(rawDriver.mountControllable(build, initial, options)),
     mountCollection: (collection) =>
       track(rawDriver.mountCollection(collection)),
     mountConfig: (build, options) =>
@@ -387,6 +388,88 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [],
         ])
         for (const h of [teamA, teamB, olderA]) h.unmount()
+        await expect
+          .poll(() => source.collection.subscriberCount, {
+            interval: 5,
+            timeout: 500,
+          })
+          .toBe(0)
+      },
+    )
+
+    // Pooling is opt-in per query. Queries that do not pass `pool` each
+    // subscribe to the source themselves, whatever input form they use.
+    scenario(
+      `pool-opt-in`,
+      `queries without pool keep a source subscription each`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const query = (team: string) => (q: any) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const handles = [
+          driver.mount(query(`a`)),
+          driver.mount(query(`b`)),
+          driver.mountConfig(query(`a`)),
+          driver.mountControllable((q, team: string) => query(team)(q), `b`),
+        ]
+        for (const h of handles) await h.flush()
+        expect(source.collection.subscriberCount).toBe(handles.length)
+        expect(
+          handles.map((h) =>
+            (h.current().data as Array<{ id: string }>).map((row) => row.id),
+          ),
+        ).toEqual([[`1`, `3`], [`2`], [`1`, `3`], [`2`]])
+        for (const h of handles) h.unmount()
+      },
+    )
+
+    // A pooled query whose parameter changes leaves its old pool group and
+    // joins the new one: its rows follow the parameter, and a peer that keeps
+    // its parameter is not disturbed.
+    scenario(
+      `pooled-param-change`,
+      `a pooled query follows its parameter between pool groups`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const pool = { pool: pooledLiveQueries }
+        const query = (q: any, team: string) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const moving = driver.mountControllable<string>(query, `a`, pool)
+        const peer = driver.mountConfig((q) => query(q, `a`), pool)
+        for (const h of [moving, peer]) await h.flush()
+        const ids = (h: LiveQueryHandle) =>
+          (h.current().data as Array<{ id: string }>).map((row) => row.id)
+        expect([ids(moving), ids(peer)]).toEqual([
+          [`1`, `3`],
+          [`1`, `3`],
+        ])
+        const shared = driver.features?.pooledEqFilters ? 1 : 2
+        expect(source.collection.subscriberCount).toBe(shared)
+
+        await moving.setParam(`b`)
+        await peer.flush()
+        expect([ids(moving), ids(peer)]).toEqual([[`2`], [`1`, `3`]])
+        expectKeyedRows(moving.current().state, [SEED[1]!])
+        expect(source.collection.subscriberCount).toBe(shared)
+
+        source.insert({ id: `4`, name: `Dave`, age: 40, team: `b` })
+        for (const h of [moving, peer]) await h.flush()
+        expect([ids(moving), ids(peer)]).toEqual([
+          [`2`, `4`],
+          [`1`, `3`],
+        ])
+
+        await moving.setParam(`a`)
+        await peer.flush()
+        expect([ids(moving), ids(peer)]).toEqual([
+          [`1`, `3`],
+          [`1`, `3`],
+        ])
+        for (const h of [moving, peer]) h.unmount()
         await expect
           .poll(() => source.collection.subscriberCount, {
             interval: 5,
@@ -1291,7 +1374,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(37)
+      expect(registry.size).toBe(39)
     })
   })
 }

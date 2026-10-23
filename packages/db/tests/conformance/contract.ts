@@ -187,10 +187,12 @@ export interface LiveQueryDriver {
   /**
    * Mount a live query whose input depends on a parameter that can change after
    * mount. `build` returns a query, or `null`/`undefined` to represent disabled.
+   * With `pool`, use the adapter's config form for a parameterized query.
    */
   mountControllable: <P>(
     build: (q: any, param: P) => any,
     initial: P,
+    opts?: { pool?: PooledLiveQueries },
   ) => ControllableHandle<P>
   /** Mount a pre-created collection passed directly to the hook. */
   mountCollection: (collection: Collection<any, any, any>) => LiveQueryHandle
@@ -216,7 +218,8 @@ export interface LiveQueryDriver {
     /**
      * Public sharing policy: queries whose config passes `pooledLiveQueries`
      * and that filter only by `eq` on one source share one source subscription
-     * per filtered field set, instead of one each.
+     * per filtered field set, instead of one each. Every other query has a
+     * subscription of its own: pooling is opt-in per query.
      */
     pooledEqFilters?: boolean
   }

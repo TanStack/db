@@ -202,11 +202,17 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   let param = $state(initial)
   let query: any
   const dispose = $effect.root(() => {
-    query = useLiveQuery((q: any) => build(q, param), [() => param])
+    query = opts?.pool
+      ? useLiveQuery(
+          { query: (q: any) => build(q, param), pool: opts.pool } as any,
+          [() => param],
+        )
+      : useLiveQuery((q: any) => build(q, param), [() => param])
   })
   const handle = makeHandle(() => query, dispose)
   return {

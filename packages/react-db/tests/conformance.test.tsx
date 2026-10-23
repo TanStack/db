@@ -155,11 +155,15 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const hook = renderHook(
     ({ param }: { param: P }) =>
-      // Param goes in the dependency list so the hook recompiles when it changes.
-      useLiveQuery((q: any) => build(q, param), [param]),
+      opts?.pool
+        ? // The config form derives identity from the query on each render.
+          useLiveQuery({ query: (q: any) => build(q, param), pool: opts.pool })
+        : // Param goes in the dependency list so the hook recompiles when it changes.
+          useLiveQuery((q: any) => build(q, param), [param]),
     { initialProps: { param: initial } },
   )
   const handle = makeHandle(hook)

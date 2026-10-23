@@ -215,12 +215,14 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const param = signal<P>(initial)
   const { result, destroy } = inCtx(() =>
     injectLiveQuery({
       params: () => ({ value: param() }),
       query: ({ params, q }: any) => build(q, params.value),
+      pool: opts?.pool,
     }),
   )
   const handle = makeHandle(result, destroy)
