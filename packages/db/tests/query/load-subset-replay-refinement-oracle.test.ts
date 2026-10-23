@@ -1308,6 +1308,8 @@ type OrderedReach = {
   retainedFailedReplays: number
   participantDemandFailures: number
   includeDemandFailures: number
+  preloadReplayFailures: number
+  discardedReplayMoves: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1422,6 +1424,11 @@ async function checkOrderedReplay(
   let retainedAfterReady = false
   const raiseBarrier = (source: BarrierSource) => {
     lowerSettledBarriers()
+    // A newer truncate discards the replay that a pending window move waits
+    // behind.
+    if (barriers.size > 0 && !settledMoves.has(latestMove)) {
+      reach.discardedReplayMoves++
+    }
     if (barriers.size === 0) {
       retainedRows = JSON.stringify(live.toArray)
       retainedAfterReady = live.status === `ready`
@@ -1478,6 +1485,9 @@ async function checkOrderedReplay(
       barrier.failures.set(load, options)
     }
     barrier?.pending.delete(load)
+    // A replay completes when its last participant settles, so demand that
+    // starts after it does not join it.
+    lowerSettledBarriers()
     return replayLoading
   }
   const retireParticipants = (
@@ -1603,6 +1613,8 @@ async function checkOrderedReplay(
     retainedFailedReplays: 0,
     participantDemandFailures: 0,
     includeDemandFailures: 0,
+    preloadReplayFailures: 0,
+    discardedReplayMoves: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -1647,13 +1659,13 @@ async function checkOrderedReplay(
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
               )
-              const replayLoading = settleParticipant(
-                `markers`,
-                load,
-                options,
-                ok,
-              )
               if (!ok) {
+                const replayLoading = settleParticipant(
+                  `markers`,
+                  load,
+                  options,
+                  false,
+                )
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
@@ -1672,16 +1684,18 @@ async function checkOrderedReplay(
                 }
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
+                  // Lazy demand in a replay failed before the first ready.
+                  if (participant && isDemand(options)) {
+                    reach.preloadReplayFailures++
+                  }
                 }
                 reach.failedLoads++
                 throw inject(new Error(`marker load failed`))
               }
-            } else {
-              await Promise.resolve()
-              settleParticipant(`markers`, load, options, true)
-            }
+            } else await Promise.resolve()
             if (options.signal?.aborted) {
               load.outcome = `ok`
+              settleParticipant(`markers`, load, options, true)
               if (scenario.abortedMarkerLoads === `resolve`) return
               reach.abortRejections++
               throw inject(
@@ -1707,6 +1721,8 @@ async function checkOrderedReplay(
             }
             await operations.commit()
             load.outcome = `ok`
+            // The load settles once its rows apply.
+            settleParticipant(`markers`, load, options, true)
           },
           unloadSubset: (options) => {
             retireParticipants(`markers`, options)
@@ -1744,8 +1760,13 @@ async function checkOrderedReplay(
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
               )
-              const replayLoading = settleParticipant(`rows`, load, options, ok)
               if (!ok) {
+                const replayLoading = settleParticipant(
+                  `rows`,
+                  load,
+                  options,
+                  false,
+                )
                 load.outcome = `failed`
                 anyLoadFailed = true
                 if (demand) demandFailed = true
@@ -1763,16 +1784,18 @@ async function checkOrderedReplay(
                 }
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
+                  // Lazy demand in a replay failed before the first ready.
+                  if (participant && isDemand(options)) {
+                    reach.preloadReplayFailures++
+                  }
                 }
                 reach.failedLoads++
                 throw inject(new Error(`load failed`))
               }
-            } else {
-              await Promise.resolve()
-              settleParticipant(`rows`, load, options, true)
-            }
+            } else await Promise.resolve()
             if (options.signal?.aborted) {
               load.outcome = `ok`
+              settleParticipant(`rows`, load, options, true)
               return
             }
             const rows = [...truth.values()]
@@ -1812,6 +1835,8 @@ async function checkOrderedReplay(
             }
             await sync.commit()
             load.outcome = `ok`
+            // The load settles once its rows apply.
+            settleParticipant(`rows`, load, options, true)
           },
           unloadSubset: (options) => {
             retireParticipants(`rows`, options)
@@ -2562,6 +2587,8 @@ describe(`Ordered windows across truncate replays`, () => {
         retainedFailedReplays: 0,
         participantDemandFailures: 0,
         includeDemandFailures: 0,
+        preloadReplayFailures: 0,
+        discardedReplayMoves: 0,
       }
       await fc.assert(
         fc.asyncProperty(
@@ -2588,14 +2615,17 @@ describe(`Ordered windows across truncate replays`, () => {
       // An aborted move needs a truncate to land inside a held move, and a
       // terminal error needs a held marker demand load to fail; the named
       // replays above reach both. A failed replay that the retention law can
-      // judge, and a demand that fails while its replay is open, are rare
-      // here; the failed-replay campaigns below declare both.
+      // judge, a demand that fails while its replay is open, a replay that
+      // fails before the first ready, and a window move behind a discarded
+      // replay are rare here; the campaigns below declare them.
       const ownedElsewhere = new Set([
         `abortedMoves`,
         `terminalErrors`,
         `retainedFailedReplays`,
         `participantDemandFailures`,
         `includeDemandFailures`,
+        `preloadReplayFailures`,
+        `discardedReplayMoves`,
       ])
       if (campaign !== `replay`) {
         for (const [dimension, count] of Object.entries(total)) {
@@ -2706,6 +2736,151 @@ describe(`Ordered windows across truncate replays`, () => {
       : orderedReplayConfig.replayProperty === failedReplayProperty
         ? ([`replay`] as const)
         : ([] as const)
+
+  // Recovery during the initial preload. A history starts while the first
+  // loads are held, over on-demand markers that the query includes or joins.
+  // Its grammar settles held loads one at a time, truncates either source,
+  // moves the window, and fails a held load, so replays start, fail, and are
+  // discarded before the query first becomes ready, with window moves
+  // waiting behind them.
+  const preloadCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
+    {
+      weight: 4,
+      arbitrary: fc.record({
+        type: fc.constant(`settle` as const),
+        ok: fc.oneof(
+          { weight: 3, arbitrary: fc.constant(true) },
+          { weight: 1, arbitrary: fc.constant(false) },
+        ),
+        keepHolding: fc.oneof(
+          { weight: 3, arbitrary: fc.constant(true) },
+          { weight: 1, arbitrary: fc.constant(false) },
+        ),
+        newest: fc.boolean(),
+      }),
+    },
+    { weight: 2, arbitrary: fc.constant({ type: `truncateMarkers` as const }) },
+    {
+      weight: 1,
+      arbitrary: fc.constant({
+        type: `truncate` as const,
+        armAfterStart: false,
+      }),
+    },
+    {
+      weight: 2,
+      arbitrary: fc.record({
+        type: fc.constant(`window` as const),
+        offset: fc.constantFrom(0 as const, 1 as const),
+        limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+      }),
+    },
+    {
+      weight: 1,
+      arbitrary: fc.record({
+        type: fc.constant(`move` as const),
+        id: fc.integer({ min: 1, max: 5 }),
+        rank: fc.integer({ min: 1, max: 60 }),
+      }),
+    },
+    { weight: 1, arbitrary: fc.constant({ type: `hold` as const }) },
+  )
+  const preloadScenario = orderedScenario.map((scenario) => ({
+    ...scenario,
+    markerMode: `on-demand` as const,
+    includes: scenario.includes || !scenario.joined,
+    historyDuringPreload: true,
+  }))
+  // A replay of include demand that fails before the first ready: initial
+  // loads settle one at a time, so the order source delivers rows and the
+  // include demands them; the marker source truncates; more held loads
+  // settle; and the oldest or newest held load fails. The oldest is often
+  // a load the truncate aborted, and the newest a replay load.
+  const settleHeld = { type: `settle` as const, ok: true, keepHolding: true }
+  const preloadDemandFailure = fc
+    .tuple(
+      preloadScenario,
+      fc.integer({ min: 1, max: 2 }),
+      fc.integer({ min: 0, max: 3 }),
+      fc.boolean(),
+      fc.array(preloadCommand, { maxLength: 6 }),
+    )
+    .map(
+      ([scenario, before, after, newest, rest]): [
+        Array<OrderedCommand>,
+        OrderedScenario,
+      ] => [
+        [
+          ...Array.from({ length: before }, () => settleHeld),
+          { type: `truncateMarkers` },
+          ...Array.from({ length: after }, () => settleHeld),
+          { type: `settle`, ok: false, newest },
+          ...rest,
+        ],
+        { ...scenario, joined: false, includes: true },
+      ],
+    )
+  const preloadCase = fc.oneof(
+    {
+      weight: 2,
+      arbitrary: fc.tuple(
+        fc.array(preloadCommand, { minLength: 1, maxLength: 12 }),
+        preloadScenario,
+      ),
+    },
+    { weight: 1, arbitrary: preloadDemandFailure },
+  )
+  const preloadProperty = `replay.ordered-preload-recovery`
+  const preloadCampaigns =
+    orderedReplayConfig.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : orderedReplayConfig.replayProperty === preloadProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(preloadCampaigns)(
+    `recovers replays that start during the initial preload (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: a replay participant that fails before the first
+      // ready, which must end the query or let the preload settle, and a
+      // window move that waits behind a replay a newer truncate discards,
+      // which must still apply.
+      const reach = createOracleReach(
+        preloadProperty,
+        [
+          `preloadReplayFailures`,
+          `discardedReplayMoves`,
+          `preloadChecks`,
+        ] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(preloadCase, async ([history, scenario]) => {
+          reach.beginHistory()
+          const observed = await checkOrderedReplay(history, scenario)
+          for (const state of [
+            `preloadReplayFailures`,
+            `discardedReplayMoves`,
+            `preloadChecks`,
+          ] as const) {
+            if (observed[state] > 0) reach.reach(state)
+          }
+        }),
+        // The fixed seed kills both mutants that the evidence names: a
+        // builder that lets a discarded replay reject a deferred window move,
+        // and one that keeps a failure before the first ready non-fatal. Each
+        // dies in about half of 200-run seeds.
+        campaign === `fixed`
+          ? { seed: 20261027, numRuns: oracleRuns(300) }
+          : {
+              ...oraclePropertyOptions(300, preloadProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      reach.assertReached()
+    },
+    120_000,
+  )
 
   it.each(failedReplayCampaigns)(
     `keeps the last publication through a failed replay (%s campaign)`,

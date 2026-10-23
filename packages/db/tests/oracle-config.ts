@@ -22,6 +22,7 @@ const staticOracleProperties = [
   `ordered-loader.request-authority`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
+  `replay.ordered-preload-recovery`,
   `oracle-replay.calibration`,
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,
