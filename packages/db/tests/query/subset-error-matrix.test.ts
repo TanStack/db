@@ -3,7 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { captureMicrotaskErrors, mockSyncCollectionOptions } from '../utils.js'
 
 type Delivery = `throw` | `reject`
 type Consumer = `effect` | `live`
@@ -399,7 +399,9 @@ describe(`loadSubset failure matrix`, () => {
   )
 
   it.each(cleanupFailureCases)(
-    `reports obsolete-demand cleanup failure without failing the source commit: $name`,
+    // A throwing unloadSubset is an adapter bug. Core reports it uncaught and
+    // fails neither the source commit nor the consumer.
+    `reports obsolete-demand cleanup failure uncaught without failing the source commit or consumer: $name`,
     async ({ consumer, failure }) => {
       const suffix = `${consumer}-${
         failure === undefined
@@ -456,6 +458,7 @@ describe(`loadSubset failure matrix`, () => {
             )
           : undefined
 
+      const reported = captureMicrotaskErrors()
       try {
         if (live) await live.preload()
         await flushFailures()
@@ -468,16 +471,18 @@ describe(`loadSubset failure matrix`, () => {
 
         await flushFailures()
 
+        expect(reported.errors).toHaveLength(1)
+        expect(Object.is(reported.errors[0], failure)).toBe(true)
         if (effect) {
-          expect(sourceErrors).toHaveLength(1)
-          expect(sourceErrors[0]?.message).toBe(String(failure))
-          expect(effect.disposed).toBe(true)
+          expect(sourceErrors).toHaveLength(0)
+          expect(effect.disposed).toBe(false)
         }
         if (live) {
-          expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
+          expect(live.utils.lastSubsetError).toBeUndefined()
           expect(live.status).toBe(`ready`)
         }
       } finally {
+        reported.restore()
         if (effect) await effect.dispose()
         if (live) await live.cleanup()
         expect(unloadCount).toBe(1)
@@ -523,13 +528,20 @@ describe(`loadSubset failure matrix`, () => {
       try {
         await live.preload()
 
-        parent.utils.begin()
-        parent.utils.write({ type: `delete`, value: row })
-        parent.utils.commit()
-        await flushFailures()
+        const reported = captureMicrotaskErrors()
+        try {
+          parent.utils.begin()
+          parent.utils.write({ type: `delete`, value: row })
+          parent.utils.commit()
+          await flushFailures()
+        } finally {
+          reported.restore()
+        }
 
         expect(unloadCount).toBe(1)
-        expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
+        expect(reported.errors).toHaveLength(1)
+        expect(Object.is(reported.errors[0], failure)).toBe(true)
+        expect(live.utils.lastSubsetError).toBeUndefined()
 
         globalThis.queueMicrotask = (callback) => {
           queuedMicrotasks.push(callback)

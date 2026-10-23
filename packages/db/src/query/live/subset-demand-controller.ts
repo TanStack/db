@@ -2,6 +2,7 @@ import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type {
@@ -114,11 +115,15 @@ export class SubsetDemandController {
     this.states.set(plan.id, state)
 
     // A failed segment is released first, so a replay judged during this
-    // change does not fail for the demand the change requests again.
+    // change does not fail for the demand the change requests again. Release
+    // every retired segment even if subscriber code that a release runs
+    // throws, then report the first error.
     retired.sort(
       (a, b) => Number(b.state === `failed`) - Number(a.state === `failed`),
     )
-    for (const segment of retired) releaseSegment(subscription, segment)
+    runAllCallbacks(
+      retired.map((segment) => () => releaseSegment(subscription, segment)),
+    )
     if (this.states.get(plan.id) !== state) {
       return { changed: false, empty: false, ready: true }
     }
@@ -250,7 +255,9 @@ export class SubsetDemandController {
     const replaced = replacement.replaces ?? []
     replacement.replaces = undefined
     state.segments = [replacement]
-    for (const segment of replaced) releaseSegment(subscription, segment)
+    runAllCallbacks(
+      replaced.map((segment) => () => releaseSegment(subscription, segment)),
+    )
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
@@ -385,9 +392,5 @@ function releaseSegment(
   segment: DemandSegment,
 ): void {
   segment.abortController.abort()
-  try {
-    subscription.releaseSnapshot(segment.where)
-  } catch {
-    // CollectionSubscription has already reported the one cleanup failure.
-  }
+  subscription.releaseSnapshot(segment.where)
 }

@@ -5,7 +5,11 @@ import { createDeferred } from '../src/deferred.js'
 import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
-import { createOnDemandCollection, flushPromises } from './utils.js'
+import {
+  captureMicrotaskErrors,
+  createOnDemandCollection,
+  flushPromises,
+} from './utils.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
@@ -25,7 +29,14 @@ import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
  *
  * Each case declares the cells it may reach; undeclared reach is a failure and
  * the final audit fails if a legal cell was never observed. Counts, signals,
- * errors, readiness, owners, and rows are checked separately. This suite is the
+ * errors, readiness, owners, and rows are checked separately.
+ *
+ * Release law: an `unloadSubset` that throws is an adapter bug. The
+ * subscription attempts each physical release once and reports its error
+ * uncaught, once, with the adapter's identity. The error fails nothing: the
+ * call that released does not throw it, `lastError` and `loadSubset:error` do
+ * not record it, and logical demand still retires. `failed-release` therefore
+ * means "attempted once; never retried", not "failed the caller". This suite is the
  * exhaustive boundary companion to the generated lifecycle histories, not a
  * second copy of their transition implementation.
  */
@@ -1481,6 +1492,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
+      const uncaught = captureMicrotaskErrors()
       let allowRelease = outcome === `return`
       let runReentry = () => {}
 
@@ -1535,7 +1547,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         observeAcquisitionInteraction(`active:unsubscribe`, `retire`)
       }
 
-      expect(thrown).toBe(outcome === `throw` ? releaseFailure : undefined)
+      // The release law: the caller never sees the adapter's release error.
+      expect(thrown).toBe(undefined)
+      await Promise.resolve()
+      expect(uncaught.errors).toEqual(
+        outcome === `throw` ? [releaseFailure] : [],
+      )
       expect(oldTargetLoad.signal?.aborted).toBe(true)
       expect(
         unloads.filter((options) => options === oldTargetLoad),
@@ -1543,14 +1560,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(unloads.filter((options) => options === peerLoad)).toHaveLength(
         Number(reentry === `release-peer` || reentry === `unsubscribe`),
       )
-      expect(errors).toEqual(
-        outcome === `throw` && reentry !== `unsubscribe`
-          ? [releaseFailure]
-          : [],
-      )
-      expect(subscription.lastError).toBe(
-        outcome === `throw` ? releaseFailure : undefined,
-      )
+      // A release error is not a load error.
+      expect(errors).toEqual([])
+      expect(subscription.lastError).toBe(undefined)
 
       allowRelease = true
       subscription.unsubscribe()
@@ -1571,6 +1583,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         )
       }
       await collection.cleanup()
+      await Promise.resolve()
+      // Reported once: neither teardown repeats the attempted release.
+      expect(uncaught.errors).toEqual(
+        outcome === `throw` ? [releaseFailure] : [],
+      )
+      uncaught.restore()
     },
   )
 
@@ -3502,6 +3520,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`retires failed acquisition release with its sync run cleanup`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)
+    const uncaught = captureMicrotaskErrors()
     let unloads = 0
     let sourceCleanups = 0
     const collection = createOnDemandCollection<{ id: string }>({
@@ -3526,7 +3545,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
     subscription.requestSnapshot({ where })
-    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+    expect(() => subscription.releaseSnapshot(where)).not.toThrow()
+    await Promise.resolve()
+    expect(uncaught.errors).toEqual([releaseFailure])
 
     await collection.cleanup()
     expect(unloads).toBe(1)
@@ -3541,6 +3562,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       `no-repeat-on-cleanup`,
     )
     subscription.unsubscribe()
+    await Promise.resolve()
+    expect(uncaught.errors).toEqual([releaseFailure])
+    uncaught.restore()
   })
 
   it.each(
@@ -3556,6 +3580,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
+      const uncaught = captureMicrotaskErrors()
       let releaseOwner = () => {}
       let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
       const collection = createCollection<{ id: string }, string>({
@@ -3601,8 +3626,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(unloads[0]).toBe(loads[0])
         expect(loads[0]!.signal!.aborted).toBe(true)
         expect(subscription.status).toBe(`ready`)
-        expect(errors).toHaveLength(outcome === `throw` ? 1 : 0)
-        if (outcome === `throw`) expect(errors[0]).toBe(failure)
+        // The release error is reported uncaught, not as a load error.
+        expect(errors).toEqual([])
+        expect(uncaught.errors).toEqual(outcome === `throw` ? [failure] : [])
 
         releaseOwner()
         expect(unloads).toHaveLength(1)
@@ -3610,7 +3636,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(unloads).toHaveLength(1)
         for (const options of unloads) expect(options).toBe(loads[0])
         expect(loads).toHaveLength(1)
+        await Promise.resolve()
+        expect(uncaught.errors).toEqual(outcome === `throw` ? [failure] : [])
       } finally {
+        uncaught.restore()
         subscription.unsubscribe()
         await collection.cleanup()
       }
@@ -3630,6 +3659,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
       const nestedFailures: Array<unknown> = []
+      const uncaught = captureMicrotaskErrors()
       let releaseOwner = () => {}
       const collection = createOnDemandCollection<{ id: string }>({
         id: `release-reentry-${reentry}-${failures}`,
@@ -3674,11 +3704,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         } catch (error) {
           releaseError = error
         }
-        expect(releaseError).toBe(failure)
-        // Both callback paths see a retired acquisition, including after throw.
+        expect(releaseError).toBe(undefined)
+        // Adapter reentry sees a retired acquisition, including after throw.
+        // A release error reaches no error listener, so that listener cannot
+        // reenter teardown.
         expect(unloads).toHaveLength(1)
-        expect(collection.subscriberCount).toBe(0)
-        if (reentry === `error-listener`) expect(errors[0]).toBe(failure)
+        // Only the adapter path reentered and unsubscribed.
+        expect(collection.subscriberCount).toBe(reentry === `adapter` ? 0 : 1)
+        expect(errors).toEqual([])
         expect(nestedFailures).toEqual([])
         expect(() => subscription.unsubscribe()).not.toThrow()
         expect(unloads).toHaveLength(1)
@@ -3686,7 +3719,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(unloads).toHaveLength(1)
         expect(loads).toHaveLength(1)
         for (const options of unloads) expect(options).toBe(loads[0])
+        await Promise.resolve()
+        // One attempt, one report, whatever the adapter would throw later.
+        expect(uncaught.errors).toEqual([failure])
       } finally {
+        uncaught.restore()
         await collection.cleanup()
         subscription.unsubscribe()
       }
@@ -3696,6 +3733,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`keeps failed releases out of truncate replay`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)
+    const uncaught = captureMicrotaskErrors()
     let unloads = 0
     let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
     const collection = createCollection<{ id: string }, string>({
@@ -3720,7 +3758,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
     subscription.requestSnapshot({ where })
-    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+    expect(() => subscription.releaseSnapshot(where)).not.toThrow()
 
     operations.begin()
     operations.truncate()
@@ -3735,6 +3773,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       `no-repeat-on-truncate`,
     )
     await collection.cleanup()
+    await Promise.resolve()
+    expect(uncaught.errors).toEqual([releaseFailure])
+    uncaught.restore()
   })
 
   it(`does not repeat failed cleanup through a replacement sync run`, async () => {
@@ -3742,6 +3783,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let nextSyncRunGeneration = 0
     const unloadSyncRunGenerations: Array<number> = []
     const releaseFailure = new Error(`old sync run release failed`)
+    const uncaught = captureMicrotaskErrors()
     const collection = createOnDemandCollection<{ id: string }>({
       id: `cleanup-debt-sync-run`,
       sync: {
@@ -3762,7 +3804,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
     subscription.requestSnapshot({ where })
-    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+    expect(() => subscription.releaseSnapshot(where)).not.toThrow()
 
     await collection.cleanup()
     collection.startSyncImmediate()
@@ -3771,6 +3813,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     expect(unloadSyncRunGenerations).toEqual([0])
     await collection.cleanup()
+    expect(uncaught.errors).toEqual([releaseFailure])
+    uncaught.restore()
   })
 
   it.each(restartScenarios)(

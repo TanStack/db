@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import type {
   CollectionSubscription,
   ReleaseLoadSubset,
@@ -171,14 +172,20 @@ describe(`OrderedSourceLoader`, () => {
       subscription as unknown as CollectionSubscription,
       `row`,
     )
+    // A throwing release is an adapter bug: it is reported uncaught and the
+    // larger prefix still settles.
+    const uncaught = captureMicrotaskErrors()
     try {
       loader.start()
       await pendingPromise(loader)
       reads.mockClear()
       info.limit = 2
-      await expect(loader.loadMore(1)).rejects.toBe(failure)
+      await loader.loadMore(1)
+      await flushPromises()
+      expect(uncaught.errors).toEqual([failure])
       expect(reads).toHaveBeenCalledWith(expect.objectContaining({ limit: 2 }))
-      expect(subscription.lastError).toBe(failure)
+      // A release failure is not a load error.
+      expect(subscription.lastError).toBeUndefined()
       info.limit = 3
       await loader.loadMore(2)
       expect(requests.map((request) => request.limit)).toEqual([
@@ -196,13 +203,14 @@ describe(`OrderedSourceLoader`, () => {
       ).toBe(true)
       expect(source.size).toBe(3)
     } finally {
+      uncaught.restore()
       loader.dispose()
       subscription.unsubscribe()
       await source.cleanup()
     }
   })
 
-  it(`keeps a literal-true replacement when retiring the older prefix throws`, () => {
+  it(`keeps a literal-true replacement when retiring the older prefix throws`, async () => {
     const failure = new Error(`old prefix release failed`)
     const requests: Array<{
       options: RequestOptions
@@ -239,12 +247,15 @@ describe(`OrderedSourceLoader`, () => {
       undefined,
       () => 0,
     )
+    const uncaught = captureMicrotaskErrors()
 
     try {
       loader.start()
       info.limit = 2
 
-      expect(() => loader.loadMore()).toThrow(failure)
+      loader.loadMore()
+      await flushPromises()
+      expect(uncaught.errors).toEqual([failure])
 
       expect(requests.map(({ options }) => options.limit)).toEqual([
         1,
@@ -275,6 +286,7 @@ describe(`OrderedSourceLoader`, () => {
           .stagedContinuation,
       ).toBeUndefined()
     } finally {
+      uncaught.restore()
       loader.dispose()
     }
   })
@@ -477,15 +489,16 @@ describe(`OrderedSourceLoader`, () => {
       const stagedContinuation = (
         loader as unknown as {
           stagedContinuation?: {
-            isAuthoritativeRequest: boolean
+            role: `finite` | `repair` | `full-source`
             windowOperationGeneration?: number
           }
         }
       ).stagedContinuation
-      expect(stagedContinuation).toMatchObject({
-        isAuthoritativeRequest: false,
-      })
-      expect(stagedContinuation?.windowOperationGeneration).toBeUndefined()
+      // The first request's own delivery invalidated ordering, so it proves
+      // no current coverage: no ordinary continuation may survive it. It
+      // stages none, or only authoritative work; a stamp taken after the
+      // request returns would stage a finite one.
+      expect(stagedContinuation?.role).not.toBe(`finite`)
       expect(
         (loader as unknown as { needsOrderingRepair: boolean })
           .needsOrderingRepair,
@@ -1375,6 +1388,9 @@ describe(`OrderedSourceLoader`, () => {
       `row`,
     )
 
+    // The provisional lease's release also throws: an adapter bug, reported
+    // uncaught, so the request failure stays the reported error.
+    const uncaught = captureMicrotaskErrors()
     try {
       subscription.requestSnapshot({
         where: new Func(`eq`, [new PropRef([`id`]), new Value(`unrelated`)]),
@@ -1384,6 +1400,8 @@ describe(`OrderedSourceLoader`, () => {
       expect(subscription.lastError).toBe(requestFailure)
       expect(reported).toEqual([requestFailure])
       expect(unloads).toEqual([loads[1]])
+      await flushPromises()
+      expect(uncaught.errors).toEqual([cleanupFailure])
 
       loader.dispose()
       subscription.unsubscribe()
@@ -1394,6 +1412,7 @@ describe(`OrderedSourceLoader`, () => {
       subscription.unsubscribe()
       expect(unloads).toEqual([loads[1], loads[0]])
     } finally {
+      uncaught.restore()
       loader.dispose()
       subscription.unsubscribe()
       await source.cleanup()
@@ -1444,12 +1463,17 @@ describe(`OrderedSourceLoader`, () => {
       )
       const notCaught = Symbol(`not caught`)
       let caught: unknown = notCaught
+      const uncaught = captureMicrotaskErrors()
 
       try {
         loader.start()
       } catch (error) {
         caught = error
       }
+      await flushPromises()
+      uncaught.restore()
+      // The provisional release's error is an adapter bug, reported uncaught.
+      expect(uncaught.errors).toEqual([cleanupFailure])
 
       expect(caught).not.toBe(notCaught)
       expect(caught).toBeInstanceOf(Error)
@@ -1536,14 +1560,23 @@ describe(`OrderedSourceLoader`, () => {
       `row`,
     )
 
-    loader.start()
-    await expect(pendingPromise(loader)).rejects.toBe(requestFailure)
-    expect(() => loader.loadMore(1)).toThrow(releaseFailure)
-    expect(methods).toEqual([`snapshot`])
+    // The release reenters, but refinement stays blocked until it returns;
+    // its error is reported uncaught and the retry then replaces the lease.
+    const uncaught = captureMicrotaskErrors()
+    try {
+      loader.start()
+      await expect(pendingPromise(loader)).rejects.toBe(requestFailure)
+      loader.loadMore(1)
+      expect(methods).toEqual([`snapshot`, `snapshot`])
+      await flushPromises()
+      expect(uncaught.errors).toEqual([releaseFailure])
 
-    loader.loadMore(3)
-    expect(methods).toEqual([`snapshot`, `snapshot`])
-    loader.dispose()
+      loader.loadMore(3)
+      expect(methods).toEqual([`snapshot`, `snapshot`])
+    } finally {
+      uncaught.restore()
+      loader.dispose()
+    }
   })
 
   it(`blocks a reentrant boundary retry until a later operation`, async () => {

@@ -158,6 +158,11 @@ try {
 Effects report subset failures through `onSourceError` and dispose because
 their incremental result can no longer be kept complete.
 
+A sync adapter's `unloadSubset` must not throw. If it does, TanStack DB reports
+the error as an uncaught error and continues as if the release had succeeded.
+The error is not a subset failure: it does not set `lastSubsetError`, reject
+`setWindow()`, dispose an Effect, or make `dispose()` or `cleanup()` reject.
+
 When a source change invalidates an ordered window, automatic full-source
 repair keeps the last complete snapshot visible. A failed repair exposes
 `utils.lastSubsetError` and retries at most twice, after 250 ms and 500 ms.

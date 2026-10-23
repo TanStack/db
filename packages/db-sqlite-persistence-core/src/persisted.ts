@@ -619,11 +619,25 @@ export interface PersistenceAdapter {
     task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
   ) => Promise<T>
   /** Schedule one regular operation before it acquires external writer locks. */
-  runInRegularScope?: <T>(
-    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
-  ) => Promise<T>
+  runInRegularScope?: RegularScope
   /** Whether hydration scopes currently enter a shared driver scheduler. */
   isHydrationScopeScheduled?: () => boolean
+}
+
+/**
+ * Regular work on a shared driver scheduler. A scheduler that admits regular
+ * work also orders it against hydrates, so the barrier is part of the same
+ * capability rather than a separate optional member.
+ */
+export type RegularScope = (<T>(
+  task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+) => Promise<T>) & {
+  /**
+   * Resolves after every operation, in either lane, queued or running at the
+   * call settles. It never rejects, takes no scheduler turn, and does not
+   * count as a lane completion.
+   */
+  afterQueuedWork: () => Promise<void>
 }
 
 export type HydrationPersistenceAdapter = PersistenceAdapter & {
@@ -2205,34 +2219,33 @@ class PersistedCollectionRuntime<
             }
             return result
           })
-        } else {
+        } else if (this.persistence.adapter.runInHydrationScope) {
           // Preserve the existing unscheduled-adapter lifecycle contract: a
-          // replacement upstream may start while stale hydration is settling.
-          if (await loadStartupMetadata(this.persistence.adapter)) {
-            if (this.persistence.adapter.isHydrationScopeScheduled?.()) {
-              startup = await this.applyMutex.run(async () => {
-                const result = await this.runInHydrationScope((adapter) =>
-                  this.startInternal(
-                    lifecycleGeneration,
-                    adapter,
-                    resolveStartupMetadata,
-                  ),
+          // replacement upstream may start while stale hydration is settling,
+          // so this restart takes no mutex and waits for no scheduler. One
+          // scope still marks both startup reads as queued work, which an
+          // election term must not run ahead of.
+          startup = await this.runInHydrationScope(async (adapter) =>
+            (await loadStartupMetadata(adapter))
+              ? this.startInternal(
+                  lifecycleGeneration,
+                  adapter,
+                  resolveStartupMetadata,
                 )
-                if (lifecycleGeneration === this.lifecycleGeneration) {
-                  await this.flushQueuedTxCommittedUnsafe()
-                }
-                return result
-              })
-            } else {
-              startup = await this.startInternal(
-                lifecycleGeneration,
-                this.persistence.adapter,
-                resolveStartupMetadata,
-              )
-              if (lifecycleGeneration === this.lifecycleGeneration) {
-                await this.flushQueuedTxCommittedUnsafe()
-              }
-            }
+              : undefined,
+          )
+          if (startup && lifecycleGeneration === this.lifecycleGeneration) {
+            await this.flushQueuedTxCommittedUnsafe()
+          }
+        } else if (await loadStartupMetadata(this.persistence.adapter)) {
+          // An adapter without a hydration scope reads directly.
+          startup = await this.startInternal(
+            lifecycleGeneration,
+            this.persistence.adapter,
+            resolveStartupMetadata,
+          )
+          if (lifecycleGeneration === this.lifecycleGeneration) {
+            await this.flushQueuedTxCommittedUnsafe()
           }
         }
         if (
@@ -4291,12 +4304,8 @@ class PersistedCollectionRuntime<
         )
       }
 
-      this.observeStreamPosition(
-        response.term,
-        response.seq,
-        response.latestRowVersion,
-      )
-
+      // The commit's own tx:committed notice advances the observed position.
+      // Observing it here first would make that notice look like a gap.
       const uniqueAcceptedMutationIds = Array.from(
         new Set(response.acceptedMutationIds),
       )

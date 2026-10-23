@@ -7,7 +7,11 @@ import { createTransaction } from '../src/transactions'
 import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import { hasVirtualProps } from '../src/virtual-props.js'
-import { stripVirtualProps } from './utils'
+import {
+  captureMicrotaskErrors,
+  flushPromises,
+  stripVirtualProps,
+} from './utils'
 import type { OutputWithVirtual } from './utils'
 import type {
   ChangeMessage,
@@ -2185,7 +2189,10 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.status).toBe(`crashed`)
   })
 
-  it(`preserves setup failure when subscription cleanup also throws`, () => {
+  it(`preserves setup failure when subscription cleanup also throws`, async () => {
+    // The cleanup failure is an adapter bug: it is reported uncaught, once,
+    // and the setup failure is what the caller sees.
+    const uncaught = captureMicrotaskErrors()
     const loadFailure = new Error(`initial subset failed`)
     const unloadFailure = new Error(`subset cleanup failed`)
     const collection = createCollection<{ id: number }>({
@@ -2213,6 +2220,12 @@ describe(`Collection.subscribeChanges`, () => {
         },
       }),
     ).toThrow(loadFailure)
+    try {
+      await flushPromises()
+    } finally {
+      uncaught.restore()
+    }
+    expect(uncaught.errors).toEqual([unloadFailure])
     expect(collection.subscriberCount).toBe(0)
   })
 })

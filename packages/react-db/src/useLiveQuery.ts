@@ -142,7 +142,10 @@ export type ConditionalUseLiveQueryConfig<TContext extends Context> =
 export function warnDeprecatedDepsArray(
   hookName: `useLiveQuery` | `useLiveInfiniteQuery` = `useLiveQuery`,
 ): void {
-  if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_DEPRECATION_WARNINGS`)) {
+  if (!(
+    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_DEPRECATION_WARNINGS`) &&
+    process.env.NODE_ENV !== `production`
+  )) {
     return
   }
 
@@ -187,7 +190,10 @@ function warnDerivedIdentityHotPath(
 ): void {
   if (
     profiler.warned ||
-    !shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+    !(
+      shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
+      process.env.NODE_ENV !== `production`
+    )
   ) {
     return
   }
@@ -264,9 +270,9 @@ export function prepareDerivedQuery(
   profiler: DerivedIdentityProfiler,
   deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
 ): DerivedQueryPreparation {
-  const shouldProfile = shouldWarnInDevelopment(
-    `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
-  )
+  const shouldProfile =
+    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
+    process.env.NODE_ENV !== `production`
   const start = shouldProfile ? getCurrentTime() : 0
   const preparedValue = prepareQueryValue(value, dbClient, deferredCollections)
 
@@ -297,7 +303,10 @@ export function prepareDerivedQuery(
 export function warnUnhashableDerivedIdentity(
   error: UnhashableQueryIRError,
 ): void {
-  if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)) {
+  if (!(
+    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
+    process.env.NODE_ENV !== `production`
+  )) {
     return
   }
 
@@ -705,7 +714,8 @@ function useLiveQueryImpl(
     if (
       dbClient ||
       forSuspense ||
-      shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+      (shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
+        process.env.NODE_ENV !== `production`)
     )
       try {
         preparedQueryValue = prepareQueryValue(
@@ -838,7 +848,10 @@ function useLiveQueryImpl(
       ).config?.syncMode
       if (
         syncMode === `on-demand` &&
-        shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+        shouldWarnInDevelopment(
+          `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
+        ) &&
+        process.env.NODE_ENV !== `production`
       ) {
         console.warn(
           `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +

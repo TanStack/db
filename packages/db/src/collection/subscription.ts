@@ -6,7 +6,7 @@ import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import { normalizeError } from '../utils/error.js'
-import { runAllCallbacks } from '../utils/callbacks.js'
+import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
 import { codedMessage, devBuild } from '../error-message.js'
@@ -171,7 +171,6 @@ export class CollectionSubscription
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
   private subsetDemands: Array<SubsetDemand> = []
-  private primaryFailureDeliveryDepth = 0
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
     BasicExpression<boolean>
@@ -553,14 +552,7 @@ export class CollectionSubscription
     const previous = demand.acquisition
     const hadPreviousAcquisition = demand.acquisitionState === `active`
     demand.acquisitionState = `detached`
-    if (hadPreviousAcquisition) {
-      try {
-        this.releaseAcquisition(previous)
-      } catch (error) {
-        fail(error)
-        return
-      }
-    }
+    if (hadPreviousAcquisition) this.releaseAcquisition(previous)
     if (!isCurrent() || demand.requestOptions.signal?.aborted) return
 
     const next = this.createSubsetAcquisitionRecord(demand)
@@ -578,11 +570,7 @@ export class CollectionSubscription
 
     if (!isCurrent()) {
       if (demand.acquisition === next) demand.acquisitionState = `detached`
-      try {
-        this.releaseAcquisition(next)
-      } catch (error) {
-        fail(error)
-      }
+      this.releaseAcquisition(next)
       return
     }
 
@@ -1070,11 +1058,12 @@ export class CollectionSubscription
     }
   }
 
-  /** Retire an acquisition before user code; failed cleanup is not retryable. */
-  private releaseAcquisition(
-    acquisition: SubsetAcquisitionRecord,
-    reportReleaseError = this.primaryFailureDeliveryDepth === 0,
-  ): void {
+  /**
+   * Retire an acquisition before user code; failed cleanup is not retryable.
+   * An `unloadSubset` that throws is an adapter bug: it is reported uncaught
+   * and fails no load, replay, or caller.
+   */
+  private releaseAcquisition(acquisition: SubsetAcquisitionRecord): void {
     if (acquisition.releaseAttempted) return
     acquisition.releaseAttempted = true
     try {
@@ -1083,14 +1072,7 @@ export class CollectionSubscription
         this.collection._sync.unloadSubset(acquisition.options)
       }
     } catch (error) {
-      const normalized = reportReleaseError
-        ? this.recordLoadSubsetError(
-            acquisition.options,
-            normalizeError(error),
-            true,
-          )
-        : normalizeError(error)
-      throw normalized
+      reportUncaught(error)
     } finally {
       acquisition.removeRequestAbortListener?.()
     }
@@ -1214,17 +1196,12 @@ export class CollectionSubscription
     if (options.signal?.aborted && !reportAborted) return normalized
 
     this._lastError = normalized
-    this.primaryFailureDeliveryDepth++
-    try {
-      this.emitInner(`loadSubset:error`, {
-        type: `loadSubset:error`,
-        subscription: this,
-        options,
-        error: normalized,
-      })
-    } finally {
-      this.primaryFailureDeliveryDepth--
-    }
+    this.emitInner(`loadSubset:error`, {
+      type: `loadSubset:error`,
+      subscription: this,
+      options,
+      error: normalized,
+    })
     return normalized
   }
 
@@ -1418,14 +1395,11 @@ export class CollectionSubscription
     } finally {
       // The failed request remains the public error, even if cleanup also fails.
       const index = this.subsetDemands.indexOf(demand)
-      if (index !== -1) this.releaseDemandAt(index, false)
+      if (index !== -1) this.releaseDemandAt(index)
     }
   }
 
-  private releaseDemandAt(
-    index: number,
-    reportReleaseError = this.primaryFailureDeliveryDepth === 0,
-  ): void {
+  private releaseDemandAt(index: number): void {
     const demand = this.subsetDemands[index]
     if (!demand) return
     const replayState = this.truncateReplayState
@@ -1438,7 +1412,7 @@ export class CollectionSubscription
         ? [
             // Adapter release is a supported reentrancy boundary. A demand
             // started from unload joins this replacement before completion.
-            () => this.releaseAcquisition(acquisition, reportReleaseError),
+            () => this.releaseAcquisition(acquisition),
           ]
         : []),
       () => this.retireEmptyReplay(),
@@ -1905,11 +1879,9 @@ export class CollectionSubscription
           }
         }
         this.subsetDemands = []
-        runAllCallbacks(
-          acquisitions.map(
-            (acquisition) => () => this.releaseAcquisition(acquisition),
-          ),
-        )
+        for (const acquisition of acquisitions) {
+          this.releaseAcquisition(acquisition)
+        }
       },
       () =>
         this.emitInner(`unsubscribed`, {
