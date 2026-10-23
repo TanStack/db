@@ -957,23 +957,23 @@ export class DbClient {
     },
     seedKind?: `initialData` | `hydration`,
   ): void {
-    const hasAuthoritativeAdapterWork =
-      collection._state.createAdapterAuthorityLookup()
-    const hasProjectedSyncedKey = collection._state.createSyncedKeyLookup()
-    const rows = chunk.rows.flatMap((row) => {
+    // A hydration seed supplies only the row data and row metadata that no
+    // committed adapter write has written; each object is judged alone.
+    const hydrating = seedKind === `hydration`
+    const authority = collection._state.createAdapterAuthorityLookups()
+    const seeds = chunk.rows.map((row) => {
       const value = collection.validateData(row.value, `insert`)
-      const key = collection.config.getKey(value)
-      const isAdapterAuthoritative =
-        seedKind === `hydration` && hasAuthoritativeAdapterWork(key)
-
-      return isAdapterAuthoritative ? [] : [{ ...row, key, value }]
+      return { ...row, key: collection.config.getKey(value), value }
     })
+    const rows = seeds.filter((row) => !hydrating || !authority.rows(row.key))
     const rowMetadataWrites = new Map<string | number, PendingMetadataWrite>()
 
-    for (const row of rows) {
-      if (row.metadata !== undefined) {
+    for (const row of seeds) {
+      if (hydrating && authority.metadata(row.key)) continue
+      // The latest seed wins whole, so one without metadata clears it.
+      if (row.metadata !== undefined)
         rowMetadataWrites.set(row.key, { type: `set`, value: row.metadata })
-      }
+      else if (hydrating) rowMetadataWrites.set(row.key, { type: `delete` })
     }
 
     if (seedKind) {
@@ -985,28 +985,25 @@ export class DbClient {
       }
     }
 
-    if (rows.length > 0) {
-      collection._state.acceptSeedTransaction({
+    if (rows.length > 0 || rowMetadataWrites.size > 0) {
+      const applied = createDeferred<void>()
+      // Nothing awaits a seed's receipt; cleanup may still reject it.
+      void applied.promise.catch(() => undefined)
+      collection._state.acceptSyncTransaction({
         committed: true,
         applicationStarted: false,
         layoutChanged: false,
+        // A seed replaces any earlier seed of its row whole.
         operations: rows.map((row) => ({
-          type: hasProjectedSyncedKey(row.key)
-            ? (`update` as const)
-            : (`insert` as const),
+          type: `insert` as const,
           key: row.key,
           value: row.value,
         })),
         rowMetadataWrites,
-        // Hydrated metadata follows every row it describes.
-        explicitRowMetadataWrites: new Map(
-          [...rowMetadataWrites].map(([key, write]) => [
-            key,
-            { position: rows.length, write },
-          ]),
-        ),
+        // An accepted transaction's metadata writes are never rebuilt.
+        explicitRowMetadataWrites: new Map(),
         collectionMetadataWrites: new Map(),
-        applied: createDeferred<void>(),
+        applied,
         preserveHydrationSeedKeys: seedKind !== undefined,
       })
     }

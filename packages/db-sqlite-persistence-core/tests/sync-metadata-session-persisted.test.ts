@@ -1,0 +1,461 @@
+import { fc, test as fcTest } from '@fast-check/vitest'
+import { describe, expect, it } from 'vitest'
+import { DbClient, collectionOptions, createCollection } from '@tanstack/db'
+import {
+  absentMarker,
+  describeMismatch,
+  historyRegimes,
+  persistedFlatLane,
+  persistedNestedLane,
+  persistedSeedLane,
+  runSessionHistory,
+  sessionCollectionKeys,
+  sessionHistoryArbitrary,
+} from '../../db/tests/sync-metadata-session-oracle'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config'
+import { persistedCollectionOptions } from '../src'
+import type { CollectionConfig, SyncConfig } from '@tanstack/db'
+import type {
+  ReceiptState,
+  SessionAction,
+  SessionDriver,
+  SessionLane,
+} from '../../db/tests/sync-metadata-session-oracle'
+import type { PersistedTx, PersistenceAdapter } from '../src'
+
+/**
+ * The persisted wrapper is a second production path for the sync metadata
+ * session oracle. Its laws, model, grammar, and comparison are the oracle's
+ * own (`packages/db/tests/sync-metadata-session-oracle.ts`). The source and
+ * the wrapper are one session: a source read through the wrapper must give
+ * what the same read gives on a bare Collection.
+ *
+ * Production path: `persistedCollectionOptions` over an in-memory adapter.
+ * The source sync function receives the wrapper's sync API. A `hold` holds
+ * one kind of delay. A store hold makes the adapter's next durable write
+ * wait, so transactions committed after it stay deferred in the wrapper. A
+ * core hold is a persisting optimistic insert of a fresh fixture key, so
+ * transactions the wrapper has handed to core stay held there. `release`
+ * ends either.
+ *
+ * Checkpoints: source reads after every action; `collection.base` only at the
+ * final checkpoint, after every hold ends and the wrapper's continuations
+ * drain. The wrapper hands rows to core after its durable step, so consumers
+ * see them a turn or more later even with no hold.
+ *
+ * Lanes: `persisted-flat`, `persisted-nested`, and `persisted-seeds`. Seeds
+ * use a `DbClient` that owns the persisted Collection. The adapter ignores
+ * stored metadata, so restart and resume reads are outside these lanes.
+ */
+
+type Row = { id: number; v: unknown }
+type SyncActions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
+
+function createHoldingAdapter() {
+  let holdNext = false
+  let releaseStore: (() => void) | undefined
+  let latest = { term: 0, seq: 0, rowVersion: 0 }
+  const adapter: PersistenceAdapter = {
+    loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: latest.term,
+        latestSeq: latest.seq,
+        latestRowVersion: latest.rowVersion,
+        resetEpoch: 0,
+      }),
+    loadCollectionMetadata: () => Promise.resolve([]),
+    applyCommittedTx: async (_target, tx: PersistedTx) => {
+      if (holdNext) {
+        holdNext = false
+        await new Promise<void>((resolve) => {
+          releaseStore = resolve
+        })
+      }
+      latest = { term: tx.term, seq: tx.seq, rowVersion: tx.rowVersion }
+    },
+    ensureIndex: () => Promise.resolve(),
+  }
+  return {
+    adapter,
+    holdNextStore: () => {
+      holdNext = true
+    },
+    releaseStore: () => {
+      holdNext = false
+      releaseStore?.()
+      releaseStore = undefined
+    },
+  }
+}
+
+const drainTurns = async () => {
+  for (let turn = 0; turn < 20; turn++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+let run = 0
+
+async function createPersistedDriver(
+  withClient = false,
+): Promise<SessionDriver> {
+  const store = createHoldingAdapter()
+  const id = `sync-metadata-session-persisted-${run++}`
+  let sync!: SyncActions
+  let resolveMutation: (() => void) | undefined
+  const client = withClient ? new DbClient() : undefined
+  const options = persistedCollectionOptions<Row, number>({
+    id,
+    getKey: (row) => row.id,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.commit()
+        actions.markReady()
+      },
+    },
+    onInsert: () =>
+      new Promise<void>((resolve) => {
+        resolveMutation = resolve
+      }),
+    persistence: { adapter: store.adapter },
+  } as CollectionConfig<Row, number> & {
+    persistence: { adapter: PersistenceAdapter }
+  })
+  const collection = client
+    ? client.collection(
+        collectionOptions(options as CollectionConfig<Row, number>),
+      )
+    : createCollection(options)
+  await collection.preload()
+  await drainTurns()
+
+  let depth = 0
+  let holdCount = 0
+  let blocker: { isPersisted: { promise: Promise<unknown> } } | undefined
+  const receipts: Array<Promise<void>> = []
+  const rejections: Array<string> = []
+  const receiptStates: Array<ReceiptState> = []
+  const track = (receipt: true | Promise<void>, expectAbort: boolean) => {
+    if (receipt === true) return
+    receipts.push(
+      receipt.then(
+        () => {
+          if (expectAbort) rejections.push(`cancelled transaction applied`)
+        },
+        (error: unknown) => {
+          if (
+            !expectAbort ||
+            !(error instanceof Error) ||
+            error.name !== `AbortError`
+          )
+            rejections.push(
+              error instanceof Error
+                ? `${error.name}: ${error.message}`
+                : String(error),
+            )
+        },
+      ),
+    )
+  }
+  const abort = () => {
+    const controller = new AbortController()
+    controller.abort()
+    track(sync.commit(controller.signal), true)
+    depth--
+  }
+  const metadata = () => sync.metadata!
+  const read = (value: unknown) => (value === undefined ? absentMarker : value)
+  const release = async () => {
+    store.releaseStore()
+    const pending = blocker
+    blocker = undefined
+    resolveMutation?.()
+    resolveMutation = undefined
+    await pending?.isPersisted.promise
+  }
+  const asMetadata = (value: unknown) =>
+    value === undefined ? {} : { metadata: value as Record<string, unknown> }
+
+  return {
+    consumerCheckpoint: `final`,
+    begin: () => {
+      sync.begin()
+      depth++
+    },
+    commit: () => {
+      const index = receiptStates.length
+      const receipt = sync.commit()
+      depth--
+      if (receipt === true) {
+        receiptStates.push(`applied`)
+        return
+      }
+      receiptStates.push(`pending`)
+      receipts.push(
+        receipt.then(
+          () => {
+            receiptStates[index] = `applied`
+          },
+          () => {
+            receiptStates[index] = `rejected`
+          },
+        ),
+      )
+    },
+    cancel: abort,
+    rowSet: (key, value) => metadata().row.set(key, value),
+    rowDelete: (key) => metadata().row.delete(key),
+    insert: (_key, value, rowMetadata) =>
+      sync.write({
+        type: `insert`,
+        value: value as Row,
+        ...asMetadata(rowMetadata),
+      }),
+    update: (_key, value, rowMetadata) =>
+      sync.write({
+        type: `update`,
+        value: value as Row,
+        ...asMetadata(rowMetadata),
+      }),
+    delete: (key) => sync.write({ type: `delete`, key }),
+    truncate: () => sync.truncate(),
+    collectionSet: (key, value) => metadata().collection.set(key, value),
+    collectionDelete: (key) => metadata().collection.delete(key),
+    hold: (holdStore) => {
+      if (holdStore) store.holdNextStore()
+      else blocker = collection.insert({ id: 1000 + holdCount++, v: 0 })
+    },
+    release,
+    seed: (key, row, rowMetadata) =>
+      client!.hydrate({
+        collections: [
+          {
+            collectionId: id,
+            rows: [
+              {
+                key,
+                value: row as Row,
+                metadata: rowMetadata as Record<string, unknown>,
+              },
+            ],
+          },
+        ],
+      }),
+    observe: () => ({
+      rowMetadata: {
+        1: read(metadata().row.get(1)),
+        2: read(metadata().row.get(2)),
+      },
+      collection: {
+        ...Object.fromEntries(
+          sessionCollectionKeys.map((key) => [
+            key,
+            read(metadata().collection.get(key)),
+          ]),
+        ),
+      },
+      list: sorted(metadata().collection.list()),
+      prefixList: sorted(metadata().collection.list(`gc:`)),
+      base: {
+        1: read(collection.base.get(1)),
+        2: read(collection.base.get(2)),
+      },
+      receipts: [...receiptStates],
+    }),
+    flush: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    settle: async () => {
+      await release()
+      while (depth > 0) abort()
+      await drainTurns()
+      await Promise.all(receipts)
+      await drainTurns()
+      return rejections
+    },
+    cleanup: () => collection.cleanup(),
+  }
+}
+
+function sorted(
+  entries: ReadonlyArray<{ key: string; value: unknown }>,
+): Array<[string, unknown]> {
+  return [...entries]
+    .map(({ key, value }): [string, unknown] => [key, value])
+    .sort(([a], [b]) => a.localeCompare(b))
+}
+
+async function assertPersistedHistory(
+  history: ReadonlyArray<SessionAction>,
+  lane: SessionLane = persistedFlatLane,
+): Promise<void> {
+  const { mismatch } = await runSessionHistory(lane, history, () =>
+    createPersistedDriver(lane.seeds),
+  )
+  if (mismatch) throw new Error(describeMismatch(history, mismatch))
+}
+
+const property = `sync-metadata-session.persisted-flat`
+const fixedSeed = 2_220_011
+const requestedReplayProperty = readOracleRunConfig().replayProperty
+
+describe(`sync metadata session oracle through the persisted wrapper`, () => {
+  it.each([false, true])(
+    `keeps a held cursor visible after a later commit (store hold: %s)`,
+    async (holdStore) => {
+      await assertPersistedHistory([
+        { type: `hold`, store: holdStore },
+        { type: `begin` },
+        { type: `collectionSet`, key: `cursor` },
+        { type: `commit` },
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `commit` },
+      ])
+    },
+  )
+
+  // The reported path: once the wrapper has handed transactions to core and
+  // core holds them, a read after a third transaction loses the earliest
+  // write. A store hold keeps them in the wrapper's staging instead; that
+  // neighbour passes on 30175be48.
+  it.each([false, true])(
+    `keeps a held write visible after a third transaction (store hold: %s)`,
+    async (holdStore) => {
+      await assertPersistedHistory([
+        { type: `hold`, store: holdStore },
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: true },
+        { type: `commit` },
+        { type: `begin` },
+        { type: `commit` },
+        { type: `begin` },
+        { type: `collectionSet`, key: `cursor` },
+        { type: `commit` },
+      ])
+    },
+  )
+
+  // A source insert equal to a seeded row is still an insert: the source never
+  // wrote the row, so it names the row's metadata and clears the seed's.
+  it(`clears a seed's metadata when the source inserts an equal row`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `seed`, key: 1 },
+        { type: `begin` },
+        { type: `reinsert`, key: 1, metadata: false },
+      ],
+      persistedSeedLane,
+    )
+  })
+
+  // An inner transaction reads the open writes of the transactions it began
+  // inside: one session reads all its open writes.
+  it(`reads an enclosing transaction's write inside a nested transaction`, async () => {
+    await assertPersistedHistory(
+      [{ type: `begin` }, { type: `rowSet`, key: 1 }, { type: `begin` }],
+      persistedNestedLane,
+    )
+  })
+
+  // An insert without metadata clears the row's metadata, even inside the
+  // transaction that set it (2026-10-05 rules).
+  it(`reads an insert's implicit metadata clear in the open transaction`, async () => {
+    await assertPersistedHistory([
+      { type: `begin` },
+      { type: `rowSet`, key: 2 },
+      { type: `upsert`, key: 2, metadata: false },
+    ])
+  })
+
+  it(`reaches held and open-over-held reads in the fixed campaign`, () => {
+    const counts = new Map<string, number>()
+    for (const history of fc.sample(
+      sessionHistoryArbitrary(persistedFlatLane),
+      {
+        numRuns: oracleRuns(50),
+        seed: fixedSeed,
+      },
+    ))
+      for (const regime of historyRegimes(persistedFlatLane, history))
+        counts.set(regime, (counts.get(regime) ?? 0) + 1)
+    for (const regime of [
+      `read with two held transactions`,
+      `open transaction over a held transaction`,
+      `store hold`,
+      `core hold`,
+    ])
+      expect(counts.get(regime) ?? 0, regime).toBeGreaterThan(5)
+  })
+
+  if (requestedReplayProperty === undefined) {
+    fcTest.prop([sessionHistoryArbitrary(persistedFlatLane)], {
+      numRuns: oracleRuns(50),
+      seed: fixedSeed,
+    })(
+      `keeps the session law on flat histories (fixed)`,
+      assertPersistedHistory,
+      120_000,
+    )
+    fcTest.prop(
+      [sessionHistoryArbitrary(persistedFlatLane)],
+      oraclePropertyOptions(50, property),
+    )(
+      `keeps the session law on flat histories (random)`,
+      assertPersistedHistory,
+      120_000,
+    )
+  } else if (requestedReplayProperty === property) {
+    fcTest.prop(
+      [sessionHistoryArbitrary(persistedFlatLane)],
+      oraclePropertyOptions(50, property),
+    )(
+      `replays persisted flat session histories`,
+      assertPersistedHistory,
+      120_000,
+    )
+  }
+})
+
+const extraLanes = [
+  { lane: persistedNestedLane, seed: 2_220_012 },
+  { lane: persistedSeedLane, seed: 2_220_013 },
+] as const
+
+describe(`sync metadata session oracle through the persisted wrapper: nesting and seeds`, () => {
+  for (const { lane, seed } of extraLanes) {
+    const lanePropertyName = `sync-metadata-session.${lane.name}`
+    const runLane = (history: Array<SessionAction>) =>
+      assertPersistedHistory(history, lane)
+    if (requestedReplayProperty === undefined) {
+      fcTest.prop([sessionHistoryArbitrary(lane)], {
+        numRuns: oracleRuns(50),
+        seed,
+      })(
+        `keeps the session law on ${lane.name} histories (fixed)`,
+        runLane,
+        120_000,
+      )
+      fcTest.prop(
+        [sessionHistoryArbitrary(lane)],
+        oraclePropertyOptions(50, lanePropertyName),
+      )(
+        `keeps the session law on ${lane.name} histories (random)`,
+        runLane,
+        120_000,
+      )
+    } else if (requestedReplayProperty === lanePropertyName) {
+      fcTest.prop(
+        [sessionHistoryArbitrary(lane)],
+        oraclePropertyOptions(50, lanePropertyName),
+      )(`replays ${lane.name} session histories`, runLane, 120_000)
+    }
+  }
+})

@@ -7,6 +7,7 @@ import {
   SyncTransactionAbortedError,
   collectionOptionsClaim,
   compileSingleRowExpression,
+  deepEquals,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
   safeRandomUUID,
@@ -5625,12 +5626,19 @@ function createWrappedSyncConfig<
       }
       // Committed source transactions not yet handed to the Collection. Core
       // holds settled optimistic rows on their keys until they apply.
-      params.collection._state.setDeferredSyncKeys((key) =>
-        pendingPublicationTransactions.some(
-          (transaction) =>
-            !transaction.handedToCollection &&
-            transaction.operationKeys.has(key),
-        ),
+      // They are committed adapter work, so a late hydration seed cannot
+      // supersede them either.
+      params.collection._state.setDeferredSyncKeys(
+        (key) =>
+          pendingPublicationTransactions.some(
+            (transaction) =>
+              !transaction.handedToCollection &&
+              transaction.operationKeys.has(key),
+          ),
+        () =>
+          pendingPublicationTransactions.filter(
+            (transaction) => !transaction.handedToCollection,
+          ),
       )
       // A source receipt is accepted once its rows are durable, and resolves
       // when core makes them visible.
@@ -5654,9 +5662,46 @@ function createWrappedSyncConfig<
       }
       const metadataValue = (write: MetadataWrite) =>
         write.type === `delete` ? undefined : write.value
-      // A metadata read sees the open transaction's write, then the newest
-      // staged one, then the Collection's. A truncate hides older row
-      // metadata. Reading a staged write makes its transaction a dependency.
+      // The row that the source's staged writes leave, in commit order then
+      // the open transactions, or undefined when none writes the key.
+      const stagedRow = (
+        key: TKey,
+      ): { present: boolean; value?: T } | undefined => {
+        let row: { present: boolean; value?: T } | undefined
+        for (const transaction of [
+          ...pendingPublicationTransactions,
+          ...transactionStack,
+        ]) {
+          if (transaction.truncate) row = { present: false }
+          transaction.operations.forEach((operation, index) => {
+            if (operation.key !== key) return
+            if (operation.type === `delete`) row = { present: false }
+            else if (transaction.partialUpdateOperationIndexes.has(index)) {
+              const before =
+                row === undefined
+                  ? params.collection._state.getAcceptedSyncedRow(key)
+                  : row.value
+              row = { present: true, value: { ...before, ...operation.value } }
+            } else row = { present: true, value: operation.value }
+          })
+        }
+        return row
+      }
+      // An insert equal to a row the source wrote keeps its metadata (the
+      // row-metadata rules of 2026-10-05). Without a staged write, core
+      // classifies the insert against its accepted rows and seeds.
+      const isEqualReinsert = (key: TKey, value: T): boolean => {
+        const staged = stagedRow(key)
+        if (staged) return staged.present && deepEquals(staged.value, value)
+        return (
+          params.collection._state.classifyPendingSyncedInsert(key, value) ===
+          `update`
+        )
+      }
+      // A metadata read sees the open transactions' writes, innermost first,
+      // then the newest staged one, then the Collection's. A truncate hides
+      // older row metadata. Reading a staged write makes its transaction a
+      // dependency.
       const readStagedMetadata = <K>(
         key: K,
         getMap: (
@@ -5666,10 +5711,12 @@ function createWrappedSyncConfig<
         stored: () => unknown,
       ): unknown => {
         if (startupState.cleanedUp) return undefined
-        const openTransaction = getOpenTransaction()
-        const openWrite = openTransaction && getMap(openTransaction).get(key)
-        if (openWrite) return metadataValue(openWrite)
-        if (truncates && openTransaction?.truncate) return undefined
+        for (let index = transactionStack.length - 1; index >= 0; index--) {
+          const transaction = transactionStack[index]!
+          const write = getMap(transaction).get(key)
+          if (write) return metadataValue(write)
+          if (truncates && transaction.truncate) return undefined
+        }
         for (
           let index = pendingPublicationTransactions.length - 1;
           index >= 0;
@@ -5803,17 +5850,28 @@ function createWrappedSyncConfig<
 
           params.begin()
           if (transaction.truncate) params.truncate()
-          for (const operation of transaction.operations) {
+          transaction.operations.forEach((operation, index) => {
             if (operation.type === `delete`) {
               params.write({ type: `delete`, key: operation.key })
-            } else {
-              params.write({
-                type: `update`,
-                value: operation.value,
-                metadata: operation.metadata,
-              })
+              return
             }
-          }
+            // An insert names the whole row, so under partial row updates it
+            // replaces a seeded row. One that core would reject as a
+            // duplicate of a stored row stays an upsert.
+            const inserts =
+              sourceSyncConfig.rowUpdateMode !== `full` &&
+              !transaction.internal &&
+              !transaction.partialUpdateOperationIndexes.has(index) &&
+              params.collection._state.classifyPendingSyncedInsert(
+                operation.key,
+                operation.value,
+              ) !== `duplicate`
+            params.write({
+              type: inserts ? `insert` : `update`,
+              value: operation.value,
+              metadata: operation.metadata,
+            })
+          })
           if (params.metadata) {
             for (const [key, write] of transaction.rowMetadataWrites) {
               applyMetadataWrite(params.metadata.row, key, write)
@@ -5975,6 +6033,9 @@ function createWrappedSyncConfig<
           }
           bindToCurrentHydration(openTransaction)
           const normalization = runtime.normalizeSyncWriteMessage(message)
+          const reinserts =
+            message.type === `insert` &&
+            isEqualReinsert(normalization.operation.key, message.value)
 
           if (
             message.type === `update` &&
@@ -6005,18 +6066,13 @@ function createWrappedSyncConfig<
             message.type === `insert` &&
             normalization.operation.metadata === undefined
           ) {
-            // Reset stale metadata for a fresh insert, but don't clobber an
-            // explicit metadata write already queued for this key in the same
-            // transaction (e.g. query reconcile stamps owners, then inserts).
+            // An insert names the row's whole metadata, so one without
+            // metadata clears it; the last write for a key wins.
             if (openTransaction.queuedBecauseHydrating) {
               openTransaction.deferredHydrationMetadataDeleteKeys.add(
                 normalization.operation.key,
               )
-            } else if (
-              !openTransaction.rowMetadataWrites.has(
-                normalization.operation.key,
-              )
-            ) {
+            } else if (!reinserts) {
               openTransaction.rowMetadataWrites.set(
                 normalization.operation.key,
                 {
@@ -6108,12 +6164,11 @@ function createWrappedSyncConfig<
                   for (const owner of new Set(pendingOwners.values())) {
                     markPendingMetadataDependency(owner)
                   }
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction) {
+                  for (const transaction of transactionStack) {
                     for (const [
                       key,
                       metadataWrite,
-                    ] of openTransaction.collectionMetadataWrites) {
+                    ] of transaction.collectionMetadataWrites) {
                       applyMetadataWrite(merged, key, metadataWrite)
                     }
                   }

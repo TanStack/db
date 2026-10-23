@@ -1502,11 +1502,10 @@ export function queryCollectionOptions(
       return true
     }
 
-    const getRowMetadata = (rowKey: string | number) => {
-      return (metadata?.row.get(rowKey) ??
-        collection._state.syncedMetadata.get(rowKey)) as
-        Record<string, unknown> | undefined
-    }
+    // The sync session's read already falls back to applied metadata, and a
+    // staged clear reads as undefined, so it must not fall back again.
+    const getRowMetadata = (rowKey: string | number) =>
+      metadata?.row.get(rowKey) as Record<string, unknown> | undefined
 
     const getOwnersFromMetadata = (
       rowMetadata: unknown,

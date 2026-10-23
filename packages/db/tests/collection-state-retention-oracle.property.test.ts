@@ -3,11 +3,9 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import {
   DuplicateKeySyncError,
-  SyncQueueInvariantError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
-import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import { whenSyncAccepted } from '../src/sync-receipt.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
@@ -996,104 +994,62 @@ it.each([
   },
 )
 
-// No public path can make a committed queued transaction invalid on replay:
-// only the open last transaction can be canceled. A replay that finds one is
-// an invariant failure, not a recoverable rejection.
-it(`throws an invariant error when replay finds an invalid committed transaction`, async () => {
-  // Current callers cannot create this queue state. Exercise the internal
-  // recovery boundary so a future refresh caller cannot strand its receipt.
-  const collection = createCollection<RetainedRow, number>({
-    getKey: (row) => row.id,
-    startSync: true,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        write({ type: `insert`, value: { id: 1, value: 0 } })
-        commit()
-        markReady()
+// A transaction begun inside an open one is independent and applies in
+// commit order (maintainer decision B of 2026-10-23, recorded in
+// docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md). When
+// it commits first, it is accepted ahead of the open transaction, and replay
+// keeps the operation kinds it was accepted with. Here the inner insert of
+// row 1 was written over the open transaction's truncate. In commit order it
+// lands over the applied row 1, and it still names the whole row: replay must
+// not make it a duplicate, with or without a hold.
+it.each([false, true])(
+  `keeps an accepted insert when it commits ahead of an open truncate (held: %s)`,
+  async (held) => {
+    let sync!: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+    let release!: () => void
+    const collection = createCollection<RetainedRow, number>({
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          sync = actions
+          actions.begin()
+          actions.write({ type: `insert`, value: { id: 1, value: 0 } })
+          actions.write({ type: `insert`, value: { id: 2, value: 0 } })
+          actions.commit()
+          actions.markReady()
+        },
       },
-    },
-  })
-  const applied = createDeferred<void>()
-  void applied.promise.catch(() => undefined)
-  const pending = {
-    committed: true,
-    applicationStarted: false,
-    layoutChanged: false,
-    operations: [
-      {
-        type: `insert` as const,
-        originalSyncType: `insert` as const,
-        key: 1,
-        value: { id: 1, value: 2 },
-      },
-    ],
-    rowMetadataWrites: new Map(),
-    explicitRowMetadataWrites: new Map(),
-    collectionMetadataWrites: new Map(),
-    applied,
-  }
-  const validApplied = createDeferred<void>()
-  void validApplied.promise.catch(() => undefined)
-  const valid = {
-    ...pending,
-    operations: [
-      {
-        ...pending.operations[0]!,
-        key: 2,
-        value: { id: 2, value: 2 },
-      },
-    ],
-    applied: validApplied,
-  }
-
-  let primaryFailure: unknown
-  let hasPrimaryFailure = false
-  try {
-    await collection.stateWhenReady()
-    collection._state.pendingSyncedTransactions.push(valid, pending)
-    expect(() => collection._state.refreshPendingSyncedProjection()).toThrow(
-      SyncQueueInvariantError,
-    )
-    expect(collection.get(1)?.value).toBe(0)
-  } catch (error) {
-    primaryFailure = error
-    hasPrimaryFailure = true
-  }
-
-  const cleanupFailures: Array<unknown> = []
-  try {
-    for (const transaction of [pending, valid]) {
-      const index =
-        collection._state.pendingSyncedTransactions.indexOf(transaction)
-      if (index !== -1)
-        collection._state.pendingSyncedTransactions.splice(index, 1)
+      onUpdate: () => new Promise<void>((resolve) => (release = resolve)),
+    })
+    try {
+      await collection.stateWhenReady()
+      const blocker = held
+        ? collection.update(2, (draft) => {
+            draft.value = 9
+          })
+        : undefined
+      sync.begin()
+      sync.truncate()
+      sync.write({ type: `insert`, value: { id: 3, value: 1 } })
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 2 } })
+      const inner = sync.commit()
+      expect(collection._state.syncedData.get(1)?.value).toBe(held ? 0 : 2)
+      // The truncate applies at once, after the inner transaction.
+      expect(sync.commit()).toBe(true)
+      await expect(Promise.resolve(inner)).resolves.not.toThrow()
+      if (blocker) {
+        release()
+        await blocker.isPersisted.promise
+      }
+      expect([...collection._state.syncedData.keys()]).toEqual([3])
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+    } finally {
+      await collection.cleanup()
     }
-    if (applied.isPending()) applied.resolve()
-    if (validApplied.isPending()) validApplied.resolve()
-    collection._state.refreshPendingSyncedProjection()
-  } catch (error) {
-    cleanupFailures.push(error)
-  }
-  try {
-    await collection.cleanup()
-  } catch (error) {
-    cleanupFailures.push(error)
-  }
-  if (hasPrimaryFailure && cleanupFailures.length > 0) {
-    throw new AggregateError(
-      [primaryFailure, ...cleanupFailures],
-      `Projection refresh and cleanup both failed`,
-      { cause: primaryFailure },
-    )
-  }
-  if (hasPrimaryFailure) throw primaryFailure
-  if (cleanupFailures.length > 0)
-    throw new AggregateError(
-      cleanupFailures,
-      `Projection refresh cleanup failed`,
-    )
-})
+  },
+)
 
 it.each([
   { initial: 0, updates: [1] },

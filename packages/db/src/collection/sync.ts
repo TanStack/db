@@ -312,7 +312,7 @@ export class CollectionSyncManager<
             // accepts it now; the receipt resolves when it is visible. One
             // held by a persisting optimistic transaction becomes visible when
             // that transaction settles.
-            this.state.commitPendingTransactions()
+            this.state.acceptSyncTransaction(pendingTransaction)
             if (!pendingTransaction.applied.isPending()) return true
             return withAcceptedReceipt(pendingTransaction.applied.promise, true)
           },
@@ -503,15 +503,14 @@ export class CollectionSyncManager<
       row: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
-          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
-          const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
-          if (pendingWrite) {
-            return pendingWrite.type === `delete`
-              ? undefined
-              : pendingWrite.value
-          }
-          if (pendingTransaction?.truncate) {
-            return undefined
+          // A source reads its own session: every accepted or open sync
+          // transaction, newest first, then applied state. A truncate hides
+          // older row metadata.
+          const pending = this.state.pendingSyncedTransactions
+          for (let index = pending.length - 1; index >= 0; index--) {
+            const write = pending[index]!.rowMetadataWrites.get(key)
+            if (write) return write.type === `delete` ? undefined : write.value
+            if (pending[index]!.truncate) return undefined
           }
           return this.state.syncedMetadata.get(key)
         },
@@ -527,13 +526,12 @@ export class CollectionSyncManager<
       collection: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
-          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
-          const pendingWrite =
-            pendingTransaction?.collectionMetadataWrites.get(key)
-          if (pendingWrite) {
-            return pendingWrite.type === `delete`
-              ? undefined
-              : pendingWrite.value
+          // Newest first, like row metadata. A truncate keeps collection
+          // metadata.
+          const pending = this.state.pendingSyncedTransactions
+          for (let index = pending.length - 1; index >= 0; index--) {
+            const write = pending[index]!.collectionMetadataWrites.get(key)
+            if (write) return write.type === `delete` ? undefined : write.value
           }
           return this.state.syncedCollectionMetadata.get(key)
         },
@@ -554,18 +552,13 @@ export class CollectionSyncManager<
         },
         list: (prefix) => {
           if (!isCurrentSync()) return []
+          // Every pending transaction applies over applied state, oldest
+          // first, so the newest write for each key wins.
           const merged = new Map(this.state.syncedCollectionMetadata)
-          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
-          if (pendingTransaction) {
-            for (const [
-              key,
-              pendingWrite,
-            ] of pendingTransaction.collectionMetadataWrites) {
-              if (pendingWrite.type === `delete`) {
-                merged.delete(key)
-              } else {
-                merged.set(key, pendingWrite.value)
-              }
+          for (const transaction of this.state.pendingSyncedTransactions) {
+            for (const [key, write] of transaction.collectionMetadataWrites) {
+              if (write.type === `delete`) merged.delete(key)
+              else merged.set(key, write.value)
             }
           }
 
