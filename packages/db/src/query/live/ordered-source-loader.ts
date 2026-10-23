@@ -678,7 +678,9 @@ export class OrderedSourceLoader {
     // end's tie then proves the window.
     if (
       (this.ownPrefixCount ?? 0) > this.info.offset + this.info.limit ||
-      Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary)
+      // Undefined means that no tie request has been attempted.
+      (this.lastBoundary !== undefined &&
+        Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary))
     )
       return
     this.loadMovedEndTie(end)

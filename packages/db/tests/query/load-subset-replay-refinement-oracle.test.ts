@@ -2273,8 +2273,9 @@ describe(`Ordered windows across truncate replays`, () => {
     },
     {
       // A move during the initial load waits behind a marker replay that the
-      // source truncate then discards. The discarded replay rejected the
-      // move, so the older move's window won.
+      // source truncate then discards. The newer move must wait for the
+      // replay that still holds publication and then apply. Before the fix,
+      // the discarded replay rejected it, so the older move's window won.
       name: `a newer window move deferred behind a discarded replay`,
       history: [
         { type: `move`, id: 1, rank: 1 },
