@@ -675,12 +675,12 @@ export class OrderedSourceLoader {
     // An installed row past the page proves the source's next row only when
     // the page read it, or when it ties with an end whose tie the loader
     // read. A refetch can move the end before that tie; reading the new
-    // end's tie then proves the window.
+    // end's tie then proves the window. An `undefined` end also matches a
+    // loader that attempted no tie. No cursor expresses a nullish end, so the
+    // loader has started or will start a full-source read, which covers it.
     if (
       (this.ownPrefixCount ?? 0) > this.info.offset + this.info.limit ||
-      // Undefined means that no tie request has been attempted.
-      (this.lastBoundary !== undefined &&
-        Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary))
+      Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary)
     )
       return
     this.loadMovedEndTie(end)
