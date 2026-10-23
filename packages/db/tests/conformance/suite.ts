@@ -1518,7 +1518,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
                   // A reactive binding read the swap as a new source: every
                   // value it published since then holds only the new
                   // source's rows, or none while it loads.
-                  for (const value of h.publications().slice(published)) {
+                  const swapped = h.publications().slice(published)
+                  // The driver logs the first paint, so the law cannot pass
+                  // on an empty log.
+                  expect(swapped.length).toBeGreaterThan(0)
+                  for (const value of swapped) {
                     expectOnlyRowsOf(value, rowsOf[next as Exclude<Pick, `D`>])
                   }
                 }

@@ -1832,8 +1832,35 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
                   expectNoPagesAfterRejection(handle)
                   break
                 }
+                const observed = handle.observations().length
                 handle.setParamSync(next)
-                await handle.flush()
+                if (collides(history, next)) {
+                  // A reactive binding read the swap as a new source. At the
+                  // first paint, after the framework's microtask flush and
+                  // before any later task, it shows only the new source's
+                  // rows or none; so does every value it publishes after.
+                  await Promise.resolve()
+                  await Promise.resolve()
+                  const allowed = new Set(pagesOf[next].map((row) => row.id))
+                  const firstPaint = handle
+                    .current()
+                    .data.map((row: { id: string }) => row.id)
+                  expect(
+                    firstPaint.filter((id: string) => !allowed.has(id)),
+                    `first paint ${JSON.stringify(firstPaint)}`,
+                  ).toEqual([])
+                  await handle.flush()
+                  for (const observation of handle
+                    .observations()
+                    .slice(observed)) {
+                    expect(
+                      observation.ids.filter((id) => !allowed.has(id)),
+                      `published ${JSON.stringify(observation.ids)}`,
+                    ).toEqual([])
+                  }
+                } else {
+                  await handle.flush()
+                }
                 history.push(next)
                 expectPageRows(handle.current(), pagesOf[next], 3)
               }
@@ -1842,9 +1869,100 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           }
         }
         reach.assertReached()
+
+        if (!driver.comparesQueryIdentity) return
+        // Keyed dimension (comparing bindings only), as in the live suite:
+        // AK reads A(x) and BK reads B(x) under their own keys. A keyed step
+        // records no claim and checks none, so a claim made before it still
+        // binds a later derived step.
+        type KeyedPick = Pick | `AK` | `BK`
+        const base = (pick: KeyedPick): Pick =>
+          pick === `AK` ? `A` : pick === `BK` ? `B` : pick
+        const isKeyed = (pick: KeyedPick) => pick !== base(pick)
+        const conflicts = (prior: KeyedPick, next: KeyedPick) =>
+          !isKeyed(prior) &&
+          !isKeyed(next) &&
+          base(prior) !== base(next) &&
+          sourceOf[base(prior)].collection.id ===
+            sourceOf[base(next)].collection.id
+        type KeyedReachState =
+          `claim crosses a keyed step` | `keyed step after a claim`
+        const keyedReach = createOracleReach<KeyedReachState>(
+          `infinite source-id claim memory with keys`,
+          [`claim crosses a keyed step`, `keyed step after a claim`],
+        )
+        const mountKeyed = driver.mountKeyedControllable
+        // Every comparing driver supplies the keyed form.
+        expect(mountKeyed).toBeDefined()
+        const keyedPicks: ReadonlyArray<KeyedPick> = [`A`, `B`, `C`, `AK`, `BK`]
+        for (const start of [`A`, `C`, `AK`] as const) {
+          for (const second of keyedPicks) {
+            for (const third of keyedPicks) {
+              keyedReach.beginHistory()
+              const history: Array<KeyedPick> = [start]
+              const handle = mountKeyed!(
+                (q, pick: KeyedPick) =>
+                  q
+                    .from({ items: sourceOf[base(pick)].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                (pick) => (isKeyed(pick) ? [`keyed`, pick] : undefined),
+                start as KeyedPick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[base(start)], 3)
+              for (const next of [second, third]) {
+                let claimIndex = -1
+                for (let index = history.length - 1; index >= 0; index--) {
+                  if (conflicts(history[index]!, next)) {
+                    claimIndex = index
+                    break
+                  }
+                }
+                if (
+                  claimIndex >= 0 &&
+                  history.slice(claimIndex + 1).some(isKeyed)
+                ) {
+                  keyedReach.reach(`claim crosses a keyed step`)
+                }
+                if (
+                  isKeyed(next) &&
+                  history.some(
+                    (prior) =>
+                      !isKeyed(prior) &&
+                      base(prior) !== base(next) &&
+                      sourceOf[base(prior)].collection.id ===
+                        sourceOf[base(next)].collection.id,
+                  )
+                ) {
+                  keyedReach.reach(`keyed step after a claim`)
+                }
+                if (claimIndex >= 0) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                handle.setParamSync(next)
+                await handle.flush()
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[base(next)], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        keyedReach.assertReached()
       },
-      // 18 histories of three steps each.
-      30_000,
+      // 18 histories of three steps each, and 75 keyed histories for a
+      // comparing binding.
+      60_000,
     )
 
     scenario(

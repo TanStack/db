@@ -724,6 +724,7 @@ function createHookInstance(dbClient: DbClient | undefined) {
       CollectionImpl<any, string | number, any, any, any>
     >(),
     sourceIds: createLiveQuerySourceIdClaims(),
+    cancelReclaimRelease: undefined as (() => void) | undefined,
     observer: null as LiveQueryObserver<object, string | number> | null,
     queryHash: undefined as string | undefined,
     suspenseKey: undefined as string | undefined,
@@ -747,8 +748,12 @@ function useLiveQueryImpl(
 
   const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
   const instance = (instanceRef.current ??= createHookInstance(dbClient))
-  const resumeDeferredCollections = () =>
+  // A commit releases the starts itself, so it drops the reclaim listener.
+  const resumeDeferredCollections = () => {
+    instance.cancelReclaimRelease?.()
+    instance.cancelReclaimRelease = undefined
     resumeDeferredLiveQueryCollections(instance.deferredCollections)
+  }
 
   // The render boundary: a render that throws anywhere after preparation
   // never commits, so it releases the sync starts it deferred here.
@@ -941,6 +946,16 @@ function useLiveQueryImpl(
             // Without a DbClient, Suspense starts it through a preload below.
             startSync: !forSuspense || dbClient !== undefined,
           }) as SuspenseCollection | null
+          // A render that never commits releases its deferred sync starts
+          // when garbage collection reclaims the live query it built. A
+          // Collection the callback returned is not this render's to reclaim.
+          if (instance.collection && !isCollection(preparedQueryValue)) {
+            instance.cancelReclaimRelease?.()
+            instance.cancelReclaimRelease = releaseDeferredOnReclaim(
+              instance.collection,
+              instance.deferredCollections,
+            )
+          }
           if (suspenseCollections && suspenseKey && instance.collection) {
             const collection = instance.collection
             const removeCleanupListener = collection.on(
@@ -975,14 +990,6 @@ function useLiveQueryImpl(
             }
             suspenseCollections.set(suspenseKey, entry)
           }
-        }
-        // A render that never commits releases its deferred sync starts when
-        // garbage collection reclaims the live query it bound.
-        if (instance.collection) {
-          releaseDeferredOnReclaim(
-            instance.collection,
-            instance.deferredCollections,
-          )
         }
         instance.config = configOrQueryOrCollection
         instance.deps = [...identityDeps]

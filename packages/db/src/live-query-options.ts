@@ -38,7 +38,8 @@ export type DeferredLiveQueryCollections = Set<
  * query the hook rejects leaves no source deferred and a later reader can
  * start it. A render that throws after the hook returns, such as in a sibling
  * hook, is not a rejection of this input: like any render that never commits,
- * its deferral stays until a `preload()` starts the source. As for a
+ * it releases its deferral through `releaseDeferredOnReclaim` when garbage
+ * collection reclaims its live query. As for a
  * `DbClient` preload, the rejection wins over a source whose resumed start
  * fails; that source records its own failure.
  */
@@ -61,15 +62,17 @@ export function rejectLiveQueryInput(
  * its live query unsubscribed until garbage collection cleans it up; that
  * cleanup releases the starts, so a direct reader's demand, made before or
  * after, then starts the sources. Releases only the starts deferred so far,
- * not ones a later render of the same hook defers.
+ * not ones a later render of the same hook defers. Pass only a live query the
+ * render built, and call the returned function when the render commits, so a
+ * committed hook keeps no listener or copied sources.
  */
 export function releaseDeferredOnReclaim(
   liveQuery: Pick<Collection<any, any, any>, `once`>,
   deferredCollections: DeferredLiveQueryCollections,
-): void {
-  if (deferredCollections.size === 0) return
+): (() => void) | undefined {
+  if (deferredCollections.size === 0) return undefined
   const pending: DeferredLiveQueryCollections = new Set(deferredCollections)
-  liveQuery.once(`status:cleaned-up`, () => {
+  return liveQuery.once(`status:cleaned-up`, () => {
     try {
       resumeDeferredLiveQueryCollections(pending)
     } catch {

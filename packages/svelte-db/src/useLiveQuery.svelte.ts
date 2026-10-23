@@ -465,14 +465,22 @@ export function useLiveQuery(
       }
 
       // A setup that never subscribes releases its deferred sync starts when
-      // garbage collection reclaims the live query it built.
-      if (collection) releaseDeferredOnReclaim(collection, deferredCollections)
+      // garbage collection reclaims the live query it built. A Collection
+      // the input supplied is not this setup's to reclaim.
+      const cancelReclaimRelease =
+        collection && !isCollection(preparedValue)
+          ? releaseDeferredOnReclaim(collection, deferredCollections)
+          : undefined
       return {
         collection,
         client: dbClient,
         queryHash,
-        resumeDeferredCollections: () =>
-          resumeDeferredLiveQueryCollections(deferredCollections),
+        // The subscribing effect releases the starts, so it drops the
+        // reclaim release.
+        resumeDeferredCollections: () => {
+          cancelReclaimRelease?.()
+          resumeDeferredLiveQueryCollections(deferredCollections)
+        },
       }
     } catch (error) {
       return rejectLiveQueryInput(deferredCollections, error)

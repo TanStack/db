@@ -334,21 +334,20 @@ const releaseHooks: Record<string, ReleaseHook> = {
   },
 }
 
-// Each reader asks for the source once and returns a read of its row. A
-// render that never commits releases its deferral when its live query is
-// reclaimed, so the row may arrive after the reader asked.
+// Each reader asks for the source synchronously and returns a read of its
+// row. A rejection has released already, so the demand starts the source at
+// once. A render that never commits releases its deferral when its live
+// query is reclaimed, so the row may arrive after the reader asked.
 const releaseReaders: Record<
   string,
-  (shared: ReturnType<typeof source>) => Promise<() => unknown>
+  (shared: ReturnType<typeof source>) => () => unknown
 > = {
-  'another hook over the Collection': async (shared) => {
+  'another hook over the Collection': (shared) => {
     const reader = renderHook(() => useLiveQuery(shared))
-    await act(async () => {})
     return () => reader.result.current.data[0]?.value
   },
-  'startSyncImmediate()': async (shared) => {
+  'startSyncImmediate()': (shared) => {
     shared.startSyncImmediate()
-    await act(async () => {})
     return () => shared.toArray[0]?.value
   },
 }
@@ -434,10 +433,20 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
             // Declared reach: the rejected render materialized the shared
             // descriptor, so it held a deferral the law must release.
             expect(materialized).toBe(1)
-            expect(syncStarts).toBe(0)
+            // A rejection releases at its render boundary, before the reader.
+            // A render that never commits releases at the reclaim, which the
+            // real GC timer may reach before or after the reader asks.
+            if (!cause.afterHook) expect(syncStarts).toBe(0)
 
-            const value = await read(client.collection(shared) as any)
-            await waitFor(() => expect(value()).toBe(`shared`))
+            const value = read(client.collection(shared) as any)
+            if (cause.afterHook) {
+              await waitFor(() => expect(value()).toBe(`shared`))
+            } else {
+              // Released at the render boundary, so the demand started it.
+              expect(syncStarts).toBe(1)
+              await act(async () => {})
+              expect(value()).toBe(`shared`)
+            }
             expect(syncStarts).toBe(1)
           } finally {
             consoleError.mockRestore()

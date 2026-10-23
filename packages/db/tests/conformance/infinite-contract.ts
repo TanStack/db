@@ -152,6 +152,17 @@ export interface InfiniteQueryDriver {
     initial: P,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryControllableHandle<P>
+  /**
+   * Mount a controllable query whose config names `key(param)` as its
+   * `queryKey`, or none when that returns `undefined`. Every driver that
+   * compares query identity supplies it; a reactive binding has no keys.
+   */
+  mountKeyedControllable?: <P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
+    initial: P,
+    config?: InfiniteQueryConfig,
+  ) => InfiniteQueryControllableHandle<P>
   mountCollection: (
     collection: Collection<any, any, any>,
     config?: InfiniteQueryConfig,

@@ -270,6 +270,37 @@ function mountInputControllable(
   }
 }
 
+// The keyed form: the config names a queryKey chosen per step, or none.
+const mountKeyedControllableWith = (path: IdentityPath) =>
+  function mountKeyedControllable<P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
+    initial: P,
+    config: InfiniteQueryConfig = {},
+  ) {
+    const log: Observations = []
+    const hook = renderHook(
+      ({ param }: { param: P }) => {
+        const keyed = { ...config, queryKey: key(param) } as any
+        return useRecorded(
+          path === `derived`
+            ? useLiveInfiniteQuery((q: any) => build(q, param), keyed)
+            : useLiveInfiniteQuery((q: any) => build(q, param), keyed, [param]),
+          log,
+        )
+      },
+      { initialProps: { param: initial } },
+    )
+    const guard = rejectReadsAfterRenderError(hook)
+    const handle = makeHandle(hook, log)
+    return {
+      ...handle,
+      setParamSync(param: P) {
+        guard(() => act(() => hook.rerender({ param })))
+      },
+    }
+  }
+
 const reactInfiniteDriver: InfiniteQueryDriver = {
   name: `react`,
   // Each render re-runs the query input and compares its identity.
@@ -290,6 +321,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   makeWindowController: createLiveQueryWindowController,
   mount,
   mountControllable: mountControllableWith(`derived`),
+  mountKeyedControllable: mountKeyedControllableWith(`derived`),
   mountCollection,
   mountCollectionControllable,
   mountConfigControllable,
@@ -303,6 +335,7 @@ runInfiniteQuerySuite({
   name: `react (dependency list)`,
   mount: mountWithDependencyList,
   mountControllable: mountControllableWith(`dependency list`),
+  mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
 })
 
 it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {

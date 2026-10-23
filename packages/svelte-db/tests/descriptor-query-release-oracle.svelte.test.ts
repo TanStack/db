@@ -353,16 +353,23 @@ describe(`Svelte descriptor source release`, () => {
             // descriptor, so it held a deferral the law must release.
             expect(materialized).toBe(1)
             // A rejection releases at once, so an eager source starts now. A
-            // setup that never subscribes releases at the reclaim, so nothing
-            // has started yet.
-            expect(starts).toBe(
-              policy === `eager` && !cause.releasedOnReclaim ? 1 : 0,
-            )
+            // setup that never subscribes releases at the reclaim, which the
+            // real GC timer may reach before or after this point.
+            if (cause.releasedOnReclaim) {
+              expect(starts).toBeLessThanOrEqual(1)
+            } else {
+              expect(starts).toBe(policy === `eager` ? 1 : 0)
+            }
             const direct = client.collection(shared)
             await read(direct)
-            // A setup that never subscribes releases its deferral when its
-            // live query is reclaimed, which may follow the reader's demand.
-            await vi.waitFor(() => expect(direct.status).toBe(`ready`))
+            // A rejection has released already, so the reader starts the
+            // source now; a setup that never subscribes releases at the
+            // reclaim, which may follow the reader's demand.
+            if (cause.releasedOnReclaim) {
+              await vi.waitFor(() => expect(direct.status).toBe(`ready`))
+            } else {
+              expect(direct.status).toBe(`ready`)
+            }
             expect(starts).toBe(1)
           } finally {
             dispose?.()

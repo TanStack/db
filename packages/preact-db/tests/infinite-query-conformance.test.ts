@@ -167,6 +167,27 @@ function mountControllable<P>(
   }
 }
 
+// The keyed form: the config names a queryKey chosen per step, or none.
+function mountKeyedControllable<P>(
+  build: (q: any, param: P) => any,
+  key: (param: P) => ReadonlyArray<unknown> | undefined,
+  initial: P,
+  config: InfiniteQueryConfig = {},
+) {
+  const { hook, log } = mountRecorded(
+    ({ param }: { param: P }) =>
+      useLiveInfiniteQuery((q: any) => build(q, param), {
+        ...config,
+        queryKey: key(param),
+      } as any),
+    { param: initial },
+  )
+  return {
+    ...makeHandle(hook, log),
+    setParamSync: (param: P) => rerenderSync(hook, { param }),
+  }
+}
+
 function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
   const { hook, log } = mountRecorded(() =>
     useLiveInfiniteQuery(collection, config as any),
@@ -246,6 +267,7 @@ const preactInfiniteDriver: InfiniteQueryDriver = {
   makeWindowController: createLiveQueryWindowController,
   mount,
   mountControllable,
+  mountKeyedControllable,
   mountCollection,
   mountCollectionControllable,
   mountConfigControllable,

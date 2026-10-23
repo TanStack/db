@@ -108,6 +108,8 @@ type InfiniteQueryRender = {
   deferredCollections: Set<
     CollectionImplType<any, string | number, any, any, any>
   >
+  /** Drops the reclaim release when this render commits. */
+  cancelReclaimRelease: (() => void) | undefined
   warned: boolean
 }
 
@@ -261,10 +263,20 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         deferredCollections.add(deferred)
       }
     }
+    const reusesRendered =
+      newCollection && binding.collection === rendered?.binding.collection
     currentRenderState = {
       binding,
       derivedQuery,
       deferredCollections,
+      // A render that never commits releases its deferred sync starts when
+      // garbage collection reclaims the window collection it built. A reused
+      // collection keeps the release its first render registered.
+      cancelReclaimRelease: reusesRendered
+        ? rendered.cancelReclaimRelease
+        : newCollection && binding.ownsCollection
+          ? releaseDeferredOnReclaim(binding.collection, deferredCollections)
+          : undefined,
       warned: false,
     }
     // Keep a created collection for the next render only once it validated
@@ -272,9 +284,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (binding.supplied) renderedRef.current = null
     else if (newCollection && binding.ownsCollection) {
       renderedRef.current = currentRenderState
-      // A render that never commits releases its deferred sync starts when
-      // garbage collection reclaims the window collection it built.
-      releaseDeferredOnReclaim(binding.collection, deferredCollections)
     }
   }
   const renderState = currentRenderState!
@@ -288,6 +297,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         renderState.warned = true
         console.warn(renderState.binding.warning)
       }
+      // A commit releases the starts itself, so it drops the reclaim release.
+      renderState.cancelReclaimRelease?.()
       resumeDeferredLiveQueryCollections(renderState.deferredCollections)
       return unsubscribe
     },
