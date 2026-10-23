@@ -398,7 +398,7 @@ export class DbClient {
 
     let resumeFailure: { error: unknown } | undefined
     try {
-      resumeDeferredLiveQueryCollections(deferredCollections)
+      resumeDeferredLiveQueryCollections(deferredCollections, true)
     } catch (error) {
       resumeFailure = { error }
     }

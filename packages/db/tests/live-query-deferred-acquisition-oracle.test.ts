@@ -51,6 +51,8 @@
  * that wait for readiness.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js'
 import {
   BTreeIndex,
   DbClient,
@@ -64,6 +66,9 @@ import {
 } from '../src'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
+import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
+import { createOracleReach } from './oracle-reach.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import type { Collection, LiveQueryObserver } from '../src'
 
 type Row = { id: string; rank: number; group: string }
@@ -1500,6 +1505,108 @@ describe(`a request that arrives while a source subscription is created`, () => 
         for (const collection of collections) await collection.cleanup()
         await source.cleanup()
       }
+    })
+  }
+})
+
+/**
+ * Source errors remain readable through a handoff that did not throw. This
+ * extends the primary demand oracle at its previously omitted failure cut.
+ * The grammar crosses callback return/throw, independent/owned start, and an
+ * optional error cause. Removing timing confuses another reader's failure
+ * with ours; removing outcome confuses markError with throw. No second start
+ * without cleanup is legal. The shared judgment also feeds the React driver.
+ */
+describe(`render sync-start handoff error provenance`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`reports only its own thrown starts (${campaign})`, async () => {
+      const reach = createOracleReach(`start-handoff`, [
+        `prior-error`,
+        `marked-error`,
+        `own-throw`,
+        `undefined-cause`,
+        `healthy`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            outcome: fc.constantFrom(
+              `ready` as const,
+              `mark-error` as const,
+              `throw` as const,
+            ),
+            timing: fc.constantFrom(
+              `before-release` as const,
+              `during-release` as const,
+            ),
+            cause: fc.constantFrom(`error` as const, `undefined` as const),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const expected = expectedStartHandoff(history)
+            const failure =
+              history.cause === `error`
+                ? new Error(`source failure`)
+                : undefined
+            let starts = 0
+            const source = createCollection<{ id: string }>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              sync: {
+                sync: ({ markReady, markError }) => {
+                  starts++
+                  if (history.outcome === `throw`) throw failure
+                  if (history.outcome === `mark-error`) markError(failure)
+                  else markReady()
+                },
+              },
+            })
+            source._deferSyncStart()
+            source.startSyncImmediate()
+            try {
+              if (history.timing === `before-release`) {
+                try {
+                  source._resumeSyncStart()
+                } catch {
+                  /* Independent reader owns this error. */
+                }
+              }
+              if (source.status === `error`) reach.reach(`prior-error`)
+              if (history.outcome === `mark-error`) reach.reach(`marked-error`)
+              if (expected.throws) reach.reach(`own-throw`)
+              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
+              if (history.outcome === `ready`) reach.reach(`healthy`)
+              const pending = new Set([source])
+              let result: { threw: boolean; error?: unknown } = { threw: false }
+              try {
+                resumeDeferredLiveQueryCollections(pending)
+              } catch (error) {
+                result = { threw: true, error }
+              }
+              expect(result.threw, JSON.stringify(history)).toBe(
+                expected.throws,
+              )
+              if (expected.throws) expect(result.error).toBe(failure)
+              expect(source.status).toBe(expected.status)
+              expect(starts).toBe(expected.starts)
+              expect(pending.size).toBe(0)
+              resumeDeferredLiveQueryCollections(pending)
+              source._resumeSyncStart()
+              expect(starts, `old render handles never retry`).toBe(1)
+            } finally {
+              await source.cleanup()
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(100), seed: 2229 }
+          : oraclePropertyOptions(100, `live-query.start-handoff`),
+      )
+      reach.assertReached()
+      console.info(
+        `start-handoff ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
     })
   }
 })

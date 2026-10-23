@@ -9,3 +9,5 @@ Reject ordinary subscriptions and deferred acquisition resumption during active 
 Release partial observer and pooled-query subscriptions when setup fails or cleanup interrupts startup. Resumed subscriptions release abandoned render deferrals without restoring retired ownership. Admission checks retain an existing cleanup promise until a replacement sync run starts.
 
 Subscribers that survive cleanup during admission retain demand for an explicit restart. Cleanup in a first-demand callback does not start a replacement implicitly.
+
+Keep ordinary hook errors readable when deferred sync startup records an error. Explicit preloads still report source startup failures. Release channels acquired before synchronous cleanup registration or observer attachment fails.

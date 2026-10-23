@@ -4,8 +4,13 @@ import { DbClient } from '../src/client.js'
 import { createDeferred } from '../src/deferred.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
+import {
+  PERSISTED_READINESS,
+  waitForPersistedInitialRender,
+} from '../src/persisted-readiness.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { withOracleCleanup } from './utils.js'
+import { createOracleReach } from './oracle-reach.js'
 import type { ChangeMessage } from '../src/types.js'
 
 type Row = { id: string; version: number }
@@ -220,6 +225,173 @@ describe(`observer subscription setup ownership`, () => {
       ])
     },
   )
+})
+
+/**
+ * The setup law also covers failure before subscribeChanges, and a peer that
+ * subscribes reentrantly during setup. A failed attempt transfers no physical
+ * channel ownership. An already-returned peer record remains a logical owner;
+ * the next explicit subscribe reattaches it. This follows subscribe/dispose's
+ * handle ownership contract, not persistence's implementation. The capability
+ * supplies controlled registration failure; no failing registration transfers
+ * an unreturned handle. First-party persisted readiness currently never throws.
+ */
+describe(`observer partial attachment`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`releases every acquired channel before retry (${campaign})`, async () => {
+      const reach = createOracleReach(`observer-partial-attach`, [
+        `early-failure`,
+        `sync-failure`,
+        `surviving-peer`,
+        `no-peer`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            mode: fc.constantFrom(`granular` as const, `wholesale` as const),
+            failureAt: fc.constantFrom(`persisted` as const, `sync` as const),
+            reenter: fc.boolean(),
+            failures: fc.integer({ min: 1, max: 2 }),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const failure = new Error(`setup failure`)
+            let failing = true
+            let reentered = false
+            let peerStop: (() => void) | undefined
+            let publish = () => {}
+            const peer = vi.fn()
+            let persistedLeases = 0
+            const source = createCollection<Row>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              ...{
+                [PERSISTED_READINESS]: {
+                  networkTimeoutMs: 0,
+                  getOrStartNetworkDeadline: () => 0,
+                  getSnapshot: () => ({ status: `ready` as const }),
+                  waitForInitialRender: waitForPersistedInitialRender,
+                  subscribe: () => {
+                    if (history.reenter && !reentered) {
+                      reentered = true
+                      peerStop = observer.subscribe(peer)
+                    }
+                    if (failing && history.failureAt === `persisted`)
+                      throw failure
+                    persistedLeases++
+                    return () => {
+                      persistedLeases--
+                    }
+                  },
+                },
+              },
+              sync: {
+                sync: ({ begin, write, commit, markReady }) => {
+                  if (failing && history.failureAt === `sync`) throw failure
+                  markReady()
+                  publish = () => {
+                    begin()
+                    write({ type: `insert`, value: { id: `a`, version: 1 } })
+                    commit()
+                  }
+                },
+              },
+            })
+            let statusLeases = 0
+            const on = source.on.bind(source)
+            source.on = (event, listener) => {
+              const stop = on(event, listener)
+              if (event !== `status:change`) return stop
+              statusLeases++
+              let active = true
+              return () => {
+                if (active) {
+                  active = false
+                  statusLeases--
+                  stop()
+                }
+              }
+            }
+            let layoutLeases = 0
+            const subscribeLayout = source._subscribeLayoutChanges.bind(source)
+            vi.spyOn(source, `_subscribeLayoutChanges`).mockImplementation(
+              (listener) => {
+                const stop = subscribeLayout(listener)
+                layoutLeases++
+                return () => {
+                  layoutLeases--
+                  stop()
+                }
+              },
+            )
+            const observer: ReturnType<
+              typeof createLiveQueryObserver<Row, string | number>
+            > = createLiveQueryObserver(source, { mode: history.mode })
+            let stop: (() => void) | undefined
+            await withOracleCleanup(async () => {
+              for (let i = 0; i < history.failures; i++) {
+                expect(() => observer.subscribe(() => {})).toThrow(failure)
+                reach.reach(
+                  history.failureAt === `persisted`
+                    ? `early-failure`
+                    : `sync-failure`,
+                )
+                expect(Boolean(peerStop)).toBe(history.reenter)
+                reach.reach(peerStop ? `surviving-peer` : `no-peer`)
+                expect(
+                  {
+                    statusLeases,
+                    layoutLeases,
+                    persistedLeases,
+                    source: source.subscriberCount,
+                  },
+                  `failure returns no physical ownership`,
+                ).toEqual({
+                  statusLeases: 0,
+                  layoutLeases: 0,
+                  persistedLeases: 0,
+                  source: 0,
+                })
+                await source.cleanup()
+              }
+              failing = false
+              stop = observer.subscribe(() => {})
+              expect(source.subscriberCount).toBe(1)
+              publish()
+              expect(observer.getSnapshot().state?.get(`a`)?.version).toBe(1)
+              if (history.reenter) expect(peer).toHaveBeenCalled()
+              stop()
+              peerStop?.()
+              expect({
+                statusLeases,
+                layoutLeases,
+                persistedLeases,
+                source: source.subscriberCount,
+              }).toEqual({
+                statusLeases: 0,
+                layoutLeases: 0,
+                persistedLeases: 0,
+                source: 0,
+              })
+            }, [
+              () => stop?.(),
+              () => peerStop?.(),
+              () => observer.dispose(),
+              () => source.cleanup(),
+            ])
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(60), seed: 2229 }
+          : oraclePropertyOptions(60, `live-query-observer.partial-attach`),
+      )
+      reach.assertReached()
+      console.info(
+        `observer-partial-attach ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+  }
 })
 
 type Mode = `granular` | `wholesale`

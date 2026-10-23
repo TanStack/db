@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   captureMicrotaskErrors,
   createOnDemandCollection,
@@ -3622,6 +3623,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(starts).toBe(expected.starts)
         expect(collection.subscriberCount).toBe(expected.acquiring)
         expect(counts).toEqual(expected.counts)
+        expect(collection._hasSubscriberOrPreload()).toBe(
+          expected.subscriberOrPreload,
+        )
         await cleanup
         await flushPromises()
         expect(collection.subscriberCount).toBe(expected.acquiring)
@@ -4638,4 +4642,161 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
     120_000,
   )
+})
+
+/**
+ * A resumption that transfers ownership before a first-demand notification
+ * fails still retains its logical demand. Cleanup ends acquisition authority;
+ * an explicit replacement sync run supplies the next opportunity to acquire.
+ * This follows cleanup/restart and logical-demand ownership in the glossary.
+ * The notification can run twice only when cleanup cleared its earlier mark.
+ * Without cleanup the first mark occurs before the transfer, so its throw
+ * leaves the subscription deferred. Collection event throws are asynchronous
+ * and therefore cannot skip resumption's next statement.
+ *
+ * These generated histories reach a real synchronous notifyResumed throw,
+ * including while public status stays ready during held cleanup. They check
+ * the transfer at return and acquisition after replacement readiness. They do
+ * not promise recovery from arbitrary programming errors or implicit restart.
+ */
+describe(`resumption notification error and surviving demand`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`acquires retained demand after replacement readiness (${campaign})`, async () => {
+      const reach = createOracleReach(`resume-notification-error`, [
+        `throwing-notification`,
+        `retained-owner`,
+        `held-cleanup`,
+        `replacement-ready`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            pending: fc.boolean(),
+            throws: fc.boolean(),
+            demands: fc.integer({ min: 1, max: 3 }),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const gate = createDeferred<void>()
+            const failure = new Error(`first-demand notification`)
+            let loads = 0
+            const source = createCollection<{ id: string }>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              syncMode: `on-demand`,
+              sync: {
+                sync: ({ markReady }) => {
+                  markReady()
+                  return {
+                    cleanup: () => (history.pending ? gate.promise : undefined),
+                    loadSubset: () => {
+                      loads++
+                      return true
+                    },
+                  }
+                },
+              },
+            })
+            source.startSyncImmediate()
+            const subscription = source.subscribeChanges(() => {}, {
+              deferAcquisition: true,
+            })
+            for (let i = 0; i < history.demands; i++)
+              subscription.requestSnapshot({
+                where: new Func(`eq`, [
+                  new PropRef([`id`]),
+                  new Value(String(i)),
+                ]),
+              })
+            // Drain the initial run's notifications while demand still defers.
+            await flushPromises()
+            expect(loads).toBe(0)
+            let cleanup: Promise<void> | undefined
+            let notifications = 0
+            const off = source._onFirstSubscriberOrPreload(() => {
+              notifications++
+              if (notifications === 1) {
+                cleanup = source.cleanup()
+                if (!history.pending) source.startSyncImmediate()
+              } else if (history.throws) throw failure
+            })
+            try {
+              let result: { threw: boolean; error?: unknown } = { threw: false }
+              try {
+                subscription.resumeDeferredAcquisition()
+              } catch (error) {
+                result = { threw: true, error }
+              }
+              expect(notifications).toBe(2)
+              expect(result.threw).toBe(history.throws)
+              if (history.throws) {
+                expect(result.error).toBe(failure)
+                reach.reach(`throwing-notification`)
+              }
+              expect(subscription.isDeferringAcquisition()).toBe(false)
+              expect(source.subscriberCount).toBe(1)
+              reach.reach(`retained-owner`)
+              if (history.pending) {
+                expect(source.status).toBe(`ready`)
+                reach.reach(`held-cleanup`)
+              }
+              gate.resolve()
+              await cleanup
+              if (history.pending) source.startSyncImmediate()
+              await flushPromises()
+              reach.reach(`replacement-ready`)
+              expect(source.status).toBe(`ready`)
+              expect(loads).toBe(history.demands)
+              expect(subscription.status).toBe(`ready`)
+            } finally {
+              off()
+              subscription.unsubscribe()
+              gate.resolve()
+              await source.cleanup()
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { ...oraclePropertyOptions(60), seed: 2229 }
+          : oraclePropertyOptions(
+              60,
+              `subscription-lifecycle.notification-error`,
+            ),
+      )
+      reach.assertReached()
+      console.info(
+        `resume-notification-error ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+  }
+})
+
+// During ordinary admission, the new owner exists before subscribeChanges
+// returns its handle. Cleanup in the acquiring-count callback must retain that
+// demand even though the subscription has not joined the publication channel.
+// The token judgment is one surviving owner, independent of production's list.
+it(`retains admitted demand during subscriber-change cleanup`, async () => {
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  let cleanup: Promise<void> | undefined
+  let observed: boolean | undefined
+  const off = source.on(`subscribers:change`, ({ subscriberCount }) => {
+    if (subscriberCount !== 1) return
+    cleanup = source.cleanup()
+    observed = source._hasSubscriberOrPreload()
+  })
+  const subscription = source.subscribeChanges(() => {})
+  try {
+    expect(observed).toBe(true)
+    expect(source.subscriberCount).toBe(1)
+    await cleanup
+  } finally {
+    off()
+    subscription.unsubscribe()
+    await source.cleanup()
+  }
 })

@@ -109,6 +109,8 @@ export function modelSubscriberResumeRetirement({
   return {
     starts: cleanup && retireAt === `loading` ? 0 : 1,
     acquiring: retireAt === `none` ? 1 : 0,
+    // Cleanup forgets first demand when no acquiring owner survives.
+    subscriberOrPreload: !cleanup || retireAt === `none`,
     counts:
       retireAt === `none` ? [1] : retireAt === `subscribers` ? [1, 0] : [],
   }
@@ -1039,4 +1041,28 @@ export function expectedDeferralBatches(
         })),
       ]
     : []
+}
+
+/**
+ * A render sync-start handoff reports exceptions from the starts it performs.
+ * A Collection's recorded error is a readable status, not evidence that this
+ * handoff threw. The ordinary React contract exposes that status as isError;
+ * an explicit preload separately owns reporting its source startup failure.
+ *
+ * This projection retains error origin and timing because either changes the
+ * permitted synchronous result. It does not model source rows or recovery.
+ * Before-release histories use independent demand to release the same gate.
+ */
+export type StartHandoffHistory = {
+  outcome: `ready` | `mark-error` | `throw`
+  timing: `before-release` | `during-release`
+  cause: `error` | `undefined`
+}
+
+export function expectedStartHandoff(history: StartHandoffHistory) {
+  return {
+    throws: history.outcome === `throw` && history.timing === `during-release`,
+    status: history.outcome === `ready` ? `ready` : `error`,
+    starts: 1,
+  } as const
 }

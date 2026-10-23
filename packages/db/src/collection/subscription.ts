@@ -301,7 +301,7 @@ export class CollectionSubscription
     if (this.unsubscribed as boolean) return
     this.defersAcquisition = false
     notifyResumed?.()
-    if (!(this.unsubscribed as boolean) && this.collection.status !== `idle`) {
+    if (this.collection.status !== `idle`) {
       this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
     }
   }

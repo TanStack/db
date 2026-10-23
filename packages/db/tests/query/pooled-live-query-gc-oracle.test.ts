@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
@@ -230,6 +233,183 @@ describe(`pooled live query gcTime`, () => {
         stopFresh?.()
         observer?.dispose()
         fresh?.dispose()
+        await source.cleanup()
+      }
+    },
+  )
+
+  /**
+   * Late cleanup notification can invoke application status listeners before
+   * registration returns. A throw is still fail-fast, but it cannot retain a
+   * source status lease. This extends failed-construction ownership to the
+   * real synchronous callback boundary, with returned and thrown neighbors.
+   * Releasing the partition before cleanup is essential: a retained partition
+   * receives cleanup at its original registration, not during registration.
+   */
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`releases late cleanup registration channels (${campaign})`, async () => {
+      const reach = createOracleReach(`pooled-late-cleanup`, [
+        `return`,
+        `throw`,
+        `undefined-cause`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            throws: fc.boolean(),
+            cause: fc.constantFrom(`error` as const, `undefined` as const),
+            peers: fc.integer({ min: 1, max: 3 }),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const gate = createDeferred<void>()
+            const source = createCollection<Row>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              sync: {
+                sync: ({ markReady }) => {
+                  markReady()
+                  return { cleanup: () => gate.promise }
+                },
+              },
+            })
+            source.startSyncImmediate()
+            let statusLeases = 0
+            const on = source.on.bind(source)
+            source.on = (event, listener) => {
+              const off = on(event, listener)
+              if (event !== `status:change`) return off
+              statusLeases++
+              let active = true
+              return () => {
+                if (active) {
+                  active = false
+                  statusLeases--
+                  off()
+                }
+              }
+            }
+            const builder = new Query()
+              .from({ r: source })
+              .where(({ r }) => eq(r.g, `x`))
+            if (!(builder instanceof BaseQueryBuilder))
+              throw new Error(`not a builder`)
+            const view = createPooledLiveQuery(builder, { gcTime: 1 })!
+            const failure =
+              history.cause === `error`
+                ? new Error(`status listener`)
+                : undefined
+            const stops = Array.from({ length: history.peers }, () =>
+              view.on(`status:change`, () => {}),
+            )
+            stops.push(
+              view.on(`status:change`, () => {
+                if (history.throws) throw failure
+              }),
+            )
+            let subscription:
+              ReturnType<typeof view.subscribeChanges> | undefined
+            try {
+              await vi.advanceTimersByTimeAsync(100)
+              expect(source.subscriberCount).toBe(0)
+              expect(statusLeases, `partition released before cleanup`).toBe(0)
+              const pending = source.cleanup()
+              let result: { threw: boolean; error?: unknown } = { threw: false }
+              try {
+                subscription = view.subscribeChanges(() => {})
+              } catch (error) {
+                result = { threw: true, error }
+              }
+              reach.reach(history.throws ? `throw` : `return`)
+              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
+              expect(result.threw).toBe(history.throws)
+              if (history.throws) expect(result.error).toBe(failure)
+              expect(
+                statusLeases,
+                `failed/terminal registration owns no channel`,
+              ).toBe(0)
+              expect(source.subscriberCount).toBe(0)
+              expect(view.status).toBe(`error`)
+              gate.resolve()
+              await pending
+            } finally {
+              stops.forEach((stop) => stop())
+              subscription?.unsubscribe()
+              gate.resolve()
+              await source.cleanup()
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(40), seed: 2229 }
+          : oraclePropertyOptions(40, `pooled-live-query.late-cleanup`),
+      )
+      reach.assertReached()
+      console.info(
+        `pooled-late-cleanup ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+  }
+
+  /** A recoverable eager-source error changes status, not partition lifetime.
+   * Only source cleanup is terminal. The return-to-ready checkpoint checks
+   * both shared views and fresh subscription ownership in the same sync run.
+   * On-demand sources cannot enter this path: pooling explicitly excludes them.
+   */
+  it.each([`before-views`, `after-views`] as const)(
+    `retains a partition through recoverable error $0`,
+    async (errorAt) => {
+      let fail = () => {}
+      let recover = () => {}
+      const source = createCollection<Row>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ begin, write, commit, markReady, markError }) => {
+            begin()
+            write({ type: `insert`, value: { id: `a`, g: `x` } })
+            commit()
+            markReady()
+            fail = () => markError(new Error(`temporary source error`))
+            recover = markReady
+          },
+        },
+      })
+      source.startSyncImmediate()
+      if (errorAt === `before-views`) fail()
+      const build = () => {
+        const builder = new Query()
+          .from({ r: source })
+          .where(({ r }) => eq(r.g, `x`))
+        if (!(builder instanceof BaseQueryBuilder))
+          throw new Error(`not a builder`)
+        return createPooledLiveQuery(builder, { gcTime: 1 })!
+      }
+      const views = [build(), build()]
+      const stops: Array<ReturnType<typeof source.subscribeChanges>> = []
+      try {
+        if (errorAt === `after-views`) fail()
+        for (const view of views) {
+          expect(view).toBeDefined()
+          stops.push(view.subscribeChanges(() => {}))
+          expect(view.status).toBe(`error`)
+        }
+        recover()
+        for (const view of views) {
+          expect(view.status).toBe(`ready`)
+          expect(
+            Array.from(view.entries(), ([key, row]) => ({
+              key,
+              id: row.id,
+              g: row.g,
+            })),
+          ).toEqual([{ key: `a`, id: `a`, g: `x` }])
+        }
+        expect(source.subscriberCount).toBe(1)
+      } finally {
+        stops.forEach((stop) => stop.unsubscribe())
+        await vi.advanceTimersByTimeAsync(100)
         await source.cleanup()
       }
     },

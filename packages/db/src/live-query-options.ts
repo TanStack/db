@@ -35,6 +35,7 @@ export type DeferredLiveQueryCollections = Set<
 /** Release every deferred source, then report the first startup failure. */
 export function resumeDeferredLiveQueryCollections(
   collections: DeferredLiveQueryCollections,
+  reportSourceErrors = false,
 ): void {
   const pending = Array.from(collections)
   collections.clear()
@@ -42,9 +43,9 @@ export function resumeDeferredLiveQueryCollections(
   for (const collection of pending) {
     try {
       collection._resumeSyncStart()
-      // Independent demand may have released this render's gate already.
-      // Its startup failure still belongs to this deferred-source handoff.
-      if (collection.status === `error`) {
+      // An explicit preload owns source failure reporting even when graph
+      // demand already released the gate. Ordinary hooks read error status.
+      if (reportSourceErrors && collection.status === `error`) {
         throw collection._lifecycle.getSyncError()
       }
     } catch (error) {

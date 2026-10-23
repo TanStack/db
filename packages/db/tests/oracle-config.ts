@@ -3,6 +3,12 @@ import { oracleReplayReporter } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `pooled-live-query.late-cleanup`,
+  `live-query-observer.partial-attach`,
+  `subscription-lifecycle.notification-error`,
+  `live-query.start-handoff`,
+  `react.descriptor-error-surface`,
+  `react.descriptor-ownership`,
   `cursor-pagination.no-peek`,
   `cursor-pagination.history`,
   `cursor-pagination.cache`,

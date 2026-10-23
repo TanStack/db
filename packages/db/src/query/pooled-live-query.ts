@@ -157,6 +157,7 @@ class Partition {
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)
       })
+      this.stopStatusEvents = stopStatus
       // Like a live query, a pooled view fails for good when its source
       // starts cleanup, before the adapter's cleanup settles; queries
       // mounted later get a new partition.

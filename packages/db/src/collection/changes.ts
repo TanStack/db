@@ -423,7 +423,7 @@ export class CollectionChangesManager<
     // A first-demand callback may itself retire this start.
     if (syncRunGeneration !== this.sync.getSyncRunGeneration()) return
     this.startSyncIfStopped()
-    // Committed demand releases even an abandoned render's sync-start gate.
+    // Independent demand releases even an abandoned render's sync-start gate.
     this.sync.resumeStart()
   }
 

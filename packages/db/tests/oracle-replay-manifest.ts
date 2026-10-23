@@ -9,6 +9,21 @@ import { registeredOracleProperties } from './oracle-config.js'
  */
 const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
+    `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
+    `live-query`,
+    `start-handoff`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
+    `pooled-live-query`,
+    `late-cleanup`,
+  ],
+  [
+    `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
+    `react`,
+    `descriptor-error-surface descriptor-ownership`,
+  ],
+  [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
     `cleanup-queue`,
     `history`,
@@ -112,7 +127,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
     `subscription-lifecycle`,
-    `async-statistics async-restart`,
+    `async-statistics async-restart notification-error`,
   ],
   [
     `db/tests/collection-subscription-replay-oracle.property.test.ts`,
@@ -132,7 +147,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/live-query-observer-history-oracle.property.test.ts`,
     `live-query-observer`,
-    `granular-history wholesale-history`,
+    `granular-history wholesale-history partial-attach`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
@@ -267,6 +282,24 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
+  [
+    `pooled-live-query.late-cleanup`,
+    `releases late cleanup registration channels.*random`,
+  ],
+  [
+    `live-query-observer.partial-attach`,
+    `releases every acquired channel before retry.*random`,
+  ],
+  [
+    `subscription-lifecycle.notification-error`,
+    `acquires retained demand after replacement readiness.*random`,
+  ],
+  [
+    `react.descriptor-error-surface`,
+    `error-surface after descriptor failure.*random`,
+  ],
+  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
   [
     `structural-identity.equal-representations`,
     `agrees with D2 value identity for equal representations`,

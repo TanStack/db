@@ -92,6 +92,7 @@
  */
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
+  BTreeIndex,
   DbClient,
   Query,
   collectionOptions,
@@ -102,8 +103,12 @@ import {
   prepareLiveQueryValue,
   toArray,
 } from '@tanstack/db'
-import { describe, expect, it } from 'vitest'
-import { Suspense } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { Component, Suspense } from 'react'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { createOracleReach } from '../../db/tests/oracle-reach'
+import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
@@ -111,6 +116,7 @@ import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createDeferred } from '../../db/src/deferred'
 import {
+  expectedStartHandoff,
   modelSubscriberStartCleanup,
   subscriberStartCleanupHistories,
 } from '../../db/tests/collection-subscription-lifecycle-grammar-oracle'
@@ -1671,6 +1677,162 @@ describe(`standalone descriptor query binding`, () => {
           await first.cleanup()
           await second.cleanup()
         }
+      })
+    }
+  }
+})
+
+/**
+ * React receives the source-error premise through actual descriptor startup.
+ * The shared conformance contract exposes ordinary hook errors as a readable
+ * status. The start-handoff judgment distinguishes a returned markError from
+ * a synchronous throw; neither permits a failed commit to retain ownership.
+ * The grammar varies both hooks, defined/absent causes, and callback return/
+ * throw. We observe the boundary and result after commit, and Collection
+ * ownership immediately after unmount, before Collection GC can hide a leak.
+ */
+describe(`descriptor error handoff at React commit`, () => {
+  class Boundary extends Component<
+    { children: ReactNode; caught: Array<unknown> },
+    { failed: boolean }
+  > {
+    state = { failed: false }
+    static getDerivedStateFromError() {
+      return { failed: true }
+    }
+    componentDidCatch(error: unknown) {
+      this.props.caught.push(error)
+    }
+    render() {
+      return this.state.failed ? null : this.props.children
+    }
+  }
+  const properties = {
+    'error-surface': `react.descriptor-error-surface`,
+    ownership: `react.descriptor-ownership`,
+  } as const
+  for (const observation of [`error-surface`, `ownership`] as const) {
+    for (const campaign of [`fixed`, `random`] as const) {
+      it(`${observation} after descriptor failure (${campaign})`, async () => {
+        const reach = createOracleReach(`react-error-handoff`, [
+          `ordinary`,
+          `infinite`,
+          `mark-error`,
+          `throw`,
+          `undefined-cause`,
+        ])
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              hook: fc.constantFrom(`ordinary` as const, `infinite` as const),
+              outcome: fc.constantFrom(`mark-error` as const, `throw` as const),
+              cause: fc.constantFrom(`error` as const, `undefined` as const),
+            }),
+            async (history) => {
+              reach.beginHistory()
+              const failure =
+                history.cause === `error`
+                  ? new Error(`source startup`)
+                  : undefined
+              const client = new DbClient()
+              const descriptor = collectionOptions(
+                `react-handoff-error`,
+                () => ({
+                  id: `react-handoff-error`,
+                  syncMode: `eager`,
+                  autoIndex: `eager`,
+                  defaultIndexType: BTreeIndex,
+                  getKey: (row: Row) => row.id,
+                  startSync: true,
+                  gcTime: 0,
+                  sync: {
+                    sync: ({ markError }) => {
+                      if (history.outcome === `throw`) throw failure
+                      markError(failure)
+                    },
+                  },
+                }),
+              )
+              const query = new Query()
+                .from({ item: descriptor })
+                .orderBy(({ item }) => item.id)
+              const caught: Array<unknown> = []
+              let current:
+                | {
+                    isError?: boolean
+                    status: string
+                    collection?: {
+                      subscriberCount: number
+                      cleanup: () => Promise<void>
+                    }
+                  }
+                | undefined
+              function Consumer() {
+                current =
+                  history.hook === `ordinary`
+                    ? useLiveQuery({ query })
+                    : useLiveInfiniteQuery(() => query, { pageSize: 1 })
+                return null
+              }
+              const consoleError = vi
+                .spyOn(console, `error`)
+                .mockImplementation(() => {})
+              let mounted: ReturnType<typeof render> | undefined
+              try {
+                mounted = render(
+                  <DbProvider client={client}>
+                    <Boundary caught={caught}>
+                      <Consumer />
+                    </Boundary>
+                  </DbProvider>,
+                )
+                await act(async () => {})
+                reach.reach(history.hook)
+                reach.reach(history.outcome)
+                if (history.cause === `undefined`)
+                  reach.reach(`undefined-cause`)
+                if (observation === `error-surface`) {
+                  const expected = expectedStartHandoff({
+                    ...history,
+                    timing: `during-release`,
+                  })
+                  if (!expected.throws) {
+                    expect(caught, `ordinary errors remain readable`).toEqual(
+                      [],
+                    )
+                    expect(current?.status).toBe(`error`)
+                    expect(current?.isError).toBe(true)
+                  } else {
+                    expect(
+                      caught,
+                      `a thrown start remains fail-fast`,
+                    ).toHaveLength(1)
+                  }
+                }
+                mounted.unmount()
+                expect(current?.collection).toBeDefined()
+                if (current?.collection)
+                  expect(
+                    current.collection.subscriberCount,
+                    `commit/unmount releases every hook owner`,
+                  ).toBe(0)
+              } finally {
+                mounted?.unmount()
+                consoleError.mockRestore()
+                await current?.collection?.cleanup()
+                await client.cleanup()
+              }
+            },
+          ),
+          campaign === `fixed`
+            ? { numRuns: oracleRuns(30), seed: 2229 }
+            : oraclePropertyOptions(30, properties[observation]),
+        )
+        reach.assertReached()
+        console.info(
+          `react-error-handoff ${observation} ${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
       })
     }
   }

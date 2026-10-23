@@ -1,4 +1,5 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
+import { runAllCallbacks } from './utils/callbacks.js'
 import {
   getLiveQueryStatusFlags,
   getPublicCollection,
@@ -633,8 +634,9 @@ class LiveQueryObserverImpl<
       if (this.subscriptions.size === 0) this.detach()
     }
     this.subscriptions.add(record)
+    const attaching = !this.attached
     try {
-      if (this.subscriptions.size === 1) {
+      if (attaching) {
         this.attach()
       } else {
         // Seed only this late granular listener; a failed seed releases its
@@ -644,6 +646,7 @@ class LiveQueryObserverImpl<
     } catch (error) {
       // Setup returned no ownership handle. Release every acquired channel
       // and the logical record, so a later explicit subscription can attach.
+      if (attaching) this.detach()
       release()
       throw error
     }
@@ -667,6 +670,14 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+    // Install ownership before any registration can call back or throw.
+    const releases: Array<() => void> = []
+    const release = () => runAllCallbacks(releases.splice(0))
+    this.collectionUnsub = release
+    const ownRelease = (unsubscribe: () => void) => {
+      if (this.collectionUnsub === release) releases.push(unsubscribe)
+      else unsubscribe()
+    }
     this.registerClientResource()
     this.syncHydrationState()
     this.refreshDetachedState(collection)
@@ -755,42 +766,45 @@ class LiveQueryObserverImpl<
     // any status change publishes a synthetic notify so consumers re-read the
     // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
     // detached attachment leaves nothing behind.
-    const statusUnsub = collection.on(`status:change`, ({ status }) =>
-      notify(undefined, status),
+    ownRelease(
+      collection.on(`status:change`, ({ status }) => notify(undefined, status)),
     )
     const subscribeLayoutChanges = (
       collection as Collection<T, TKey, any> & {
         _subscribeLayoutChanges?: (listener: () => void) => () => void
       }
     )._subscribeLayoutChanges
-    const layoutUnsub =
-      typeof subscribeLayoutChanges === `function`
-        ? subscribeLayoutChanges.call(collection, () =>
-            notify([], collection.status, true),
-          )
-        : noop
-    const persistedUnsubs = this.persistedSources?.map((source) =>
-      source.readiness.subscribe(() => {
-        if (this.disposed || this.subscriptions.size === 0) return
-        this.snapshotDirty = true
-        if (
-          this.hasHydrationSeed() &&
-          this.readPersistedReadiness().status === `ready`
-        ) {
-          this.scheduleHydrationHandoff()
-        } else {
-          this.emit(undefined)
-        }
-      }),
-    )
+    if (typeof subscribeLayoutChanges === `function`) {
+      ownRelease(
+        subscribeLayoutChanges.call(collection, () =>
+          notify([], collection.status, true),
+        ),
+      )
+    }
+    for (const source of this.persistedSources ?? []) {
+      ownRelease(
+        source.readiness.subscribe(() => {
+          if (this.disposed || this.subscriptions.size === 0) return
+          this.snapshotDirty = true
+          if (
+            this.hasHydrationSeed() &&
+            this.readPersistedReadiness().status === `ready`
+          ) {
+            this.scheduleHydrationHandoff()
+          } else {
+            this.emit(undefined)
+          }
+        }),
+      )
+      if (this.collectionUnsub !== release) return
+    }
 
     // `subscribeChanges` delivers the initial state synchronously, so a
     // listener can dispose the observer while the collection subscription is
     // still being created. Register the release hook up front; if detach()
     // ran during that replay (collectionUnsub no longer points at our hook),
     // undo the subscription as soon as the call returns.
-    let subscription: { unsubscribe: () => void } | null = null
-    const clientUnsub =
+    ownRelease(
       this.client && this.queryHash
         ? this.client.subscribe((event) => {
             if (
@@ -809,24 +823,15 @@ class LiveQueryObserverImpl<
                 : this.diffEntries(previousEntries, nextEntries),
             )
           })
-        : noop
-    const release = () => {
-      clientUnsub()
-      statusUnsub()
-      layoutUnsub()
-      persistedUnsubs?.forEach((unsubscribe) => unsubscribe())
-      subscription?.unsubscribe()
-    }
-    this.collectionUnsub = release
-    subscription = collection.subscribeChanges(
+        : noop,
+    )
+    const subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
       { includeInitialState: !this.wholesale && !attachedWithHydrationSeed },
     )
+    ownRelease(() => subscription.unsubscribe())
     this.blockDelivery = false
-    if (this.collectionUnsub !== release) {
-      subscription.unsubscribe()
-      return
-    }
+    if (this.collectionUnsub !== release) return
     if (this.wholesale || attachedWithHydrationSeed) {
       // Publications raised while subscribeChanges starts sync are part of the
       // subscribe handshake. Apply their final snapshot state now, but suppress

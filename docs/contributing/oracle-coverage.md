@@ -144,6 +144,36 @@ replacement acquisition, readiness and rows. The previous implementation fails
 16. The controlled grammar does not claim arbitrary recursive cleanup or async
 provider work before acquisition. This owner retains those wider witnesses.
 
+The ten-finding high review adds generated error-provenance and partial-setup
+histories to the existing owners. The deferred-acquisition owner crosses ready,
+returned-error and thrown starts, before/during handoff, with defined/absent
+causes. Its independent start-handoff judgment also feeds real React ordinary
+and infinite hook drivers, which compare readable error/boundary behavior and
+ownership immediately after unmount. Explicit DbClient preload continues to
+report source startup failures. Pooled lifecycle histories add released
+partitions whose synchronous late cleanup callback returns or throws, including
+1–3 healthy status peers. Observer histories add early capability or sync
+failure, one/two failed attempts, both modes and reentrant surviving peers,
+then explicit retry/publication/release. First-party persisted readiness does
+not throw at registration; that premise is a controlled core-capability claim.
+The lifecycle owner adds held/immediate cleanup and actual post-transfer
+notification throws across 1–3 demands, checked after replacement readiness.
+Original and narrow-mutant assertions calibrate these cuts. All six new
+properties have declared reach, paired fixed/random campaigns and guarded
+seed/path replay. The [high-review audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md#high-review-of-ten-findings--2026-10-23)
+records counts and finite limits.
+
+Two high-review claims remain evidence gaps, not accepted exclusions. The
+pooled lifecycle owner needs a legal eager-source `subscribeChanges` throw
+whose contract promises same-run partition recovery; current eager
+`markError`/`markReady` histories recover both shared views. On-demand sources
+are ineligible for pooling. The lifecycle/deferred-acquisition owners need a
+notification-throw trace that keeps retained demand detached past supported
+replacement readiness; generated real throws currently acquire afterward.
+Arbitrary provider outages, callback programs and other frameworks' error
+policies remain outside these new witnesses. The approved cleanup admission
+rejection policy remains unchanged.
+
 The Collection lifecycle history owner includes a 26-cell cleanup-restart
 matrix. It crosses explicit and default eager sources with absent or present
 loaders, empty or nonempty replacements, and no interruption, truncate during

@@ -1255,3 +1255,346 @@ Final repaired replay-owner SHA-256:
 The six-part evidence block and the stated finite limits above still apply.
 The historical generated-RED chronology deviation, F02 decision and F07 evidence
 gap remain visible. Integration GREEN does not turn this into a ready verdict.
+## High review of ten findings — 2026-10-23
+
+The review checks `929c1d418a84c2d9ed57fb68aa829ba8c85c5ab7`, the head supplied
+by GitHub when this evaluation began. The reviewer did not supply its own
+reviewed SHA. Production and test repairs below follow that head. Earlier
+entries, decisions, counterexamples, and evidence remain unchanged.
+
+The review exposed two distinct laws. A recorded Collection error does not
+prove that a particular handoff threw. A failed subscription setup transfers no
+resource ownership to a caller that received no release handle. Those laws
+need separate error-provenance and partial-construction observations.
+
+### Laws, experiments, and inference
+
+| Law and authority                                                                                                                                                                                                                                | Previous coverage and missing distinction                                                                                                                                    | Decisive experiment                                                                                                                                                                                                                                            | Repair and enforcement boundary                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ordinary React hooks expose a returned source error through `status` and `isError`. A handoff propagates an exception from the start it performs. The shared conformance contract and subscription ownership contract supply authority. H01/H06. | Healthy deferred starts and explicit preload rejection did not distinguish recorded error from this call's throw. React did not observe owners after failed commit.          | Original helper fails generated error-origin/timing histories. Both real hooks enter the boundary on returned `markError`, then retain one Collection subscriber after unmount.                                                                                | Default handoff reports only its actual throws. Explicit DbClient preload still requests source-error reporting. Core compares exact error identity, status, one start, and drained handoff at return. React compares status, `isError`, boundary capture, and zero owners immediately after unmount. |
+| Failed construction releases all channels acquired before failure. Real cleanup callbacks may run during registration. H05/H07.                                                                                                                  | Pooled cleanup cases omitted a throwing late status callback. Observer setup cases omitted earlier capability failure and reentrant peer ownership.                          | Original pooled code retains one source status lease. Original observer retains status/layout leases. A narrow observer repair still leaks when a reentrant peer survives.                                                                                     | Own pooled status release before cleanup registration. Observer installs one release list before registration and detaches the failed physical attachment even with surviving logical records. Check immediately after every failed attempt, then explicit retry, publication, and final release.     |
+| Ordinary demand is independent of an abandoned render. Deferred acquisition alone starts no provider work. Law 15 and the shared startup judgment supply authority. H02.                                                                         | Existing real React abandoned-render histories already distinguish ordinary, resumed, preload, and deferring readers, with both source modes and `startSync` values.         | All real abandoned-render cases retain zero adapter starts before commit/direct demand. Ordinary demand subsequently starts once. Deferred demand retains zero.                                                                                                | Retain behavior. Change the comment from “Committed demand” to “Independent demand.” This rule does not promise that an arbitrary ordinary subscription is a render-only read.                                                                                                                        |
+| First-demand history, current acquiring ownership, and cleanup-surviving logical demand are different facts. H03.                                                                                                                                | The retirement matrix omitted the retained first-demand mark. Ordinary admission lacked an observation during its acquiring-count callback, before publication registration. | Removing the current-count OR fails one ownership assertion. Removing the positive-count guard fails four reentrant retirement assertions.                                                                                                                     | Preserve the representations. Extend the existing token judgment and callback observation. An acquiring notification can unsubscribe synchronously and make the count zero even when `delta === 1`.                                                                                                   |
+| Retained logical demand can acquire after explicit replacement readiness. Cleanup invalidates old acquisition authority. The glossary supplies authority. H08.                                                                                   | A synchronous second first-demand notification was not generated at the ownership-transfer cut.                                                                              | Real `notifyResumed` throws after transfer, including while held cleanup leaves public status ready. Retained demand still acquires after explicit replacement readiness. A mutant suppressing readiness-driven restart fails the acquisition-count assertion. | Add generated coverage. Do not add recovery machinery for an unproved permanent failure. The notification-error consequence remains an evidence gap beyond these histories.                                                                                                                           |
+
+H01's reference judgment is shared by the core and real React driver. It retains
+callback outcome, handoff timing, and defined/undefined cause. It combines no
+production queues or classifiers. The React driver supplies only host scheduling
+and observations. Explicit preload has a distinct error-reporting obligation:
+it must reject if its source startup failed even when graph demand consumed the
+gate first. Existing exact-error, healthy-peer, stream and replacement cases
+continue to check that obligation.
+
+H07 uses a controlled persisted-readiness capability that can fail registration
+before returning a handle. First-party readiness registration does not currently
+throw. The driver also uses real sync startup throws. This proves cleanup at the
+core capability boundary, not a first-party persistence outage or every possible
+provider failure. A failed registration itself transfers no unreturned handle.
+A returned reentrant peer remains a logical record. A later explicit subscription
+reattaches that record and receives subsequent publication.
+
+### Lossless source-order ledger
+
+| ID and original location                                                        | Claim and technical verdict                                                                                                                                                                                                                                                                                 | PR action / disposition                                                                                                                                                                     | Durable value and destination                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H01 `live-query-options.ts:47`, correctness                                     | Confirmed. The helper rethrows unrelated recorded errors, including `undefined`. The summary's error-boundary consequence is reproduced with real React.                                                                                                                                                    | `fixed-now`: distinguish readable status from an actual thrown start. Explicit preload retains source-error reporting.                                                                      | Shared start-handoff judgment, deferred-acquisition owner, and both React receiving drivers.                                                                                                                                           |
+| H02 `collection/changes.ts:427`, correctness                                    | Default admission releases the gate by design. The alleged ordinary-hook render work is not observed: real abandoned renders start no adapter work. A default subscriber is independent demand.                                                                                                             | `accepted-design`: retain law 15 and clarify the comment.                                                                                                                                   | Existing real React/core startup matrices remain. The separate test-integrity allegation is checked below.                                                                                                                             |
+| H03 `collection/changes.ts:436`, simplification                                 | Refuted. Sticky first demand, current ownership, and surviving logical demand differ. The count can become zero during a positive-count event.                                                                                                                                                              | `refuted`: do not remove either count check.                                                                                                                                                | Added mark comparison and admission-reentry witness in the lifecycle owners. Both proposed removals fail assertions.                                                                                                                   |
+| H04 `query/pooled-live-query.ts:194`, correctness                               | The catch terminates the partition. A legal recoverable source error that reaches that catch remains unproved. Eager `markError`/`markReady` before or after view construction recovers both shared views without throwing.                                                                                 | `confirmed-open`, evidence gap. No speculative partition recovery added.                                                                                                                    | Pooled lifecycle owner retains two finite same-run recovery cases. Needed: smallest legal eager-source sequence where `subscribeChanges` throws yet the same partition must recover.                                                   |
+| H05 `query/pooled-live-query.ts:173`, correctness                               | Confirmed. A released partition can register during held cleanup; a retained view status callback throws before registration returns and leaves a status lease.                                                                                                                                             | `fixed-now`: assign the status release before cleanup registration.                                                                                                                         | Generated late-cleanup property in pooled lifecycle owner, with returned/throwing and defined/undefined neighbors.                                                                                                                     |
+| H06 `react-db/useLiveQuery.ts:1044`, `useLiveInfiniteQuery.ts:438`, correctness | Confirmed on the original helper for both hooks. A post-acquisition throw prevents the unsubscribe handle from reaching React. The footnote is correct: the hook pattern predates this PR, but the broad helper throw makes it reachable.                                                                   | `fixed-now` through H01. Separate hook rollback guards were tried and removed after their removal survived repaired-helper histories. Both hook source files remain unchanged in this pass. | Keep separate error-surface and post-unmount ownership properties through the actual hooks. Do not dismiss the finding as outside the diff.                                                                                            |
+| H07 `live-query-observer.ts:643`, correctness                                   | Confirmed at the controlled capability and real sync boundaries. Partial registration and a surviving reentrant peer defeat the older release placement/record-count rule.                                                                                                                                  | `fixed-now`: one early-owned release list and explicit failed-attachment detach.                                                                                                            | Observer history owner generates failure boundary, mode, peer presence, and repeated failed attempts, then checks successful next use.                                                                                                 |
+| H08 `collection/subscription.ts:303`, correctness                               | A second first-demand callback can throw after ownership transfer. `subscribers:change` callback errors are reported asynchronously and cannot skip the next statement. Generated synchronous-throw histories retain demand and acquire after replacement readiness. Permanent stranding is not reproduced. | `confirmed-open`, evidence gap. No retry/finally state added without a legal failing trace.                                                                                                 | Lifecycle owner now generates actual notification throws across held/immediate cleanup and 1–3 distinct demands. Needed: smallest source-ready sequence that skips restart and remains stuck after the supported readiness checkpoint. |
+| H09 `collection/subscription.ts:304`, simplification                            | Confirmed. The outer unsubscribed guard duplicates `restartDetachedDemands`' first authority check.                                                                                                                                                                                                         | `fixed-now`: remove the guard and cast.                                                                                                                                                     | Whole lifecycle, retirement and deferred-acquisition owners protect the inner check.                                                                                                                                                   |
+| H10 `db/mangle-cache.json:419`, code weight                                     | Confirmed reporting gap. The reported +139 gzip/+238 brotli package figures match the previous head against merged main.                                                                                                                                                                                    | `fixed-now`: perform and record actual refactor experiments and final shipped-byte measurement below. Growth remains explicit.                                                              | This versioned record and PR body retain accepted/rejected alternatives and their evidence.                                                                                                                                            |
+
+The H02 provenance claim is separate from its product claim. Commit
+`2151d9f1f` did change cancellation fixtures to create deferred logical demand
+and then resume it. That change does not establish permission for ordinary React
+render work. At this evaluation's parent, the DbClient queued-load fixture still
+checks no adapter work before release, using an explicit queued load. The real
+React startup matrix separately checks zero work for abandoned renders and
+later acquisition for direct demand. The high review supplied no failing render
+fixture. These assertions remain intact, and all actual render-cut suites pass.
+
+The ten panel entries and both summary bullets are accounted for above. H01's
+`undefined` cause, H02's test-integrity subclaim, both H06 hooks, and H06's
+outside-diff provenance remain distinct. No additional product sibling was
+confirmed. Fixture setup and replay-registration mistakes found during this
+pass are recorded below rather than counted as product defects.
+
+### Generated grammar and calibration
+
+All six properties run fixed seed `2229` and an unseeded campaign with equal
+budgets. Each declares reach with a minimum of one history per named state.
+The state counts below come from the final normal runs. Observer reach uses an
+actual returned peer handle, checked against the generated premise.
+
+| Property / state                                                    | Fixed | Random |
+| ------------------------------------------------------------------- | ----: | -----: |
+| `live-query.start-handoff` / prior-error                            |    33 |     27 |
+| same / marked-error                                                 |    29 |     29 |
+| same / own-throw                                                    |    18 |     15 |
+| same / undefined-cause                                              |    43 |     57 |
+| same / healthy                                                      |    35 |     40 |
+| `pooled-live-query.late-cleanup` / return                           |    22 |     22 |
+| same / throw                                                        |    18 |     18 |
+| same / undefined-cause                                              |    18 |     21 |
+| `live-query-observer.partial-attach` / early-failure                |    29 |     27 |
+| same / sync-failure                                                 |    31 |     33 |
+| same / surviving-peer                                               |    26 |     32 |
+| same / no-peer                                                      |    34 |     28 |
+| `subscription-lifecycle.notification-error` / throwing-notification |    31 |     32 |
+| same / retained-owner                                               |    60 |     60 |
+| same / held-cleanup                                                 |    30 |     36 |
+| same / replacement-ready                                            |    60 |     60 |
+| `react.descriptor-error-surface` / ordinary                         |    16 |     16 |
+| same / infinite                                                     |    14 |     14 |
+| same / mark-error                                                   |    16 |     16 |
+| same / throw                                                        |    14 |     14 |
+| same / undefined-cause                                              |    15 |     13 |
+| `react.descriptor-ownership` / ordinary                             |    16 |     11 |
+| same / infinite                                                     |    14 |     19 |
+| same / mark-error                                                   |    16 |     21 |
+| same / throw                                                        |    14 |      9 |
+| same / undefined-cause                                              |    15 |     12 |
+
+The core handoff budget is 100, pooled cleanup 40, observer attachment and
+notification error 60, and each React observation 30. These are sampled finite
+histories, not universal proofs. The domains retain the distinctions needed to
+reconstruct the reports and the following neighboring cases:
+
+- Handoff: ready versus returned error versus throw, before versus during
+  release, and defined versus absent cause. Timing distinguishes another
+  reader's failure. Outcome distinguishes readable error from exception.
+  Calling an old render handle again must not start a second run.
+- Pooled registration: returned versus thrown late callback, defined versus
+  absent cause, and 1–3 healthy peer status listeners. Removing release-before-
+  cleanup prevents the late-registration premise. On-demand sources are
+  excluded by production's pool eligibility, not a test waiver.
+- Observer: granular/wholesale, early capability/real sync failure, one/two
+  failed attempts, and absent/present reentrant peer. Removing early failure
+  loses partial-registration reach. Removing peer presence accepts the narrow
+  record-count repair. Successful retry/publication/release follows every case.
+- Notification: held/immediate cleanup, returned/thrown second notification,
+  and 1–3 distinct predicates. Cleanup is required to clear the first demand
+  mark and reach the second notification. Distinct predicates retain separate
+  demands. Replacement readiness is explicit because cleanup promises no
+  automatic restart.
+- React: both hooks, returned error versus actual throw, and defined/absent
+  cause. A healthy source is covered by the surrounding host suite. Direct
+  QueryBuilder input to the infinite hook is outside its accepted input form.
+
+Original RED and hostile results are assertion failures at the claimed cuts:
+
+| Experiment                                                              | Captured failure                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Original H01 helper                                                     | Seed `2229`, path `0:1`: `mark-error/before-release/error` unexpectedly throws. A random original replay is `1735232938`, path `1`, with an earlier thrown start.                                                                                            |
+| Original real React, ordinary hook                                      | Error-surface seed `-1964136193`, path `2:0`: boundary capture replaces readable error. Ownership seed `-1619664311`, path `0:0`: one owner remains after unmount. Fixed seed `2229`, path `0:0` also fails both observations.                               |
+| Original real React, infinite hook                                      | Restricting the same grammar to the infinite hook reproduces both boundary and retained-owner assertions. The receiving input is `() => query`.                                                                                                              |
+| Original H05 placement                                                  | Seed `2229`, path `2:1:1`, `throws=true/cause=error/peers=1`: one status lease remains.                                                                                                                                                                      |
+| Original H07 attachment                                                 | Seed `2229`, path `0:0:0`, and random `-1896275468`, path `0:0:0:0`: early capability failure retains status/layout leases.                                                                                                                                  |
+| Narrow H07 repair without failed-attachment detach for a surviving peer | Seed `2229`, path `0:1`, and random `754580778`, path `0:0:0`: peer=true retains failed physical ownership. Both campaign assertions fail.                                                                                                                   |
+| Restore H01's broad recorded-error throw                                | Both final core campaigns fail the handoff throw assertion. Random seed `1085601716`, path `0:1`.                                                                                                                                                            |
+| Delete H05's early status ownership                                     | Both final pooled campaigns fail the zero-status-lease assertion. Random seed `-395346131`, path `0:1`.                                                                                                                                                      |
+| Suppress readiness-driven restart after transfer                        | Both notification campaigns fail the acquisition-count assertion. Random seed `-843337973`, path `0:0:1`, reaches a real thrown notification and observes zero loads instead of one. This calibrates retained-demand coverage, not an H08 production repair. |
+| Delete H03 current-count OR                                             | One assertion fails during acquiring-count cleanup before the new subscription joins publication registration.                                                                                                                                               |
+| Delete H03 positive-count conjunct                                      | Four assertions fail in reentrant retirement histories.                                                                                                                                                                                                      |
+
+Every production mutation was restored byte for byte before the final GREEN.
+Removing the hook rollback guards survives both direct-source and exploratory
+lazy-child histories with the repaired helper. That surviving mutant supplies
+no evidence that rollback guards are necessary. The unproved lazy-child
+extension is not part of the final claimed grammar. Original helper plus guards
+passes both hooks' ownership checks, but the upstream provenance repair also
+passes without adding those guards.
+
+Early H04 on-demand throw probes did not reach pool subscription: the pool
+explicitly rejects on-demand sources. They are setup failures, not RED evidence.
+An early infinite-hook fixture also supplied an unsupported direct QueryBuilder.
+Its setup failures are withdrawn. The corrected real-hook original assertions
+above supply the evidence. The first combined core run passed runtime tests but
+reported two test-source builder type errors. The final run fixes the narrowing
+without changing the grammar or expected results. A replay manifest test also
+caught dynamically constructed React property IDs. Literal IDs repair the
+registry check without changing behavior.
+
+### GREEN commands and direct replay
+
+From `packages/db`:
+
+```sh
+pnpm exec vitest run tests/collection tests/db-client.test.ts tests/effect \
+  tests/live-query tests/query/pooled-live-query \
+  tests/query/load-subset-replay-refinement-oracle.test.ts \
+  --coverage.enabled=false \
+  --pool-options.threads.maxThreads=2 --pool-options.threads.minThreads=1
+```
+
+This final run passes 2,816 runtime/type tests in 54 runner entries, with no type
+or unhandled errors. The final observer reach check separately passes all 30
+owner tests. The complete replay-wrapper run passes 34 protocol tests, while
+its three manifest tests initially fail on the dynamic IDs. After correction,
+all three manifest tests pass. From `packages/react-db`, the full test command
+passes 462 tests in 23 files. A final four-campaign run adds nonvacuous Collection
+ownership and `isError` comparisons and passes. No full repository `pnpm test`
+claim follows from these scoped runs.
+
+All six guarded replays run only the manifest's random lane and report one
+completed exact-property witness. Use these seed/path pairs:
+
+| Property                                    |        Seed | Path      |
+| ------------------------------------------- | ----------: | --------- |
+| `live-query.start-handoff`                  |        2229 | `0:1`     |
+| `pooled-live-query.late-cleanup`            |        2229 | `2:1:1`   |
+| `live-query-observer.partial-attach`        | -1896275468 | `0:0:0:0` |
+| `subscription-lifecycle.notification-error` |  -843337973 | `0:0:1`   |
+| `react.descriptor-error-surface`            | -1964136193 | `2:0`     |
+| `react.descriptor-ownership`                | -1619664311 | `0:0`     |
+
+For example, from `packages/db`:
+
+```sh
+TANSTACK_DB_ORACLE_SEED=2229 \
+TANSTACK_DB_ORACLE_PATH=0:1 \
+TANSTACK_DB_ORACLE_PROPERTY=live-query.start-handoff \
+node --import tsx tests/oracle-replay.ts \
+  tests/live-query-deferred-acquisition-oracle.test.ts --coverage.enabled=false
+```
+
+For React, run from `packages/react-db` and use
+`../db/tests/oracle-replay.ts` with the descriptor test file. None of the new
+properties uses `fc.commands`, so no commands replay path applies.
+
+### Shipped weight and refactor experiments — H10
+
+The target remains merged main `65d9ada508114f199464f753d50eb3447eb0eaf9`, verified
+by a fresh fetch. `pnpm size:compare --packages db,react-db --files` reports:
+
+| Scenario              | gzip delta | brotli delta |
+| --------------------- | ---------: | -----------: |
+| db package            |       +175 |         +233 |
+| React package         |          0 |            0 |
+| app                   |       +175 |         +294 |
+| app-effect            |       +164 |         +138 |
+| app-group-by          |       +174 |         +100 |
+| app-includes          |       +170 |          +66 |
+| app-join              |       +173 |         +170 |
+| app-local-storage     |       +166 |         +219 |
+| app-optimistic-action |       +171 |         +248 |
+| app-paced-mutations   |       +160 |          +65 |
+
+Actual alternatives tried during this pass:
+
+1. Replace separate observer channel locals and release closures with one
+   early-owned list. Keep the existing callback runner so every acquired
+   channel gets a release attempt. This repair removes parallel ownership
+   mechanics and supports early registration failures.
+2. Remove the duplicate outer unsubscribed guard. Existing inner authority
+   checks preserve behavior through the full lifecycle suite.
+3. Remove current-demand count from `hasSubscriberOrPreload`. Reject this
+   candidate: it fails one admission-reentry ownership assertion.
+4. Remove the positive-count conjunct from positive ownership notification.
+   Reject this candidate: four reentrant retirement assertions fail.
+5. Add then remove rollback guards in both React hooks. Keep their removal:
+   repaired-helper ownership histories pass without them. Measured React cost
+   falls from +22 gzip/+26 brotli to zero. The typical app falls from +186 gzip
+   to +175. Brotli changes are nonlinear and not a sum of source-file deltas.
+
+The db package remains 36 gzip bytes larger and 5 brotli bytes smaller than
+this review's parent comparison. Its remaining growth pays for error-provenance
+separation, early resource ownership, and the prior demand/admission repairs.
+The rejected count simplifications violate concrete ownership laws. No extra
+React rollback or replacement lifecycle remains. The new production diff is
+net +7 source lines, reported only as context. Shipped bytes above are the
+weight measure. The test/model/replay changes add roughly 840 lines separately
+from production and contract documentation.
+
+### ORC-001–015 assessment and limits
+
+001/002: The conformance error surface, handle ownership, glossary cleanup
+rules and architecture law 15 supply authority. Small error-origin and
+resource-token judgments stay independent of production classifiers.
+003/009: Each changed owner states its law and limits before mechanics.
+The shared handoff judgment names its projection. Vocabulary follows the
+glossary. 004: The grammar controls above name reconstruction, axis ablation,
+finite ranges and nearby exclusions. 005/013: Real Collection/observer/pool
+entry points and real React commit/unmount paths reach the stated cuts.
+Returned versus thrown starts and cleanup callbacks are distinguishing
+neighbors. No concrete missing source fact is identified for these cuts.
+006: Original and narrow-mutant assertions above reject the wrong designs.
+H04/H08 gaps receive no closure credit. 007: Equal fixed/random budgets and six
+guarded direct replays pass. 008: The handoff projection retains timing and
+outcome because each changes allowed throw behavior. The retirement model's
+new mark observation distinguishes retired ownership after cleanup. No new
+stateful reference machine was introduced. 010: Driver cleanup is deterministic
+within these fault domains. Experimental mutations restore exact bytes.
+Cleanup-throwing capabilities are outside this grammar and are not claimed.
+011: No new shared semantic-fault hypothesis needs a second formulation.
+012: This versioned record preserves verdict-critical evidence and source
+identities. 014: React receives the shared handoff judgment through actual host
+scheduling. Controlled capability failure remains a core-only claim.
+015: Mandatory minima and every declared state count appear above.
+
+The encoded laws are enforced at their stated return, failed-construction,
+retry-publication and host-unmount cuts for these finite grammars. They do not
+establish arbitrary provider outages, every callback program, every React
+schedule, or other frameworks' error policies. Ordinary hook/error ownership
+and explicit preload rejection are separate observations. The pooled and
+observer owners retain their broader existing lifecycle histories.
+
+H04 remains open until a legal eager-source subscription throw with promised
+same-run recovery is supplied. H08 remains open until a retained demand is
+shown stuck past supported replacement readiness. Both questions were sent
+with the tested path and observed results. Neither is silently deferred or
+refuted by a different-path green test. The coverage map names those owners
+and required witnesses.
+
+### Reviewer assessment, loss audit, and readiness
+
+**Hire recommendation: hire for code review.** The review found four reproduced
+behavioral findings, including two subtle partial-construction leaks, plus a
+valid simplification and the missing size rationale. Its strongest contribution
+was tracing a new throw into unchanged receiving code. Its recovery and render
+claims need better legal-path evidence. One simplification contradicts reentrant
+ownership, and the review did not supply executable fixtures for its two
+remaining failure consequences. Those limits reduce confidence in autonomous
+design recommendations, without erasing the useful discoveries.
+
+Ten raw items = six `fixed-now` (H01/H05/H06/H07/H09/H10), one
+`accepted-design` (H02), one `refuted` (H03), and two `confirmed-open` evidence
+gaps (H04/H08). No items are deferred or merged away as duplicates. Accounting
+is complete. Confirmed authorized repairs and their declared oracle work are
+complete in the bounded domains above. The two unproved consequences remain
+open investigations, rather than confirmed unfixed defects.
+
+Whole-PR verdict remains **not ready** because the earlier confirmed F02 warm-
+source hydration mismatch still needs its initial-snapshot policy. H04/H08,
+the earlier F07 typing report, and final-head CI also limit readiness evidence.
+The earlier 24 passing checks at `929c1d418` do not validate this new tree.
+Browser dependency installation timed out at that head and on merged main;
+that infrastructure failure did not execute application assertions. CodeRabbit
+remains paused and last reviewed `da37bc9bb`. No bot command or review comment
+was sent during this evaluation.
+
+### Repaired source identities
+
+The implementation/test revision is identified by its parent above and these
+SHA-256 values. The subsequent closeout entry pins the resulting commit.
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/db/src/client.ts` | `72fb0652c06885430bdb0554277de1c2e2c25b6cfa52105fb4e120feefd730b1` |
+| `packages/db/src/collection/changes.ts` | `0c07c750b94a97773bd707975a7ec7a41959ca7271112c4c0efeb79763a52b70` |
+| `packages/db/src/collection/subscription.ts` | `e20dee08fe0a9c952f4b0b0e20cc1d95890559e5e980665926afd3f23148a900` |
+| `packages/db/src/live-query-observer.ts` | `ddc6f6c2a13df4b919222ba7618626c36209079b7c3e1252f9fd0275211f576a` |
+| `packages/db/src/live-query-options.ts` | `49d617f85b1a5cc09c4815130db703baa45fb7b5915b5a0973b77c662dbcf26b` |
+| `packages/db/src/query/pooled-live-query.ts` | `01c253b1b781d78f570d3dbb7048cf90f5bc05a4292ee3ee623a9661463204d3` |
+| `packages/db/tests/collection-subscription-lifecycle-grammar-oracle.ts` | `b6e5752c5f78312971667dd9c0e6ea7af7fd5d9a9db18b29a20be1b68c75325a` |
+| `packages/db/tests/collection-subscription-lifecycle-oracle.test.ts` | `a344eecab6e4b1220f97249ae7de0feb905bf23af07cb6ca5926c1e387373a63` |
+| `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` | `818998ac2d4049475d95d08d75b2a8c3321ec10ee3c073c5778017308d8147cd` |
+| `packages/db/tests/live-query-observer-history-oracle.property.test.ts` | `6e1caf13a0eec60b530a1d31708b1e9c0ec5e636bd97d211d004f1f24c7678eb` |
+| `packages/db/tests/oracle-config.ts` | `c1e6b14b96491d266571d65913f0bfb3acc98cdc3b9544a95317ae1b0b18970b` |
+| `packages/db/tests/oracle-replay-manifest.ts` | `eef645f84c09044ac06bbd369b237b427a3cee1ab5bcb198020abc4d3724ba9b` |
+| `packages/db/tests/query/pooled-live-query-gc-oracle.test.ts` | `029a28a9210c7c8981994f83044a454b6934c3cd61e29ae3e5c079c167ef6507` |
+| `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx` | `979091a554ac15c6f24f8b1d81112473c1e1b9db048e25a3031095e3a36cb4b5` |
