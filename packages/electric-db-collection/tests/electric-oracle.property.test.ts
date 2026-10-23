@@ -3863,9 +3863,11 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }).toEqual({
         publicRows: [[1, `updated across callbacks`, `stable-1`]],
         durableRows: [],
+        // The source's insert is persisted as an insert, which replaces any
+        // cached row (decision C1 of 2026-10-23); its update merges.
         persistedMutations: [
           {
-            type: `update`,
+            type: `insert`,
             key: 1,
             value: {
               id: 1,

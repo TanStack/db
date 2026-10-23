@@ -8,8 +8,8 @@ is RED on the base revision. The same pull request repairs production; see
 ## Decisions
 
 The maintainer made five decisions on 2026-10-22; the fifth replaced an
-encoding the author had extended without asking. A sixth, on 2026-10-23,
-withdrew the second:
+encoding the author had extended without asking. Three more followed on
+2026-10-23; the sixth withdrew the second:
 
 1. **Borrow standard theory.** "this is a clear case where we borrow laws";
    "Generally we want to follow standard theory here". One sync run is a
@@ -79,6 +79,38 @@ withdrew the second:
    abort discards only its own transaction's writes. An inner transaction
    still reads the open writes of the transactions it began inside; the
    author's proposal said so, and the maintainer accepted it.
+7. **Cover every nested history (2026-10-23).** The first encoding of
+   decision 6 excluded an inner row write or truncate that conflicts with an
+   enclosing open transaction's row writes. The maintainer asked to "cover
+   everything with the grammar". The model now judges those histories. An
+   open transaction's inserts follow the rows before them in commit order;
+   a commit fixes their kinds. An outer insert that lands on a different row
+   the source wrote makes its transaction invalid, as a duplicate-key insert
+   would. No read includes an invalid transaction, it ignores later writes,
+   and its commit rejects. Two rules came from existing authority, not from
+   the maintainer. Later writes cannot revive an invalid transaction, a
+   truncate included: core's own comment says so ("later writes cannot
+   revive it"), and core's `truncate` contradicted it. A seed accepted after
+   an insert was written cannot change the insert's kind, because a seed is
+   older than every source write (D4).
+8. **Cached rows are seeds, and wrapper inserts replace (2026-10-23).** The
+   persisted wrapper wrote every source insert to core and storage as an
+   update. The SQLite persistence plan (`PERSISTNCE-PLAN-SQLITE-ONLY.md`,
+   2026-02-10, §D) gives the reason: a remote snapshot that overlaps the
+   local cache must not raise `DuplicateKeySyncError`. Under partial row
+   updates the update also merged a cached row's omitted fields under the
+   insert. No document argued for that merge; the test that pins it
+   (#2037) calls it pre-existing behavior. The maintainer chose option C: a
+   cached row is a snapshot older than every source write, like a hydration
+   seed, so a source insert replaces it and its metadata. While the change
+   was being implemented, three existing persisted owners showed that the
+   wrapper's inserts also replace rows the source itself wrote earlier in the
+   run (the hydration FIFO and hydration-failure tests, and the persisted
+   optimistic-history oracle). The maintainer then chose C1: in the wrapper,
+   an insert replaces whatever row it lands on, never raises a duplicate-key
+   error, and never invalidates its transaction. Its metadata still follows
+   the 2026-10-05 rules: it clears unless it is an equal re-insert of a row
+   the source wrote. Core keeps duplicates and invalidation.
 
 ## Laws and sources
 
@@ -89,6 +121,7 @@ withdrew the second:
 | Monotonic reads | Terry §3.2 | The writes a read includes only grow, except at an abort. When an inner transaction commits, an enclosing open transaction's write to the same object is ordered after it, so a read can change without a new write |
 | Own reads | Adya 1999, §3.1.2 | A transaction reads its own writes; the innermost open transaction's writes come last in the order |
 | Aborted reads | Adya §3.1.2, G1a | Not guaranteed across open transactions: an inner transaction reads an enclosing transaction's open writes and can commit before that transaction aborts (decision 6). No read after an abort includes the aborted writes |
+| Invalid transactions | decision 7; core's invalidation comment | A transaction whose insert lands on a different source row, in commit order, is invalid: no read includes it, later writes are ignored, and its commit rejects. Where inserts replace (the persisted wrapper, decision 8), the insert replaces that row instead |
 | Termination order | the sync API | `commit` and abort act on the innermost open transaction; the API has no transaction handle |
 | Monotonic atomic view | Bailis et al. 2014 (HAT), Def. 27 | Once a consumer observes any effect of a transaction, it observes all of its effects thereafter, across both stores. The comparison is stronger: `collection.base` must equal the model at every checkpoint |
 | Applied receipt | `SyncConfig.commit` docs; glossary "applied receipt" | A receipt settles when its transaction applies |
@@ -114,11 +147,17 @@ event-log model, the history grammar, the driver contract, and the
 comparison. Drivers:
 
 - `sync-metadata-session-oracle.property.test.ts`: a `DbClient` Collection;
-  lanes `flat`, `nested` (depth ≤ 3), `seeds`, and `seeds-full`
-  (`rowUpdateMode: 'full'`).
+  lanes `flat`, `nested` (depth ≤ 3), `seeds`, `nested-seeds`, `seeds-full`
+  (`rowUpdateMode: 'full'`), and `nested-conflicts`, which favours row
+  writes to one row inside nested transactions so that inner writes land
+  ahead of enclosing ones and transactions become invalid.
 - `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`:
   `persistedCollectionOptions` over an in-memory adapter, with store and core
-  holds; lanes `persisted-flat`, `persisted-nested`, `persisted-seeds`.
+  holds; lanes `persisted-flat`, `persisted-nested`, `persisted-seeds`,
+  `persisted-cached` (row 1 is in storage when the run starts; the model
+  holds it as a seed accepted before any action), and `persisted-conflicts`.
+  Every persisted lane declares the one model difference of decision 8: an
+  insert over a different row replaces it.
 
 The row-metadata composition oracle keeps its base nested lane, which
 already judged independent transactions: a transaction begun inside T1
@@ -127,13 +166,10 @@ This change adds a `held` variant of that lane (a hold cannot change commit
 order) and applies D5 to its seed variant. Its held-window lane, added
 earlier for this issue, stays.
 
-The session grammar does not generate an inner transaction's row write or
-truncate after an enclosing open transaction has written that row or
-truncated (a truncate: after it has written any row). Committing first puts
-the inner write ahead of the outer one, so the outer insert's kind can
-change, or the outer transaction can become invalid, which the session model
-does not judge. The composition oracle's nested lane owns those histories for
-one key; the coverage map records the gap for several keys.
+The grammar generates every nested history (decision 7). The key
+independence property skips histories in which the model invalidates a
+transaction: invalidation is per transaction, so a row 2 conflict also
+removes row 1's writes. That is atomicity, not a cross-key leak.
 
 ## RED evidence on `30175be48`
 
@@ -226,7 +262,7 @@ files.
 
 ## Production repair
 
-The repair keeps the existing structures and changes four rules.
+The repair keeps the existing structures and changes these rules.
 
 - **Reads.** `metadata.row.get`, `metadata.collection.get`, and `list()`
   walk every pending transaction, newest first, then applied state; a
@@ -250,38 +286,80 @@ The repair keeps the existing structures and changes four rules.
   as an equal re-insert. A held seed's receipt has a rejection handler.
 - **Wrapper metadata.** An insert without metadata stages a clear unless it is
   an equal re-insert of a row the source wrote; the last write for a key
-  wins. Under partial row updates the wrapper hands core an insert as an
-  insert unless core would reject it as a duplicate of a stored row.
+  wins.
 - **Query.** `getRowMetadata` no longer falls back to applied metadata, which
   read a staged clear as "no value".
+- **Invalid transactions (decision 7).** Core's readers skip a transaction a
+  replay invalidated, and `write` and `truncate` ignore it; `truncate` no
+  longer clears the invalidation. Its metadata writes need no check: no read
+  includes it, and it never applies (a mutant that lets them through is
+  equivalent).
+- **Seed authority across a hold.** The replay projection records which keys
+  accepted source transactions wrote. An accepted source write makes a row
+  the source's, as its application does, so a seed no longer exempts that
+  row while the transaction is held. Before, an inner commit during a hold
+  kept the outer transaction valid, and the same history without the hold
+  invalidated it.
+- **Wrapper inserts (decision 8).** A source insert replaces the row it lands
+  on: in core as a delete then the insert when core holds a different row,
+  and in storage as an `insert` mutation, which the SQLite adapter upserts.
+  The wrapper records the keys its source transactions handed to core in this
+  run; any other row came from the cache or a seed, so an insert equal to it
+  still clears metadata. After an inner commit, the wrapper re-judges each
+  enclosing transaction's implicit metadata clears on the keys the inner
+  transaction wrote, as core's replay does, and an inner re-insert keeps its
+  metadata when it lands where the row is absent.
 
 ### Evidence block
 
 - **Law:** read your writes, monotonic writes in commit order, own reads,
-  monotonic atomic view, applied receipts, and D4/D5 seed authority, as
-  stated above. Authority: decisions 1 and 3–6.
-- **Reach:** the fixed campaigns (100 histories per lane) reach these
-  declared states. The reach test fails below its minimum: 11, or 5 for the
-  two states that need a seed and a source write on one row.
+  monotonic atomic view, applied receipts, invalid transactions, and D4/D5
+  seed authority, as stated above, with the wrapper difference of decision
+  8. Authority: decisions 1 and 3–8.
+- **Reach:** declared with `createOracleReach` in each fixed campaign
+  (ORC-015); a campaign fails below its minimum. Core lanes: 11, or 5 for
+  states that need a seed and a source write on one row, or a write after an
+  invalidation. Persisted lanes: 5. Counts in the fixed campaigns:
 
-  | State | flat | nested | seeds | nested-seeds | seeds-full |
-  |---|---|---|---|---|---|
-  | read with two held transactions | 18 | 37 | 16 | 22 | 12 |
-  | open transaction over a held transaction | 51 | 62 | 36 | 48 | 30 |
-  | truncate during a hold | 30 | 25 | 22 | 21 | 15 |
-  | nested commit | | 59 | | 52 | |
-  | nested commit during a hold | | 43 | | 36 | |
-  | abort keeps an inner commit | | 11 | | 9 | |
-  | seed under a source insert | | | 37 | 26 | 24 |
-  | seed under an open update | | | 10 | 5 | 7 |
+  | State | flat | nested | seeds | nested-seeds | seeds-full | nested-conflicts |
+  |---|---|---|---|---|---|---|
+  | read with two held transactions | 18 | 37 | 16 | 20 | 12 | 65 |
+  | open transaction over a held transaction | 51 | 61 | 36 | 47 | 30 | 136 |
+  | truncate during a hold | 30 | 31 | 22 | 24 | 15 | 69 |
+  | nested commit | | 59 | | 52 | | 158 |
+  | nested commit during a hold | | 43 | | 36 | | 107 |
+  | abort keeps an inner commit | | 11 | | 9 | | 24 |
+  | inner write to an enclosing row | | 7 | | 10 | | 92 |
+  | transaction invalidated | | 2 | | | | 28 |
+  | commit of an invalid transaction | | 2 | | | | 15 |
+  | write to an invalid transaction | | 1 | | | | 16 |
+  | seed under a source insert | | | 37 | 27 | 24 | |
+  | seed under an open update | | | 10 | 5 | 7 | |
 
-  The persisted lanes declare their own states in
-  `sync-metadata-session-persisted.test.ts`.
-- **RED:** `30175be48` production with this branch's tests, as listed under
-  "RED evidence": 51 of 186 tests fail in the session, composition, and
-  retention files.
-- **GREEN:** `pnpm vitest run` in `packages/db`: 285 files, 13,902 tests
-  pass. The session oracle file passes 67 of 67 in three consecutive runs.
+  `nested-conflicts` runs 300 fixed histories; the others run 100. Persisted
+  lanes: `persisted-conflicts` (150 histories) reaches an insert that
+  replaces a different row 18 times and an inner write to an enclosing row
+  50 times; `persisted-cached` (80) reaches a source insert over the cached
+  row 25 times and a source update over it 14 times.
+- **RED:**
+  - `30175be48` production with this branch's tests, as listed under "RED
+    evidence": 51 of 186 tests fail in the session, composition, and
+    retention files.
+  - Decision 7, on the production before its repair: 7 failures in the
+    session oracle (reads include an invalid transaction's staged metadata
+    and a collection write made after its invalidation; a hold changes
+    whether a seed exempts a row). Two more were model and grammar faults,
+    fixed before the production change: key independence compared histories
+    that invalidate a transaction, and the model kept a transaction's row
+    writes from before its own truncate.
+  - Decision 8, on the wrapper before its repair: the `persisted-cached` lane
+    fails because a source insert merges over the cached row and keeps its
+    `seeded` field; the persisted lanes fail on nested conflicts.
+- **GREEN:** `packages/db`: 286 files, 13,917 tests pass; the session oracle
+  file passes 78 of 78 twice. `packages/db-sqlite-persistence-core`: 33
+  files, 1,732 tests pass (2 skipped, 2 todo); the persisted session file
+  passes three runs in a row. Query DB, node, browser, and Electric suites
+  pass with their receiving expectations updated for decision 8.
 - **Mutant:** each fails the oracle.
   - Commit in place (no commit-order move): 17 failures, including
     `commitOrderDuringHold`, `outerContinuesAfterInnerDuringHold`, nested hold
@@ -294,34 +372,50 @@ The repair keeps the existing structures and changes four rules.
     campaigns do not catch it; random campaigns did, twice, before the witness
     existed.
   - An equal re-insert that merges under partial row updates instead of
-    replacing its row: `seedUnderOpenReinsert`, whose first seed is narrow and
-    whose late seed carries a field the re-insert omits. Every campaign and
-    the other owners pass this mutant.
-  - Wrapper: reading only the innermost open transaction; keeping an earlier
-    explicit write over an insert's clear; clearing on every insert; handing
-    every insert to core as an update; hiding staged transactions from seed
-    authority. Each fails at least one persisted lane.
-- **Limits:** the session grammar excludes an inner row write or truncate
-  that conflicts with an enclosing open transaction's row writes (see
-  "Executable owner"). Under partial row updates the seed-order property
-  drops `reinsert` from both runs, because decision "b" lets a moved seed
-  change a re-insert's planned row. Invalidated transactions, a read of an
-  invalidated transaction's metadata writes, and restart and resume stay
-  outside this oracle.
+    replacing its row: `seedUnderOpenReinsert`.
+  - Readers that include an invalid transaction: the nested and conflict
+    campaigns. A truncate that revives an invalid transaction: the nested and
+    conflict campaigns and the conflict lane's reach.
+  - Wrapper, earlier rules: reading only the innermost open transaction;
+    keeping an earlier explicit write over an insert's clear; clearing on
+    every insert; hiding staged transactions from seed authority. Each fails
+    at least one persisted lane.
+  - Wrapper, decision 8: an insert that merges over a held row (12 persisted
+    hydration cases and the hydration FIFO test); storage that receives
+    inserts as updates (the sync-config and hydration cases); a cached row
+    counted as source-written (`persisted-cached`); enclosing implicit clears
+    left unjudged (`persisted-conflicts`). An inner re-insert that loses its
+    kept metadata survives every campaign; the pinned witness `keeps an inner
+    re-insert's metadata when it commits ahead of the row it re-inserted`
+    kills it.
+- **Limits:** under partial row updates the seed-order property drops
+  `reinsert` from both runs, because decision "b" lets a moved seed change a
+  re-insert's planned row. Key independence skips histories that invalidate
+  a transaction. The persisted test adapter stores no rows: its cached row is
+  readable only until the run's first durable commit, so reloads within a run
+  are not exercised. The error an invalid commit rejects with, and restart
+  and resume, stay outside this oracle.
 
 ### Code weight
 
-`pnpm size:compare` against `30175be48`: `@tanstack/db` grows 178 bytes gzip
-(`collection/state.js` +658 minified bytes, `collection/sync.js` +78,
-`client.js` +10), `db-sqlite-persistence-core` grows 203 bytes gzip
-(`persisted.js` +729), and `query-db-collection` shrinks 5. The growth is
-commit-order acceptance, per-object seed authority (including the wrapper's
-staged transactions), the source-key set that tells a seed-only row from a
-source-written one, the readers' loops, and the wrapper's re-insert
-classification. Refactors made to pay for it: the seed acceptance method
-became the single acceptance method for commits and seeds; the two seed
-authority lookups became one loop; the base invariant throw for an accepted
-duplicate is gone. The closed-nesting attempt was net negative because it
+`pnpm size:compare` against `65d9ada50` (`origin/main` after the merge):
+`@tanstack/db` grows 258 bytes gzip, and the typical `app` scenario 240;
+`db-sqlite-persistence-core` grows 538; `query-db-collection` shrinks 5.
+
+- Core: commit-order acceptance, per-object seed authority (including a
+  wrapping sync's staged transactions), the source-key sets that tell a
+  seed-only row from a source-written one, the readers' loops, and the skip of
+  invalid transactions.
+- Wrapper: the staged-row fold, the re-insert judgment, the record of
+  implicit metadata clears and their re-judgment after an inner commit, the
+  source-written key set, and the insert handoff to core and storage.
+
+Refactors made to pay for it: the seed acceptance method became the single
+acceptance method for commits and seeds; the two seed authority lookups became
+one loop; the base invariant throw for an accepted duplicate is gone; guards on
+an invalid transaction's metadata writes were removed once a mutant showed them
+unobservable; and decision 8 removed the wrapper's invalidation and
+duplicate-key paths. The closed-nesting attempt was net negative because it
 deleted reclassification and invalidation, but decision 6 keeps both.
 
 ## Review ledger
@@ -398,12 +492,6 @@ tests, and a mutant campaign in a separate worktree.
 
 ## Open
 
-- **Reads of an invalidated transaction.** A replay can invalidate an open
-  transaction when an inner transaction commits a conflicting row first. Its
-  later row writes are ignored, but `metadata.row.set` still stages, and the
-  readers include those writes until its commit rejects. No oracle generates
-  the conflict; the composition oracle's nested lane covers one key without
-  reads.
 - **Query owner supplement.** The `rowToQueries` supplement in
   `getOwnersFromMetadata` survived every mutant run; it may be removable.
   Not attempted in this change.

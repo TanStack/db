@@ -4928,9 +4928,11 @@ describe(`sync-ingested write ownership oracle`, () => {
       expect(electedAdapter.applied).toHaveLength(1)
       expect(electedAdapter.applied[0]).toMatchObject({
         truncate: true,
+        // A source insert is persisted as an insert, which replaces any
+        // cached row (decision C1 of 2026-10-23).
         mutations: [
           {
-            type: `update`,
+            type: `insert`,
             key: `rich`,
             value: { id: `rich`, title: `through Browser owner` },
           },

@@ -47,6 +47,8 @@ type PendingSyncedProjection<T extends object, TKey extends string | number> = {
   truncated: boolean
   /** Keys a queued source operation writes; seeds do not count. */
   sourceKeys: Set<TKey>
+  /** The keys among them that an accepted transaction writes. */
+  acceptedSourceKeys: Set<TKey>
 }
 
 type PendingInsertDisposition = `insert` | `update` | `duplicate`
@@ -131,6 +133,7 @@ export class CollectionStateManager<
     states: new Map(),
     truncated: false,
     sourceKeys: new Set(),
+    acceptedSourceKeys: new Set(),
   }
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
@@ -987,9 +990,14 @@ export class CollectionStateManager<
     if (!current.exists) return `insert`
     // A seed is older than every source write, so it never makes a source
     // insert a duplicate. An insert replaces a row that only a seed supplied;
-    // over a row the source also wrote, a seed beneath can change the row,
-    // and the insert stays the re-insert the source wrote.
-    if (this.hydrationSeedKeys.has(key))
+    // over a row an open transaction also wrote, a seed beneath can change
+    // the row, and the insert stays the re-insert the source wrote. An
+    // accepted source write makes the row the source's, as its application
+    // does.
+    if (
+      this.hydrationSeedKeys.has(key) &&
+      !projection.acceptedSourceKeys.has(key)
+    )
       return projection.sourceKeys.has(key) ? `update` : `insert`
     if (current.value !== undefined && deepEquals(current.value, value)) {
       return `update`
@@ -1090,6 +1098,7 @@ export class CollectionStateManager<
       states: new Map(),
       truncated: false,
       sourceKeys: new Set(),
+      acceptedSourceKeys: new Set(),
     }
 
     for (const transaction of this.pendingSyncedTransactions) {
@@ -1124,8 +1133,10 @@ export class CollectionStateManager<
           operation.type = disposition
         }
         this.applyPendingSyncOperation(projection, operation)
-        if (!transaction.preserveHydrationSeedKeys)
+        if (!transaction.preserveHydrationSeedKeys) {
           projection.sourceKeys.add(key)
+          if (transaction.committed) projection.acceptedSourceKeys.add(key)
+        }
       }
       if (invalidKey !== undefined) {
         Object.assign(projection, before)
@@ -1702,6 +1713,7 @@ export class CollectionStateManager<
       states: new Map(),
       truncated: false,
       sourceKeys: new Set(),
+      acceptedSourceKeys: new Set(),
     }
     this.preSyncVisibleState.clear()
     this.preSyncVirtualState.clear()

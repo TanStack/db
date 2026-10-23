@@ -6535,8 +6535,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       title: `From remote`,
     })
     expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    // A source insert names the whole row, so storage replaces any cached row
+    // instead of merging over it (decision C1 of 2026-10-23); the adapter's
+    // insert is an upsert, so cache and snapshot overlap stays safe.
     expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(
-      `update`,
+      `insert`,
     )
   })
 
@@ -14977,11 +14980,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         limit: index + 1,
       }))
       // Model complete source obligations independently of production queues.
-      // Hydration establishes the baseline first; source patches retain detail.
-      // Fresh inserts reset metadata, while updates keep baseline ownership.
-      // Row values retain the pre-existing quiescent wrapper semantics: source
-      // inserts are upserts, and partial mode retains omitted baseline fields.
-      // Metadata reset does not imply replacement of the complete row value.
+      // Hydration establishes the baseline first. A cached baseline row is a
+      // snapshot older than every source write, like a hydration seed
+      // (maintainer decision C1 of 2026-10-23, recorded in
+      // docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md):
+      // a source insert names the whole row, so it replaces the baseline row
+      // and resets its metadata, while a partial update merges over it and
+      // keeps baseline ownership. A later partial update merges over the row
+      // the first source write left.
       const sourceTitles = hasSuccessor
         ? [`first source value`, `second source value`]
         : [`first source value`]
@@ -14991,7 +14997,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           {
             type: `write`,
             transactionId: title,
-            row: { id: `shared`, title, detail: `retained baseline` },
+            row:
+              type === `insert`
+                ? { id: `shared`, title }
+                : { id: `shared`, title, detail: `retained baseline` },
           },
           { type: `commit`, transactionId: title },
         ]),

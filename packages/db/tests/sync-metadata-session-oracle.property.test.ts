@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -13,6 +14,7 @@ import {
   flatLane,
   historyRegimes,
   modelCheckpoints,
+  nestedConflictLane,
   nestedLane,
   nestedSeedLane,
   runHoldInvariance,
@@ -534,7 +536,91 @@ const lanes = [
     property: `sync-metadata-session.nested-seeds`,
     seed: 2_220_005,
   },
+  {
+    lane: nestedConflictLane,
+    property: `sync-metadata-session.nested-conflicts`,
+    seed: 2_220_006,
+    // Invalidation needs an outer insert, an inner write to the same row,
+    // and the inner commit, so this lane runs more fixed histories.
+    runs: 300,
+  },
 ] as const
+
+/**
+ * Declared reach (ORC-015): the states each lane's laws need, and how many
+ * fixed-campaign histories must enter each. A seed over a source insert or an
+ * open update needs both on one row, and a write to an invalid transaction
+ * needs an invalidation first, so those minimums are lower.
+ */
+const common = 11
+const rare = 5
+const declaredReach: Record<string, Array<[string, number]>> = {
+  flat: [
+    [`read with two held transactions`, common],
+    [`open transaction over a held transaction`, common],
+    [`truncate during a hold`, common],
+  ],
+  nested: [
+    [`nested commit`, common],
+    [`nested commit during a hold`, common],
+    [`abort keeps an inner commit`, common],
+    [`open transaction over a held transaction`, common],
+  ],
+  seeds: [
+    [`seed`, common],
+    [`seed under a source insert`, rare],
+    [`seed under an open update`, rare],
+    [`open transaction over a held transaction`, common],
+  ],
+  'nested-seeds': [
+    [`seed`, common],
+    [`nested commit`, common],
+    [`inner write to an enclosing row`, rare],
+    [`seed under a source insert`, rare],
+    [`seed under an open update`, rare],
+  ],
+  'seeds-full': [
+    [`seed`, common],
+    [`seed under a source insert`, rare],
+    [`open transaction over a held transaction`, common],
+  ],
+  'nested-conflicts': [
+    [`inner write to an enclosing row`, common],
+    [`nested commit during a hold`, common],
+    [`transaction invalidated`, common],
+    [`commit of an invalid transaction`, common],
+    [`write to an invalid transaction`, rare],
+  ],
+}
+
+/** One reach counter per minimum, for a lane's fixed campaign. */
+function createLaneReach(lane: SessionLane, property: string) {
+  const states = declaredReach[lane.name]!
+  const counters = [...new Set(states.map(([, minimum]) => minimum))].map(
+    (minimum) => {
+      const declared = states
+        .filter(([, stateMinimum]) => stateMinimum === minimum)
+        .map(([state]) => state)
+      return {
+        declared: new Set(declared),
+        reach: createOracleReach(`${property} (fixed)`, declared, { minimum }),
+      }
+    },
+  )
+  return {
+    record(history: ReadonlyArray<SessionAction>): void {
+      const regimes = historyRegimes(lane, history)
+      for (const { declared, reach } of counters) {
+        reach.beginHistory()
+        for (const regime of regimes)
+          if (declared.has(regime)) reach.reach(regime)
+      }
+    },
+    assertReached(): void {
+      for (const { reach } of counters) reach.assertReached()
+    },
+  }
+}
 
 describe(`sync metadata session oracle`, () => {
   it(`derives the named witnesses from the laws`, async () => {
@@ -662,56 +748,6 @@ describe(`sync metadata session oracle`, () => {
       await assertSessionHistory(lane, history)
     },
   )
-
-  it(`reaches every law premise in the fixed campaigns`, () => {
-    const required: Record<string, Array<string>> = {
-      flat: [
-        `read with two held transactions`,
-        `open transaction over a held transaction`,
-        `truncate during a hold`,
-      ],
-      nested: [
-        `nested commit`,
-        `nested commit during a hold`,
-        `abort keeps an inner commit`,
-        `open transaction over a held transaction`,
-      ],
-      seeds: [
-        `seed`,
-        `seed under a source insert`,
-        `seed under an open update`,
-        `open transaction over a held transaction`,
-      ],
-      'nested-seeds': [
-        `seed`,
-        `nested commit`,
-        `seed under a source insert`,
-        `seed under an open update`,
-      ],
-      'seeds-full': [
-        `seed`,
-        `seed under a source insert`,
-        `open transaction over a held transaction`,
-      ],
-    }
-    for (const { lane, seed } of lanes) {
-      const counts = new Map<string, number>()
-      for (const history of fc.sample(sessionHistoryArbitrary(lane), {
-        numRuns: oracleRuns(100),
-        seed,
-      }))
-        for (const regime of historyRegimes(lane, history))
-          counts.set(regime, (counts.get(regime) ?? 0) + 1)
-      // A seed over a source insert or an open update needs both on one row,
-      // so it is rarer.
-      const rare = [`seed under a source insert`, `seed under an open update`]
-      for (const regime of required[lane.name]!)
-        expect(
-          counts.get(regime) ?? 0,
-          `${lane.name}: ${regime}`,
-        ).toBeGreaterThanOrEqual(rare.includes(regime) ? 5 : 11)
-    }
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -988,14 +1024,25 @@ describe(`sync metadata session paired formulations`, () => {
 })
 
 describe(`sync metadata session campaigns`, () => {
-  for (const { lane, property, seed } of lanes) {
+  for (const entry of lanes) {
+    const { lane, property, seed } = entry
     const run = (history: Array<SessionAction>) =>
       assertSessionHistory(lane, history)
     if (requestedReplayProperty === undefined) {
+      const reach = createLaneReach(lane, property)
       fcTest.prop([sessionHistoryArbitrary(lane)], {
-        numRuns: oracleRuns(100),
+        numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
         seed,
-      })(`keeps the session law on ${lane.name} histories (fixed)`, run, 60_000)
+      })(
+        `keeps the session law on ${lane.name} histories (fixed)`,
+        (history) => {
+          reach.record(history)
+          return run(history)
+        },
+        120_000,
+      )
+      it(`reaches the declared states in the ${lane.name} fixed campaign`, () =>
+        reach.assertReached())
       fcTest.prop(
         [sessionHistoryArbitrary(lane)],
         oraclePropertyOptions(100, property),

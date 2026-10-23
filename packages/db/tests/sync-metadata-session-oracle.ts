@@ -73,14 +73,13 @@ import { fc } from '@fast-check/vitest'
  *
  * ## Limits
  *
- * The oracle does not judge `list()` order, invalidated transactions, live
- * queries, or change events. It does not generate an inner transaction's
- * row write or truncate that conflicts with an outer open transaction's row
- * writes (see the history grammar). Stale runs and writes without an open
- * transaction are fixed boundary witnesses, not generated histories. Only the
- * `seeds-full` lane uses full row updates. A source update of an absent row
- * is not a legal history (the change-message protocol), so it is not
- * generated.
+ * The oracle does not judge `list()` order, live queries, change events, or
+ * the error an invalid transaction's commit rejects with. Stale runs and
+ * writes without an open transaction are fixed boundary witnesses, not
+ * generated histories. Only the `seeds-full` lane uses full row updates. A
+ * source update of an absent row is not a legal history (the change-message
+ * protocol), so it is not generated; it arises only when an inner
+ * transaction's update commits ahead of the enclosing write it relied on.
  */
 
 // ---------------------------------------------------------------------------
@@ -156,6 +155,25 @@ export type SessionLane = {
    * seeded row drops the seed's other fields. Other lanes use `'partial'`.
    */
   fullRows?: boolean
+  /**
+   * Whether the grammar favours row writes to row 1 inside nested
+   * transactions, so an inner write often lands ahead of an enclosing write
+   * to the same row and an outer transaction becomes invalid.
+   */
+  conflicts?: boolean
+  /**
+   * Whether row 1 is in the persisted cache when the run starts. A cached
+   * row is a snapshot older than every source write, so the model holds it
+   * as a seed accepted before any action (decision of 2026-10-23).
+   */
+  cached?: boolean
+  /**
+   * Whether an insert over a different row replaces it, as the persisted
+   * wrapper's inserts do (maintainer decision C1 of 2026-10-23; the SQLite
+   * persistence plan's duplicate-key safety). Core instead makes the
+   * transaction invalid. The insert still clears metadata, as an insert.
+   */
+  insertsReplace?: boolean
 }
 
 export const flatLane: SessionLane = {
@@ -182,6 +200,13 @@ export const nestedSeedLane: SessionLane = {
   seeds: true,
   undefinedValues: true,
 }
+export const nestedConflictLane: SessionLane = {
+  name: `nested-conflicts`,
+  maxDepth: 3,
+  seeds: false,
+  undefinedValues: true,
+  conflicts: true,
+}
 export const seedFullLane: SessionLane = {
   name: `seeds-full`,
   maxDepth: 1,
@@ -194,21 +219,52 @@ export const persistedFlatLane: SessionLane = {
   maxDepth: 1,
   seeds: false,
   storeHold: true,
+  insertsReplace: true,
 }
 export const persistedNestedLane: SessionLane = {
   name: `persisted-nested`,
   maxDepth: 3,
   seeds: false,
   storeHold: true,
+  insertsReplace: true,
+}
+export const persistedConflictLane: SessionLane = {
+  name: `persisted-conflicts`,
+  maxDepth: 3,
+  seeds: false,
+  storeHold: true,
+  insertsReplace: true,
+  conflicts: true,
+}
+export const persistedCachedLane: SessionLane = {
+  name: `persisted-cached`,
+  maxDepth: 2,
+  seeds: false,
+  storeHold: true,
+  insertsReplace: true,
+  cached: true,
 }
 export const persistedSeedLane: SessionLane = {
   name: `persisted-seeds`,
   maxDepth: 1,
   seeds: true,
   storeHold: true,
+  insertsReplace: true,
 }
 
-const rowKeyArbitrary = fc.constantFrom(...sessionRowKeys)
+const anyRowKey = fc.constantFrom(...sessionRowKeys)
+
+/** The cached row and metadata a `cached` lane starts with. */
+export const cachedRow = { id: 1, v: `cached`, seeded: `cached` }
+export const cachedMetadata = { cached: true }
+
+/** A model at the start of a run on this lane. */
+export function createSessionModel(lane: SessionLane): SessionModel {
+  const model = new SessionModel(lane.fullRows, lane.insertsReplace === true)
+  if (lane.cached === true)
+    model.seed(1, cachedRow, { present: true, value: cachedMetadata })
+  return model
+}
 const collectionKeyArbitrary = fc.constantFrom(...sessionCollectionKeys)
 
 /**
@@ -219,6 +275,13 @@ const collectionKeyArbitrary = fc.constantFrom(...sessionCollectionKeys)
 export function sessionActionArbitrary(
   lane: SessionLane,
 ): fc.Arbitrary<SessionAction> {
+  // The conflict lane multiplies row writes and names row 1 three times as
+  // often as row 2.
+  const rows = lane.conflicts === true ? 3 : 1
+  const rowKeyArbitrary =
+    lane.conflicts === true
+      ? fc.constantFrom<SessionRowKey>(1, 1, 1, 2)
+      : anyRowKey
   const weighted = (
     weight: number,
     arbitrary: fc.Arbitrary<SessionAction>,
@@ -236,13 +299,13 @@ export function sessionActionArbitrary(
       rowKeyArbitrary.map((key) => ({ type: `rowDelete` as const, key })),
     ),
     weighted(
-      2,
+      2 * rows,
       fc
         .tuple(rowKeyArbitrary, fc.boolean())
         .map(([key, metadata]) => ({ type: `upsert` as const, key, metadata })),
     ),
     weighted(
-      1,
+      rows,
       fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
         type: `reinsert` as const,
         key,
@@ -250,29 +313,34 @@ export function sessionActionArbitrary(
       })),
     ),
     weighted(
-      1,
+      rows,
       rowKeyArbitrary.map((key) => ({ type: `remove` as const, key })),
     ),
     weighted(1, fc.constant({ type: `truncate` as const })),
-    weighted(
-      2,
-      fc
-        .tuple(collectionKeyArbitrary, fc.integer({ min: 0, max: 5 }))
-        .map(([key, roll]) => ({
-          type: `collectionSet` as const,
-          key,
-          ...(lane.undefinedValues && roll === 0
-            ? { undefinedValue: true }
-            : {}),
-        })),
-    ),
-    weighted(
-      1,
-      collectionKeyArbitrary.map((key) => ({
-        type: `collectionDelete` as const,
-        key,
-      })),
-    ),
+    // The conflict lane leaves collection metadata to the other lanes.
+    ...(lane.conflicts === true
+      ? []
+      : [
+          weighted(
+            2,
+            fc
+              .tuple(collectionKeyArbitrary, fc.integer({ min: 0, max: 5 }))
+              .map(([key, roll]) => ({
+                type: `collectionSet` as const,
+                key,
+                ...(lane.undefinedValues && roll === 0
+                  ? { undefinedValue: true }
+                  : {}),
+              })),
+          ),
+          weighted(
+            1,
+            collectionKeyArbitrary.map((key) => ({
+              type: `collectionDelete` as const,
+              key,
+            })),
+          ),
+        ]),
     weighted(
       3,
       lane.storeHold
@@ -281,6 +349,17 @@ export function sessionActionArbitrary(
     ),
     weighted(1, fc.constant({ type: `release` as const })),
   ]
+  if (lane.seeds || lane.cached === true)
+    actions.push(
+      weighted(
+        2,
+        fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
+          type: `insertOverSeed` as const,
+          key,
+          metadata,
+        })),
+      ),
+    )
   if (lane.seeds)
     actions.push(
       weighted(
@@ -293,14 +372,6 @@ export function sessionActionArbitrary(
             narrow,
             ...(roll === 0 ? { bare: true } : {}),
           })),
-      ),
-      weighted(
-        2,
-        fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
-          type: `insertOverSeed` as const,
-          key,
-          metadata,
-        })),
       ),
     )
   return fc.oneof(...actions)
@@ -324,11 +395,31 @@ export function historyRegimes(
   lane: SessionLane,
   history: ReadonlyArray<SessionAction>,
 ): Set<string> {
-  const model = new SessionModel(lane.fullRows)
+  const model = createSessionModel(lane)
   const regimes = new Set<string>()
   for (const [step, action] of history.entries()) {
     if (!isLegal(lane, model, action)) continue
-    const before = { held: model.heldTransactions, depth: model.depth }
+    const before = {
+      held: model.heldTransactions,
+      depth: model.depth,
+      invalidations: model.invalidations,
+      replacedConflicts: model.replacedConflicts,
+      invalid: model.depth > 0 && model.innermostInvalid,
+      seedOnlyRow:
+        `key` in action &&
+        typeof action.key === `number` &&
+        model.depth > 0 &&
+        !model.innermostInvalid &&
+        model.sourceRow(action.key).present &&
+        !model.sourceWroteRow(action.key),
+      writesEnclosingRow:
+        model.depth >= 2 &&
+        (action.type === `upsert` ||
+          action.type === `reinsert` ||
+          action.type === `remove` ||
+          action.type === `insertOverSeed`) &&
+        model.enclosingWroteRow(action.key),
+    }
     void planAction(model, action, { s: step })(modelOnly)
     if (before.held >= 2) regimes.add(`read with two held transactions`)
     if (model.depth > 0 && model.heldTransactions >= 1)
@@ -339,6 +430,23 @@ export function historyRegimes(
     }
     if (action.type === `cancel` && model.lastCancelKeptInnerCommit)
       regimes.add(`abort keeps an inner commit`)
+    if (
+      before.seedOnlyRow &&
+      (action.type === `insertOverSeed` || action.type === `reinsert`)
+    )
+      regimes.add(`source insert over a seeded row`)
+    if (before.seedOnlyRow && action.type === `upsert`)
+      regimes.add(`source update over a seeded row`)
+    if (model.invalidations > before.invalidations)
+      regimes.add(`transaction invalidated`)
+    if (model.replacedConflicts > before.replacedConflicts)
+      regimes.add(`insert replaces a different row`)
+    if (before.writesEnclosingRow)
+      regimes.add(`inner write to an enclosing row`)
+    if (before.invalid && action.type === `commit`)
+      regimes.add(`commit of an invalid transaction`)
+    if (before.invalid && writesSource(action))
+      regimes.add(`write to an invalid transaction`)
     if (action.type === `truncate` && model.isHolding)
       regimes.add(`truncate during a hold`)
     if (action.type === `seed`) {
@@ -359,6 +467,13 @@ export function historyRegimes(
   return regimes
 }
 
+/** Whether an action writes through the open transaction. */
+function writesSource(action: SessionAction): boolean {
+  return ![`begin`, `commit`, `cancel`, `hold`, `release`, `seed`].includes(
+    action.type,
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Independent model
 // ---------------------------------------------------------------------------
@@ -375,6 +490,20 @@ export function historyRegimes(
  * instead scans queued transaction write sets. The two structures differ on
  * purpose.
  *
+ * An insert's kind follows the row before it in that order (the row-metadata
+ * rules of 2026-10-05 and decision D5): over an absent row, or a row that
+ * only seeds supplied, it is an insert, and one without metadata clears the
+ * row's metadata; over an equal row the source wrote it is an equal
+ * re-insert and keeps it. A seed is older than every source write, so a seed
+ * accepted after the insert was written does not change its kind. An open
+ * transaction's kinds follow the order as it changes; a commit fixes them.
+ * When an inner transaction commits first, an enclosing transaction's insert
+ * can land on a different row that the source wrote. That transaction is then
+ * invalid, as a duplicate-key insert would be: no read includes its writes,
+ * it ignores later writes, a truncate included, and its commit rejects.
+ * Lanes whose inserts replace (the persisted wrapper) keep the transaction,
+ * and the insert replaces that row and clears its metadata.
+ *
  * The source and consumers read different layers of the same order. The
  * source reads every accepted transaction and seed, applied or held, and its
  * open transactions, because accepted work always applies and the source's
@@ -385,23 +514,29 @@ type ObjectStore = `row` | `rowMetadata` | `collection`
 type ModelValue = { present: false } | { present: true; value: unknown }
 const absent: ModelValue = { present: false }
 
-type ModelEvent =
-  | { frame: number; truncate: true }
-  | {
-      frame: number
-      truncate: false
-      store: ObjectStore
-      key: string | number
-      value: ModelValue
-      /**
-       * How a row write meets the row before it. Under partial row updates an
-       * `update` merges its fields over that row, a seed included. An
-       * `insert`, and every write under full row updates, replaces it.
-       */
-      rowWrite?: `insert` | `update`
-    }
+type InsertKind = `insert` | `reinsert` | `duplicate`
+type ModelWrite = {
+  frame: number
+  /** When the write was issued, to tell it from a later seed. */
+  seq: number
+  truncate: false
+  store: ObjectStore
+  key: string | number
+  value: ModelValue
+  /**
+   * How a row write meets the row before it. Under partial row updates an
+   * `update` merges its fields over that row, a seed included. An
+   * `insert`, and every write under full row updates, replaces it.
+   */
+  rowWrite?: `insert` | `update`
+  /** An insert without metadata, which clears it unless it re-inserts. */
+  clears?: boolean
+  /** An insert's kind, fixed when its transaction commits. */
+  kind?: InsertKind
+}
+type ModelEvent = { frame: number; seq: number; truncate: true } | ModelWrite
 
-type FrameStatus = `open` | `accepted` | `applied` | `aborted`
+type FrameStatus = `open` | `invalid` | `accepted` | `applied` | `aborted`
 type ModelFrame = {
   status: FrameStatus
   /** Whether a transaction begun inside this one committed while it was open. */
@@ -412,6 +547,7 @@ type ModelSeed = {
   row: unknown
   metadata: ModelValue
   applied: boolean
+  seq: number
 }
 /** One step of the serialization order: a source write or a seed. */
 type ModelEntry = { event: ModelEvent } | { seed: ModelSeed }
@@ -437,7 +573,10 @@ export const absentMarker = `<absent>`
 
 export class SessionModel {
   /** Under full row updates an update replaces the row. */
-  constructor(private readonly fullRows = false) {}
+  constructor(
+    private readonly fullRows = false,
+    private readonly insertsReplace = false,
+  ) {}
 
   private events: Array<ModelEvent> = []
   private frames: Array<ModelFrame> = []
@@ -460,17 +599,29 @@ export class SessionModel {
     ).length
   }
   lastCancelKeptInnerCommit = false
+  /** How many transactions have become invalid. */
+  invalidations = 0
+  /** Where inserts replace: checks that found an insert over a different row. */
+  replacedConflicts = 0
   /** The frame each `commit()` closed, in commit order. */
   private committed: Array<number> = []
+  private seq = 0
 
   begin(): void {
     this.frames.push({ status: `open`, innerCommitted: false })
     this.openStack.push(this.frames.length - 1)
   }
 
+  /** Whether the innermost open transaction is invalid. */
+  get innermostInvalid(): boolean {
+    return this.frames[this.innermost()]?.status === `invalid`
+  }
+
   write(store: ObjectStore, key: string | number, value: ModelValue): void {
+    if (this.innermostInvalid) return
     this.events.push({
       frame: this.innermost(),
+      seq: this.seq++,
       truncate: false,
       store,
       key,
@@ -478,21 +629,27 @@ export class SessionModel {
     })
   }
 
-  /** A source insert or update of a row's data. */
-  writeRow(key: SessionRowKey, row: unknown, rowWrite: `insert` | `update`) {
+  /**
+   * A source insert or update of a row's data. An insert names the row's
+   * whole metadata, so `clears` marks one written without metadata.
+   */
+  writeRow(
+    key: SessionRowKey,
+    row: unknown,
+    rowWrite: `insert` | `update`,
+    clears = false,
+  ) {
+    if (this.innermostInvalid) return
     this.events.push({
       frame: this.innermost(),
+      seq: this.seq++,
       truncate: false,
       store: `row`,
       key,
       value: { present: true, value: row },
       rowWrite,
+      ...(rowWrite === `insert` && clears ? { clears } : {}),
     })
-  }
-
-  /** An insert names the row's whole metadata; one without metadata clears it. */
-  insertClear(key: SessionRowKey): void {
-    this.write(`rowMetadata`, key, absent)
   }
 
   /** Whether the row is present from source writes alone, ignoring seeds. */
@@ -502,23 +659,35 @@ export class SessionModel {
   }
 
   /**
-   * Whether a transaction that the innermost one began inside has written
-   * row data: any row, or `key` only, and a truncate counts for every row.
-   * The grammar keeps an inner transaction's row writes and truncates apart
-   * from those, so that committing first never reorders writes to one row.
+   * Whether a valid transaction that the innermost one began inside has
+   * written this row's data, or truncated. Committing first puts the inner
+   * write ahead of that one.
    */
-  enclosingWroteRows(key?: SessionRowKey): boolean {
-    const enclosing = new Set(this.openStack.slice(0, -1))
+  enclosingWroteRow(key: SessionRowKey): boolean {
+    const enclosing = new Set(
+      this.openStack
+        .slice(0, -1)
+        .filter((frame) => this.frames[frame]!.status === `open`),
+    )
     return this.events.some(
       (event) =>
         enclosing.has(event.frame) &&
-        (event.truncate ||
-          (event.store === `row` && (key === undefined || event.key === key))),
+        (event.truncate || (event.store === `row` && event.key === key)),
     )
   }
 
+  /**
+   * A truncate discards its transaction's earlier row data and row metadata
+   * writes; collection metadata writes stay.
+   */
   truncate(): void {
-    this.events.push({ frame: this.innermost(), truncate: true })
+    if (this.innermostInvalid) return
+    const frame = this.innermost()
+    this.events = this.events.filter(
+      (event) =>
+        event.frame !== frame || event.truncate || event.store === `collection`,
+    )
+    this.events.push({ frame, seq: this.seq++, truncate: true })
   }
 
   /** The row as the source sees it; the driver classifies inserts by it. */
@@ -533,13 +702,26 @@ export class SessionModel {
    * applies at once regardless, with everything accepted before it.
    */
   commit(): void {
-    const frame = this.openStack.pop()!
+    const frame = this.innermost()
+    this.committed.push(frame)
+    if (this.frames[frame]!.status === `invalid`) {
+      this.openStack.pop()
+      return
+    }
+    // A commit fixes the kinds its inserts have in the order as it stands.
+    const entries = this.sessionEntries()
+    entries.forEach((entry, index) => {
+      const event = `event` in entry ? entry.event : undefined
+      if (event && event.frame === frame && isInsert(event))
+        event.kind = this.insertKind(entries, index)
+    })
+    this.openStack.pop()
     for (const enclosing of this.openStack)
       this.frames[enclosing]!.innerCommitted = true
-    this.committed.push(frame)
     this.frames[frame]!.status = `accepted`
     this.accepted.push({ frame })
     if (!this.holding || this.truncates(frame)) this.applyAccepted()
+    this.invalidateOpen()
   }
 
   /** An abort discards only the innermost open transaction's own writes. */
@@ -563,8 +745,48 @@ export class SessionModel {
    * transactions, whose writes have not yet committed.
    */
   seed(key: SessionRowKey, row: unknown, metadata: ModelValue): void {
-    this.accepted.push({ seed: { key, row, metadata, applied: false } })
+    this.accepted.push({
+      seed: { key, row, metadata, applied: false, seq: this.seq++ },
+    })
     if (!this.holding) this.applyAccepted()
+    this.invalidateOpen()
+  }
+
+  /**
+   * An open transaction whose insert now lands on a different row that the
+   * source wrote is invalid, and stays invalid. Where inserts replace, the
+   * transaction stays valid and the insert replaces that row.
+   */
+  private invalidateOpen(): void {
+    for (const frame of this.openStack) {
+      if (this.frames[frame]!.status !== `open`) continue
+      if (this.insertsReplace) {
+        const entries = this.sessionEntries()
+        if (
+          entries.some(
+            (entry, index) =>
+              `event` in entry &&
+              entry.event.frame === frame &&
+              isInsert(entry.event) &&
+              this.insertKind(entries, index) === `duplicate`,
+          )
+        )
+          this.replacedConflicts++
+        continue
+      }
+      const entries = this.sessionEntries()
+      const duplicates = entries.some(
+        (entry, index) =>
+          `event` in entry &&
+          entry.event.frame === frame &&
+          isInsert(entry.event) &&
+          this.insertKind(entries, index) === `duplicate`,
+      )
+      if (duplicates) {
+        this.frames[frame]!.status = `invalid`
+        this.invalidations++
+      }
+    }
   }
 
   /** Whether an open transaction has updated this row. */
@@ -616,10 +838,16 @@ export class SessionModel {
       list,
       prefixList: list.filter(([key]) => key.startsWith(sessionPrefix)),
       base,
-      // A receipt settles when its transaction applies (`SyncConfig.commit`).
-      receipts: this.committed.map((frame) =>
-        this.frames[frame]!.status === `applied` ? `applied` : `pending`,
-      ),
+      // A receipt settles when its transaction applies (`SyncConfig.commit`),
+      // and an invalid transaction's commit rejects.
+      receipts: this.committed.map((frame) => {
+        const status = this.frames[frame]!.status
+        return status === `applied`
+          ? `applied`
+          : status === `invalid`
+            ? `rejected`
+            : `pending`
+      }),
     }
   }
 
@@ -650,7 +878,9 @@ export class SessionModel {
       ...this.accepted.flatMap((item) =>
         `frame` in item ? this.frameEntries(item.frame) : [item],
       ),
-      ...this.openStack.flatMap((frame) => this.frameEntries(frame)),
+      ...this.openStack
+        .filter((frame) => this.frames[frame]!.status === `open`)
+        .flatMap((frame) => this.frameEntries(frame)),
     ]
   }
 
@@ -696,6 +926,8 @@ export class SessionModel {
         if (store !== `collection`) return absent
         continue
       }
+      if (store === `rowMetadata` && this.clearsMetadata(entries, index, key))
+        return absent
       if (event.store !== store || event.key !== key) continue
       if (
         !this.fullRows &&
@@ -727,12 +959,59 @@ export class SessionModel {
     return entries
       .slice(0, end)
       .some(
-        (entry) =>
+        (entry, index) =>
           `event` in entry &&
           (entry.event.truncate ||
-            (entry.event.store === store && entry.event.key === key)),
+            (entry.event.store === store && entry.event.key === key) ||
+            (store === `rowMetadata` &&
+              this.clearsMetadata(entries, index, key))),
       )
   }
+
+  /** Whether the entry at `index` is an insert that clears `key`'s metadata. */
+  private clearsMetadata(
+    entries: ReadonlyArray<ModelEntry>,
+    index: number,
+    key: string | number,
+  ): boolean {
+    const entry = entries[index]!
+    return (
+      `event` in entry &&
+      isInsert(entry.event) &&
+      entry.event.key === key &&
+      entry.event.clears === true &&
+      this.insertKind(entries, index) !== `reinsert`
+    )
+  }
+
+  /**
+   * An insert's kind against the row before it in the order. A seed
+   * accepted after the insert was written does not count.
+   */
+  private insertKind(
+    entries: ReadonlyArray<ModelEntry>,
+    index: number,
+  ): InsertKind {
+    const event = (entries[index] as { event: ModelWrite }).event
+    if (event.kind) return event.kind
+    const before = entries
+      .slice(0, index)
+      .filter((entry) => !(`seed` in entry) || entry.seed.seq < event.seq)
+    const row = this.fold(`row`, event.key, before)
+    if (
+      !row.present ||
+      !this.sourceWroteBefore(`row`, event.key, before, before.length)
+    )
+      return `insert`
+    return canonical(row.value) ===
+      canonical((event.value as { value: unknown }).value)
+      ? `reinsert`
+      : `duplicate`
+  }
+}
+
+function isInsert(event: ModelEvent): event is ModelWrite {
+  return !event.truncate && event.rowWrite === `insert`
 }
 
 function encode(value: ModelValue): unknown {
@@ -801,12 +1080,11 @@ export type SessionMismatch = {
  * alternate; `remove` and `reinsert` need the row. A seed is legal at any
  * point, including over a row the source has inserted.
  *
- * An inner transaction does not write a row, or truncate, after a
- * transaction it began inside has written that row or truncated (truncate:
- * after it has written any row). Committing first would put the inner write
- * ahead of the outer one, so the outer insert's kind could change or its
- * transaction become invalid. The row-metadata composition oracle owns those
- * histories; this one owns the reads around them.
+ * An inner transaction may write a row that a transaction it began inside
+ * has written, and may truncate. Committing first puts the inner write ahead
+ * of the outer one, so a source update can land on a row that is absent in
+ * commit order; it then writes its own fields. The outer insert's kind can
+ * change, or its transaction become invalid (see the model).
  *
  * Implicit row metadata follows the 2026-10-05 rules. An insert names the
  * row's whole metadata, so one without `metadata` clears it; an update
@@ -820,7 +1098,7 @@ export async function runSessionHistory(
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
 ): Promise<{ mismatch: SessionMismatch | undefined; steps: number }> {
-  const model = new SessionModel(lane.fullRows)
+  const model = createSessionModel(lane)
   const driver = await createDriver()
   let mismatch: SessionMismatch | undefined
   let steps = 0
@@ -918,7 +1196,7 @@ export async function runHoldInvariance(
 ): Promise<SessionMismatch | undefined> {
   const held = await createDriver()
   const unheld = await createDriver()
-  const model = new SessionModel(lane.fullRows)
+  const model = createSessionModel(lane)
   let mismatch: SessionMismatch | undefined
   try {
     for (const [step, action] of history.entries()) {
@@ -966,7 +1244,7 @@ function planHistory(
   lane: SessionLane,
   history: ReadonlyArray<SessionAction>,
 ): Array<PlannedCall> {
-  const model = new SessionModel(lane.fullRows)
+  const model = createSessionModel(lane)
   const planned: Array<PlannedCall> = []
   for (const [step, action] of history.entries()) {
     if (!isLegal(lane, model, action)) continue
@@ -1017,12 +1295,17 @@ function withoutOtherRow(observation: SessionObservation): SessionObservation {
  * metadata, consumers' view of row 1, and receipts must match at each
  * checkpoint of an action both runs perform. Row 2's actions never change
  * which other actions are legal; `truncate` names every row and stays.
+ * Invalidation is per transaction: a row 2 insert that lands on a different
+ * row makes its whole transaction invalid, row 1's writes included. Histories
+ * where the model invalidates a transaction are therefore not compared.
  */
 export async function runKeyIndependence(
   lane: SessionLane,
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
 ): Promise<SessionMismatch | undefined> {
+  if (historyRegimes(lane, history).has(`transaction invalidated`))
+    return undefined
   const both = await createDriver()
   const rowOneOnly = await createDriver()
   let mismatch: SessionMismatch | undefined
@@ -1146,7 +1429,7 @@ export async function modelCheckpoints(
   lane: SessionLane,
   history: ReadonlyArray<SessionAction>,
 ): Promise<Map<number, SessionObservation>> {
-  const model = new SessionModel(lane.fullRows)
+  const model = createSessionModel(lane)
   const checkpoints = new Map<number, SessionObservation>()
   for (const [step, action] of history.entries()) {
     if (!isLegal(lane, model, action)) continue
@@ -1172,23 +1455,14 @@ function isLegal(
       return lane.seeds
     case `insertOverSeed`:
       return (
-        lane.seeds &&
+        (lane.seeds || lane.cached === true) &&
         model.depth > 0 &&
-        !model.enclosingWroteRows(action.key) &&
         model.sourceRow(action.key).present &&
         !model.sourceWroteRow(action.key)
       )
     case `remove`:
     case `reinsert`:
-      return (
-        model.depth > 0 &&
-        !model.enclosingWroteRows(action.key) &&
-        model.sourceRow(action.key).present
-      )
-    case `upsert`:
-      return model.depth > 0 && !model.enclosingWroteRows(action.key)
-    case `truncate`:
-      return model.depth > 0 && !model.enclosingWroteRows()
+      return model.depth > 0 && model.sourceRow(action.key).present
     default:
       return model.depth > 0
   }
@@ -1229,8 +1503,12 @@ function planAction(
         : { id: action.key, v: value }
       const metadata = action.metadata ? value : undefined
       const present = model.sourceRow(action.key).present
-      if (metadata === undefined && !present) model.insertClear(action.key)
-      model.writeRow(action.key, row, present ? `update` : `insert`)
+      model.writeRow(
+        action.key,
+        row,
+        present ? `update` : `insert`,
+        metadata === undefined,
+      )
       if (metadata !== undefined)
         model.write(`rowMetadata`, action.key, {
           present: true,
@@ -1249,9 +1527,7 @@ function planAction(
       if (!current.present) throw new Error(`reinsert needs a present row`)
       const row = structuredClone(current.value)
       const metadata = action.metadata ? value : undefined
-      if (metadata === undefined && !model.sourceWroteRow(action.key))
-        model.insertClear(action.key)
-      model.writeRow(action.key, row, `insert`)
+      model.writeRow(action.key, row, `insert`, metadata === undefined)
       if (metadata !== undefined)
         model.write(`rowMetadata`, action.key, {
           present: true,
@@ -1304,8 +1580,7 @@ function planAction(
         ? { id: action.key, v: value, m: value }
         : { id: action.key, v: value }
       const metadata = action.metadata ? value : undefined
-      if (metadata === undefined) model.insertClear(action.key)
-      model.writeRow(action.key, row, `insert`)
+      model.writeRow(action.key, row, `insert`, metadata === undefined)
       if (metadata !== undefined)
         model.write(`rowMetadata`, action.key, {
           present: true,

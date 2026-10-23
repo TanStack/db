@@ -2609,47 +2609,49 @@ theory (maintainer decisions of 2026-10-22 and 2026-10-23, recorded in
 sync run is a session with read-your-writes, own reads, and monotonic writes
 in commit order. Every sync transaction is independent, including one begun
 inside another; accepted transactions apply in commit order, and a hold
-cannot change that order. Consumers see whole transactions. Hydration seeds
-are older than every source write.
+cannot change that order. An outer insert that lands on a different source
+row in commit order makes its transaction invalid. Consumers see whole
+transactions. Hydration seeds and persisted cache rows are older than every
+source write. In the persisted wrapper an insert replaces whatever row it
+lands on.
 
 | Owner | Production paths | Observations and checkpoint |
 |---|---|---|
-| [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`) | `persistedCollectionOptions` over an in-memory adapter, store hold and core hold; seeds through a `DbClient` that owns the persisted Collection | the same source reads after every action; `collection.base` and receipts after settlement |
+| [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`) | `persistedCollectionOptions` over an in-memory adapter, store hold and core hold; seeds through a `DbClient`; a row cached in storage at startup | the same source reads after every action; `collection.base` and receipts after settlement |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested lanes | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
 | [hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts) | `DbClient` initialData, hydration chunks, and an adapter sync transaction (inserts, updates, deletes, truncates, and metadata-only writes) in full and partial row modes | public rows, the synced store, and row metadata through `client.dehydrate()` after each action; D5 per object |
 | [Query ownership lifecycle](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts) receiving witnesses | Query DB claims, releases, and retention cleanup over core and `persistedCollectionOptions` | published owners and non-owner row metadata |
+| receiving expectations in the [persisted oracle](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts), the Electric oracle, the Browser coordinator oracle, and the Electron IPC tests | persisted source inserts over a hydrated baseline; the durable mutation a source insert writes | public and durable rows; persisted mutation types |
 
 On `30175be48`, 51 of 186 tests fail in the session, composition, and
 retention files: held reads, commit order and outer writes after a held inner
 commit, every seed rule, and the paired properties. The persisted lanes fail
 the held reads through core, reads of an enclosing open transaction, an
-insert's implicit clear, equal re-inserts, inserts over seeds under partial
-row updates, and late seeds beside a store-held transaction. Six Query
-witnesses fail, including two that only dropping Query's `??` metadata
-fallback repairs. The review record's evidence block lists reach counts,
-mutants, and GREEN runs.
+insert's implicit clear, equal re-inserts, inserts over seeds and cached rows
+under partial row updates, and late seeds beside a store-held transaction.
+Six Query witnesses fail, including two that only dropping Query's `??`
+metadata fallback repairs. The review record's evidence block lists reach
+counts, mutants, and GREEN runs.
 
-Two limits are deliberate:
+Two comparisons are narrowed on purpose, each recorded with its authority in
+the review record:
 
-- The session grammar does not generate an inner transaction's row write or
-  truncate after an enclosing open transaction has written that row or
-  truncated (a truncate: after it has written any row). Owner: the
-  composition oracle's nested lane, for one key. Needed witness for several
-  keys and for reads: a model of reclassified and invalidated outer
-  transactions. Authority: decision 6, which keeps transactions independent
-  without transaction identifiers.
 - Under partial row updates the seed-order property drops `reinsert` from
   both runs: decision "b" lets a seed moved first change a partial update's
   merge base, so a re-insert planned from the arrival-order row is no longer
   equal. The named witnesses `partialUpdateThenLateSeed` and
   `seedUnderOpenReinsert` cover that interaction.
+- Key independence skips histories in which the model invalidates a
+  transaction: invalidation removes the whole transaction, row 1's writes
+  included (decision 7).
 
-Reads of an invalidated transaction's staged metadata and the Query owner
-supplement in `getOwnersFromMetadata` remain open in the review record.
-Restart and resume reads belong to the SQLite resume-snapshot and Electric
-resume owners; this oracle's claim ends with one sync run.
+The persisted test adapter stores no rows of its own, so reloads within one
+run are not exercised. The Query owner supplement in `getOwnersFromMetadata`
+remains open in the review record. Restart and resume reads belong to the
+SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
+with one sync run.
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to

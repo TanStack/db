@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions, createCollection } from '@tanstack/db'
 import {
   absentMarker,
+  cachedMetadata,
+  cachedRow,
   describeMismatch,
   historyRegimes,
+  persistedCachedLane,
+  persistedConflictLane,
   persistedFlatLane,
   persistedNestedLane,
   persistedSeedLane,
@@ -17,6 +21,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src'
 import type { CollectionConfig, SyncConfig } from '@tanstack/db'
 import type {
@@ -55,15 +60,24 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
 type Row = { id: number; v: unknown }
 type SyncActions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 
-function createHoldingAdapter() {
+/**
+ * An in-memory adapter that can hold its next durable step. It stores no
+ * rows of its own. With `cached`, its reads supply row 1 from a previous
+ * run's storage until this run's first durable commit; the oracle observes
+ * one run, so later reads do not occur in its histories.
+ */
+function createHoldingAdapter(cached = false) {
   let holdNext = false
   let releaseStore: (() => void) | undefined
   let latest = { term: 0, seq: 0, rowVersion: 0 }
+  let cachedRows = cached
+    ? [{ key: 1, value: cachedRow, metadata: cachedMetadata }]
+    : []
   const adapter: PersistenceAdapter = {
-    loadSubset: () => Promise.resolve([]),
+    loadSubset: () => Promise.resolve(cachedRows),
     loadResumeSnapshot: () =>
       Promise.resolve({
-        rows: [],
+        rows: cachedRows,
         keySet: { status: `consistent` },
         collectionMetadata: [],
         latestTerm: latest.term,
@@ -73,6 +87,7 @@ function createHoldingAdapter() {
       }),
     loadCollectionMetadata: () => Promise.resolve([]),
     applyCommittedTx: async (_target, tx: PersistedTx) => {
+      cachedRows = []
       if (holdNext) {
         holdNext = false
         await new Promise<void>((resolve) => {
@@ -105,8 +120,9 @@ let run = 0
 
 async function createPersistedDriver(
   withClient = false,
+  cached = false,
 ): Promise<SessionDriver> {
-  const store = createHoldingAdapter()
+  const store = createHoldingAdapter(cached)
   const id = `sync-metadata-session-persisted-${run++}`
   let sync!: SyncActions
   let resolveMutation: (() => void) | undefined
@@ -297,7 +313,7 @@ async function assertPersistedHistory(
   lane: SessionLane = persistedFlatLane,
 ): Promise<void> {
   const { mismatch } = await runSessionHistory(lane, history, () =>
-    createPersistedDriver(lane.seeds),
+    createPersistedDriver(lane.seeds, lane.cached === true),
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
 }
@@ -365,6 +381,25 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
     )
   })
 
+  // An inner transaction's equal re-insert keeps the row's metadata. When it
+  // commits ahead of the outer transaction whose row it re-inserted, it lands
+  // where that row is absent; it is still the re-insert it was written as.
+  it(`keeps an inner re-insert's metadata when it commits ahead of the row it re-inserted`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `rowSet`, key: 1 },
+        { type: `commit` },
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `begin` },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `commit` },
+      ],
+      persistedConflictLane,
+    )
+  })
+
   // An insert without metadata clears the row's metadata, even inside the
   // transaction that set it (2026-10-05 rules).
   it(`reads an insert's implicit metadata clear in the open transaction`, async () => {
@@ -424,25 +459,75 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
   }
 })
 
-const extraLanes = [
-  { lane: persistedNestedLane, seed: 2_220_012 },
-  { lane: persistedSeedLane, seed: 2_220_013 },
-] as const
+/**
+ * Each lane's fixed campaign and the states it must reach (ORC-015). The
+ * conflict lane runs more histories: an insert over a different row needs an
+ * outer insert, an inner write to the same row, and the inner commit.
+ */
+const extraLanes: Array<{
+  lane: SessionLane
+  seed: number
+  runs: number
+  reach: Array<string>
+}> = [
+  {
+    lane: persistedNestedLane,
+    seed: 2_220_012,
+    runs: 50,
+    reach: [`nested commit`, `nested commit during a hold`, `store hold`],
+  },
+  {
+    lane: persistedSeedLane,
+    seed: 2_220_013,
+    runs: 50,
+    reach: [`seed`, `store hold`],
+  },
+  {
+    lane: persistedCachedLane,
+    seed: 2_220_015,
+    runs: 80,
+    reach: [
+      `source insert over a seeded row`,
+      `source update over a seeded row`,
+      `store hold`,
+    ],
+  },
+  {
+    lane: persistedConflictLane,
+    seed: 2_220_014,
+    runs: 150,
+    reach: [
+      `inner write to an enclosing row`,
+      `insert replaces a different row`,
+      `store hold`,
+    ],
+  },
+]
 
 describe(`sync metadata session oracle through the persisted wrapper: nesting and seeds`, () => {
-  for (const { lane, seed } of extraLanes) {
+  for (const { lane, seed, runs, reach: states } of extraLanes) {
     const lanePropertyName = `sync-metadata-session.${lane.name}`
     const runLane = (history: Array<SessionAction>) =>
       assertPersistedHistory(history, lane)
     if (requestedReplayProperty === undefined) {
+      const reach = createOracleReach(`${lanePropertyName} (fixed)`, states, {
+        minimum: 5,
+      })
       fcTest.prop([sessionHistoryArbitrary(lane)], {
-        numRuns: oracleRuns(50),
+        numRuns: oracleRuns(runs),
         seed,
       })(
         `keeps the session law on ${lane.name} histories (fixed)`,
-        runLane,
-        120_000,
+        (history) => {
+          reach.beginHistory()
+          for (const regime of historyRegimes(lane, history))
+            if (states.includes(regime)) reach.reach(regime)
+          return runLane(history)
+        },
+        240_000,
       )
+      it(`reaches the declared states in the ${lane.name} fixed campaign`, () =>
+        reach.assertReached())
       fcTest.prop(
         [sessionHistoryArbitrary(lane)],
         oraclePropertyOptions(50, lanePropertyName),
