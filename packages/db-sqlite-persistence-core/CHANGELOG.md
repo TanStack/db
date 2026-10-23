@@ -1,5 +1,28 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.5.0
+
+### Minor Changes
+
+- Reloaded persisted collections now read their rows before they write a leader election term. A collection still takes its leader lock when it subscribes, but it reserves its durable term only after the database work already queued on the shared scheduler has settled, or as soon as something needs a leader during that election: a local write, a follower request, a sync commit during startup, or `ensureLeadership`. A need that an earlier leader already served does not let a later takeover skip the wait. A tab that takes over treats the departed leader's route as gone, so a sync commit queued behind one of its reads goes to the new leader and settles without waiting out an RPC timeout. The Electron renderer applies the same rule to its own hydrations. The renderer now has a hydration scope, so its startup runs as one hydration, as a Browser tab's does, and a restart keeps its metadata and row reads in one scope, so a term cannot run between them. ([#2219](https://github.com/TanStack/db/pull/2219))
+
+  `ensureLeadership` now resolves when this node becomes leader, keeps its place in the Web Locks queue instead of replacing its lock request, and rejects if the coordinator is disposed.
+
+  Migration for custom persistence adapters: `runInRegularScope` is now a `RegularScope`, which must also provide `afterQueuedWork()`. It resolves once every operation queued or running on the adapter's scheduler at the call has settled. An adapter without a scheduler can return a promise that settles with its running hydrations. A coordinator now rejects an adapter whose `runInRegularScope` lacks `afterQueuedWork` with `InvalidPersistenceAdapterError`.
+
+### Patch Changes
+
+- Apps without a persisted Collection no longer bundle the persisted initial-render wait. The persistence adapter now supplies the wait, so a typical app is about 230 bytes smaller after gzip. ([#2228](https://github.com/TanStack/db/pull/2228))
+
+- Reloads no longer repeat setup that is already complete. A reopened persisted collection checks its tables, indexes, triggers, and bookkeeping rows in the same query that reads its registration, and runs its nine setup statements only when something is missing. Each adapter checks database-wide setup with one query and runs it only when a table, index, or migrated column is missing, instead of about 19 statements on every load. The write-only global `schema_version` row, which adapters with different schema versions overwrote on every load, is no longer created or written. ([#2219](https://github.com/TanStack/db/pull/2219))
+
+  A tab no longer rereads all of a collection's rows after its own write. It used to record the write's stream position before that write's commit notice arrived, so the notice looked like a gap and triggered `pullSince` and a full row scan.
+
+- Add `SQLiteConnectionClosedError`. A browser OPFS connection now rejects requests made after close starts with this error instead of `InvalidPersistedCollectionConfigError`. ([#2213](https://github.com/TanStack/db/pull/2213))
+
+- Updated dependencies [[`30175be`](https://github.com/TanStack/db/commit/30175be483fa70799da579e2c407fb7ed9f2b435), [`37b8fc2`](https://github.com/TanStack/db/commit/37b8fc2c5abd08e9128ec3606c6534aaec3ae67e)]:
+  - @tanstack/db@0.15.3
+
 ## 0.4.12
 
 ### Patch Changes

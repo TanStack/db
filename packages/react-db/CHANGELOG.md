@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.5.13
+
+### Patch Changes
+
+- Production builds no longer include the development warnings of `useLiveQuery`. A typical app's bundle is about 1.6 kB smaller before compression and 0.66 kB smaller after gzip. ([#2227](https://github.com/TanStack/db/pull/2227))
+
+- Updated dependencies [[`30175be`](https://github.com/TanStack/db/commit/30175be483fa70799da579e2c407fb7ed9f2b435), [`37b8fc2`](https://github.com/TanStack/db/commit/37b8fc2c5abd08e9128ec3606c6534aaec3ae67e)]:
+  - @tanstack/db@0.15.3
+
 ## 0.5.12
 
 ### Patch Changes
