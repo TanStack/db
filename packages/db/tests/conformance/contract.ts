@@ -41,7 +41,8 @@
  * Solid, Angular, and Svelte without a `DbClient`) compares no identity. It
  * compiles any query input, including one without a stable IR identity, and
  * its rows follow the current input: after a source swap under the same
- * Collection ID, it publishes the new source's rows and never the old ones,
+ * Collection ID, every value it publishes holds only the new source's rows
+ * (or none while it loads) and never the old ones,
  * and one query over two same-ID objects reads each of them.
  * A `DbClient` matches queries by identity hash, so a binding backed by one
  * follows the comparing law; that boundary has its own receiving witnesses.
@@ -183,6 +184,16 @@ export interface LiveQueryHandle {
 export interface ControllableHandle<P> extends LiveQueryHandle {
   /** Rejects when the adapter rejects the reconfigured query input. */
   setParam: (param: P) => Promise<void>
+  /**
+   * The `data` value the binding left published at the end of each
+   * synchronous turn since mount, in order. Drivers record at their
+   * framework's publication points (React and Preact commits, Vue pre-flushes,
+   * Svelte pre-effects, Solid render effects, Angular effects) through
+   * `publication-log.ts`, which keeps the last value of each turn: a value
+   * replaced within one turn is never painted. A law about what a swap may
+   * show reads these, not only the value after `setParam` settles.
+   */
+  publications: () => ReadonlyArray<unknown>
 }
 
 /**

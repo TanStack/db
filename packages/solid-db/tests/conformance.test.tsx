@@ -20,13 +20,19 @@ import {
   gt,
   sum,
 } from '@tanstack/db'
-import { createRoot, createSignal, onCleanup } from 'solid-js'
+import {
+  createRenderEffect,
+  createRoot,
+  createSignal,
+  onCleanup,
+} from 'solid-js'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
@@ -210,15 +216,23 @@ function mountControllable<P>(
   initial: P,
 ): ControllableHandle<P> {
   const [param, setParam] = createSignal<P>(initial)
-  const { getResult, dispose } = inRoot(() =>
+  const published = createPublicationLog()
+  const { getResult, dispose } = inRoot(() => {
     // Reading param() inside the query fn makes Solid recompute on change.
-    useLiveQuery((q: any) => build(q, param())),
-  )
+    const query = useLiveQuery((q: any) => build(q, param()))
+    // Solid renders the value each render effect reads.
+    createRenderEffect(() => published.record(query.data))
+    return query
+  })
   const handle = makeHandle(getResult, dispose)
   return {
     ...handle,
+    publications: published.values,
     async setParam(next: P) {
       setParam(() => next)
+      // The first paint after the change: the framework ran its reactive
+      // work synchronously, but no later task has run.
+      published.record(getResult().data)
       await settle()
     },
   }

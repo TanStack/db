@@ -33,6 +33,7 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { renderHook, settle } from './render-probe'
@@ -198,13 +199,18 @@ function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
 ): ControllableHandle<P> {
+  const published = createPublicationLog()
   const hook = renderHook(
     ({ param }: { param: P }) => useLiveQuery((q: any) => build(q, param)),
-    { initialProps: { param: initial } },
+    {
+      initialProps: { param: initial },
+      onCommit: (result) => published.record(result.data),
+    },
   )
   const handle = makeHandle(hook)
   return {
     ...handle,
+    publications: published.values,
     async setParam(param: P) {
       hook.rerender({ param })
       await settle()
@@ -219,17 +225,22 @@ function mountKeyedControllable<P>(
   key: (param: P) => ReadonlyArray<unknown> | undefined,
   initial: P,
 ): ControllableHandle<P> {
+  const published = createPublicationLog()
   const hook = renderHook(
     ({ param }: { param: P }) =>
       useLiveQuery({
         query: (q: any) => build(q, param),
         queryKey: key(param),
       } as any),
-    { initialProps: { param: initial } },
+    {
+      initialProps: { param: initial },
+      onCommit: (result) => published.record(result.data),
+    },
   )
   const handle = makeHandle(hook)
   return {
     ...handle,
+    publications: published.values,
     async setParam(param: P) {
       hook.rerender({ param })
       await settle()

@@ -128,6 +128,21 @@ function expectNoRowsAfterRejection(h: LiveQueryHandle): void {
   }
 }
 
+/** A published `data` value holds no row outside `rows`. */
+function expectOnlyRowsOf(
+  value: unknown,
+  rows: ReadonlyArray<{ id: string }>,
+): void {
+  const allowed = new Set(rows.map(({ id }) => id))
+  const published = (Array.isArray(value) ? value : value ? [value] : []).map(
+    (row: { id: string }) => row.id,
+  )
+  expect(
+    published.filter((id) => !allowed.has(id)),
+    `published rows ${JSON.stringify(published)}`,
+  ).toEqual([])
+}
+
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -1497,7 +1512,16 @@ export function runSuite(rawDriver: LiveQueryDriver) {
                   expectNoRowsAfterRejection(h)
                   break
                 }
+                const published = h.publications().length
                 await h.setParam(next)
+                if (collides(history, next)) {
+                  // A reactive binding read the swap as a new source: every
+                  // value it published since then holds only the new
+                  // source's rows, or none while it loads.
+                  for (const value of h.publications().slice(published)) {
+                    expectOnlyRowsOf(value, rowsOf[next as Exclude<Pick, `D`>])
+                  }
+                }
                 history.push(next)
                 if (next === `D`) {
                   expectDisabledResult(

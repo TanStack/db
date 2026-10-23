@@ -15,6 +15,7 @@ import {
   DestroyRef,
   EnvironmentInjector,
   createEnvironmentInjector,
+  effect,
   inject,
   input,
   runInInjectionContext,
@@ -37,6 +38,7 @@ import {
 } from '../../db/tests/utils'
 import { injectLiveQuery } from '../src/index'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
@@ -214,17 +216,28 @@ function mountControllable<P>(
   initial: P,
 ): ControllableHandle<P> {
   const param = signal<P>(initial)
-  const { result, destroy } = inCtx(() =>
-    injectLiveQuery({
+  const published = createPublicationLog()
+  const { result, destroy } = inCtx(() => {
+    const query = injectLiveQuery({
       params: () => ({ value: param() }),
       query: ({ params, q }: any) => build(q, params.value),
-    }),
-  )
+    })
+    // Angular renders the value each effect run reads.
+    effect(() => {
+      published.record(query.data())
+    })
+    return query
+  })
   const handle = makeHandle(result, destroy)
   return {
     ...handle,
+    publications: published.values,
     async setParam(next: P) {
       param.set(next)
+      // The first paint after the change: the framework has flushed its
+      // reactive work, but no later task has run.
+      TestBed.tick()
+      published.record(result.data())
       await settle()
     },
   }

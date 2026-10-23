@@ -26,6 +26,7 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { rejectReadsAfterRenderError } from './rejected-binding'
@@ -180,18 +181,27 @@ const mountControllableWith = (path: IdentityPath) =>
     build: (q: any, param: P) => any,
     initial: P,
   ): ControllableHandle<P> {
+    const published = createPublicationLog()
     const hook = renderHook(
-      ({ param }: { param: P }) =>
-        path === `derived`
-          ? // The callback captures param, so its IR identity changes with it.
-            useLiveQuery((q: any) => build(q, param))
-          : useLiveQuery((q: any) => build(q, param), [param]),
+      ({ param }: { param: P }) => {
+        const result =
+          path === `derived`
+            ? // The callback captures param, so its IR identity changes with it.
+              useLiveQuery((q: any) => build(q, param))
+            : useLiveQuery((q: any) => build(q, param), [param])
+        // A layout effect records each committed value.
+        useLayoutEffect(() => {
+          published.record(result.data)
+        })
+        return result
+      },
       { initialProps: { param: initial } },
     )
     const guard = rejectReadsAfterRenderError(hook)
     const handle = makeHandle(hook)
     return {
       ...handle,
+      publications: published.values,
       async setParam(param: P) {
         await guard(() =>
           act(async () => {
@@ -247,15 +257,21 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
     key: (param: P) => ReadonlyArray<unknown> | undefined,
     initial: P,
   ): ControllableHandle<P> {
+    const published = createPublicationLog()
     const hook = renderHook(
       ({ param }: { param: P }) => {
         const config = {
           query: (q: any) => build(q, param),
           queryKey: key(param),
         } as any
-        return path === `derived`
-          ? useLiveQuery(config)
-          : useLiveQuery(config, [param])
+        const result =
+          path === `derived`
+            ? useLiveQuery(config)
+            : useLiveQuery(config, [param])
+        useLayoutEffect(() => {
+          published.record(result.data)
+        })
+        return result
       },
       { initialProps: { param: initial } },
     )
@@ -263,6 +279,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
     const handle = makeHandle(hook)
     return {
       ...handle,
+      publications: published.values,
       async setParam(param: P) {
         await guard(() =>
           act(async () => {
