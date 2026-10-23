@@ -169,9 +169,10 @@ describe(`oracle run configuration`, () => {
       numRuns: 40,
       seed: -42,
     })
+    // A path replays one recorded counterexample, so it runs once.
     expect(
       oracleRandomParameters(40, replayRun, `includes.incremental-history`),
-    ).toEqual({ numRuns: 40, seed: -42, path: `1:0:2` })
+    ).toEqual({ numRuns: 1, seed: -42, path: `1:0:2` })
   })
 })
 

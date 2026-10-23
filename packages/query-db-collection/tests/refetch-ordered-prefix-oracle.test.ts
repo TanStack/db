@@ -13,6 +13,7 @@ import fc from 'fast-check'
 import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -1967,7 +1968,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
 
   // The premise-directed campaign for the skip under a hold. Its reach
   // witness requires refetches that report while a hold is running.
-  it.runIf(replay.replayPath === undefined)(
+  it.skipIf(oracleReplayRequested())(
     `generated refetch histories under a hold (fixed campaign)`,
     async () => {
       let reachedReport = 0
@@ -1991,10 +1992,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       const options =
         campaign === `fixed`
           ? { seed: 20261013, numRuns: oracleRuns(80) }
-          : {
-              ...oraclePropertyOptions(80, property),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            }
+          : oraclePropertyOptions(80, property)
       // fast-check reports its seed only when the property fails. Choose the
       // random campaign's seed here, so a test timeout can report it too.
       const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)

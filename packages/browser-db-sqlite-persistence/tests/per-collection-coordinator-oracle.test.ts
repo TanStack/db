@@ -5001,10 +5001,13 @@ packages/db/src/query/live/ARCHITECTURE.md) for a follower tab. A follower
 routes on-demand demand it cannot serve to the elected owner. Its load, and so
 its live query's first ready, settles only when the rows the owner fetched for
 it are visible in the follower; if applying the owner's commit fails here, the
-load rejects and the follower's source enters error. The single-runtime lanes
-`persistence.follower-remote-demand` and `persistence.follower-generation-notice`
-in db-sqlite-persistence-core/tests/persisted-oracle.test.ts own the runtime
-mechanism with a coordinator double. This lane is their receiving witness
+load rejects and the follower's source enters error. The single-runtime
+`persistence.follower-remote-demand` lane and the follower generation-notice
+cells in db-sqlite-persistence-core/tests/persisted-oracle.test.ts own the
+runtime mechanism with a coordinator double. The generation-notice cells are
+fixed histories: their rotation cell is pinned as failing under the known gap
+#2139, and the fix adds their generated campaign back. This lane is their
+receiving witness
 across the real boundary: two tabs, each with its own real
 BrowserCollectionCoordinator over Node's real BroadcastChannel and Web Locks,
 and one real SQLite file opened by both tabs.
@@ -5434,8 +5437,9 @@ describe(`follower remote-demand settlement across real tabs`, () => {
   // source. The model owes the same applied settlement there: the rows it
   // already showed stay visible, and a new demand settles with its rows.
   // This topology never routes to another tab's owner, so the
-  // elected-owner notice path stays covered by the single-runtime
-  // `persistence.follower-generation-notice` lane.
+  // elected-owner notice path stays with the single-runtime follower
+  // generation-notice cells in persisted-oracle.test.ts. Their rotation cell
+  // is pinned as failing under the known gap #2139.
   it(
     `keeps a rotated follower's rows and serves its new demand from its own generation`,
     () =>

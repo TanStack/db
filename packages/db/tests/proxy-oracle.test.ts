@@ -1970,7 +1970,7 @@ describe(`Proxy Library`, () => {
       delete proxy.arr[2]
 
       expect(getChanges()).toEqual({
-        // eslint-disable-next-line
+        // eslint-disable-next-line no-sparse-arrays -- the deleted index is a hole
         arr: [1, 2, , 4, 5],
       })
       expect(2 in arr).toBe(true)
