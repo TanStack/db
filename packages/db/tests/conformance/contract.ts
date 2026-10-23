@@ -247,8 +247,11 @@ export interface LiveQueryDriver {
   mountDisabled: () => LiveQueryHandle
   /**
    * Whether the binding compares query identity to decide when to compile
-   * again (see the opening query-identity law). A public adapter property, not
-   * inferred from observed output.
+   * again (see the opening query-identity law). The driver declares the
+   * adapter's documented policy for the inputs it mounts; the suite does not
+   * infer it from observed output. Svelte compares identity only for a query
+   * that a `DbClient` backs, and its shared drivers mount none, so they
+   * declare `false`.
    */
   comparesQueryIdentity: boolean
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */

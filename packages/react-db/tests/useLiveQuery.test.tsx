@@ -3286,6 +3286,49 @@ describe(`Query Collections`, () => {
       ).toThrow(UnhashableQueryIRError)
     })
 
+    // A dependency list decides reuse, so the identity is checked when the
+    // query compiles: at mount and when a dependency changes. With a
+    // DbClient, the hook also hashes the query for hydration on every render;
+    // an unhashable query there leaves hydration without a key until the
+    // query compiles again.
+    it(`rejects an unhashable dependency-list query with a DbClient only when it compiles`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `deps-client-unhashable`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const client = new DbClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <DbProvider client={client}>{children}</DbProvider>
+      )
+      const hook = renderHook(
+        ({ functional, version }) =>
+          useLiveQuery(
+            (q) =>
+              functional
+                ? q
+                    .from({ people: collection })
+                    .fn.where(({ people }) => people.age > 25)
+                : q.from({ people: collection }),
+            [version],
+          ),
+        { initialProps: { functional: false, version: 1 }, wrapper },
+      )
+      await waitFor(() => expect(hook.result.current.data).toHaveLength(3))
+
+      // The query changed but its dependency did not, so nothing compiles.
+      expect(() =>
+        hook.rerender({ functional: true, version: 1 }),
+      ).not.toThrow()
+      expect(hook.result.current.data).toHaveLength(3)
+
+      expect(() => hook.rerender({ functional: true, version: 2 })).toThrow(
+        UnhashableQueryIRError,
+      )
+    })
+
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const collection = createCollection(

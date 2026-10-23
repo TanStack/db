@@ -118,8 +118,8 @@ export function claimLiveQuerySourceIds(
 
 /** Where a binding that compares query identity checks a prepared query. */
 export interface LiveQueryIdentityScope {
-  /** This binding's claims; omit to check identity without claiming. */
-  claims?: LiveQuerySourceIdClaims
+  /** This binding's source Collection ID claims. */
+  claims: LiveQuerySourceIdClaims
   client: DbClient | undefined
   bindingName: string
   /** Report a descriptor source that no client bound. */
@@ -143,13 +143,11 @@ export function identifyLiveQuery<TIdentity = unknown>(
   ) => TIdentity,
 ): TIdentity {
   const identity = identify(preparedValue)
-  if (scope.claims) {
-    claimLiveQuerySourceIds(
-      scope.claims,
-      getPreparedLiveQuerySources(preparedValue, scope.onUnboundDescriptor),
-      scope.client,
-      scope.bindingName,
-    )
-  }
+  claimLiveQuerySourceIds(
+    scope.claims,
+    getPreparedLiveQuerySources(preparedValue, scope.onUnboundDescriptor),
+    scope.client,
+    scope.bindingName,
+  )
   return identity
 }

@@ -35,6 +35,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryIdentityScope,
+  LiveQueryKey,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   LiveQuerySourceIdClaims,
@@ -110,7 +111,7 @@ export type DerivedIdentityProfiler = {
 }
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
-export type LiveQueryKey = ReadonlyArray<unknown>
+export type { LiveQueryKey }
 type UseLiveQueryConfigOptions<TContext extends Context> = Omit<
   LiveQueryCollectionConfig<TContext>,
   `query`
@@ -255,7 +256,7 @@ type DerivedQueryPreparation = {
 
 /** How a hook checks a prepared query whose identity it compares. */
 export function getIdentityScope(
-  claims: LiveQuerySourceIdClaims | undefined,
+  claims: LiveQuerySourceIdClaims,
   dbClient: DbClient | undefined,
   hookName: string,
 ): LiveQueryIdentityScope {
@@ -774,8 +775,16 @@ function useLiveQueryImpl(
           dbClient,
           instance.deferredCollections,
         )
-        depsQueryIdentity = getPreparedLiveQueryIdentity(preparedQueryValue)
-        streamIdentity = [`deps`, resolvedDeps, depsQueryIdentity]
+        try {
+          depsQueryIdentity = getPreparedLiveQueryIdentity(preparedQueryValue)
+          streamIdentity = [`deps`, resolvedDeps, depsQueryIdentity]
+        } catch (error) {
+          // The dependency list, not this hash, decides reuse: an unhashable
+          // query leaves hydration without a key and rejects only when it
+          // compiles.
+          if (!(error instanceof UnhashableQueryIRError)) throw error
+          identityError = error
+        }
       }
     } else if (inputIsCollection) {
       identityDeps = []
@@ -917,7 +926,9 @@ function useLiveQueryImpl(
         if (suspenseCollection) {
           instance.collection = suspenseCollection
         } else {
-          if (!dbClient) {
+          // A keyed query claims nothing, so it reports an unbound descriptor
+          // here; the other forms reported it when they claimed.
+          if (!dbClient && queryKey !== undefined) {
             getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
           }
           instance.collection = resolveLiveQueryValue(preparedQueryValue, {

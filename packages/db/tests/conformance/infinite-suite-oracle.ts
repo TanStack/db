@@ -16,6 +16,7 @@
  * history instead of test-runner housekeeping.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { createOracleReach } from '../oracle-reach'
 import { expectPageRows } from './page-laws-oracle'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
@@ -159,6 +160,24 @@ async function captureRejection(
   }
 }
 
+/**
+ * After a rejection, every read throws or holds no rows. Two reads catch a
+ * memo that throws once and then serves its previous value. No current driver
+ * can fail this check (see `contract.ts`); it guards a driver whose binding
+ * stays mounted after a rejection.
+ */
+function expectNoPagesAfterRejection(handle: InfiniteQueryHandle): void {
+  for (let read = 0; read < 2; read++) {
+    let data: unknown
+    try {
+      data = handle.current().data
+    } catch {
+      continue
+    }
+    expect(data).toEqual([])
+  }
+}
+
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt++) {
     if (check()) return
@@ -216,6 +235,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     key: string,
     name: string,
     fn: () => Promise<void> | void,
+    // A generated grammar runs many histories, each through the driver's cut.
+    timeoutMs?: number,
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
@@ -237,7 +258,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         sources = null
       }
     }
-    it(label, run)
+    it(label, run, timeoutMs)
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
@@ -1717,52 +1738,113 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       `source-id-reuse`,
       `rejects or pages a different source under a Collection ID the binding read`,
       async () => {
+        // Claim memory grammar, as in the live suite without a disabled step:
+        // a history mounts on A(x) or C(y), then takes two steps over A(x),
+        // B(x) (another object under A's ID), and C(y). The pairwise model
+        // judges each step from the history alone. A comparing binding rejects
+        // a step when an earlier step read another object under its ID, which
+        // ends the history; a reactive binding pages the selected source.
+        type Pick = `A` | `B` | `C`
         const first = driver.makeSource(rows(4))
-        const other = driver.makeSource(rows(2, `o`))
-        const reused = driver.makeSource(rows(3, `r`), first.collection.id)
-        const handle = driver.mountControllable(
-          (q, source: { collection: any }) =>
-            q
-              .from({ items: source.collection })
-              .orderBy(({ items }: any) => items.rank, `desc`),
-          first,
-          { pageSize: 3 },
-        )
-        await handle.flush()
-        expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
-        // A fresh ID and a revisit of the claimed object are legal.
-        handle.setParamSync(other)
-        await handle.flush()
-        expectPageRows(handle.current(), rows(2, `o`), 3)
-        handle.setParamSync(first)
-        await handle.flush()
-        expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
-        handle.setParamSync(other)
-        await handle.flush()
-        if (!driver.comparesQueryIdentity) {
-          handle.setParamSync(reused)
-          await handle.flush()
-          expectPageRows(handle.current(), rows(3, `r`), 3)
-          return
+        const sourceOf: Record<Pick, { collection: any }> = {
+          A: first,
+          B: driver.makeSource(rows(3, `r`), first.collection.id),
+          C: driver.makeSource(rows(2, `o`)),
         }
-        const error = await captureRejection(async () => {
-          handle.setParamSync(reused)
-          await handle.flush()
-          return handle.current()
-        })
-        expect(error).toMatchObject({ name: `SourceCollectionIdReuseError` })
-        // After a rejection, every read throws or holds no rows. Two reads
-        // catch a memo that throws once and then serves its previous value.
-        for (let read = 0; read < 2; read++) {
-          let data: unknown
-          try {
-            data = handle.current().data
-          } catch {
-            continue
+        const pagesOf: Record<Pick, Array<InfiniteRow>> = {
+          A: rows(4).slice(0, 3),
+          B: rows(3, `r`),
+          C: rows(2, `o`),
+        }
+        const collides = (history: ReadonlyArray<Pick>, next: Pick) =>
+          history.some(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+        type ReachState =
+          | `swap after an intervening query`
+          | `revisit after an intervening query`
+        // A state names what lies between the step that made a claim and the
+        // step that tests it.
+        const reachedState = (
+          history: ReadonlyArray<Pick>,
+          next: Pick,
+        ): ReachState | undefined => {
+          const lastIndex = (match: (pick: Pick) => boolean) => {
+            for (let index = history.length - 1; index >= 0; index--) {
+              if (match(history[index]!)) return index
+            }
+            return -1
           }
-          expect(data).toEqual([])
+          const conflict = lastIndex(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+          if (conflict >= 0) {
+            return history.length - conflict > 1
+              ? `swap after an intervening query`
+              : undefined
+          }
+          const revisit = lastIndex((prior) => prior === next)
+          return revisit >= 0 && history.length - revisit > 1
+            ? `revisit after an intervening query`
+            : undefined
         }
+        // Declared reach: the states where a claim must outlive the query
+        // that made it.
+        const reach = createOracleReach<ReachState>(
+          `infinite source-id claim memory`,
+          [
+            `swap after an intervening query`,
+            `revisit after an intervening query`,
+          ],
+        )
+        const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`]
+        for (const start of [`A`, `C`] as const) {
+          for (const second of picks) {
+            for (const third of picks) {
+              reach.beginHistory()
+              const history: Array<Pick> = [start]
+              const handle = driver.mountControllable(
+                (q, pick: Pick) =>
+                  q
+                    .from({ items: sourceOf[pick].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                start as Pick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[start], 3)
+              for (const next of [second, third]) {
+                const state = reachedState(history, next)
+                if (state) reach.reach(state)
+                if (driver.comparesQueryIdentity && collides(history, next)) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                handle.setParamSync(next)
+                await handle.flush()
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[next], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        reach.assertReached()
       },
+      // 18 histories of three steps each.
+      30_000,
     )
 
     scenario(
@@ -1793,6 +1875,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             return handle.current()
           })
           expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          expectNoPagesAfterRejection(handle)
           return
         }
         // A changed captured value recompiles, though no identity names it.

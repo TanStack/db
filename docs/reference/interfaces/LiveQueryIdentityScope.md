@@ -19,15 +19,15 @@ Defined in: [packages/db/src/live-query-adapter.ts:124](https://github.com/TanSt
 
 ***
 
-### claims?
+### claims
 
 ```ts
-optional claims: LiveQuerySourceIdClaims;
+claims: LiveQuerySourceIdClaims;
 ```
 
 Defined in: [packages/db/src/live-query-adapter.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L122)
 
-This binding's claims; omit to check identity without claiming.
+This binding's source Collection ID claims.
 
 ***
 

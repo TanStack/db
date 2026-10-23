@@ -9,7 +9,7 @@ function resolveLiveQueryValue(value, __namedParameters):
   | null;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L249)
+Defined in: [packages/db/src/live-query-options.ts:251](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L251)
 
 Resolve an adapter's query value to what its observer watches: `null` for a
 disabled query, an existing Collection with sync started, or a live query.
