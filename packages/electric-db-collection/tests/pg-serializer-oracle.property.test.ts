@@ -3,7 +3,6 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
 import {
   oraclePropertyOptions,
-  oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
@@ -24,21 +23,16 @@ function serializerProp<T>(property: string, [arbitrary]: [fc.Arbitrary<T>]) {
       throw new Error(`duplicate PostgreSQL serializer property: ${name}`)
     }
     registeredProperties.add(name)
-    if (oracleReplayRequested()) {
-      oracleReplayTest(fcTest, property).prop(
-        [arbitrary],
-        oraclePropertyOptions(100, property),
-      )(`${name} (replay)`, check)
-      return
-    }
-    fcTest.prop([arbitrary], { numRuns: oracleRuns(100), seed: 20260930 })(
-      `${name} (fixed)`,
-      check,
-    )
-    fcTest.prop([arbitrary], oraclePropertyOptions(100))(
-      `${name} (random)`,
-      check,
-    )
+    // A path replay of the property runs only the random campaign, from its
+    // path. The fixed campaign stands aside during every path replay.
+    oracleReplayTest(fcTest).prop([arbitrary], {
+      numRuns: oracleRuns(100),
+      seed: 20260930,
+    })(`${name} (fixed)`, check)
+    oracleReplayTest(fcTest, property).prop(
+      [arbitrary],
+      oraclePropertyOptions(100, property),
+    )(`${name} (random)`, check)
   }
 }
 

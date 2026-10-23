@@ -17,7 +17,6 @@ import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
-  oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
@@ -65,24 +64,17 @@ function electricHistoryProperty<T>(
     throw new Error(`duplicate Electric history property: ${property}`)
   }
   registeredHistoryProperties.add(property)
-  if (!oracleReplayRequested()) {
-    fcTest.prop([arbitrary], {
-      numRuns: oracleRuns(baseRuns),
-      seed: fixedSeed,
-      examples,
-    })(`${name} (fixed)`, check, timeout)
-    fcTest.prop([arbitrary], {
-      ...oraclePropertyOptions(baseRuns, property),
-      examples,
-    })(`${name} (random)`, check, timeout)
-    return
-  }
-  // A path replay runs only the selected history. The registration stands
-  // aside for every other property.
+  // A path replay of this property runs only the random campaign, from its
+  // path. The fixed campaign stands aside during every path replay.
+  oracleReplayTest(fcTest).prop([arbitrary], {
+    numRuns: oracleRuns(baseRuns),
+    seed: fixedSeed,
+    examples,
+  })(`${name} (fixed)`, check, timeout)
   oracleReplayTest(fcTest, property).prop([arbitrary], {
     ...oraclePropertyOptions(baseRuns, property),
     examples,
-  })(`${name} (replay)`, check, timeout)
+  })(`${name} (random)`, check, timeout)
 }
 
 /**
@@ -646,7 +638,10 @@ function queuedPresencePropertyOptions(mode: `fixed` | `random`): {
   path?: string
 } {
   if (mode === `fixed`) {
-    return { numRuns: queuedPresenceRuns, seed: queuedPresenceFixedSeed }
+    return {
+      numRuns: oracleRuns(queuedPresenceRuns),
+      seed: queuedPresenceFixedSeed,
+    }
   }
   return oraclePropertyOptions(queuedPresenceRuns, queuedPresenceProperty)
 }
@@ -3249,14 +3244,6 @@ describe(`Electric adapter laws`, () => {
     queuedPresencePropertyOptions(`fixed`),
   )(
     `generated queued Electric histories preserve staged presence and reset fences (fixed)`,
-    runQueuedPresenceCampaign,
-  )
-
-  oracleReplayTest(fcTest).prop(
-    queuedPresenceArbitraries,
-    queuedPresencePropertyOptions(`random`),
-  )(
-    `generated queued Electric histories preserve staged presence and reset fences (random)`,
     runQueuedPresenceCampaign,
   )
 
@@ -7705,46 +7692,36 @@ describe(`Electric adapter laws`, () => {
     `preserves persisted Electric interleavings (fixed)`,
     runPersistenceInterleavingCampaign,
   )
-
-  oracleReplayTest(fcTest).prop(
-    [persistenceInterleavingCampaignArbitrary],
-    oraclePropertyOptions(4, persistenceInterleavingProperty),
-  )(
-    `preserves persisted Electric interleavings (random)`,
-    runPersistenceInterleavingCampaign,
-  )
 })
 
-// The replay suites register only during a path replay. Each stands aside
-// unless the replay selects its own property.
-if (oracleReplayRequested()) {
-  oracleReplayTest(describe, persistenceInterleavingProperty)(
-    `persisted Electric interleaving replay`,
-    () => {
-      beforeEach(resetElectricOracleMocks)
+// Each campaign's random lane has its own suite. An ordinary run runs it
+// beside the adapter laws. A path replay of its property runs only it.
+oracleReplayTest(describe, persistenceInterleavingProperty)(
+  `persisted Electric interleaving campaign`,
+  () => {
+    beforeEach(resetElectricOracleMocks)
 
-      fcTest.prop(
-        [persistenceInterleavingCampaignArbitrary],
-        oraclePropertyOptions(4, persistenceInterleavingProperty),
-      )(
-        `preserves persisted Electric interleavings (replay)`,
-        runPersistenceInterleavingCampaign,
-      )
-    },
-  )
+    fcTest.prop(
+      [persistenceInterleavingCampaignArbitrary],
+      oraclePropertyOptions(4, persistenceInterleavingProperty),
+    )(
+      `preserves persisted Electric interleavings (random)`,
+      runPersistenceInterleavingCampaign,
+    )
+  },
+)
 
-  oracleReplayTest(describe, queuedPresenceProperty)(
-    `Electric queued-presence replay`,
-    () => {
-      beforeEach(resetElectricOracleMocks)
+oracleReplayTest(describe, queuedPresenceProperty)(
+  `Electric queued-presence campaign`,
+  () => {
+    beforeEach(resetElectricOracleMocks)
 
-      fcTest.prop(
-        queuedPresenceArbitraries,
-        oraclePropertyOptions(queuedPresenceRuns, queuedPresenceProperty),
-      )(
-        `generated queued Electric histories preserve staged presence and reset fences (replay)`,
-        runQueuedPresenceCampaign,
-      )
-    },
-  )
-}
+    fcTest.prop(
+      queuedPresenceArbitraries,
+      queuedPresencePropertyOptions(`random`),
+    )(
+      `generated queued Electric histories preserve staged presence and reset fences (random)`,
+      runQueuedPresenceCampaign,
+    )
+  },
+)

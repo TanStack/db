@@ -12,6 +12,7 @@ import { IR, createCollection } from '@tanstack/db'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import {
   SQLiteCorePersistenceAdapter,
@@ -4420,7 +4421,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       `preserves exact rows across fixed-seed binding histories`,
       async () => {
         await campaign(`fixed seed`, {
-          numRuns: BINDING_RUNS,
+          numRuns: oracleRuns(BINDING_RUNS),
           seed: BINDING_FIXED_SEED,
         })
       },

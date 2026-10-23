@@ -29,9 +29,10 @@ import {
  * reference relation does not define.
  */
 // Every generated law below uses the same property in a fixed and a fresh
-// campaign. Set UTILS_ORACLE_PROPERTY to the numbered test label and provide
-// UTILS_ORACLE_SEED and UTILS_ORACLE_PATH to replay its fast-check shrink
-// directly, for example with `vitest run tests/utils-oracle.property.test.ts`.
+// campaign. Set TANSTACK_DB_ORACLE_PROPERTY to `utils.<number>` from the test
+// label, with TANSTACK_DB_ORACLE_SEED and TANSTACK_DB_ORACLE_PATH, to replay
+// its fast-check shrink directly, for example with
+// `vitest run tests/utils-oracle.property.test.ts`.
 const fixedSeed = 20260911
 const campaignRuns = 100
 // Each property registers as `utils.<number>`, in file order. A path replay
@@ -1177,7 +1178,8 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   // Keep newly added generated laws after the original registration order:
-  // UTILS_ORACLE_PROPERTY uses ordinal selectors for saved seed/path replays.
+  // `utils.<number>` names properties in registration order, so saved
+  // seed/path replays keep their numbers.
   describe(`additional non-ring value boundaries`, () => {
     utilsProperty([arbitraryRegExp])(
       `RegExp source and flags determine equality`,

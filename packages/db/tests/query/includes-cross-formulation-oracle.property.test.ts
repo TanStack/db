@@ -16,6 +16,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import {
+  oracleCalibrationTest,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
@@ -985,14 +986,6 @@ const windowedExamples: Array<
 
 describe(`includes cross-formulation oracle`, () => {
   const replay = readOracleRunConfig()
-  // A calibration witness injects a hostile mutant into its main property
-  // during a replay of that property, selected by
-  // TANSTACK_DB_ORACLE_CALIBRATION. It runs in ordinary runs and in replays of
-  // its property. A replay of the property without its fault replays the
-  // main property, so the witness has nothing to check then.
-  const calibrationIdle = (fault: string) =>
-    oracleReplayRequested() &&
-    process.env.TANSTACK_DB_ORACLE_CALIBRATION !== fault
 
   test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
     const parents = new Map(
@@ -2173,10 +2166,13 @@ describe(`includes cross-formulation oracle`, () => {
   // tests/query/includes-cross-formulation-oracle.property.test.ts
   // -t 'agrees across nested includes'
   // Expected: one main-property failure at cross-formulation checkpoint 0.
-  oracleReplayTest(test, `includes-cross-formulation.equivalence`)(
+  oracleCalibrationTest(
+    test,
+    `includes-cross-formulation.equivalence`,
+    `missing-parent`,
+  )(
     `generated equivalence rejects a missing production parent and replays its checkpoint`,
     async () => {
-      if (calibrationIdle(`missing-parent`)) return
       // The hostile observation is injected after the real nested query is
       // captured. The same generated driver and refinement comparison execute
       // during shrinking and direct seed/path replay.
@@ -2225,10 +2221,13 @@ describe(`includes cross-formulation oracle`, () => {
   // tests/query/includes-cross-formulation-oracle.property.test.ts
   // -t 'matches recomputation for ordered offset and limit child windows for a random'
   // Expected: one main-property failure at ordered-window checkpoint 0.
-  oracleReplayTest(test, `includes-cross-formulation.ordered-window`)(
+  oracleCalibrationTest(
+    test,
+    `includes-cross-formulation.ordered-window`,
+    `extra-child`,
+  )(
     `generated window rejects an extra production child and replays its checkpoint`,
     async () => {
-      if (calibrationIdle(`extra-child`)) return
       const property = fc.asyncProperty(
         windowedScenarioArbitrary,
         async (sample) => {

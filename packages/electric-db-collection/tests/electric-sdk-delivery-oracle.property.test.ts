@@ -16,7 +16,6 @@ import {
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
-  oracleReplayRequested,
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
 import {
@@ -123,12 +122,10 @@ function sdkCampaigns(
       throw violation.report(error)
     }
   }
-  if (oracleReplayRequested()) {
-    oracleReplayTest(it, propertyId)(`${name} (replay)`, () => runCampaign())
-    return
-  }
-  it(`${name} (fixed)`, () => runCampaign(fixedSeed))
-  it(`${name} (random)`, () => runCampaign())
+  // A path replay of the property runs only the random campaign, from its
+  // path. The fixed campaign stands aside during every path replay.
+  oracleReplayTest(it)(`${name} (fixed)`, () => runCampaign(fixedSeed))
+  oracleReplayTest(it, propertyId)(`${name} (random)`, () => runCampaign())
 }
 
 function violationCheckpoint(error: unknown): string {

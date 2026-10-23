@@ -42,6 +42,7 @@ const staticOracleProperties = [
   `electric.valid-batch-partition`,
   `ivm.index-refinement`,
   `offline.key-scheduler-fifo-ledger`,
+  `offline.interruption-settlement`,
   `op-sqlite.columnar-sql-aliases`,
   `op-sqlite.result-carrier-equivalence`,
   `op-sqlite.write-marker-aliases`,
@@ -375,9 +376,61 @@ export type OracleReplayConfig = {
   replayProperty: string | undefined
 }
 
+/**
+ * Replay variables that oracles read before they moved to the shared
+ * TANSTACK_DB_ORACLE_* variables. Nothing reads them now, so a command that
+ * still sets one would run the full campaigns and appear to pass. Reading the
+ * config rejects them instead.
+ */
+const retiredReplayVariables = [
+  `UTILS_ORACLE_PROPERTY`,
+  `UTILS_ORACLE_SEED`,
+  `UTILS_ORACLE_PATH`,
+  `COMPARISON_ORACLE_PROPERTY`,
+  `COMPARISON_ORACLE_SEED`,
+  `COMPARISON_ORACLE_PATH`,
+  `PG_SERIALIZER_ORACLE_PROPERTY`,
+  `PG_SERIALIZER_ORACLE_SEED`,
+  `PG_SERIALIZER_ORACLE_PATH`,
+  `PG_SERIALIZER_ORACLE_RUNS`,
+  `TANSTACK_DB_ELECTRIC_ORACLE_PROPERTY`,
+  `TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY`,
+  `TANSTACK_DB_ELECTRIC_HISTORY_SEED`,
+  `TANSTACK_DB_ELECTRIC_HISTORY_PATH`,
+  `TANSTACK_DB_ELECTRIC_DURABILITY_SEED`,
+  `TANSTACK_DB_ELECTRIC_DURABILITY_PATH`,
+  `TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED`,
+  `TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH`,
+  `TANSTACK_DB_IVM_INDEX_SEED`,
+  `TANSTACK_DB_IVM_INDEX_PATH`,
+  `TANSTACK_DB_SQLITE_BINDING_SEED`,
+  `TANSTACK_DB_SQLITE_BINDING_PATH`,
+  `TANSTACK_DB_SQLITE_ORACLE_SEED`,
+  `TANSTACK_DB_SQLITE_ORACLE_PATH`,
+  `TANSTACK_DB_SQLITE_ORACLE_RUNS`,
+  `TANSTACK_DB_WS5A_PROPERTY`,
+  `TANSTACK_DB_WS5A_SEED`,
+  `TANSTACK_DB_WS5A_PATH`,
+  `TANSTACK_INDEXEDDB_ORACLE_SEED`,
+  `TANSTACK_INDEXEDDB_ORACLE_PATH`,
+  `TANSTACK_DB_OFFLINE_ORACLE_SEED`,
+  `TANSTACK_DB_OFFLINE_ORACLE_PATH`,
+  `TANSTACK_DB_OFFLINE_ORACLE_RUNS`,
+] as const
+
 export function readOracleRunConfig(
   environment: OracleEnvironment = process.env,
 ): OracleReplayConfig & { multiplier: number } {
+  const retired = retiredReplayVariables.filter(
+    (variable) => environment[variable] !== undefined,
+  )
+  if (retired.length > 0) {
+    throw new Error(
+      `Retired oracle replay variables are set: ${retired.join(`, `)}. ` +
+        `Use TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and ` +
+        `TANSTACK_DB_ORACLE_PROPERTY.`,
+    )
+  }
   const multiplierValue = environment.TANSTACK_DB_ORACLE_RUNS_MULTIPLIER ?? `1`
   const multiplier = Number(multiplierValue)
   if (
@@ -530,6 +583,26 @@ export function oracleReplayTest<TRegistration extends { skip: unknown }>(
       ? oracleReplayRequested()
       : oracleReplaySkips(...properties)
   // `skip` registers through the same API, so it has the registration's type.
+  return standsAside ? (registration.skip as TRegistration) : registration
+}
+
+/**
+ * The registration for a calibration witness. During a path replay of
+ * `property`, TANSTACK_DB_ORACLE_CALIBRATION selects a hostile mutant that the
+ * main property runs against, and the witness for that `fault` checks the
+ * failure. The witness runs in ordinary runs and in that calibration replay.
+ * It stands aside during every other path replay, where it has nothing to
+ * check.
+ */
+export function oracleCalibrationTest<TRegistration extends { skip: unknown }>(
+  registration: TRegistration,
+  property: string,
+  fault: string,
+): TRegistration {
+  const standsAside =
+    oracleReplaySkips(property) ||
+    (oracleReplayRequested() &&
+      process.env.TANSTACK_DB_ORACLE_CALIBRATION !== fault)
   return standsAside ? (registration.skip as TRegistration) : registration
 }
 

@@ -415,9 +415,8 @@ describe(`LocalStorage value fidelity oracle`, () => {
     ] as const
     for (const entry of entries) {
       for (const handler of [true, false]) {
-        for (const payload of pinned.filter((candidate) =>
-          isLegal({ entry, handler, payload: candidate }),
-        )) {
+        for (const payload of pinned) {
+          if (!isLegal({ entry, handler, payload })) continue
           it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () =>
             runHistory({ entry, handler, payload }))
         }

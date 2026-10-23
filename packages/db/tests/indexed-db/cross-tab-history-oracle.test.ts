@@ -22,6 +22,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
+  oracleRuns,
 } from '../oracle-config.js'
 import { runCampaign } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
@@ -64,7 +65,7 @@ const action = (
 ): TransportStep => ({ kind, tab, key, value: 2, optional: true })
 const stores = stress ? [0, 0, 1, 0, 1] : [0, 0, 1]
 
-async function campaign(seed?: number, path?: string) {
+async function campaign(numRuns: number, seed?: number, path?: string) {
   await runCampaign(
     'transport',
     history,
@@ -77,7 +78,7 @@ async function campaign(seed?: number, path?: string) {
           'registered campaign calibration',
         )
     },
-    { runs, seed, path },
+    { runs: numRuns, seed, path },
   )
 }
 
@@ -87,14 +88,17 @@ const crossTabProperty = `indexeddb.cross-tab-history`
 
 it.skipIf(oracleReplayRequested())(
   'refines independent per-Collection snapshots with fixed histories',
-  () => campaign(11792026),
+  () => campaign(oracleRuns(runs), 11792026),
   120_000,
 )
 it.skipIf(oracleReplaySkips(crossTabProperty))(
   'refines independent per-Collection snapshots with fresh histories',
   () => {
-    const { seed, path } = oraclePropertyOptions(runs, crossTabProperty)
-    return campaign(seed, path)
+    const { numRuns, seed, path } = oraclePropertyOptions(
+      runs,
+      crossTabProperty,
+    )
+    return campaign(numRuns, seed, path)
   },
   120_000,
 )

@@ -4982,29 +4982,14 @@ describe(`includes recompute oracle`, () => {
       `reparent`,
       `rekey`,
     ]
-    // A transition pair with no history placement at this depth has no
-    // history to generate, so the matrix registers no cell for it.
-    const transitionPairs = transitions
-      .flatMap((firstTransition, firstIndex) =>
-        transitions.map((secondTransition, secondIndex) => ({
-          firstIndex,
-          firstTransition,
-          secondIndex,
-          secondTransition,
-        })),
-      )
-      .filter(
-        ({ firstTransition, secondTransition }) =>
+    for (const [firstIndex, firstTransition] of transitions.entries()) {
+      for (const [secondIndex, secondTransition] of transitions.entries()) {
+        if (
           transitionHistoryPlacements(depth, firstTransition, secondTransition)
-            .length > 0,
-      )
-    for (const {
-      firstIndex,
-      firstTransition,
-      secondIndex,
-      secondTransition,
-    } of transitionPairs) {
-      {
+            .length === 0
+        ) {
+          continue
+        }
         for (const sourceBranch of [0, 1] as const) {
           const property = `includes.matrix.transition-${depth}-${firstTransition}-${secondTransition}-${sourceBranch}`
           const arbitrary = transitionHistoryScenariosArbitrary(

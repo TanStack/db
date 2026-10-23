@@ -16,9 +16,13 @@
  * - A test modifier passed around as a value, as in
  *   `const run = replaying ? it.skip : it`. The rule cannot see what such an
  *   alias switches off. `oracleReplayTest(test, property)` selects a replay.
- * - A test registered under a condition, or after an early `return`,
- *   unless the condition is a shared replay helper or its negation. An early
- *   `throw` fails the run loudly, so it guards nothing.
+ * - A test registered under a condition, or after an early `return`, unless
+ *   the condition is a shared replay helper and the test registers when the
+ *   helper is false, as in `if (!oracleReplayRequested())`. Each helper is
+ *   false in an ordinary run, so such a test runs there. An early `throw`
+ *   fails the run loudly, and `continue` filters a loop's data, so neither
+ *   guards a registration. A registration made through `oracleReplayTest`
+ *   or `oracleCalibrationTest` is checked as a registration of its test.
  * - Playwright's runtime `test.skip()` or `test.fixme()` inside a test,
  *   unless its condition is `browserName !== '<browser>'`: a control that
  *   only one browser supports.
@@ -35,11 +39,11 @@
  * The rule has no inline exception. A known gap is pinned with `it.fails` on
  * a fixed seed, not skipped.
  *
- * The rule cannot see a run count lowered to any value above 1, a seed read
- * from configuration that is absent in ordinary runs, a test function renamed
- * before its modifier is read (`const t = it; t.skip(...)`), or a call to a
- * local helper that registers tests under a condition. Reviewers still check
- * those.
+ * The rule cannot see a run count lowered to any value above 1, a run count
+ * or seed held in a variable, a test function renamed before its modifier is
+ * read (`const t = it; t.skip(...)`), a call to a local helper that registers
+ * tests under a condition, or a condition inside a loop's iterable, as in
+ * `cases.filter(() => !process.env.CI)`. Reviewers still check those.
  */
 
 const testRoots = new Set([`describe`, `fcTest`, `it`, `suite`, `test`])
@@ -66,7 +70,10 @@ const registrationMembers = new Set([
 ])
 // oracle-config implements replay selection, so its options may carry a
 // replay path from configuration.
-const replaySelectionModule = /(^|[/\\])oracle-config\.ts$/
+const replaySelectionModule =
+  /(^|[/\\])packages[/\\]db[/\\]tests[/\\]oracle-config\.ts$/
+// The shared helpers that return a test registration or its `skip` form.
+const selectionHelpers = new Set([`oracleCalibrationTest`, `oracleReplayTest`])
 const runHelpers = new Set([
   `oraclePropertyOptions`,
   `oracleRandomParameters`,
@@ -81,6 +88,15 @@ function calleeChain(callee) {
     if (node.type === `MemberExpression`) {
       if (node.property.type === `Identifier`) names.unshift(node.property.name)
       node = node.object
+    } else if (
+      node.type === `CallExpression` &&
+      node.callee.type === `Identifier` &&
+      selectionHelpers.has(node.callee.name) &&
+      node.arguments.length > 0
+    ) {
+      // `oracleReplayTest(it)` returns `it` or `it.skip`, so a registration
+      // made through it is checked as a registration of `it`.
+      node = node.arguments[0]
     } else if (node.type === `CallExpression`) {
       node = node.callee
     } else {
@@ -146,15 +162,6 @@ function isSharedHelperCall(node, names, sourceCode) {
   )
 }
 
-/** A shared replay condition, or its negation. */
-function isReplayCondition(node, sourceCode) {
-  const condition =
-    node.type === `UnaryExpression` && node.operator === `!`
-      ? node.argument
-      : node
-  return isSharedHelperCall(condition, replayConditions, sourceCode)
-}
-
 /** Exactly `.skipIf(<shared replay condition>)`, not negated. */
 function isReplaySelection({ name, args }, sourceCode) {
   return (
@@ -165,31 +172,28 @@ function isReplaySelection({ name, args }, sourceCode) {
 }
 
 /**
- * Whether a statement always leaves its block without failing. A `throw`
- * fails the run loudly, so it guards nothing.
+ * Whether a statement always returns from its function. A `throw` fails the
+ * run loudly, and `continue` or `break` skips one item of a loop's data, as
+ * `.filter` would, so neither guards a registration.
  */
-function exits(statement) {
+function returns(statement) {
   if (statement === null || statement === undefined) return false
-  if (
-    statement.type === `ReturnStatement` ||
-    statement.type === `ContinueStatement` ||
-    statement.type === `BreakStatement`
-  ) {
-    return true
-  }
+  if (statement.type === `ReturnStatement`) return true
   if (statement.type === `BlockStatement`) {
-    return exits(statement.body.at(-1))
+    return returns(statement.body.at(-1))
   }
   if (statement.type === `IfStatement`) {
-    return exits(statement.consequent) && exits(statement.alternate)
+    return returns(statement.consequent) && returns(statement.alternate)
   }
   return false
 }
 
 /**
- * The conditions that decide whether `node` runs: every enclosing `if`,
+ * The conditions that decide whether `node` runs, each with the value that
+ * the condition must have for `node` to run: every enclosing `if`,
  * conditional, or logical branch, and every earlier `if` in an enclosing
- * block that leaves the block.
+ * block that returns. `registersWhen` is undefined when no single value
+ * decides it, as for `??`.
  */
 function guardingConditions(node) {
   const conditions = []
@@ -200,9 +204,20 @@ function guardingConditions(node) {
         parent.type === `ConditionalExpression`) &&
       child !== parent.test
     ) {
-      conditions.push(parent.test)
+      conditions.push({
+        test: parent.test,
+        registersWhen: child === parent.consequent,
+      })
     } else if (parent.type === `LogicalExpression` && child === parent.right) {
-      conditions.push(parent.left)
+      conditions.push({
+        test: parent.left,
+        registersWhen:
+          parent.operator === `&&`
+            ? true
+            : parent.operator === `||`
+              ? false
+              : undefined,
+      })
     } else if (
       parent.type === `BlockStatement` ||
       parent.type === `Program` ||
@@ -211,14 +226,29 @@ function guardingConditions(node) {
       const body =
         parent.type === `SwitchCase` ? parent.consequent : parent.body
       for (const statement of body.slice(0, body.indexOf(child))) {
-        if (statement.type === `IfStatement` && exits(statement.consequent)) {
-          conditions.push(statement.test)
+        if (statement.type === `IfStatement` && returns(statement.consequent)) {
+          conditions.push({ test: statement.test, registersWhen: false })
         }
       }
     }
     child = parent
   }
   return conditions
+}
+
+/**
+ * Whether a guard keeps a registration in every ordinary run. Each shared
+ * replay helper is false in an ordinary run, so the registration must run
+ * when the helper is false: under `!helper()`, in the `else` branch of
+ * `helper()`, or after `if (helper()) return`. A registration that runs only
+ * when a helper is true would run only during a replay.
+ */
+function keepsOrdinaryRun({ test, registersWhen }, sourceCode) {
+  if (registersWhen === undefined) return false
+  const negated = test.type === `UnaryExpression` && test.operator === `!`
+  const helper = negated ? test.argument : test
+  if (!isSharedHelperCall(helper, replayConditions, sourceCode)) return false
+  return negated ? registersWhen : !registersWhen
 }
 
 /** A `path` that a witness recorded: a literal, or a failure's path. */
@@ -414,7 +444,7 @@ export default {
           return
         }
         const unguarded = guardingConditions(node).every((condition) =>
-          isReplayCondition(condition, sourceCode),
+          keepsOrdinaryRun(condition, sourceCode),
         )
         if (!unguarded) {
           context.report({ node, messageId: `guarded` })

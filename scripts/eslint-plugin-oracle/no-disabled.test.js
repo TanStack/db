@@ -45,7 +45,7 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     ...[
       `it.skipIf(oracleReplaySkips('cursor.exact-width'))('a', () => check())`,
       `if (!oracleReplayRequested()) { it('a', () => check()) }`,
-      `if (oracleReplayRequested()) { it('replays the path', () => check()) }`,
+      `if (oracleReplayRequested()) { replayOnly() } else { it('a', () => check()) }`,
       `const propertyTest = oracleReplayTest(fcTest, 'cursor.exact-width')\npropertyTest.prop([a])('a', check)`,
       `describe('s', () => { if (oracleReplaySkips('cursor.exact-width')) return\n it('a', () => check()) })`,
     ].map((code) => ({
@@ -54,6 +54,8 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     })),
     // Playwright's test API calls that register nothing.
     `test('a', async () => { if (rejected) { expect(test.info().project.name).not.toBe('webkit') } })`,
+    // A guard that skips a loop item filters data, as \`.filter\` would.
+    `for (const c of cases) { if (!c.legal) continue\n it(c.name, () => check(c)) }`,
     // Registrations in a loop or over a table run in every ordinary run.
     `for (const campaign of campaigns) { it(campaign.name, () => check(campaign)) }`,
     `const fixedRuns = { seed: 1846, numRuns: 40 }`,
@@ -273,6 +275,41 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     {
       code: `fcTest.prop([history], { numRuns: 200 })('checks the history', check)`,
       errors: [{ messageId: `literalRuns` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nif (process.env.CI) { oracleReplayTest(it)('a', () => check()) }`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\noracleReplayTest(it).only('a', () => check())`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `only` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\noracleReplayTest(it).skip('a', () => check())`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\noracleReplayTest(it).skipIf(process.env.CI)('a', () => check())`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `conditional` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nif (oracleReplayRequested()) { it('law', () => check()) }`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\ndescribe('s', () => { if (!oracleReplayRequested()) return\n it('a', () => check()) })`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\noracleReplayRequested() && it('law', () => check())`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
     },
     {
       // A comment does not grant an exception.

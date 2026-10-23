@@ -16,7 +16,6 @@ import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
 import {
   oraclePropertyOptions,
-  oracleReplayRequested,
   oracleReplayTest,
 } from '../oracle-config.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
@@ -651,21 +650,16 @@ function optimisticProperty(
   run: (routes: RouteValues) => Promise<void>,
 ): void {
   const options = oraclePropertyOptions(12, property)
-  // Both normal campaigns use the same arbitrary, driver, checker, and budget.
-  // A path replay registers only its requested property, as its one lane.
-  if (oracleReplayRequested()) {
-    oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
-      name,
-      run,
-    )
-    return
-  }
-
-  fcTest.prop([routeValuesArbitrary], { ...options, seed: 1_658_013 })(
-    `${name} (fixed seed)`,
+  // Both campaigns use the same arbitrary, driver, checker, and budget. A path
+  // replay of this property runs only the random campaign, from its path.
+  oracleReplayTest(fcTest).prop([routeValuesArbitrary], {
+    ...options,
+    seed: 1_658_013,
+  })(`${name} (fixed seed)`, run)
+  oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
+    `${name} (random seed)`,
     run,
   )
-  fcTest.prop([routeValuesArbitrary], options)(`${name} (random seed)`, run)
 }
 
 describe(`optimistic relationship-transition oracle`, () => {
