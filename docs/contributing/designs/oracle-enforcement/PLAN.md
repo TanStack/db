@@ -33,7 +33,7 @@ shortcuts appeared in that work:
 - Comparison exclusions (`replayOpen`, a narrowed identity check) widened
   without a fresh maintainer decision.
 - Most edits went through shell commands (Python and `sed`), so an edit hook
-  that matches only the harness's own edit tool would not have fired.
+  that matches only the harness's own edit tool would not fire.
 
 ## Order of work
 
@@ -91,13 +91,13 @@ names, and feedback protocol. Research from 2026-10-23:
 | Harness | Post-edit hook | Configuration | Feedback to the model | End-of-turn hook that can force a retry |
 | --- | --- | --- | --- | --- |
 | Claude Code | `PostToolUse`, matcher `Edit\|Write` | `.claude/settings.json` | exit `2` with stderr | `Stop` |
-| Codex CLI | `PostToolUse`, matcher `apply_patch` | `.codex/hooks.json`; the project must be trusted, and the hook approved in `/hooks` | exit `2` with stderr | not found |
-| Cursor | `afterFileEdit` (stdin has `file_path`) | `.cursor/hooks.json` | not confirmed: the documentation shows a logging-style hook | not confirmed |
+| Codex CLI | `PostToolUse`, matcher `apply_patch` | `.codex/hooks.json`. The project must be trusted, and the hook approved in `/hooks` | exit `2` with stderr | not found |
+| Cursor | `afterFileEdit` (stdin has `file_path`) | `.cursor/hooks.json` | not confirmed. The documentation shows a logging-style hook | not confirmed |
 | Gemini CLI | `AfterTool`, matcher `write_file\|replace` | `.gemini/settings.json` | JSON `hookSpecificOutput.additionalContext` | `AfterAgent` with `decision: "deny"` |
-| GitHub Copilot coding agent | `postToolUse` | `.github/hooks/*.json`; read only from the default branch | JSON `additionalContext`; a nonzero exit does not block | `agentStop` with `decision: "block"` |
+| GitHub Copilot coding agent | `postToolUse` | `.github/hooks/*.json`, read only from the default branch | JSON `additionalContext`. A nonzero exit does not block | `agentStop` with `decision: "block"` |
 | Windsurf / Devin Desktop | `post_write_code` (stdin has `tool_info.file_path`) | `.windsurf/hooks.json` or `.devin/hooks.json` | exit `2` with stderr | not found |
-| Cline | executable `PostToolUse` | `.clinerules/hooks/PostToolUse`; turn on "Enable Hooks" | JSON `contextModification` | not found |
-| OpenCode | plugin `tool.execute.after` | `.opencode/plugins/*.ts` | append to the tool's `output.output`; `"lsp": true` also reports LSP diagnostics on edits | not found |
+| Cline | executable `PostToolUse` | `.clinerules/hooks/PostToolUse`, with "Enable Hooks" turned on | JSON `contextModification` | not found |
+| OpenCode | plugin `tool.execute.after` | `.opencode/plugins/*.ts` | append to the tool's `output.output`. `"lsp": true` also reports LSP diagnostics on edits | not found |
 | Aider | built-in `--auto-lint` with `--lint-cmd` | `.aider.conf.yml` | built in: a nonzero exit makes Aider offer a fix | not applicable |
 
 Sources: code.claude.com/docs/en/hooks, developers.openai.com/codex/hooks,
@@ -125,9 +125,9 @@ these APIs change often.
    oracle rules syntactic, and keep type-aware rules out of the edit hook.
 4. **Fallbacks.** Some harnesses need setup by each contributor (Codex trust,
    the Cline toggle, the Copilot default branch). Keep these layers:
-   - an `AGENTS.md` instruction to run `pnpm lint:changed` after edits;
-   - editor diagnostics, which IDE-based agents read;
-   - the pre-commit hook;
+   - an `AGENTS.md` instruction to run `pnpm lint:changed` after edits.
+   - editor diagnostics, which IDE-based agents read.
+   - the pre-commit hook.
    - CI.
 
 ### Pre-commit
