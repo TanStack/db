@@ -7,7 +7,7 @@ title: LiveQueryWindowRecompile
 type LiveQueryWindowRecompile = "identity" | "dependencies" | "always";
 ```
 
-Defined in: packages/db/src/live-query-window-binding.ts:70
+Defined in: [packages/db/src/live-query-window-binding.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L70)
 
 When a query input compiles again.
 

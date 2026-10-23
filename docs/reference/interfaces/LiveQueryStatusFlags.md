@@ -3,7 +3,7 @@ id: LiveQueryStatusFlags
 title: LiveQueryStatusFlags
 ---
 
-Defined in: packages/db/src/live-query-primitives.ts:51
+Defined in: [packages/db/src/live-query-primitives.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L51)
 
 The derived boolean status flags every adapter exposes for a query.
 
@@ -15,7 +15,7 @@ The derived boolean status flags every adapter exposes for a query.
 isCleanedUp: boolean;
 ```
 
-Defined in: packages/db/src/live-query-primitives.ts:56
+Defined in: [packages/db/src/live-query-primitives.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L56)
 
 ***
 
@@ -25,7 +25,7 @@ Defined in: packages/db/src/live-query-primitives.ts:56
 isError: boolean;
 ```
 
-Defined in: packages/db/src/live-query-primitives.ts:55
+Defined in: [packages/db/src/live-query-primitives.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L55)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: packages/db/src/live-query-primitives.ts:55
 isIdle: boolean;
 ```
 
-Defined in: packages/db/src/live-query-primitives.ts:54
+Defined in: [packages/db/src/live-query-primitives.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L54)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: packages/db/src/live-query-primitives.ts:54
 isLoading: boolean;
 ```
 
-Defined in: packages/db/src/live-query-primitives.ts:52
+Defined in: [packages/db/src/live-query-primitives.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L52)
 
 ***
 
@@ -55,4 +55,4 @@ Defined in: packages/db/src/live-query-primitives.ts:52
 isReady: boolean;
 ```
 
-Defined in: packages/db/src/live-query-primitives.ts:53
+Defined in: [packages/db/src/live-query-primitives.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L53)

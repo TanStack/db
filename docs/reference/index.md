@@ -440,6 +440,7 @@ title: "@tanstack/db"
 - [queryOnce](functions/queryOnce.md)
 - [queueStrategy](functions/queueStrategy.md)
 - [readLiveQueryWindowPageShape](functions/readLiveQueryWindowPageShape.md)
+- [rejectLiveQueryInput](functions/rejectLiveQueryInput.md)
 - [resetWarnings](functions/resetWarnings.md)
 - [resolveLiveQueryValue](functions/resolveLiveQueryValue.md)
 - [resumeDeferredLiveQueryCollections](functions/resumeDeferredLiveQueryCollections.md)

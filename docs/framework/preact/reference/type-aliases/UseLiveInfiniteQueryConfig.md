@@ -7,7 +7,7 @@ title: UseLiveInfiniteQueryConfig
 type UseLiveInfiniteQueryConfig<_TContext> = object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:26](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L26)
+Defined in: [useLiveInfiniteQuery.ts:27](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L27)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [useLiveInfiniteQuery.ts:26](https://github.com/TanStack/db/blob/mai
 optional initialPageParam: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:34](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L34)
+Defined in: [useLiveInfiniteQuery.ts:35](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L35)
 
 First result-page label, not a server cursor or remote offset.
 
@@ -35,7 +35,7 @@ First result-page label, not a server cursor or remote offset.
 optional pageSize: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:32](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L32)
+Defined in: [useLiveInfiniteQuery.ts:33](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L33)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [useLiveInfiniteQuery.ts:32](https://github.com/TanStack/db/blob/mai
 optional queryKey: LiveQueryKey;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:31](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L31)
+Defined in: [useLiveInfiniteQuery.ts:32](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L32)
 
 Explicit identity for a query whose IR cannot derive one, such as a query
 with functional variants. Structured queries should omit it.

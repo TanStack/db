@@ -9,7 +9,7 @@ title: useLiveInfiniteQuery
 function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:85](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L85)
+Defined in: [useLiveInfiniteQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L86)
 
 Page through an ordered live query, growing one live-query Collection's
 window with `utils.setWindow()` instead of recreating it per page.
@@ -64,7 +64,7 @@ const { pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
 function useLiveInfiniteQuery<TContext>(queryFn, config): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L94)
+Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L95)
 
 Page through an ordered live query, growing one live-query Collection's
 window with `utils.setWindow()` instead of recreating it per page.

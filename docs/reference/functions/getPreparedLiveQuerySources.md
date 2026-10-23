@@ -7,7 +7,7 @@ title: getPreparedLiveQuerySources
 function getPreparedLiveQuerySources(value, onUnboundDescriptor?): Collection<Record<string, unknown>, string | number, UtilsRecord, StandardSchemaV1<unknown, unknown>, Record<string, unknown>>[];
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L177)
+Defined in: [packages/db/src/live-query-options.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L162)
 
 Concrete source objects in query-position order for a prepared value.
 

@@ -8,7 +8,7 @@ type UseLiveInfiniteQueryReturn<TContext> = UseLiveQueryResult<InferResultType<T
 }>> & InfiniteQueryPagination<InferResultType<TContext>[number]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:46](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L46)
+Defined in: [useLiveInfiniteQuery.ts:47](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveInfiniteQuery.ts#L47)
 
 ## Type Parameters
 

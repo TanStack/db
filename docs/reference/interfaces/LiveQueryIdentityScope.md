@@ -3,7 +3,7 @@ id: LiveQueryIdentityScope
 title: LiveQueryIdentityScope
 ---
 
-Defined in: [packages/db/src/live-query-adapter.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L123)
+Defined in: [packages/db/src/live-query-adapter.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L120)
 
 Where a binding that compares query identity checks a prepared query.
 
@@ -15,7 +15,7 @@ Where a binding that compares query identity checks a prepared query.
 bindingName: string;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:127](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L127)
+Defined in: [packages/db/src/live-query-adapter.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L124)
 
 ***
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/live-query-adapter.ts:127](https://github.com/TanSt
 optional claims: LiveQuerySourceIdClaims;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L125)
+Defined in: [packages/db/src/live-query-adapter.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L122)
 
 This binding's claims; omit to check identity without claiming.
 
@@ -37,19 +37,7 @@ This binding's claims; omit to check identity without claiming.
 client: DbClient | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L126)
-
-***
-
-### deferredCollections?
-
-```ts
-optional deferredCollections: DeferredLiveQueryCollections;
-```
-
-Defined in: [packages/db/src/live-query-adapter.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L129)
-
-Sync starts the query's preparation deferred.
+Defined in: [packages/db/src/live-query-adapter.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L123)
 
 ***
 
@@ -59,7 +47,7 @@ Sync starts the query's preparation deferred.
 optional onUnboundDescriptor: (alias) => never;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L131)
+Defined in: [packages/db/src/live-query-adapter.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L126)
 
 Report a descriptor source that no client bound.
 

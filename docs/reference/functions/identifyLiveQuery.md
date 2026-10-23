@@ -10,13 +10,13 @@ function identifyLiveQuery<TIdentity>(
    identify): TIdentity;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L141)
+Defined in: [packages/db/src/live-query-adapter.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L136)
 
 Identify a prepared query for a binding that compares query identity. The
 identity throws `UnhashableQueryIRError` for IR without a stable identity,
-then the query's sources claim their Collection IDs. Either rejection
-releases the sync starts the preparation deferred, so a later reader, such
-as another hook over the same Collection, can still start those sources.
+then the query's sources claim their Collection IDs. The binding's render
+boundary releases the sync starts a rejected render deferred; see
+`rejectLiveQueryInput`.
 
 ## Type Parameters
 

@@ -7,4 +7,4 @@ title: LiveQueryKey
 type LiveQueryKey = ReadonlyArray<unknown>;
 ```
 
-Defined in: [useLiveQuery.ts:111](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L111)
+Defined in: [useLiveQuery.ts:113](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L113)

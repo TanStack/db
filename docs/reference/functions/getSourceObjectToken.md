@@ -7,7 +7,7 @@ title: getSourceObjectToken
 function getSourceObjectToken(source): number;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L77)
+Defined in: [packages/db/src/live-query-adapter.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L74)
 
 A process-unique number for a source object, without retaining it.
 

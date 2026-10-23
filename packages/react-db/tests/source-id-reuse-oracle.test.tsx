@@ -446,8 +446,8 @@ describe(`React source ID reuse`, () => {
                 .join({ failingB: failing[1]! }, ({ failingA, failingB }) =>
                   eq(failingA.id, failingB.id),
                 )
-                .join({ healthy }, ({ failingA, healthy }) =>
-                  eq(failingA.id, healthy.id),
+                .join({ healthy }, ({ failingA, healthy: row }) =>
+                  eq(failingA.id, row.id),
                 )
                 .join({ settings: current }, ({ failingA, settings }) =>
                   eq(failingA.id, settings.id),
