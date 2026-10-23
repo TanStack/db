@@ -1,273 +1,273 @@
 {
   "docs/collections/electric-collection.md": [
-    "0dd50060adbf8c3f",
-    "102e3b6860d47f70",
-    "54275ea6e4b24910"
+    "56d9efac4ed9aa8d",
+    "7422149f2dff594a",
+    "b16254176b96780a"
   ],
-  "docs/collections/indexed-db-collection.md": ["dad4e77c4763f32a"],
+  "docs/collections/indexed-db-collection.md": ["02840970e37fce46"],
   "docs/collections/local-only-collection.md": [
-    "35d97a3a9d141256",
-    "3615b30b88224e39",
-    "36f0f65995ced962",
-    "62bfffbdd760af64",
-    "78e9144a8c4d6946"
+    "1616bfc9a1c371dd",
+    "23aedda50d1a9c4d",
+    "9b19823410809fa7",
+    "ab45c1f424a4f5c2",
+    "fc371ec14b35d52c"
   ],
   "docs/collections/local-storage-collection.md": [
-    "22017ba94407fe7d",
-    "2add0a25c7533df9",
-    "3663c960d1461dde",
-    "7a5ee2385c57e6da",
-    "93529b815b56005f",
-    "952d65ad77259ef8",
-    "a23b02c8ebff50ea"
+    "000e5e37db6d115b",
+    "44ba7d96e999cffd",
+    "517ab246f2d8be78",
+    "bc535604c77c1fa1",
+    "c38cafc80222d29c",
+    "dd2763deb14376a3",
+    "eabd7079c8e94cee"
   ],
   "docs/collections/powersync-collection.md": [
-    "1afab707dfed2b14",
-    "20090ec993fa884d",
-    "4dd21379bff94d51",
-    "54e13a571814f441",
-    "b7a80e0fdee7efdc"
+    "08fdc12554aef6bd",
+    "0ed5441c16943c10",
+    "2b5c40bcc4e20ec0",
+    "a0537dcb94f1fdd8",
+    "f40497dfb722c9dd"
   ],
   "docs/collections/query-collection.md": [
-    "0c7c57c2f2daf128",
-    "25caab8b5e0160ca",
-    "40db37e1b3b1649f",
-    "46c646552bb94fa1",
-    "46eafbc648a2de41",
-    "4936e66d71ebc0b5",
-    "79702ff5b213cb74",
-    "7ec88a76700c9ef5",
-    "8f3f399ac425424a",
-    "947554ae2af1c47d",
-    "9d6166c311d0d6e6",
-    "a3687d66ef982466",
-    "a5b52c9f8af29d00",
-    "e14f245e9749d168",
-    "ea2ff4dd09fbb02f"
+    "0229dd13bd4d1ffd",
+    "061e910f0c004a30",
+    "1b699b36eff1d332",
+    "2574bda356de34f2",
+    "2b6afbd876364c47",
+    "393233dab9f06f9f",
+    "40cb3614551740e2",
+    "7629a8f334d06ac6",
+    "7fa66ee20b7bfb43",
+    "8f2171f6414ed15e",
+    "958f9a40aa89f03c",
+    "af597bdfb912efff",
+    "bd88200750280a4c",
+    "c70312226e5685fc",
+    "e45e143986a0a5c5"
   ],
   "docs/collections/query-initial-placeholder-data-design.md": [
-    "9edcfc23f56a849b"
+    "149bb533130822d5"
   ],
   "docs/collections/trailbase-collection.md": [
-    "01bc2c23f090ee82",
-    "8e6131fa04843059",
-    "c5e5da6b0528d05a",
-    "da0fb4a61a4b1258",
-    "e5fd5fd7cf3ee7af"
+    "6ce5b7286c00a06c",
+    "a3a582bdac23bba1",
+    "d87926f88d1893b3",
+    "f52226428b04d159",
+    "fe61c9648fce3ad9"
   ],
   "docs/contributing/oracle-reviews/initial-full-source-sync-readiness.md": [
-    "db1f0953a754e669"
+    "e8bffd051d9cc384"
   ],
-  "docs/framework/angular/overview.md": ["d39903c5982ee517"],
-  "docs/framework/react/overview.md": ["74b26b1d16180ce0", "b0e6d12ea9882897"],
-  "docs/framework/solid/overview.md": ["505fbc1660154c2b"],
+  "docs/framework/angular/overview.md": ["608090f6634091b7"],
+  "docs/framework/react/overview.md": ["4b92baa28023107a", "c454038dbd572c86"],
+  "docs/framework/solid/overview.md": ["0ed5a4dc482e3487"],
   "docs/guides/collection-options-creator.md": [
-    "26cf7b70bf5a9328",
-    "6555958fbcbbe3f3",
-    "6b31a02781cc0b6f",
-    "7bec8c32bbcdd756",
-    "7ef713bfd5fc90d4",
-    "8bad2af899e2098a",
-    "a04db2d01d988b05",
-    "ada9c5856d6af91e",
-    "e31e1498002eef0b"
+    "1e45d0804bc49c6d",
+    "30721b8dbc34c240",
+    "30959fbff6b0b9b3",
+    "8e4594291426b79a",
+    "94e97da76ab64521",
+    "98f8d2a6f39e3d08",
+    "a56d2489cdbbbe2d",
+    "ad2c8cf0431a5130",
+    "d04164c069c046e7"
   ],
   "docs/guides/error-handling.md": [
-    "11d18030135ddad1",
-    "2562d7c6eeede61b",
-    "2dce561a1a49b614",
-    "339019147dd88b41",
-    "392bbc3bc9e5790c",
-    "3a3ba04c9ccdeb61",
-    "3f29a3e83096bccb",
-    "73bf36e975556612",
-    "82a5eb0bd5e837b4",
-    "adaec9d8439a0d76",
-    "c2db832bb6875e28",
-    "c740378204672b1c",
-    "d92784296ae4c98a",
-    "e647ec0d24c013f6",
-    "f5a0e5835193f709"
+    "0d42062acd306170",
+    "21c4f07ed33e73d3",
+    "2e4f4ffd14769f71",
+    "39b87a75c1a7cddf",
+    "39d852db0f643223",
+    "45b7505ca2e2d743",
+    "51e4e1b10b424521",
+    "80f1e12fddaac9ad",
+    "94f75b445e4e77e3",
+    "a13c70241881d8bb",
+    "a227bec199f61386",
+    "b1ed7616c9a09f1e",
+    "b3b928d3f7fd310e",
+    "b9b81423f794c4a8",
+    "d1c64f9173ac52a0"
   ],
   "docs/guides/live-queries.md": [
-    "01f663e8b4b7a5c5",
-    "03b16ea37af5155a",
-    "193a6540c5cb9751",
-    "3168fcfa7b402bd5",
-    "3c7650d829b70c58",
-    "41ad2967e4792981",
-    "44a43649d5328fee",
-    "5049db06a1bca6c2",
-    "54b2845b3f4a3a94",
-    "5fcce92ba0507289",
-    "70bbc60053a33fad",
-    "a4cbec996c7c4cb5",
-    "bdc9c30c57add7cd",
-    "bfaf11792701b5a6",
-    "cdddcc4e9dff0a9b",
-    "d42c540f286dedc0",
-    "d5628fff0679e5dc",
-    "f113d47460e2166b",
-    "f4ba391e288f96cc"
+    "012683b68aea9bd9",
+    "1c901a9aab4c3605",
+    "328e6118b6859a6d",
+    "350c201eb314ac4a",
+    "3606a1edf6576b6b",
+    "47c25de745935ecf",
+    "49792941ddf68946",
+    "49c11d80e5db559e",
+    "4d22db9980cce9ba",
+    "539715bcca864ac7",
+    "835b83a3af148c5d",
+    "8590ef81b4186488",
+    "9d9f28d1f7ce5e67",
+    "9e5a76892e694d3f",
+    "acdeadcf40bb3576",
+    "c561ebd715ee0dc0",
+    "d1a56dd2b016d61c",
+    "ef28fad1f061708d",
+    "f5dfaaee1c2fc9b1"
   ],
   "docs/guides/mutations.md": [
-    "08261373bf652f48",
-    "1255521980bf984d",
-    "1397fc8a87edfa8b",
-    "1b9ddb3f971078cc",
-    "2e74aee8c03a2c23",
-    "3ed04a2948b0b6e0",
-    "479ded16124a4b79",
-    "6ab013c30a539cb0",
-    "6e5d7d2bc0e7944a",
-    "779413de3b4085a2",
-    "7e5e18900577074f",
-    "839efb04d2715746",
-    "8c968ac8b3f2b84f",
-    "8d38c4925d5a1918",
-    "ad561652b2f92f13",
-    "be1a2f6b93290baa",
-    "c3e85f5abfc6333d",
-    "cecaaeb48d5e7a8b",
-    "e48a63a8418dd5f6",
-    "fffbd38b18827d0e"
+    "10504e85bc44cb36",
+    "23c224b97339aad2",
+    "24f926bb7f5e9bf4",
+    "4c84ab8dcd0c869b",
+    "5405b8237edb7edc",
+    "621ca9c1abe615b2",
+    "676555290fb5f3ec",
+    "6b6fed7dbce90a71",
+    "71b81aa657f0792a",
+    "7272172699ac9d1f",
+    "763d3f2ff4f82ff8",
+    "98f2cab14439b918",
+    "9b556db14527fe01",
+    "bc7f2418773fce1c",
+    "c2461550f9d3e496",
+    "de14bc736e2ed20c",
+    "e01722dd826edfe8",
+    "e1e4ae286396b7b5",
+    "e79a4c90cf8a5761",
+    "ff2316ae59ea3bd0"
   ],
   "docs/guides/offline-transactions.md": [
-    "24e0163dcb007fab",
-    "8d210fead79f3cf0"
+    "53fad67bfc557743",
+    "cbb84bbc032fe6d9"
   ],
   "docs/guides/schemas.md": [
-    "136aaed9cbe5ea61",
-    "19b138ed11f82f63",
-    "21c20e07e4bbc178",
-    "2320661c518a4ad3",
-    "2f838bf85e0da434",
-    "492dbb0212c677de",
-    "7019266cd52d2ed5",
-    "877b3a9c16c15da2",
-    "9ceb0ac6e0564630",
-    "aadec84ec61f60f1",
-    "dbf1970a78767f17",
-    "ebed33ff5f590c48",
-    "f00d518c1dc0f352"
+    "0f1234ee3709c004",
+    "175f5a2c0175199c",
+    "4feb48bc8c2450d8",
+    "50b51df6b24125cc",
+    "571063c019efde35",
+    "5b2a85437b077d70",
+    "6ff4f1903d62e884",
+    "9ce8558a3c61a956",
+    "b30da55c0692c68c",
+    "caf0b926ff1b6e4d",
+    "df0dab60bf88a19b",
+    "ec0faf98a535caac",
+    "f9cec253d1e29e88"
   ],
   "docs/guides/sqlite-persistence.md": [
-    "0bc141ca7a9cecaa",
-    "76993422b4c8881f",
-    "be59956fa556b952",
-    "dcf611fc0de7a5ea"
+    "44d938b27e7d8e56",
+    "6b656ba540d345bd",
+    "dca01a57fc0a2e04",
+    "fb16035447c1c5b4"
   ],
   "docs/guides/ssr.md": [
-    "2eeb8be63193e90e",
-    "3f521af644cc4a6c",
-    "7df90009f17bb64f",
-    "bae874816b80fa76",
-    "d0c5531a14522216"
+    "43ecdc891c511196",
+    "7d6d492c15650152",
+    "86955b615a421d2f",
+    "bb340f403f9813b1",
+    "c809652214430dfa"
   ],
   "docs/overview.md": [
-    "17addcbdcdc8bd9d",
-    "25834862ad19e87b",
-    "49c4d17ae089392e",
-    "6b316852f49bd7e1",
-    "7f2e477746fb333c",
-    "b218fcb90eae1b25"
+    "29c08f39ce288ed8",
+    "3a15ab6c1b66500c",
+    "bccbf6aceee45753",
+    "be08f67a8db26760",
+    "c31cc7218909bb3f",
+    "c64c851e1a775b7d"
   ],
   "docs/quick-start.md": [
-    "031935aa43874a0a",
-    "3dc699a8394a7d6d",
-    "73d5900ac8e2d76b",
-    "74b26b1d16180ce0"
+    "050709d610c65189",
+    "4b92baa28023107a",
+    "9a2229c6576082a7",
+    "b6f8297128236baf"
   ],
   "packages/angular-db/skills/angular-db/SKILL.md": [
-    "0039ec2323554d77",
-    "1c2d766183b1c4ed",
-    "2170cb84aea1c46e",
-    "2e9b57d202697885",
-    "373e31c9185d8b2d"
+    "05e664d90130374e",
+    "52cc4733bc84ecdc",
+    "70be2e9d955c38d4",
+    "a383923cc25453f2",
+    "d7162b5c2af01089"
   ],
   "packages/db/skills/db-core/collection-setup/references/local-adapters.md": [
-    "131410fc478710cc",
-    "1a15d24213289e11",
-    "ba6f6ce87766c12f",
-    "fb57b98d2e7f574a"
+    "4efbd8925c757c30",
+    "626940148a94ad34",
+    "d9d940252f67e38d",
+    "f9bb0de5ca97a91d"
   ],
   "packages/db/skills/db-core/collection-setup/references/powersync-adapter.md": [
-    "9667df44886f0ca2"
+    "ea56bb18de1e5bc3"
   ],
   "packages/db/skills/db-core/collection-setup/references/query-adapter.md": [
-    "458f58547abe2d59",
-    "4f6f60340f2e2c0b",
-    "8a1c6eada500cff8",
-    "9b0bf4836d0cfb78",
-    "b6712a06f76aabeb",
-    "c034a05d65b63d4a",
-    "d1afd54756a54a67"
+    "1d3913d423bc7e38",
+    "3b24ad26456d3e7c",
+    "591f73320d6029a0",
+    "5f24bed8eb699df8",
+    "9c1631a553ea07d2",
+    "ac10737f5050571f",
+    "fcf5567666226944"
   ],
   "packages/db/skills/db-core/collection-setup/references/trailbase-adapter.md": [
-    "049d5225d8e5e24a"
+    "e0e8861a744963a2"
   ],
   "packages/db/skills/db-core/collection-setup/SKILL.md": [
-    "0ce632547d2f3429",
-    "1860f97d7af4d664",
-    "2045994875b4948a",
-    "4bdb69d627811855",
-    "9760d69c1a43223c",
-    "b6846dcda912e886",
-    "c529358f3d493b5a",
-    "cc984debd9673623",
-    "ebca8a1eea44c425",
-    "ef0695b2edac1d47",
-    "f807227957b45b54"
+    "070f001f9160a30b",
+    "26751817f0f8e23a",
+    "591e4f7c004f672d",
+    "84f362c63e9360cb",
+    "9eabaf549c35dd7a",
+    "a8fde4fbfc21276a",
+    "abba53377897fe5e",
+    "af80855f8b6db66c",
+    "c83cd2bf72d16c54",
+    "cf64631446425ad8",
+    "ea4b823c98753caa"
   ],
-  "packages/db/skills/db-core/custom-adapter/SKILL.md": ["b3c120c7a08c2366"],
+  "packages/db/skills/db-core/custom-adapter/SKILL.md": ["0946d1e769d92cf7"],
   "packages/db/skills/db-core/live-queries/references/operators.md": [
-    "4b17b68395b1fe83"
+    "012683b68aea9bd9"
   ],
   "packages/db/skills/db-core/live-queries/SKILL.md": [
-    "32a783108e6f18bf",
-    "738472679137647d",
-    "918167034910a1e9",
-    "b1246c8734027a6a"
+    "069a9d0f7d5744b2",
+    "70da1f691de74854",
+    "d808ae7acfd79f4d",
+    "fcf8dccac11c4ade"
   ],
   "packages/db/skills/db-core/mutations-optimistic/references/transaction-api.md": [
-    "e35c8663478b601a"
+    "967d90e913132656"
   ],
   "packages/db/skills/db-core/mutations-optimistic/SKILL.md": [
-    "1337a5a5bcd052bd",
-    "4f3879defa7fb44f",
-    "aebe19060ddcbd7c",
-    "d289f1c191a383e3",
-    "e720a019114309a8"
+    "1dbef3144d02599f",
+    "549bc78a7c315a5d",
+    "6b0a0344d218354e",
+    "8b95067b56d2d9ca",
+    "a87b1b6b7f312e36"
   ],
   "packages/db/skills/db-core/persistence/SKILL.md": [
-    "132b43a15b4c1d96",
-    "65b4f94b03be5df4",
-    "6a97114189308f12",
-    "8e483f20ce54a2cd",
-    "ba99444cf808cdc1",
-    "e17e1d3eedb30ae4"
+    "226a17d946d2644a",
+    "42ca999e9550faf3",
+    "4321c008910761e3",
+    "49cc6207176cfdd0",
+    "6e51303b6511a747",
+    "9d1be38d645f5ff3"
   ],
-  "packages/db/skills/meta-framework/SKILL.md": ["77fd28263fca116b"],
+  "packages/db/skills/meta-framework/SKILL.md": ["29bfd0d0914b4128"],
   "packages/offline-transactions/skills/offline/SKILL.md": [
-    "120091041b09393e",
-    "1a506e324de141a4",
-    "4bb0f7db77cc9451",
-    "dbd64ce5b54e79cf"
+    "14055dbaded0d439",
+    "17d601a70493c3b0",
+    "9a3cd51e9c17d3f9",
+    "ba3fc8531b556c3e"
   ],
   "packages/react-db/skills/react-db/SKILL.md": [
-    "23255f3913c6cc54",
-    "5828824fffb42015",
-    "6cea34f4dcc65cae",
-    "e18a2c5d10ddc044"
+    "25034f3ee0fa0a2b",
+    "2ef25b5bf5bff30f",
+    "313daeae3a103f55",
+    "c878afe32da4edee"
   ],
-  "packages/solid-db/skills/solid-db/SKILL.md": ["fc051f29c5d4f27e"],
+  "packages/solid-db/skills/solid-db/SKILL.md": ["7860a5e90890c302"],
   "packages/svelte-db/skills/svelte-db/SKILL.md": [
-    "502c3a8c40af4e0d",
-    "56cbaae9c63c2fc2",
-    "ed4d80558901d985"
+    "5c9035dd0f4aad97",
+    "72cc3552d6a4ade1",
+    "9f5ba57807c8dd03"
   ],
   "packages/vue-db/skills/vue-db/SKILL.md": [
-    "4cbe8baab108bd25",
-    "8bcb70ab4bdfacfc"
+    "23d62290a7b76578",
+    "bb0769916fc9762b"
   ]
 }

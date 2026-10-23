@@ -13,7 +13,7 @@
 //
 // `doc-snippets-baseline.json` lists examples that already failed when the
 // check began, by file and a hash of their code. Editing one changes its
-// hash, so an edited example must pass. An example that passes must leave the
+// hash, so an edited example must pass; reformatting one keeps it. An example that passes must leave the
 // baseline: run with --update-baseline after fixing one.
 //
 // Debugging: SNIPPET_ONLY=<file>:<line> checks one example, and
@@ -32,8 +32,34 @@ const baselinePath = join(root, `scripts`, `doc-snippets-baseline.json`)
 const baseline = existsSync(baselinePath)
   ? JSON.parse(readFileSync(baselinePath, `utf8`))
   : {}
+// The tokens of an example, without the punctuation and spacing that
+// formatting changes, so a reformatted example keeps its baseline entry.
+function fingerprint(code) {
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true)
+  scanner.setText(code)
+  const skip = new Set([
+    ts.SyntaxKind.CommaToken,
+    ts.SyntaxKind.SemicolonToken,
+    ts.SyntaxKind.OpenParenToken,
+    ts.SyntaxKind.CloseParenToken,
+  ])
+  const tokens = []
+  for (
+    let kind = scanner.scan();
+    kind !== ts.SyntaxKind.EndOfFileToken;
+    kind = scanner.scan()
+  )
+    if (!skip.has(kind))
+      tokens.push(
+        kind === ts.SyntaxKind.StringLiteral
+          ? JSON.stringify(scanner.getTokenValue())
+          : // Formatting also reflows the HTML in a component template.
+            scanner.getTokenText().replace(/\s+/g, ``),
+      )
+  return tokens.join(` `)
+}
 const hashOf = (code) =>
-  createHash(`sha256`).update(code.trim()).digest(`hex`).slice(0, 16)
+  createHash(`sha256`).update(code).digest(`hex`).slice(0, 16)
 
 function walk(dir, keep) {
   if (!existsSync(dir)) return []
@@ -91,6 +117,8 @@ for (const file of markdown) {
     })
   }
 }
+
+for (const snippet of snippets) snippet.hash = hashOf(fingerprint(snippet.code))
 
 if (process.env.SNIPPET_ONLY) {
   const keep = snippets.filter(
@@ -292,10 +320,10 @@ snippets.forEach((snippet, i) => {
 })
 
 const known = (snippet) =>
-  baseline[snippet.file]?.includes(hashOf(snippet.code)) ?? false
+  baseline[snippet.file]?.includes(snippet.hash) ?? false
 const newFailures = failures.filter(({ snippet }) => !known(snippet))
 const failing = new Set(
-  failures.map(({ snippet }) => `${snippet.file}#${hashOf(snippet.code)}`),
+  failures.map(({ snippet }) => `${snippet.file}#${snippet.hash}`),
 )
 const stale = Object.entries(baseline).flatMap(([file, hashes]) =>
   hashes
@@ -306,7 +334,7 @@ const stale = Object.entries(baseline).flatMap(([file, hashes]) =>
 if (updateBaseline && !process.env.SNIPPET_ONLY) {
   const next = {}
   for (const { snippet } of failures)
-    (next[snippet.file] ??= []).push(hashOf(snippet.code))
+    (next[snippet.file] ??= []).push(snippet.hash)
   for (const hashes of Object.values(next)) hashes.sort()
   const sorted = Object.fromEntries(
     Object.entries(next).sort(([a], [b]) => a.localeCompare(b)),
