@@ -1,4 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
 /**
  * # When may a live-query Collection start provider work?
  *
@@ -46,6 +45,7 @@ import { describe, expect, it, vi } from 'vitest'
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
+import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
   DbClient,

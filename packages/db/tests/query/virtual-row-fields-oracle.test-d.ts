@@ -1,11 +1,3 @@
-import { describe, expectTypeOf, test } from 'vitest'
-import {
-  createLiveQueryCollection,
-  eq,
-  leftJoin,
-  materialize,
-  toArray,
-} from '../../src/query/index.js'
 /**
  * # Which types represent virtual-field-bearing rows?
  *
@@ -41,6 +33,14 @@ import {
  * nested-helper cells and `GetRawResult` enrichment breaks eleven
  * projected-value cells.
  */
+import { describe, expectTypeOf, test } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  leftJoin,
+  materialize,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'

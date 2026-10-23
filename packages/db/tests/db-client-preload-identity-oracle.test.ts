@@ -1,5 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
-import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 /**
  * # A DbClient preload cannot substitute another source Collection
  *
@@ -57,6 +55,8 @@ import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
  * the observer's own row after preload. It does not model concurrent first
  * claims or arbitrary hydration orders.
  */
+import { describe, expect, it, vi } from 'vitest'
+import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 import {
   DbClient,
   Query,

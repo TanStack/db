@@ -7,7 +7,7 @@ title: OrderByClause
 type OrderByClause = object;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L78)
+Defined in: [packages/db/src/query/ir.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L73)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:78](https://github.com/TanStack/db/blob
 compareOptions: CompareOptions;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L80)
+Defined in: [packages/db/src/query/ir.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L75)
 
 ***
 
@@ -27,4 +27,4 @@ Defined in: [packages/db/src/query/ir.ts:80](https://github.com/TanStack/db/blob
 expression: BasicExpression;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L79)
+Defined in: [packages/db/src/query/ir.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L74)

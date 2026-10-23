@@ -4,6 +4,7 @@
 '@tanstack/svelte-db': patch
 '@tanstack/vue-db': patch
 '@tanstack/solid-db': patch
+'@tanstack/angular-db': patch
 ---
 
 Breaking: joins, grouping, includes, and pooling are now opt-in. An app bundles an operator's code only when it imports the value for that operator. A typical app is about 10 kB smaller after gzip. This app has a query collection, a filtered live query, and React `useLiveQuery`.
@@ -11,4 +12,5 @@ Breaking: joins, grouping, includes, and pooling are now opt-in. An app bundles 
 - Joins take a join operator. Change `.join(source, on)` to `.join(leftJoin(source, on))`, and `.innerJoin(source, on)` to `.join(innerJoin(source, on))`. `rightJoin`, `fullJoin`, and `joinOf(type, source, on)` work the same way. The old call shape throws `JoinOperatorRequiredError`.
 - An include needs `include()`, `toArray()`, or `materialize()`. Change `issues: q.from(...)` in `select()` to `issues: include(q.from(...))`. A subquery in `select()` without one of these throws `IncludeOperatorRequiredError`.
 - Aggregates such as `count()` need no change. A `groupBy` with no aggregate takes `groupKeys()`: `.groupBy(groupKeys(({ todo }) => todo.status))`. Without it, the query throws `GroupingOperatorRequiredError`.
-- Hooks do not pool live queries by default. To share one partition among many equality-filtered queries, pass `pool: pooledLiveQueries` in the hook's query config: `useLiveQuery({ query, pool: pooledLiveQueries })`. Results do not change.
+- Hooks do not pool live queries by default. To share one partition among many equality-filtered queries, pass `pool: pooledLiveQueries` in the hook's query config: `useLiveQuery({ query, pool: pooledLiveQueries })`. Results do not change. Angular's `{ params, query }` form takes `pool` the same way.
+- Code that builds query IR by hand must supply the operator code. `IR.Aggregate` takes the grouping compiler as its third argument. `IR.IncludesSubquery` takes the include runtime as its fifth argument. `IR.JoinClause` has a required `runtime` field. Queries that the query builder builds need no change.

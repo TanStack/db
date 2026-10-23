@@ -100,6 +100,8 @@ const { data, status } = useLiveQuery({
 // When disabled: status='disabled', data=undefined
 ```
 
+Many queries of one shape, such as one per list row, can share one partition. Pass `pool: pooledLiveQueries` (from `@tanstack/db`) in the config form: `useLiveQuery({ query, pool: pooledLiveQueries })`. Pooling applies to queries that filter one eager source with `eq(field, literal)`. It is off by default, and Suspense and `DbClient` queries never pool.
+
 ### useLiveSuspenseQuery
 
 ```tsx
@@ -171,7 +173,7 @@ const mutate = usePacedMutations({
 
 ## Includes (Hierarchical Data)
 
-When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `useLiveQuery` in a subcomponent:
+When a query uses `include()` for a subquery in `select`, each child field is a live `Collection`. Subscribe to it with `useLiveQuery` in a subcomponent:
 
 ```tsx
 function ProjectList() {
@@ -180,10 +182,10 @@ function ProjectList() {
       q.from({ p: projectsCollection }).select(({ p }) => ({
         id: p.id,
         name: p.name,
-        issues: q
+        issues: include(q
           .from({ i: issuesCollection })
           .where(({ i }) => eq(i.projectId, p.id))
-          .select(({ i }) => ({ id: i.id, title: i.title })),
+          .select(({ i }) => ({ id: i.id, title: i.title }))),
       })),
   })
 

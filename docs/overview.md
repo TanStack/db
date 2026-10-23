@@ -323,7 +323,7 @@ You can also query across collections with joins:
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
-import { eq } from '@tanstack/db'
+import { eq, innerJoin } from '@tanstack/db'
 
 const Todos = () => {
   const { data: todos } = useLiveQuery({

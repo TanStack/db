@@ -1,11 +1,3 @@
-import { describe, expect, test } from 'vitest'
-import {
-  createLiveQueryCollection,
-  eq,
-  leftJoin,
-  materialize,
-  toArray,
-} from '../../src/query/index.js'
 /**
  * # Which published values carry virtual row fields?
  *
@@ -40,6 +32,14 @@ import {
  * observations. `checkWithCleanup` retains the primary mismatch as the cause
  * when Collection cleanup also fails and attempts every cleanup.
  */
+import { describe, expect, test } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  leftJoin,
+  materialize,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { mockSyncCollectionOptions } from '../utils.js'

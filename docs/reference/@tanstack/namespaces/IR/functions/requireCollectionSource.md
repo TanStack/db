@@ -9,7 +9,7 @@ title: requireCollectionSource
 function requireCollectionSource(source): never;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:152](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L152)
+Defined in: [packages/db/src/query/ir.ts:147](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L147)
 
 A descriptor must bind to a DbClient before a Collection is required.
 
@@ -29,7 +29,7 @@ A descriptor must bind to a DbClient before a Collection is required.
 function requireCollectionSource(source): CollectionImpl;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L153)
+Defined in: [packages/db/src/query/ir.ts:148](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L148)
 
 A descriptor must bind to a DbClient before a Collection is required.
 

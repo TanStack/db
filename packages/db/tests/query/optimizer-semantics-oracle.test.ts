@@ -1,11 +1,3 @@
-import { describe, expect, test } from 'vitest'
-import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
-import {
-  createLiveQueryCollection,
-  innerJoin,
-  leftJoin,
-  rightJoin,
-} from '../../src/query/index.js'
 /**
  * An outer predicate on an aggregate subquery's result must run after the
  * aggregate. Moving it to source rows can change or remove the result.
@@ -29,6 +21,14 @@ import {
  * supplies a second formulation for matching and nonmatching controls.
  * The nested matching cases also reject an all-empty QueryRef implementation.
  */
+import { describe, expect, test } from 'vitest'
+import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
+import {
+  createLiveQueryCollection,
+  innerJoin,
+  leftJoin,
+  rightJoin,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {

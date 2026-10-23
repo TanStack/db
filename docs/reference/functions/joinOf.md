@@ -10,7 +10,7 @@ function joinOf<TJoinType, TContext, TSource>(
 on): JoinOperator<TContext, TSource, TJoinType>;
 ```
 
-Defined in: [packages/db/src/query/builder/join-operators.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L58)
+Defined in: [packages/db/src/query/builder/join-operators.ts:63](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/join-operators.ts#L63)
 
 A join whose type is chosen at run time.
 

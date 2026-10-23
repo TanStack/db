@@ -223,7 +223,7 @@ Create a live query using configuration object
 
 #### config
 
-`Accessor`\<`LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>\>
+`Accessor`\<`LiveQueryHookConfig`\<`TContext`\>\>
 
 Configuration object with query and options
 

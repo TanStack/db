@@ -1,4 +1,3 @@
-import { describe, expectTypeOf, test } from 'vitest'
 /**
  * Oracle owner: the query-builder compile-time suites.
  *
@@ -13,6 +12,7 @@ import { describe, expectTypeOf, test } from 'vitest'
  * paired runtime test owns the unmatched-row value witness. Existing generic,
  * join, and nullable-leaf suites remain the broader compatibility owners.
  */
+import { describe, expectTypeOf, test } from 'vitest'
 import {
   Query,
   createLiveQueryCollection,

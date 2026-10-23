@@ -17,7 +17,7 @@ function followRef(
 };
 ```
 
-Defined in: [packages/db/src/query/ir.ts:495](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L495)
+Defined in: [packages/db/src/query/ir.ts:490](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L490)
 
 Follows the given reference in a query
 until its finds the root field the reference points to.

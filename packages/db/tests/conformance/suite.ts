@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest'
 /**
  * Shared live-query conformance suite.
  *
@@ -37,6 +36,7 @@ import { describe, expect, it } from 'vitest'
  * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
  */
+import { describe, expect, it } from 'vitest'
 import {
   include,
   leftJoin,

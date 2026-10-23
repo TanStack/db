@@ -4,7 +4,7 @@ title: compileExpression
 ---
 
 ```ts
-function compileExpression(expr, isSingleRow): CompiledExpression | CompiledSingleRowExpression;
+function compileExpression(expr, isSingleRow): CompiledSingleRowExpression | CompiledExpression;
 ```
 
 Defined in: [packages/db/src/query/compiler/evaluators.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L103)
@@ -24,4 +24,4 @@ This eliminates branching during evaluation by pre-compiling the expression stru
 
 ## Returns
 
-`CompiledExpression` \| `CompiledSingleRowExpression`
+`CompiledSingleRowExpression` \| `CompiledExpression`

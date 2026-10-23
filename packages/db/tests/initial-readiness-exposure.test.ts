@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest'
-import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 /**
  * Initial-query readiness exposure witnesses for core readers.
  *
@@ -14,6 +12,8 @@ import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
  * live-query path that frameworks use for `eq` filters, and
  * `toArrayWhenReady`.
  */
+import { describe, expect, it } from 'vitest'
+import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { resolveLiveQueryValue } from '../src/live-query-options.js'

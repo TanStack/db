@@ -1,11 +1,3 @@
-import {
-  DbClient,
-  collectionOptions,
-  createCollection,
-  eq,
-  gt,
-  leftJoin,
-} from '@tanstack/db'
 /**
  * Source ID reuse contract for React's derived live-query identity.
  *
@@ -36,6 +28,14 @@ import {
  * This does not assert a process-wide Collection registry, legacy dependency
  * arrays, or explicit-key semantics; explicit queryKey callers own their key.
  */
+import {
+  DbClient,
+  collectionOptions,
+  createCollection,
+  eq,
+  gt,
+  leftJoin,
+} from '@tanstack/db'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Component, Suspense } from 'react'

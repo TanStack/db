@@ -7,7 +7,7 @@ title: QueryBuilder
 type QueryBuilder<TContext> = Omit<BaseQueryBuilder<TContext>, "from" | "unionAll" | "_getQuery">;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:1755](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1755)
+Defined in: [packages/db/src/query/builder/index.ts:1778](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1778)
 
 ## Type Parameters
 

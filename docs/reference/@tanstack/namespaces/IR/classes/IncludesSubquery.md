@@ -3,7 +3,7 @@ id: IncludesSubquery
 title: IncludesSubquery
 ---
 
-Defined in: [packages/db/src/query/ir.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L296)
+Defined in: [packages/db/src/query/ir.ts:291](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L291)
 
 ## Extends
 
@@ -26,7 +26,7 @@ new IncludesSubquery(
    scalarField?): IncludesSubquery;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L298)
+Defined in: [packages/db/src/query/ir.ts:293](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L293)
 
 #### Parameters
 
@@ -90,7 +90,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L97)
+Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
 
 **`Internal`**
 
@@ -110,7 +110,7 @@ BaseExpression.__returnType
 childCorrelationField: PropRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:301](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L301)
+Defined in: [packages/db/src/query/ir.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L296)
 
 ***
 
@@ -120,7 +120,7 @@ Defined in: [packages/db/src/query/ir.ts:301](https://github.com/TanStack/db/blo
 correlationField: PropRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L300)
+Defined in: [packages/db/src/query/ir.ts:295](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L295)
 
 ***
 
@@ -130,7 +130,7 @@ Defined in: [packages/db/src/query/ir.ts:300](https://github.com/TanStack/db/blo
 fieldName: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:302](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L302)
+Defined in: [packages/db/src/query/ir.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L297)
 
 ***
 
@@ -140,7 +140,7 @@ Defined in: [packages/db/src/query/ir.ts:302](https://github.com/TanStack/db/blo
 materialization: IncludesMaterialization;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L307)
+Defined in: [packages/db/src/query/ir.ts:302](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L302)
 
 ***
 
@@ -150,7 +150,7 @@ Defined in: [packages/db/src/query/ir.ts:307](https://github.com/TanStack/db/blo
 optional parentFilters: Where[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:305](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L305)
+Defined in: [packages/db/src/query/ir.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L300)
 
 ***
 
@@ -160,7 +160,7 @@ Defined in: [packages/db/src/query/ir.ts:305](https://github.com/TanStack/db/blo
 optional parentProjection: PropRef<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L306)
+Defined in: [packages/db/src/query/ir.ts:301](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L301)
 
 ***
 
@@ -170,7 +170,7 @@ Defined in: [packages/db/src/query/ir.ts:306](https://github.com/TanStack/db/blo
 query: QueryIR;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L299)
+Defined in: [packages/db/src/query/ir.ts:294](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L294)
 
 ***
 
@@ -180,7 +180,7 @@ Defined in: [packages/db/src/query/ir.ts:299](https://github.com/TanStack/db/blo
 runtime: object;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:304](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L304)
+Defined in: [packages/db/src/query/ir.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L299)
 
 #### createBucketFacades()
 
@@ -234,7 +234,7 @@ adapter resolves those references after the graph reaches quiescence.
 optional scalarField: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L308)
+Defined in: [packages/db/src/query/ir.ts:303](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L303)
 
 ***
 
@@ -244,7 +244,7 @@ Defined in: [packages/db/src/query/ir.ts:308](https://github.com/TanStack/db/blo
 type: "includesSubquery";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L297)
+Defined in: [packages/db/src/query/ir.ts:292](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L292)
 
 #### Overrides
 

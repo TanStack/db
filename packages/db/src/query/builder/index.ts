@@ -314,9 +314,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   /**
    * Join another table or subquery to the current query
    *
-   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
-   * @param onCallback - A function that receives table references and returns the join condition
-   * @param type - The type of join: 'inner', 'left', 'right', or 'full' (defaults to 'left')
+   * @param operator - A join operator: `leftJoin`, `innerJoin`, `rightJoin`,
+   *   `fullJoin`, or `joinOf(type, ...)`. Each takes an object with a single
+   *   key-value pair (the alias and a Collection or subquery) and a callback
+   *   that returns the join condition. Pass it inline so the callback is typed
+   *   from this query.
    * @returns A QueryBuilder with the joined table available
    *
    * @example
@@ -665,7 +667,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   /**
    * Group rows by one or more columns for aggregation
    *
-   * @param callback - A function that receives table references and returns the field(s) to group by
+   * @param keys - A function that receives table references and returns the
+   *   field(s) to group by. A query with no aggregate wraps it in `groupKeys()`;
+   *   aggregates such as `count()` bring the grouping code themselves.
    * @returns A QueryBuilder with grouping applied (enables aggregate functions in SELECT and HAVING)
    *
    * @example
@@ -688,6 +692,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *     category: sales.category,
    *     totalSales: sum(sales.amount)
    *   }))
+   *
+   * // Group without an aggregate
+   * query
+   *   .from({ orders: ordersCollection })
+   *   .groupBy(groupKeys(({orders}) => orders.status))
+   *   .select(({orders}) => ({ status: orders.status }))
    * ```
    */
   groupBy(

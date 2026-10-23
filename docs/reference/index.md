@@ -260,6 +260,7 @@ title: "@tanstack/db"
 - [KeyedNamespacedRow](type-aliases/KeyedNamespacedRow.md)
 - [KeyedStream](type-aliases/KeyedStream.md)
 - [LiveQueryCollectionUtils](type-aliases/LiveQueryCollectionUtils.md)
+- [LiveQueryHookConfig](type-aliases/LiveQueryHookConfig.md)
 - [LiveQueryKey](type-aliases/LiveQueryKey.md)
 - [LiveQueryObserverListener](type-aliases/LiveQueryObserverListener.md)
 - [LiveQueryOptions](type-aliases/LiveQueryOptions.md)

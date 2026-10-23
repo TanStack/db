@@ -1,3 +1,8 @@
+/**
+ * Joins Test Suite
+ *
+ * Tests multi-collection joins with various syncMode combinations
+ */
 import { randomUUID } from 'node:crypto'
 import {
   createLiveQueryCollection,
@@ -6,11 +11,6 @@ import {
   isNull,
   leftJoin,
 } from '@tanstack/db'
-/**
- * Joins Test Suite
- *
- * Tests multi-collection joins with various syncMode combinations
- */
 
 import { describe, expect, it, vi } from 'vitest'
 import { waitFor, waitForQueryData } from '../utils/helpers'

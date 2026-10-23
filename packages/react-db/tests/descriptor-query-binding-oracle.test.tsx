@@ -1,17 +1,3 @@
-import {
-  DbClient,
-  Query,
-  collectionOptions,
-  createCollection,
-  eq,
-  getStableQueryBuilderHash,
-  innerJoin,
-  isUndefined,
-  joinOf,
-  leftJoin,
-  prepareLiveQueryValue,
-  toArray,
-} from '@tanstack/db'
 /**
  * A Query assembled with a Collection descriptor is a reusable query plan.
  * Its source Collection belongs to the DbClient that later consumes it, so
@@ -96,6 +82,20 @@ import {
  * start the source even though the earlier render never committed. These
  * histories do not cover arbitrary concurrent render schedules.
  */
+import {
+  DbClient,
+  Query,
+  collectionOptions,
+  createCollection,
+  eq,
+  getStableQueryBuilderHash,
+  innerJoin,
+  isUndefined,
+  joinOf,
+  leftJoin,
+  prepareLiveQueryValue,
+  toArray,
+} from '@tanstack/db'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Suspense } from 'react'

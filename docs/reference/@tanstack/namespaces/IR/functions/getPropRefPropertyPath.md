@@ -7,7 +7,7 @@ title: getPropRefPropertyPath
 function getPropRefPropertyPath(ref): string[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:246](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L246)
+Defined in: [packages/db/src/query/ir.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L241)
 
 Returns the property path after removing only explicit source qualification.
 

@@ -3,7 +3,7 @@ id: QueryRef
 title: QueryRef
 ---
 
-Defined in: [packages/db/src/query/ir.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L169)
+Defined in: [packages/db/src/query/ir.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L164)
 
 ## Extends
 
@@ -20,7 +20,7 @@ new QueryRef(
    bindingId?): QueryRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L172)
+Defined in: [packages/db/src/query/ir.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L167)
 
 #### Parameters
 
@@ -54,7 +54,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L97)
+Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
 
 **`Internal`**
 
@@ -74,7 +74,7 @@ BaseExpression.__returnType
 alias: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L174)
+Defined in: [packages/db/src/query/ir.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L169)
 
 ***
 
@@ -84,7 +84,7 @@ Defined in: [packages/db/src/query/ir.ts:174](https://github.com/TanStack/db/blo
 query: QueryIR;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L173)
+Defined in: [packages/db/src/query/ir.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L168)
 
 ***
 
@@ -94,7 +94,7 @@ Defined in: [packages/db/src/query/ir.ts:173](https://github.com/TanStack/db/blo
 type: "queryRef";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L170)
+Defined in: [packages/db/src/query/ir.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L165)
 
 #### Overrides
 
@@ -112,7 +112,7 @@ BaseExpression.type
 get bindingId(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L181)
+Defined in: [packages/db/src/query/ir.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L176)
 
 ##### Returns
 
