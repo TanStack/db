@@ -214,7 +214,7 @@ async function checkHistory(
     commands,
   )
   const client = new DbClient()
-  let clientObserver: ReturnType<typeof createLiveQueryObserver> | undefined
+  let clientObserver: typeof observer | undefined
   try {
     // No write occurs between the final capture and either getter. The model's
     // revision is unchanged, so both public getter paths retain its identity.

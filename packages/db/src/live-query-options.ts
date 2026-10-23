@@ -2,6 +2,7 @@ import { BaseQueryBuilder } from './query/builder/index.js'
 import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
+import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
   createPooledLiveQuery,
   getPooledQueryIdentity,
@@ -210,13 +211,7 @@ export function getLiveQueryHash(
           ? preparedValue.query
           : undefined
     const ir = isCollection(preparedValue)
-      ? (
-          preparedValue as {
-            utils: {
-              getWindow?: () => { limit: number; offset: number } | undefined
-            }
-          }
-        ).utils.getWindow?.()
+      ? getBuilderFromConfig(preparedValue.config)?.getWindow()
       : query instanceof BaseQueryBuilder
         ? query._getQuery()
         : undefined

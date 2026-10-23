@@ -436,3 +436,32 @@ describe(`live query identity`, () => {
     )
   })
 })
+
+// A source Collection can expose arbitrary adapter utilities. A coincidentally
+// named utility is not live-query window metadata and identity must not call it.
+it.each([false, true])(
+  `derives a keyed source identity without invoking utilities (throws=%s)`,
+  async (throws) => {
+    let calls = 0
+    const source = createCollection({
+      id: `keyed-source-utils`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: () => {} },
+      utils: {
+        getWindow: () => {
+          calls++
+          if (throws) throw new Error(`adapter utility requires a caller`)
+          return { limit: 7, offset: 3 }
+        },
+      },
+    })
+    try {
+      expect(getLiveQueryHash(source, [`source-key`])).toBe(
+        getLiveQueryHash(undefined, [`source-key`]),
+      )
+      expect(calls, `identity reads no arbitrary adapter utility`).toBe(0)
+    } finally {
+      await source.cleanup()
+    }
+  },
+)
