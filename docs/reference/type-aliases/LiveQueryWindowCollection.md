@@ -7,7 +7,7 @@ title: LiveQueryWindowCollection
 type LiveQueryWindowCollection = Collection<any, any, any> & object;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L139)
+Defined in: [packages/db/src/live-query-window-controller.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L132)
 
 **`Internal`**
 

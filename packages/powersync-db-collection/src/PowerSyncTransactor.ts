@@ -109,11 +109,12 @@ export class PowerSyncTransactor {
               resolve()
             } else if (
               collection.status === `error` ||
+              collection.status === `crashed` ||
               collection.status === `cleaned-up`
             ) {
               unsubscribe()
               reject(
-                collection.status === `error`
+                collection.status !== `cleaned-up`
                   ? (collection._lifecycle.getSyncError() ??
                       new Error(`Collection failed before readiness`))
                   : new LoadSubsetOperationAbortedError(),

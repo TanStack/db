@@ -126,7 +126,7 @@ export function rxdbCollectionOptions(
   type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, fail, collection } = params
 
       let initialFetchComplete = false
       async function initialFetch() {
@@ -225,19 +225,23 @@ export function rxdbCollectionOptions(
 
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
-        sub = rxCollection.$.subscribe((ev) => {
-          const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
-          switch (ev.operation) {
-            case `INSERT`:
-              queue({ type: `insert`, value: cur })
-              break
-            case `UPDATE`:
-              queue({ type: `update`, value: cur })
-              break
-            case `DELETE`:
-              queue({ type: `delete`, value: cur })
-              break
-          }
+        sub = rxCollection.$.subscribe({
+          next: (ev) => {
+            const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
+            switch (ev.operation) {
+              case `INSERT`:
+                queue({ type: `insert`, value: cur })
+                break
+              case `UPDATE`:
+                queue({ type: `update`, value: cur })
+                break
+              case `DELETE`:
+                queue({ type: `delete`, value: cur })
+                break
+            }
+          },
+          // An errored stream ends, so later writes would never arrive.
+          error: stop,
         })
 
         const subs = getFromMapOrCreate(
@@ -272,17 +276,21 @@ export function rxdbCollectionOptions(
           }
         }
 
-        if (!isCleanedUp()) {
+        if (!isCleanedUp() && !stopped) {
           markReady()
         }
       }
 
-      void start().catch((error: unknown) => {
+      // Whether this sync run stopped: a reload runs `sync` again while the
+      // Collection still shows the previous run's status.
+      let stopped = false
+      function stop(error: unknown) {
         stopOngoingFetch()
-        if (collection.status === `loading`) {
-          markError(error)
-        }
-      })
+        if (stopped) return
+        stopped = true
+        fail(error)
+      }
+      void start().catch(stop)
 
       return stopOngoingFetch
     },

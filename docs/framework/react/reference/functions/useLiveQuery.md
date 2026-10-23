@@ -6,10 +6,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): object;
+function useLiveQuery<TContext>(queryFn, deps?): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:387](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L387)
+Defined in: [useLiveQuery.ts:403](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L403)
 
 Create a live query using a query function.
 
@@ -35,88 +35,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}>;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext>;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: true;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
-```
-
-#### status
-
-```ts
-status: CollectionStatus;
-```
 
 ### Examples
 
@@ -176,12 +97,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -193,10 +114,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): object;
+function useLiveQuery<TContext>(queryFn, deps?): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:407](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L407)
+Defined in: [useLiveQuery.ts:415](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L415)
 
 Create a live query using a query function.
 
@@ -222,92 +143,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: 
-  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext> | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: boolean;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: 
-  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### status
-
-```ts
-status: UseLiveQueryStatus;
-```
 
 ### Examples
 
@@ -367,12 +205,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -384,7 +222,7 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): object;
+function useLiveQuery<TContext>(queryFn, deps?): object & UseLiveQueryFlags;
 ```
 
 Defined in: [useLiveQuery.ts:429](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L429)
@@ -416,92 +254,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: 
-  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext> | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: boolean;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: 
-  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### status
-
-```ts
-status: UseLiveQueryStatus;
-```
 
 ### Examples
 
@@ -561,12 +316,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -578,10 +333,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(queryFn, deps?): object;
+function useLiveQuery<TResult, TKey, TUtils>(queryFn, deps?): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:451](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L451)
+Defined in: [useLiveQuery.ts:443](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L443)
 
 Create a live query using a query function.
 
@@ -618,89 +373,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: 
-  | Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>
-  | undefined;
-```
-
-#### data
-
-```ts
-data: TResult[] | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: boolean;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: Map<TKey, TResult> | undefined;
-```
-
-#### status
-
-```ts
-status: UseLiveQueryStatus;
-```
 
 ### Examples
 
@@ -760,12 +435,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -777,10 +452,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn, deps?): object;
+function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn, deps?): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:477](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L477)
+Defined in: [useLiveQuery.ts:461](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L461)
 
 Create a live query using a query function.
 
@@ -823,94 +498,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: 
-  | Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>
-  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext> | TResult[] | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: boolean;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: 
-  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | Map<TKey, TResult>
-  | undefined;
-```
-
-#### status
-
-```ts
-status: UseLiveQueryStatus;
-```
 
 ### Examples
 
@@ -970,12 +560,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -987,10 +577,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): object;
+function useLiveQuery<TContext>(config): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:548](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L548)
+Defined in: [useLiveQuery.ts:524](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L524)
 
 Create a live query using configuration object
 
@@ -1010,88 +600,9 @@ Configuration object with query and options
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}>;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext>;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: true;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
-```
-
-#### status
-
-```ts
-status: CollectionStatus;
-```
 
 ### Examples
 
@@ -1117,12 +628,12 @@ const { data, isReady } = useLiveQuery({
 
 ```ts
 // Handle all states uniformly
-const { data, isLoading, isReady, isError } = useLiveQuery({
+const { data, isLoading, isReady, isLoadingError } = useLiveQuery({
   query: (q) => q.from({ items: itemCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Something went wrong</div>
+if (isLoadingError) return <div>Something went wrong</div>
 if (!isReady) return <div>Preparing...</div>
 
 return <div>{data.length} items loaded</div>
@@ -1131,10 +642,10 @@ return <div>{data.length} items loaded</div>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): object;
+function useLiveQuery<TContext>(config): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:567](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L567)
+Defined in: [useLiveQuery.ts:535](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L535)
 
 Create a live query using a query function.
 
@@ -1152,92 +663,9 @@ Create a live query using a query function.
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: 
-  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext> | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: boolean;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: 
-  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### status
-
-```ts
-status: UseLiveQueryStatus;
-```
 
 ### Examples
 
@@ -1297,12 +725,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -1314,10 +742,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config, deps?): object;
+function useLiveQuery<TContext>(config, deps?): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:586](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L586)
+Defined in: [useLiveQuery.ts:546](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L546)
 
 Create a live query using a query function.
 
@@ -1341,88 +769,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}>;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext>;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: true;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
-```
-
-#### status
-
-```ts
-status: CollectionStatus;
-```
 
 ### Examples
 
@@ -1482,12 +831,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -1499,10 +848,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config, deps): object;
+function useLiveQuery<TContext>(config, deps): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:606](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L606)
+Defined in: [useLiveQuery.ts:558](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L558)
 
 Create a live query using a query function.
 
@@ -1526,92 +875,9 @@ Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: 
-  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### data
-
-```ts
-data: InferResultType<TContext> | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: boolean;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: 
-  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
-  | undefined;
-```
-
-#### status
-
-```ts
-status: UseLiveQueryStatus;
-```
 
 ### Examples
 
@@ -1671,12 +937,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>
@@ -1688,10 +954,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:655](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L655)
+Defined in: [useLiveQuery.ts:599](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L599)
 
 Subscribe to an existing live query collection
 
@@ -1719,87 +985,9 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Collection<TResult, TKey, TUtils>;
-```
-
-#### data
-
-```ts
-data: TResult[];
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: true;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: Map<TKey, TResult>;
-```
-
-#### status
-
-```ts
-status: CollectionStatus;
-```
 
 ### Examples
 
@@ -1823,10 +1011,10 @@ const handleToggle = (id) => {
 
 ```ts
 // Handle states consistently
-const { data, isLoading, isError } = useLiveQuery(sharedCollection)
+const { data, isLoading, isLoadingError } = useLiveQuery(sharedCollection)
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error loading data</div>
+if (isLoadingError) return <div>Error loading data</div>
 
 return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 ```
@@ -1834,10 +1022,10 @@ return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & UseLiveQueryFlags;
 ```
 
-Defined in: [useLiveQuery.ts:678](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L678)
+Defined in: [useLiveQuery.ts:614](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L614)
 
 Create a live query using a query function.
 
@@ -1863,87 +1051,9 @@ Create a live query using a query function.
 
 ### Returns
 
-`object`
+`object` & `UseLiveQueryFlags`
 
 Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult> & SingleResult;
-```
-
-#### data
-
-```ts
-data: TResult | undefined;
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: boolean;
-```
-
-#### isEnabled
-
-```ts
-isEnabled: true;
-```
-
-#### isError
-
-```ts
-isError: boolean;
-```
-
-#### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-#### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-#### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
-```
-
-#### isReady
-
-```ts
-isReady: boolean;
-```
-
-#### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-#### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-#### state
-
-```ts
-state: Map<TKey, TResult>;
-```
-
-#### status
-
-```ts
-status: CollectionStatus;
-```
 
 ### Examples
 
@@ -2003,12 +1113,12 @@ const { data } = useLiveQuery({
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery({
+const { data, isLoading, isLoadingError, status } = useLiveQuery({
   query: (q) => q.from({ todos: todoCollection })
 })
 
 if (isLoading) return <div>Loading...</div>
-if (isError) return <div>Error: {status}</div>
+if (isLoadingError) return <div>Error: {status}</div>
 
 return (
   <ul>

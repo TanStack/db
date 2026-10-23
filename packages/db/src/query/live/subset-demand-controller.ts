@@ -18,12 +18,18 @@ type DemandSegment = {
   abortController: AbortController
   ready: LoadSubsetRequestResult
   state: `starting` | `pending` | `settled` | `failed`
+  // The load threw, so the subscription does not hold it, and a source
+  // reload's replay does not load it again.
+  thrown?: true
   replaces?: Array<DemandSegment>
 }
 
 type DemandState = {
   keys: Map<string, unknown>
   segments: Array<DemandSegment>
+  // Needed keys whose latest load failed; the plan's request error clears
+  // once none remains.
+  failedKeys: Set<string>
 }
 
 export type DemandUpdate = {
@@ -39,8 +45,44 @@ export type DemandUpdate = {
  */
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
+
+  /** `onLoaded`: a load left the plan with no key whose latest load failed. */
+  constructor(private readonly onLoaded?: (planId: string) => void) {}
   private readonly warnedPlans = new Set<string>()
   private valueIdentity = createValueIdentity()
+
+  /**
+   * A source reload's replay loaded every segment the subscription holds
+   * again. Returns the plans that no longer miss a key.
+   */
+  settleReplay(): Array<string> {
+    const loaded: Array<string> = []
+    for (const [planId, state] of this.states) {
+      // Every segment the subscription holds was loaded again, also one whose
+      // own retry is still pending. A load that threw holds no demand, and
+      // as the latest load of its keys it still decides them (law 10).
+      const thrown = new Set(
+        state.segments.flatMap((segment) =>
+          segment.thrown ? [...segment.keys.keys()] : [],
+        ),
+      )
+      for (const segment of state.segments)
+        for (const key of segment.keys.keys())
+          if (!thrown.has(key)) state.failedKeys.delete(key)
+      if (state.failedKeys.size === 0) loaded.push(planId)
+    }
+    return loaded
+  }
+
+  /** Whether any plan still holds demand. */
+  holdsDemand(): boolean {
+    return this.states.size > 0
+  }
+
+  /** Whether the plan still needs a key whose latest load failed. */
+  hasFailedKeys(planId: string): boolean {
+    return (this.states.get(planId)?.failedKeys.size ?? 0) > 0
+  }
 
   setDemand(
     subscription: CollectionSubscription,
@@ -76,20 +118,28 @@ export class SubsetDemandController {
         segment.state === `failed` &&
         equalKeySets(segment.keys, nextKeys),
     )
-    const state: DemandState = { keys: nextKeys, segments }
+    const state: DemandState = {
+      keys: nextKeys,
+      segments,
+      failedKeys: new Set(
+        [...(previous?.failedKeys ?? [])].filter((key) => nextKeys.has(key)),
+      ),
+    }
     this.states.set(plan.id, state)
 
-    // Release every retired segment even if subscriber code that a release
-    // runs throws, then report the first error.
-    runAllCallbacks(
-      retired.map((segment) => () => releaseSegment(subscription, segment)),
-    )
-    if (this.states.get(plan.id) !== state) {
-      return { changed: false, empty: false, ready: true }
-    }
+    // Law 9: a demand change is one step. Start its new demand before it
+    // releases the retired segments, so an open replay keeps the new demand
+    // and is not judged in between. Release every retired segment even if
+    // subscriber code that a release runs throws, then report the first
+    // error.
+    const release = () =>
+      runAllCallbacks(
+        retired.map((segment) => () => releaseSegment(subscription, segment)),
+      )
 
     if (nextKeys.size === 0) {
       this.states.delete(plan.id)
+      release()
       return { changed: true, empty: true, ready: true }
     }
 
@@ -105,35 +155,64 @@ export class SubsetDemandController {
     const replace =
       retryReplacement || (removed && (added.size > 0 || segments.length > 1))
     const requestedKeys = replace ? nextKeys : added
-    if (requestedKeys.size > 0) {
-      const segment = createSegment(plan, requestedKeys)
-      if (replace) segment.replaces = [...segments]
-      segments.push(segment)
-      const started = startSegment(subscription, segment, () =>
-        this.warnUnoptimized(plan),
-      )
-      if (this.states.get(plan.id) !== state) {
-        return { changed: false, empty: false, ready: true }
-      }
-      if (!started)
-        throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `Subset demand snapshot did not start`
-            : codedMessage(159),
-        )
-      if (replace) {
-        if (segment.ready instanceof Promise) {
-          void segment.ready.then(
-            () => this.finishReplacement(subscription, plan.id, segment),
-            () => {},
+    // A replacement alone decides the demand: the segments it supersedes are
+    // released, and aborted, once it settles.
+    let replacement: DemandSegment | undefined
+    try {
+      if (requestedKeys.size > 0) {
+        const segment = createSegment(plan, requestedKeys)
+        if (replace) {
+          segment.replaces = [...segments]
+          replacement = segment
+        }
+        segments.push(segment)
+        let started: boolean
+        try {
+          started = startSegment(
+            subscription,
+            segment,
+            () => this.warnUnoptimized(plan),
+            (succeeded) => this.recordOutcome(plan.id, segment, succeeded),
           )
-        } else {
-          this.finishReplacement(subscription, plan.id, segment)
+        } catch (error) {
+          // A load that throws failed its keys, as one that rejects does.
+          segment.state = `failed`
+          segment.thrown = true
+          this.recordOutcome(plan.id, segment, false)
+          throw error
+        }
+        if (this.states.get(plan.id) !== state) {
+          return { changed: false, empty: false, ready: true }
+        }
+        if (!started)
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Subset demand snapshot did not start`
+              : codedMessage(159),
+          )
+        if (replace) {
+          subscription.replaceSnapshots(
+            segment.where,
+            (segment.replaces ?? []).map((replaced) => replaced.where),
+          )
+          if (segment.ready instanceof Promise) {
+            void segment.ready.then(
+              () => this.finishReplacement(subscription, plan.id, segment),
+              () => {},
+            )
+          } else {
+            this.finishReplacement(subscription, plan.id, segment)
+          }
         }
       }
+    } finally {
+      release()
+    }
+    if (this.states.get(plan.id) !== state) {
+      return { changed: false, empty: false, ready: true }
     }
 
-    const pending = state.segments
+    const pending = (replacement ? [replacement] : state.segments)
       .filter(
         (segment) =>
           segment.state === `pending` && intersects(segment.keys, nextKeys),
@@ -145,6 +224,23 @@ export class SubsetDemandController {
       empty: false,
       ready: pending.length > 0 ? Promise.all(pending) : true,
     }
+  }
+
+  // The outcome of a segment the plan still holds decides its keys: a
+  // success loaded them, and a failure leaves the needed ones missing. A
+  // released segment's late outcome decides nothing.
+  private recordOutcome(
+    planId: string,
+    segment: DemandSegment,
+    succeeded: boolean,
+  ): void {
+    const state = this.states.get(planId)
+    if (!state?.segments.includes(segment)) return
+    for (const key of segment.keys.keys()) {
+      if (succeeded) state.failedKeys.delete(key)
+      else if (state.keys.has(key)) state.failedKeys.add(key)
+    }
+    if (succeeded && state.failedKeys.size === 0) this.onLoaded?.(planId)
   }
 
   clear(): void {
@@ -258,6 +354,7 @@ function startSegment(
   subscription: CollectionSubscription,
   segment: DemandSegment,
   onUnoptimized: () => void,
+  onOutcome: (succeeded: boolean) => void,
 ): boolean {
   let observed = false
   const requested = subscription.requestSnapshot({
@@ -267,7 +364,8 @@ function startSegment(
     onUnoptimized,
     onLoadSubsetResult: (result) => {
       observed = true
-      segment.ready = result
+      segment.ready =
+        result instanceof Promise ? followReplay(subscription, result) : result
       segment.state = result instanceof Promise ? `pending` : `settled`
     },
   })
@@ -275,13 +373,46 @@ function startSegment(
     void segment.ready.then(
       () => {
         segment.state = `settled`
+        onOutcome(true)
       },
       () => {
         segment.state = `failed`
+        onOutcome(false)
       },
     )
   }
   return requested && observed
+}
+
+// A truncate's or a reload's replay replaces a load that it aborts: the replay
+// decides it, and the load's own late outcome decides nothing. A load that
+// fails while the replay is in flight fails with its own error once the
+// replay settles.
+function followReplay(
+  subscription: CollectionSubscription,
+  ready: Promise<unknown>,
+): Promise<void> {
+  const replacements = subscription.replacementCount
+  const replaced = () => {
+    const replay = subscription.pendingTruncateReplacement
+    return replay && followReplay(subscription, replay)
+  }
+  const decide = (error: unknown): Promise<void> | undefined => {
+    if (replacements !== subscription.replacementCount) return replaced()
+    const replay = subscription.pendingTruncateReplacement
+    if (!replay) throw error
+    // The load joined the replay: its own failure stands once the replay
+    // settles, unless a newer replay replaced it meanwhile.
+    return replay.then(
+      () => decide(error),
+      () => decide(error),
+    )
+  }
+  return ready.then(
+    () =>
+      replacements === subscription.replacementCount ? undefined : replaced(),
+    decide,
+  )
 }
 
 function releaseSegment(

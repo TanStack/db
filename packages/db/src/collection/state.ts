@@ -58,6 +58,12 @@ interface PendingSyncedTransaction<
   layoutChanged: boolean
   operations: Array<PendingSyncOperation<T, TKey>>
   truncate?: boolean
+  // Why the transaction replaces every row. A reload's first transaction
+  // replaces them, and the adapter's own truncate() can too, in the same
+  // transaction. A reload that ends early drops only its own replacement; a
+  // canceled one moves to the run's next transaction.
+  reloadReplacement?: boolean
+  adapterTruncate?: boolean
   truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   /** The last explicit write per key, after `position` operations. */
@@ -115,6 +121,15 @@ export class CollectionStateManager<
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
+  /** A reload armed its truncate for the new run's next transaction. */
+  public reloadTruncatePending = false
+  // The truncate event being emitted is a reload's own first-commit truncate.
+  private emittingReloadTruncate = false
+
+  /** @internal The truncate event being emitted is a reload's own. */
+  public isEmittingReloadTruncate(): boolean {
+    return this.emittingReloadTruncate
+  }
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
@@ -907,6 +922,16 @@ export class CollectionStateManager<
     this.commitPendingTransactions()
   }
 
+  /** A retired sync run's open transaction can never commit. */
+  discardOpenSyncTransactions(): void {
+    const committed = this.pendingSyncedTransactions.filter(
+      (transaction) => transaction.committed,
+    )
+    if (committed.length === this.pendingSyncedTransactions.length) return
+    this.pendingSyncedTransactions = committed
+    this.refreshPendingSyncedProjection()
+  }
+
   /** Whether the newest sync transaction is still open for writes. */
   hasOpenSyncTransaction(): boolean {
     return this.pendingSyncedTransactions.at(-1)?.committed === false
@@ -919,8 +944,16 @@ export class CollectionStateManager<
     )
   }
 
+  /** Whether the open sync transaction replaces every synced row. */
+  openTransactionReplaces(): boolean {
+    const open = this.pendingSyncedTransactions.at(-1)
+    return open?.committed === false && open.truncate === true
+  }
+
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
+    // A reload's next commit replaces every synced row, so it builds on none.
+    if (this.reloadTruncatePending) return
     const { states, truncated } = this.pendingSyncedProjection
     if (!truncated) {
       for (const entry of this.syncedData.entries()) {
@@ -1263,10 +1296,15 @@ export class CollectionStateManager<
           }
 
           // Emit truncate event so subscriptions can reset their cursor tracking state
-          this._events.emit(`truncate`, {
-            type: `truncate`,
-            collection: this.collection,
-          })
+          this.emittingReloadTruncate = transaction.reloadReplacement === true
+          try {
+            this._events.emit(`truncate`, {
+              type: `truncate`,
+              collection: this.collection,
+            })
+          } finally {
+            this.emittingReloadTruncate = false
+          }
         }
 
         // Attribution belongs to the whole atomic batch. A repeated write must
@@ -1472,8 +1510,13 @@ export class CollectionStateManager<
       // A truncate that makes the Collection ready publishes its batch after
       // the status reads ready and before status listeners and ready
       // callbacks run, so their writes follow the batch they describe.
+      // During a reload, that is the reload's completion.
       if (truncateMarksReady && this.lifecycle.status !== `ready`)
-        capture(() => this.lifecycle.markReady(emit))
+        capture(() =>
+          this.lifecycle.reloading
+            ? this.lifecycle.completeReload(emit)
+            : this.lifecycle.markReady(emit),
+        )
       if (!emitted) emit()
 
       if (this.syncRunGeneration === syncRunGeneration) {

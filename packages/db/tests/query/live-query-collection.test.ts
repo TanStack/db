@@ -1000,10 +1000,10 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers.size).toBe(2)
 
     // Tear down the source collection and the live query, e.g. when switching
-    // to a different data set at runtime. Cleaning up a source collection puts
-    // the dependent live query into an error state.
+    // to a different data set at runtime. Nothing subscribes to the live
+    // query, so the source's cleanup is admitted and ends the query.
     await usersCollection.cleanup()
-    expect(activeUsers.status).toBe(`error`)
+    expect(activeUsers.status).toBe(`crashed`)
 
     await activeUsers.cleanup()
     expect(activeUsers.status).toBe(`cleaned-up`)
@@ -2040,7 +2040,10 @@ describe(`createLiveQueryCollection`, () => {
         }
 
         expect(commitError).toBeUndefined()
-        expect(live.status).toBe(`error`)
+        // After the first ready, the failed request is a request error on the
+        // live query's node; the query stays ready.
+        expect(live.status).toBe(`ready`)
+        expect(live.health.error).toEqual(expect.anything())
         expect(live.utils.lastSubsetError).toBe(failure)
       } finally {
         await Promise.all([live.cleanup(), users.cleanup(), issues.cleanup()])

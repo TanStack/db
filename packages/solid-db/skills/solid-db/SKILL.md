@@ -61,7 +61,8 @@ const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query()        → Array<T> (data)  — or T | undefined when using findOne()
 // query.data     → DEPRECATED — use query() instead. Migrate any existing code.
 // query.status   → CollectionStatus
-// query.isLoading, query.isReady, query.isError
+// query.isLoading, query.isReady, query.isError (query must restart)
+// query.health   → health tree; query.health?.hasErrors means data may be stale
 // query.state    → ReactiveMap<TKey, T>
 // query.collection → Collection
 

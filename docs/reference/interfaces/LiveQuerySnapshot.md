@@ -3,7 +3,7 @@ id: LiveQuerySnapshot
 title: LiveQuerySnapshot
 ---
 
-Defined in: [packages/db/src/live-query-observer.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L67)
+Defined in: [packages/db/src/live-query-observer.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L23)
 
 The canonical, adapter-agnostic view of a live query at a point in time.
 
@@ -32,7 +32,7 @@ collection:
   | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L76)
+Defined in: [packages/db/src/live-query-observer.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L32)
 
 The underlying collection, or `undefined` when disabled.
 
@@ -44,9 +44,23 @@ The underlying collection, or `undefined` when disabled.
 data: T | readonly T[] | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L74)
+Defined in: [packages/db/src/live-query-observer.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L30)
 
 Ordered results (single row for `findOne`), or `undefined` when disabled.
+
+***
+
+### health
+
+```ts
+health: HealthNode | undefined;
+```
+
+Defined in: [packages/db/src/live-query-observer.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L64)
+
+The health tree for the query and every Collection it depends on, or
+`undefined` for a disabled query. After the first ready, a source
+problem shows here and the data stays.
 
 ***
 
@@ -56,7 +70,19 @@ Ordered results (single row for `findOne`), or `undefined` when disabled.
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L97)
+Defined in: [packages/db/src/live-query-observer.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L52)
+
+***
+
+### isCrashed
+
+```ts
+isCrashed: boolean;
+```
+
+Defined in: [packages/db/src/live-query-observer.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L51)
+
+Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover.
 
 ***
 
@@ -66,17 +92,7 @@ Defined in: [packages/db/src/live-query-observer.ts:97](https://github.com/TanSt
 isEnabled: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L98)
-
-***
-
-### isError
-
-```ts
-isError: boolean;
-```
-
-Defined in: [packages/db/src/live-query-observer.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L96)
+Defined in: [packages/db/src/live-query-observer.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L53)
 
 ***
 
@@ -86,7 +102,7 @@ Defined in: [packages/db/src/live-query-observer.ts:96](https://github.com/TanSt
 isIdle: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L95)
+Defined in: [packages/db/src/live-query-observer.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L47)
 
 ***
 
@@ -96,17 +112,19 @@ Defined in: [packages/db/src/live-query-observer.ts:95](https://github.com/TanSt
 isLoading: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L89)
+Defined in: [packages/db/src/live-query-observer.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L45)
 
 ***
 
-### isPersistedReady
+### isLoadingError
 
 ```ts
-isPersistedReady: boolean;
+isLoadingError: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L93)
+Defined in: [packages/db/src/live-query-observer.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L49)
+
+The first load failed: there is nothing to show.
 
 ***
 
@@ -116,7 +134,20 @@ Defined in: [packages/db/src/live-query-observer.ts:93](https://github.com/TanSt
 isReady: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L90)
+Defined in: [packages/db/src/live-query-observer.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L46)
+
+***
+
+### isSyncError
+
+```ts
+isSyncError: boolean;
+```
+
+Defined in: [packages/db/src/live-query-observer.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L58)
+
+The data is shown, and something keeps it from staying current: a sync
+problem or a failed request somewhere in `health`.
 
 ***
 
@@ -126,7 +157,7 @@ Defined in: [packages/db/src/live-query-observer.ts:90](https://github.com/TanSt
 layoutRevision: number;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L87)
+Defined in: [packages/db/src/live-query-observer.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L43)
 
 Monotonic counter bumped whenever the visible layout (the ordered key
 sequence) changes — membership, ordering, or an order-only move. Lets
@@ -139,35 +170,13 @@ always accompanies a new snapshot, but not vice versa.
 
 ***
 
-### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-Defined in: [packages/db/src/live-query-observer.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L94)
-
-***
-
-### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-Defined in: [packages/db/src/live-query-observer.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L92)
-
-Persisted restore is separate from upstream/Collection readiness.
-
-***
-
 ### state
 
 ```ts
 state: ReadonlyMap<TKey, T> | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L72)
+Defined in: [packages/db/src/live-query-observer.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L28)
 
 Keyed results, or `undefined` for a disabled query.
 
@@ -179,4 +188,4 @@ Keyed results, or `undefined` for a disabled query.
 status: CollectionStatus | "disabled";
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L88)
+Defined in: [packages/db/src/live-query-observer.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L44)

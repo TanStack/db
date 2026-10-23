@@ -278,7 +278,7 @@ db.close()
 ```
 
 Connections created by `createIndexedDB` close automatically on native
-`versionchange`. Unexpected native connection closure also notifies their managed Collections. In both cases, active Collections enter `error`.
+`versionchange`. Unexpected native connection closure also notifies their managed Collections. In both cases, active Collections crash: they enter `error` even after they were ready, and so does every live query and Effect over them.
 The descriptor's `db.close()` method has the same local effect. Their last
 published rows remain available. Recreate affected Collections with a new
 instance using the current database version. Calling the raw `db.db.close()`

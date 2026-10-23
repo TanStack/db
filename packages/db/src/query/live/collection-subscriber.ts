@@ -1,4 +1,5 @@
 import { normalizeExpressionPaths } from '../compiler/expressions.js'
+import { LoadOrder } from '../../collection/lifecycle.js'
 import { OrderedSourceLoader } from './ordered-source-loader.js'
 import {
   computeSubscriptionOrderByHints,
@@ -30,6 +31,7 @@ export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
+  private readonly loadOrder = new LoadOrder()
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
@@ -42,7 +44,10 @@ export class CollectionSubscriber<
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoader: OrderedSourceLoader | undefined
-  private readonly demand = new SubsetDemandController()
+  // A request error clears as soon as a later load of its failed key succeeds.
+  private readonly demand = new SubsetDemandController((planId) =>
+    this.collectionConfigBuilder.clearFailedRequest(planId),
+  )
 
   constructor(
     private sourceId: string,
@@ -50,6 +55,11 @@ export class CollectionSubscriber<
     private collection: Collection,
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>,
   ) {}
+
+  /** The live query this subscription reads for, as `subscribers` lists it. */
+  private owner(): SubscribeChangesOptions[`owner`] {
+    return this.collectionConfigBuilder.dependent()
+  }
 
   subscribe(): CollectionSubscription {
     const whereClause =
@@ -75,6 +85,10 @@ export class CollectionSubscriber<
     // live query collection, avoiding the multi-hop deferred promise chain that
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
     const trackLoadResult = (result: LoadSubsetRequestResult) => {
+      // A later successful load clears this source's request error.
+      this.loadOrder.track(result, () =>
+        this.collectionConfigBuilder.settleRootLoad(this.sourceId),
+      )
       if (result instanceof Promise) {
         // Defer the tracked rejection by one microtask so the subscription's
         // error event can put an initial live query in error before loading
@@ -114,14 +128,17 @@ export class CollectionSubscriber<
       }
     }
     const onLoadSubsetError = (event: SubscriptionLoadSubsetErrorEvent) => {
-      this.collectionConfigBuilder.recordSubsetError(
+      const error = this.collectionConfigBuilder.recordSubsetError(
         event.error,
         // Lazy demand owns its fatal-error path. For eager sources, one
         // successful page does not finish initial ordered refinement.
         !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
-          this.collectionConfigBuilder.liveQueryCollection?.status ===
-            `loading`,
+          this.collectionConfigBuilder.liveQueryCollection?._lifecycle
+            .inFirstLoad === true,
       )
+      if (!this.collectionConfigBuilder.isLazySource(this.sourceId)) {
+        this.collectionConfigBuilder.failRootLoad(this.sourceId, error)
+      }
     }
 
     // Create subscription with onStatusChange - listener is registered before any async work
@@ -200,12 +217,12 @@ export class CollectionSubscriber<
       // Convert that synchronous form to the same query-local fatal demand
       // state as a rejected load, without letting it escape the source commit.
       // Preserve unrelated graph/programming errors as throws.
+      // During the query's start, the throw fails the start, which releases
+      // the sources it subscribed to.
       if (!Object.is(subscription.lastError, error)) throw error
-      const isInitialSync =
-        this.collectionConfigBuilder.liveQueryCollection?.status === `loading`
       const generation = this.collectionConfigBuilder.beginDemand(plan.id)
       this.collectionConfigBuilder.failDemand(plan.id, generation, error)
-      if (isInitialSync) throw error
+      if (this.collectionConfigBuilder.isStarting()) throw error
       return
     }
     if (!update.changed) return
@@ -214,31 +231,23 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.retireDemand(plan.id)
       return
     }
-
     const generation = this.collectionConfigBuilder.beginDemand(
       plan.id,
       update.ready instanceof Promise,
     )
-    if (update.ready instanceof Promise) {
-      const settleWith = (ready: Promise<unknown>) =>
-        void ready.then(
-          () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
-          (error) => {
-            // A truncate replay aborts the acquisition it supersedes. Its
-            // replacement decides the demand; a real failure rejects it too.
-            const replacement = subscription.pendingTruncateReplacement
-            if (replacement) settleWith(replacement)
-            else
-              this.collectionConfigBuilder.failDemand(
-                plan.id,
-                generation,
-                error,
-              )
-          },
-        )
-      settleWith(update.ready)
-    } else {
+    // The request error also clears when the query stops needing the
+    // failed key.
+    if (!this.demand.hasFailedKeys(plan.id))
+      this.collectionConfigBuilder.clearFailedRequest(plan.id)
+    const settle = () =>
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
+    if (update.ready instanceof Promise) {
+      // Each segment follows a truncate's or a reload's replay itself.
+      void update.ready.then(settle, (error) =>
+        this.collectionConfigBuilder.failDemand(plan.id, generation, error),
+      )
+    } else {
+      settle()
     }
   }
 
@@ -290,6 +299,7 @@ export class CollectionSubscriber<
       onStatusChange,
       onLoadSubsetError,
       deferAcquisition: this.defersAcquisition(),
+      owner: this.owner(),
       truncateReplayPublication: this.truncateReplayPublicationControl(),
       orderBy: hints.orderBy,
       limit: hints.limit,
@@ -334,6 +344,7 @@ export class CollectionSubscriber<
       onStatusChange,
       onLoadSubsetError,
       deferAcquisition: this.defersAcquisition(),
+      owner: this.owner(),
       truncateReplayPublication: this.truncateReplayPublicationControl(() => {
         // Recovery favors a simple, authoritative rebuild over resuming a
         // fragile cursor. The retained full-source demand is replayed on later
@@ -426,10 +437,25 @@ export class CollectionSubscriber<
           return
         }
         this.orderedLoader?.settleFullSourceReplay()
+        // The replay loaded every demand this subscription holds again.
+        this.collectionConfigBuilder.settleReplayedRequests(
+          this.sourceId,
+          this.demand.settleReplay(),
+        )
         this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
           syncRunGeneration,
         )
       },
+      // The query keeps its last snapshot, which no longer updates: a
+      // request error, or a failed first load before readiness.
+      fail: (error) => {
+        if (
+          syncRunGeneration ===
+          this.collectionConfigBuilder.getSyncRunGeneration()
+        )
+          this.collectionConfigBuilder.failReplay(this.sourceId, error)
+      },
+      holdsDemand: () => this.demand.holdsDemand(),
     }
   }
 

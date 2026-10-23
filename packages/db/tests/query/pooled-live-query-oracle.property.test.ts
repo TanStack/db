@@ -47,15 +47,16 @@
  * the last checkpoint equal those of a granular observer of the live-query
  * Collection, by type, key, value, and previous value; folded in order, they
  * never insert a held key, update or delete an unheld one, or carry a stale
- * previous value, and they leave the model's rows. A peer mounted when its
- * source starts cleanup is terminal like its live query: status `error` with
- * the rows it had, pending optimistic rows included, through the restart and
- * later writes. A peer mounted after cleanup follows the restarted source.
+ * previous value, and they leave the model's rows. Cleanup refuses while a
+ * live query reads the source, so the driver cleans up with its dependents:
+ * a peer mounted then ends like its live query, `cleaned-up` with no rows,
+ * through the restart and later writes. A peer mounted after cleanup follows
+ * the restarted source.
  *
  * Calibration: a partition that ignored the previous value, kept group rows
  * in arrival order, or compared literals without normalization fails the
  * pinned histories and campaigns. A view that kept reporting the source's
- * status after cleanup fails the cleanup histories. An update delivered as a
+ * status, or kept its rows, after cleanup fails the cleanup histories. An update delivered as a
  * delete and insert, with a stale previous value, or with the previous row as
  * its value fails the in-group update history and both campaigns; so do a
  * partition born terminal on a cleaned-up source and a freeze that drops
@@ -380,7 +381,7 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
-    name: `a peer mounted at cleanup stays failed while a new one follows the restart`,
+    name: `a peer mounted at cleanup stays cleaned up while a new one follows the restart`,
     history: {
       rows: [{ f: `a`, g: `x` }],
       peers: [{ f: `a` }, { f: `a` }],
@@ -600,7 +601,9 @@ async function runHistory(history: History): Promise<void> {
   const references: Array<ReturnType<typeof createLiveQueryCollection>> = []
   type Mounted = {
     reference: ReturnType<typeof createLiveQueryCollection>
-    // The model rows when the source started cleanup, if it has since.
+    // The model rows when the source's cleanup ended this peer, if it has.
+    // The peer then shows no rows; its granular stream got no deletes, so it
+    // still folds to these rows.
     frozen: Array<string> | undefined
     view: {
       collection?: unknown
@@ -686,7 +689,7 @@ async function runHistory(history: History): Promise<void> {
       expect(
         [...snapshot.state!.values()].map(describeFields).sort(),
         `${label} model`,
-      ).toEqual(model)
+      ).toEqual(entry.frozen ? [] : model)
       // The granular stream delivers each change once, with the type and
       // values the live-query Collection's stream has, and folds to the model.
       expect(entry.violations, `${label} granular contradictions`).toEqual([])
@@ -746,8 +749,9 @@ async function runHistory(history: History): Promise<void> {
     mounted.get(index)?.unsubscribe()
     mounted.delete(index)
   }
-  // Every mounted peer freezes with the rows it had, pending writes included.
-  // `beforeRestart` runs once the source is cleaned up.
+  // Cleanup ends every mounted peer first, as it does its live query: the
+  // peer is cleaned up with no rows from then on. `beforeRestart` runs once
+  // the source is cleaned up.
   const cleanupAndRestart = async (
     checkpoint: string,
     beforeRestart: () => Promise<void>,
@@ -755,7 +759,7 @@ async function runHistory(history: History): Promise<void> {
     for (const [index, entry] of mounted) {
       entry.frozen ??= expectedRows(rows, history.peers[index]!)
     }
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
     check(`${checkpoint} cleaned up`)
     // The mock source re-syncs its initial rows when it restarts.
     rows.clear()
@@ -891,7 +895,7 @@ async function runHistory(history: History): Promise<void> {
       for (const entry of mounted.values()) entry.unsubscribe()
     },
     () => Promise.all(references.map((reference) => reference.cleanup())),
-    () => source.cleanup(),
+    () => source.cleanup({ dependents: true }),
   ])
 }
 
@@ -931,7 +935,7 @@ describe(`pooled live query oracle`, () => {
       expect(snapshot.status).toBe(reference.status)
       expect([...snapshot.state!.keys()]).toEqual([...reference.keys()])
       stop()
-      await source.cleanup()
+      await source.cleanup({ dependents: true })
     })
 
     for (const { name, history } of pinnedHistories) {

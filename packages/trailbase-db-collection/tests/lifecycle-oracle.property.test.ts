@@ -11,8 +11,10 @@ import type { Event, ListResponse } from 'trailbase'
  *
  * An eager sync run needs both its list and stream before readiness. An
  * on-demand sync run does not claim an initial list. Stream events update an independent
- * key/value relation. Startup failure rejects; later failure keeps the last
- * rows and reports the error. Cleanup clears rows, cancels work, and fences
+ * key/value relation. Startup failure rejects; any later end of the stream
+ * that the adapter did not cancel keeps the last rows and the `ready` status
+ * and reports the Collection's `error`, because the adapter does not resubscribe.
+ * A failure is that error's `cause`. Cleanup clears rows, cancels work, and fences
  * late results from prior sync runs after restart.
  *
  * A controlled RecordApi and native ReadableStream provide explicit gates for
@@ -351,10 +353,16 @@ async function checkLifecycle(
           assertNoTimers()
           const isFailure =
             plan.ending === `read-error` || plan.ending === `parse-error`
-          if (isFailure && !plan.immediate) {
-            expectedReports.push({
-              epoch,
-              args: [`TrailBase subscription failed`, failure],
+          if (!plan.immediate && plan.ending !== `cleanup`) {
+            expect(
+              collection.health,
+              `${epoch}:${plan.ending} error`,
+            ).toMatchObject({
+              hasErrors: true,
+              failureReason: null,
+              error: expect.objectContaining(
+                isFailure ? { cause: failure } : {},
+              ),
             })
           }
           assertReports()
@@ -1159,8 +1167,12 @@ it.each(heldPlans)(
  * once per sync run and does not resubscribe. After the stream ends, the
  * Collection keeps its rows and stays ready, a later service change does not
  * reach it, and a later on-demand load does not wait for a new subscription.
- * The load lists the service's current rows. This lane makes that limit
- * executable; it does not claim that the limit is the right product behavior.
+ * The load lists the service's current rows. Because the sync adapter stops
+ * receiving changes, it reports the Collection's `error`, so an application can
+ * see that the rows can grow stale; only a reload or restart subscribes again. This
+ * lane makes that limit executable; reconnecting is left to the TrailBase
+ * provider, and the lane does not claim the limit is the right product
+ * behavior.
  *
  * Reference: the same service model. The prediction after the stream ends is
  * the rows that the last delivered event or page established.
@@ -1172,10 +1184,11 @@ it.each(heldPlans)(
  * flight when the stream ends, or cleanup between them.
  *
  * Checkpoints: after the stream ends, after the service change, and after the
- * later load. Each compares rows, status, and subscribe calls.
+ * later load. Each compares rows, status, and subscribe calls. After the end,
+ * The Collection's `error` stays, and nothing clears it in this sync run.
  */
 it.each([`close`, `read-error`] as const)(
-  `keeps rows and does not resubscribe after the stream ends: %s`,
+  `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
   async (ending) => {
     const service = new Map(raceServiceRows.map((row) => [row.id, row]))
     let controller!: ReadableStreamDefaultController<Event>
@@ -1214,6 +1227,14 @@ it.each([`close`, `read-error`] as const)(
       await turn()
       expect(collection.status, `${ending} status after the end`).toBe(`ready`)
       expect(rows(), `${ending} rows after the end`).toEqual(established)
+      const stopped = {
+        hasErrors: true,
+        failureReason: null,
+        error: expect.anything(),
+      }
+      expect(collection.health, `${ending} error after the end`).toMatchObject(
+        stopped,
+      )
 
       service.set(1, { id: 1, data: `v2` })
       await turn()
@@ -1229,6 +1250,67 @@ it.each([`close`, `read-error`] as const)(
       expect(rows(), `${ending} a later load lists current rows`).toEqual(
         sortedRows(service.values()),
       )
+      expect(collection.health, `${ending} error after the load`).toMatchObject(
+        stopped,
+      )
+    } finally {
+      await collection.cleanup()
+      reported.mockRestore()
+    }
+  },
+)
+
+/**
+ * ## Does a reload recover a failed startup?
+ *
+ * Law (the error surface's reload contract): `reload()` runs `sync` again
+ * while the Collection still shows `error`. The new run's own outcome decides
+ * the reload: a subscription that listens makes it ready and the reload
+ * resolves; a subscription that rejects fails the reload, and the status stays
+ * `error`. The adapter cannot read Collection status to learn whether this run
+ * is ready, because status still shows the failed run.
+ *
+ * Grammar (exhaustive, 2 histories): the first subscription rejects; the
+ * reload's subscription listens or rejects. Checkpoints: after the reload
+ * settles (or a bounded wait), compare its outcome, status, and subscribe
+ * calls.
+ */
+it.each([`listens`, `rejects`] as const)(
+  `a reload after a failed startup settles when the new subscription %s`,
+  async (outcome) => {
+    const stream = new ReadableStream<Event>({ start() {} })
+    const api = new MockRecordApi<RaceRow>()
+    api.subscribe
+      .mockImplementationOnce(() => Promise.reject(failure))
+      .mockImplementationOnce(() =>
+        outcome === `listens`
+          ? Promise.resolve(stream)
+          : Promise.reject(new Error(`reload subscription failed`)),
+      )
+    api.list.mockImplementation(() => Promise.resolve({ records: [] }))
+    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi: api,
+        getKey: (row: RaceRow) => row.id,
+        startSync: true,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    try {
+      await collection.preload().catch(() => undefined)
+      expect(collection.status).toBe(`error`)
+      const settled = await Promise.race([
+        collection.reload().then(
+          () => `resolved`,
+          () => `rejected`,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(`pending`), 500)),
+      ])
+      expect(settled).toBe(outcome === `listens` ? `resolved` : `rejected`)
+      expect(collection.status).toBe(outcome === `listens` ? `ready` : `error`)
+      expect(api.subscribe).toHaveBeenCalledTimes(2)
     } finally {
       await collection.cleanup()
       reported.mockRestore()

@@ -1757,12 +1757,27 @@ function createElectricSync<T extends Row<unknown>>(
       begin,
       write,
       commit: commitSyncTransaction,
-      markReady,
-      markError,
+      fail,
       truncate,
       collection,
       metadata,
     } = params
+    // Readiness of this sync run. A reload runs `sync` again while the
+    // Collection still shows the previous run's status, so status cannot say
+    // whether this run has reached its first ready.
+    let ready = false
+    const markReady = () => {
+      ready = true
+      params.markReady()
+    }
+    // The stream can give up from several places; the first one stops this
+    // sync run, and fail() may be called once.
+    let stopped = false
+    const giveUp = (error: unknown) => {
+      if (stopped) return
+      stopped = true
+      fail(error)
+    }
     let commitSequence = 0
     const pendingAppliedReceipts = new Map<number, Promise<void>>()
     const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
@@ -1939,13 +1954,13 @@ function createElectricSync<T extends Row<unknown>>(
     const failInitialSync = (cause: unknown) => {
       if (firstSnapshotCommitted) return
       initialSyncFailedFinally = true
-      markError(cause)
+      giveUp(cause)
     }
     const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
-      if (sessionCleanedUp || collection.status !== `loading`) return
+      if (sessionCleanedUp || ready || stopped) return
       if (failure !== undefined) {
         initialSyncFailedFinally = true
-        markError(failure)
+        giveUp(failure)
       } else if (isActiveLifecycle()) {
         wrappedMarkReady(isBuffering, streamErrorVersion)
       } else markReady()
@@ -1953,7 +1968,7 @@ function createElectricSync<T extends Row<unknown>>(
     // An external abort stops the source for good. Before the first ready,
     // that is the final initial failure; cleanup aborts internally instead.
     const forwardExternalAbort = () => {
-      const fails = isActiveLifecycle() && collection.status === `loading`
+      const fails = isActiveLifecycle() && !ready
       abortController.abort()
       if (fails) failInitialSync(new StreamAbortedError(collectionId))
     }
@@ -1998,9 +2013,9 @@ function createElectricSync<T extends Row<unknown>>(
         // retry follows. A retry that succeeds is a success: waiting loads
         // settle on the snapshot it establishes.
         // Waiting loads and readiness waits reject with the same cause.
-        const fail = (cause: unknown) => {
+        const failWaits = (cause: unknown) => {
           rejectFullSnapshot(cause)
-          if (collection.status === `loading`) failInitialSync(cause)
+          if (!ready) failInitialSync(cause)
         }
 
         if (shapeOptions.onError) {
@@ -2008,14 +2023,14 @@ function createElectricSync<T extends Row<unknown>>(
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
-            fail(error)
+            failWaits(error)
             throw error
           }
-          if (!retry || typeof retry !== `object`) fail(errorParams)
+          if (!retry || typeof retry !== `object`) failWaits(errorParams)
           return retry
         } else {
-          const initialSyncFailed = collection.status === `loading`
-          fail(errorParams)
+          const initialSyncFailed = !ready
+          failWaits(errorParams)
           console.error(
             `An error occurred while syncing collection: ${collection.id}, \n` +
               (initialSyncFailed
@@ -2319,7 +2334,7 @@ function createElectricSync<T extends Row<unknown>>(
       streamErrorVersion++
       unsubscribeStream()
       abortController.abort()
-      markError(
+      giveUp(
         new Error(
           `Electric resume state referenced an unseen row; a full snapshot is required`,
         ),
@@ -2625,8 +2640,7 @@ function createElectricSync<T extends Row<unknown>>(
         const readyErrorVersion = streamErrorVersion
         // Readiness counts accepted rows.
         const accepted = whenSyncAccepted(applied)
-        const firstSnapshot =
-          commitPoint === `up-to-date` && collection.status === `loading`
+        const firstSnapshot = commitPoint === `up-to-date` && !ready
         if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
         if (accepted === true) {
           wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
@@ -2653,7 +2667,7 @@ function createElectricSync<T extends Row<unknown>>(
               streamErrorVersion++
               unsubscribeStream()
               abortController.abort()
-              if (collection.status !== `error`) markError(error)
+              giveUp(error)
             },
           )
         }
@@ -2708,15 +2722,12 @@ function createElectricSync<T extends Row<unknown>>(
       },
       (error) => {
         // The SDK gave up: it rejected the retry decision or exhausted its
-        // retry loop. No provider batch will settle the gate, and before the
-        // first ready this is the source's final initial failure.
+        // retry loop. No provider batch will settle the gate.
         rejectFullSnapshot(error)
-        if (
-          isActiveLifecycle() &&
-          !abortController.signal.aborted &&
-          collection.status === `loading`
-        )
-          failInitialSync(error)
+        if (isActiveLifecycle() && !abortController.signal.aborted) {
+          if (!ready) failInitialSync(error)
+          else giveUp(error)
+        }
       },
     )
 
@@ -2740,7 +2751,7 @@ function createElectricSync<T extends Row<unknown>>(
           streamErrorVersion++
           unsubscribeStream()
           abortController.abort()
-          markError(error)
+          giveUp(error)
         },
       )
     }

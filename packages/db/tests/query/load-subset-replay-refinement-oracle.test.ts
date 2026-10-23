@@ -204,8 +204,13 @@ describe(`loadSubset replay refinement`, () => {
         expect(readEvents()).toEqual(initial)
         publications.length = 0
 
-        await source.cleanup()
-        if (live) expect(live.status).toBe(`error`)
+        // A live query refuses the public cleanup; internal teardown that
+        // bypasses it is fatal for the query.
+        if (live) {
+          await expect(source.cleanup()).rejects.toThrow(/dependent/)
+          await source._lifecycle.cleanup()
+          expect(live.status).toBe(`crashed`)
+        } else await source.cleanup()
         source.startSyncImmediate()
         await flushPromises()
         expect(loads).toBe(2)
@@ -233,7 +238,7 @@ describe(`loadSubset replay refinement`, () => {
         expect(read()).toEqual(expected)
         expect(readEvents()).toEqual(expected)
         expect(publications).toEqual(publishes ? [replacement] : [])
-        if (live) expect(live.status).toBe(`error`)
+        if (live) expect(live.status).toBe(`crashed`)
       } catch (error) {
         primaryFailure = { error }
         throw error
@@ -1244,6 +1249,9 @@ type OrderedReach = {
   markerTruncates: number
   abortedMoves: number
   terminalErrors: number
+  // A failed load after initial-query readiness left a request error on the
+  // query's own node, and the query stayed ready (ARCHITECTURE.md law 16).
+  requestErrors: number
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -1395,6 +1403,7 @@ async function checkOrderedReplay(
     markerTruncates: 0,
     abortedMoves: 0,
     terminalErrors: 0,
+    requestErrors: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -1700,6 +1709,7 @@ async function checkOrderedReplay(
   try {
     await live.preload()
     await peer?.preload()
+    let sawRequestError = false
     for (const command of history) {
       try {
         switch (command.type) {
@@ -1819,7 +1829,12 @@ async function checkOrderedReplay(
         swallow(error)
       }
       await flushPromises()
+      // A failed load after initial-query readiness shows as a request error
+      // until a later load of its data succeeds.
+      if (live.status === `ready` && live.health.error !== null)
+        sawRequestError = true
     }
+    if (sawRequestError) reach.requestErrors++
     holding = false
     throwNextUnload = false
     await settleAll()
@@ -1919,13 +1934,13 @@ describe(`Ordered windows across truncate replays`, () => {
   // - a window move that retires lazy joined demand whose release throws (the
   //   subscription reported the release failure as a load error, so the move
   //   rejected with it; core now reports it uncaught);
-  // - a held marker demand load that fails (the model expected convergence,
-  //   but a failed lazy join demand is fatal by design; this replay keeps the
-  //   terminal-error branch reached);
+  // - a held marker demand load that fails (after initial-query readiness a
+  //   failed lazy join demand is a request error on the query's node, and the
+  //   window still converges; this replay keeps that branch reached);
   // - two window moves while a load is held (the model let the older move,
   //   which settled later, restore its window; the newest move wins);
-  // - an inner join whose lazy root demand load fails (the model allowed a
-  //   terminal error only for marker loads; either side can be lazy);
+  // - an inner join whose lazy root demand load fails (either side can be
+  //   lazy, and either side's failure is a request error);
   // - a window move that a deferred newer move supersedes (it resolved when
   //   its own load settled, before the newer move resumed, so awaiting it
   //   showed neither window);
@@ -2025,7 +2040,7 @@ describe(`Ordered windows across truncate replays`, () => {
         joined: `some`,
         markerMode: `on-demand`,
       },
-      reaches: `terminalErrors`,
+      reaches: `requestErrors`,
     },
     {
       name: `two window moves while a load is held`,
@@ -2050,7 +2065,7 @@ describe(`Ordered windows across truncate replays`, () => {
         { type: `move`, id: 1, rank: 1 },
       ],
       scenario: { ...ordinaryOrderedScenario, limit: 1, joined: `inner` },
-      reaches: `terminalErrors`,
+      reaches: `requestErrors`,
     },
     {
       name: `a window move that a deferred newer move supersedes`,
@@ -2119,6 +2134,7 @@ describe(`Ordered windows across truncate replays`, () => {
         markerTruncates: 0,
         abortedMoves: 0,
         terminalErrors: 0,
+        requestErrors: 0,
       }
       await fc.assert(
         fc.asyncProperty(
@@ -2139,11 +2155,16 @@ describe(`Ordered windows across truncate replays`, () => {
       // starts, and while it settles; loads fail and stay held across a
       // truncate; and the settled-window law is checked.
       // An aborted move needs a truncate to land inside a held move, and a
-      // terminal error needs a held marker demand load to fail; the named
-      // replays above reach both.
+      // request error needs a held demand load to fail after readiness; the
+      // named replays above reach both. A terminal error needs a failed first
+      // load.
       if (campaign !== `replay`) {
         for (const [dimension, count] of Object.entries(total)) {
-          if (dimension === `abortedMoves` || dimension === `terminalErrors`)
+          if (
+            dimension === `abortedMoves` ||
+            dimension === `terminalErrors` ||
+            dimension === `requestErrors`
+          )
             continue
           expect(count, dimension).toBeGreaterThan(0)
         }

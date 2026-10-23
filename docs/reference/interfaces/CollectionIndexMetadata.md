@@ -3,7 +3,7 @@ id: CollectionIndexMetadata
 title: CollectionIndexMetadata
 ---
 
-Defined in: [packages/db/src/collection/events.ts:81](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L81)
+Defined in: [packages/db/src/collection/events.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L91)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: [packages/db/src/collection/events.ts:81](https://github.com/TanStac
 expression: BasicExpression;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L93)
+Defined in: [packages/db/src/collection/events.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L103)
 
 ***
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/collection/events.ts:93](https://github.com/TanStac
 indexId: number;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L91)
+Defined in: [packages/db/src/collection/events.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L101)
 
 ***
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/collection/events.ts:91](https://github.com/TanStac
 optional name: string;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L92)
+Defined in: [packages/db/src/collection/events.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L102)
 
 ***
 
@@ -43,7 +43,7 @@ Defined in: [packages/db/src/collection/events.ts:92](https://github.com/TanStac
 optional options: CollectionIndexSerializableValue;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L95)
+Defined in: [packages/db/src/collection/events.ts:105](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L105)
 
 ***
 
@@ -53,7 +53,7 @@ Defined in: [packages/db/src/collection/events.ts:95](https://github.com/TanStac
 resolver: CollectionIndexResolverMetadata;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L94)
+Defined in: [packages/db/src/collection/events.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L104)
 
 ***
 
@@ -63,7 +63,7 @@ Defined in: [packages/db/src/collection/events.ts:94](https://github.com/TanStac
 signature: string;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L90)
+Defined in: [packages/db/src/collection/events.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L100)
 
 Stable signature derived from expression + serializable options.
 Non-serializable option fields are intentionally omitted.
@@ -76,6 +76,6 @@ Non-serializable option fields are intentionally omitted.
 signatureVersion: 1;
 ```
 
-Defined in: [packages/db/src/collection/events.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L85)
+Defined in: [packages/db/src/collection/events.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L95)
 
 Version for the signature serialization contract.

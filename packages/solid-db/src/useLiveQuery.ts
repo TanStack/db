@@ -23,11 +23,11 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -39,6 +39,21 @@ type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
     ? InferResultType<TContext> | []
     : InferResultType<TContext>
+
+/** Status and error fields every `useLiveQuery` result has. */
+type UseLiveQueryFlags = {
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
+  isCrashed: boolean
+  isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `health`. */
+  isSyncError: boolean
+  health: HealthNode | undefined
+}
 
 /**
  * Create a live query using a query function
@@ -84,7 +99,7 @@ type InferConditionalResultType<TContext extends Context> =
  *     <Match when={todosQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={todosQuery.isError}>
+ *     <Match when={todosQuery.isLoadingError}>
  *       <div>Error: {todosQuery.status}</div>
  *     </Match>
  *     <Match when={todosQuery.isReady}>
@@ -109,6 +124,7 @@ type InferConditionalResultType<TContext extends Context> =
  *   </Suspense>
  * )
  */
+
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
@@ -121,15 +137,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
+} & UseLiveQueryFlags
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -145,15 +153,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
+} & UseLiveQueryFlags
 
 /**
  * Create a live query using configuration object
@@ -186,7 +186,7 @@ export function useLiveQuery<TContext extends Context>(
  *     <Match when={itemsQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={itemsQuery.isError}>
+ *     <Match when={itemsQuery.isLoadingError}>
  *       <div>Something went wrong</div>
  *     </Match>
  *     <Match when={!itemsQuery.isReady}>
@@ -207,15 +207,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
+} & UseLiveQueryFlags
 
 /**
  * Subscribe to an existing live query collection
@@ -246,7 +238,7 @@ export function useLiveQuery<TContext extends Context>(
  *    <Match when={sharedQuery.isLoading}>
  *      <div>Loading...</div>
  *    </Match>
- *    <Match when={sharedQuery.isError}>
+ *    <Match when={sharedQuery.isLoadingError}>
  *      <div>Error loading data</div>
  *    </Match>
  *  </Switch>
@@ -270,15 +262,7 @@ export function useLiveQuery<
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
+} & UseLiveQueryFlags
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -298,15 +282,7 @@ export function useLiveQuery<
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
+} & UseLiveQueryFlags
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
@@ -369,9 +345,7 @@ export function useLiveQuery(
       name: `TanstackDBStatus`,
     },
   )
-  const [persistedStatus, setLocalStatus] =
-    createSignal<LiveQueryPersistedStatus>(`unavailable`)
-  const [persistedError, setLocalError] = createSignal<unknown>(undefined)
+  const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -435,6 +409,7 @@ export function useLiveQuery(
         return []
       }
       setStatus(currentCollection.status)
+      setHealth(currentCollection.health)
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWait = {
@@ -443,14 +418,14 @@ export function useLiveQuery(
           ready: false,
         }
         try {
-          await observer.preloadForInitialRender()
+          await observer.preload()
         } catch (error) {
           if (generation === resourceGeneration) releaseLocalWait()
           throw error
         }
         if (generation !== resourceGeneration) return data
         localWait.ready = true
-        // `preloadForInitialRender` waits for readiness but does not itself
+        // `preload` waits for readiness but does not itself
         // retain the Collection after it settles. Hold one observer
         // subscription across Solid's ready-before-commit Suspense gap.
         observer.subscribe(() => {})
@@ -482,6 +457,7 @@ export function useLiveQuery(
         }
         syncDataFromCollection(currentCollection)
         setStatus(currentCollection.status)
+        setHealth(currentCollection.health)
       })
       return data
     },
@@ -496,8 +472,7 @@ export function useLiveQuery(
     const currentCollection = collection()
     if (!currentCollection) {
       setStatus(`disabled` as const)
-      setLocalStatus(`unavailable`)
-      setLocalError(undefined)
+      setHealth(undefined)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -544,8 +519,7 @@ export function useLiveQuery(
           syncDataFromCollection(currentCollection)
           const snapshot = observer.getSnapshot()
           setStatus(snapshot.status)
-          setLocalStatus(snapshot.persistedStatus)
-          setLocalError(snapshot.persistedError)
+          setHealth(snapshot.health)
         })
       },
     )
@@ -560,8 +534,7 @@ export function useLiveQuery(
       syncDataFromCollection(currentCollection)
       const snapshot = observer.getSnapshot()
       setStatus(snapshot.status)
-      setLocalStatus(snapshot.persistedStatus)
-      setLocalError(snapshot.persistedError)
+      setHealth(snapshot.health)
     })
 
     onCleanup(() => {
@@ -617,34 +590,34 @@ export function useLiveQuery(
         return status() === `ready` || status() === `disabled`
       },
     },
-    persistedStatus: {
-      get() {
-        return persistedStatus()
-      },
-    },
-    isPersistedReady: {
-      get() {
-        return persistedStatus() === `ready`
-      },
-    },
-    persistedError: {
-      get() {
-        return persistedError()
-      },
-    },
     isIdle: {
       get() {
         return status() === `idle`
       },
     },
-    isError: {
+    isLoadingError: {
       get() {
         return status() === `error`
+      },
+    },
+    isCrashed: {
+      get() {
+        return status() === `crashed`
       },
     },
     isCleanedUp: {
       get() {
         return status() === `cleaned-up`
+      },
+    },
+    isSyncError: {
+      get() {
+        return status() === `ready` && health()?.hasErrors === true
+      },
+    },
+    health: {
+      get() {
+        return health()
       },
     },
   })

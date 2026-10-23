@@ -59,7 +59,10 @@ export interface LiveQueryStatusFlags {
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. `status` is `error`. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke. `status` is `crashed`. */
+  isCrashed: boolean
   isCleanedUp: boolean
 }
 
@@ -75,7 +78,8 @@ export function getLiveQueryStatusFlags(
     isLoading: status === `loading`,
     isReady: status === `ready`,
     isIdle: status === `idle`,
-    isError: status === `error`,
+    isLoadingError: status === `error`,
+    isCrashed: status === `crashed`,
     isCleanedUp: status === `cleaned-up`,
   }
 }

@@ -2313,7 +2313,7 @@ describe(`createEffect`, () => {
       }
     })
 
-    it(`should auto-dispose when source collection is cleaned up`, async () => {
+    it(`refuses source cleanup while it reads, and disposes with its source's dependents`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
       const consoleErrorSpy = vi
@@ -2331,19 +2331,21 @@ describe(`createEffect`, () => {
       expect(events.length).toBe(3)
       expect(effect.disposed).toBe(false)
 
-      // Clean up the source collection — should auto-dispose the effect
-      await users.cleanup()
+      // The source refuses cleanup while the Effect reads it; with its
+      // dependents it disposes the Effect first, which is not a source error.
+      await expect(users.cleanup()).rejects.toThrow(/dependent/)
+      expect(effect.disposed).toBe(false)
+      expect(users.subscribers.map(({ kind }) => kind)).toEqual([`effect`])
+      await users.cleanup({ dependents: true })
       await flushPromises()
 
       expect(effect.disposed).toBe(true)
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`cleaned up`),
-      )
+      expect(consoleErrorSpy).not.toHaveBeenCalled()
 
       consoleErrorSpy.mockRestore()
     })
 
-    it(`should not fire events after source collection is cleaned up`, async () => {
+    it(`should not fire events after its source is cleaned up with its dependents`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
       vi.spyOn(console, `error`).mockImplementation(() => {})
@@ -2356,8 +2358,8 @@ describe(`createEffect`, () => {
       await flushPromises()
       const countAfterInit = events.length
 
-      // Clean up source — effect auto-disposes
-      await users.cleanup()
+      // Clean up source with its dependents — the effect disposes first
+      await users.cleanup({ dependents: true })
       await flushPromises()
 
       expect(effect.disposed).toBe(true)
@@ -2385,7 +2387,9 @@ describe(`createEffect`, () => {
 
       await flushPromises()
 
-      await users.cleanup()
+      // Internal teardown that bypasses the public refusal ends the Effect
+      // with a source error.
+      await users._lifecycle.cleanup()
       await flushPromises()
 
       expect(effect.disposed).toBe(true)
@@ -2413,7 +2417,7 @@ describe(`createEffect`, () => {
 
       await flushPromises()
 
-      await users.cleanup()
+      await users._lifecycle.cleanup()
       await flushPromises()
 
       expect(effect.disposed).toBe(true)

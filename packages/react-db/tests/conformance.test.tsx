@@ -27,6 +27,8 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type { RenderHookResult } from '@testing-library/react'
 import type {
@@ -103,28 +105,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-react-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  // Starting sync throws → engine catches and sets status to `error`.
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-react-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 function mount(build: QueryBuild) {
@@ -180,13 +166,13 @@ function makeHandle(hook: RenderHookResult<any, any>) {
         state: r?.state,
         status: r?.status,
         isReady: r?.isReady,
-        persistedStatus: r?.persistedStatus,
-        isPersistedReady: r?.isPersistedReady,
-        persistedError: r?.persistedError,
-        isError: r?.isError,
+        isLoadingError: r?.isLoadingError,
+        isCrashed: r?.isCrashed,
+        isSyncError: r?.isSyncError,
         // Read react-db's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).
         isEnabled: r?.isEnabled,
+        health: r?.health,
       })
     },
     async flush() {
@@ -216,6 +202,12 @@ const reactDriver: LiveQueryDriver = {
     makeLaggingSource<T>(
       createCollection,
       `conformance-react-lagging-${sourceSeq++}`,
+    ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-react-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,
@@ -347,7 +339,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
   }
   const hook = renderHook(() => raw)
@@ -357,9 +351,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`, `isEnabled`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`, `isEnabled`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

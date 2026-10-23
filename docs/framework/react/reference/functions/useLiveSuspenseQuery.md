@@ -9,7 +9,7 @@ title: useLiveSuspenseQuery
 function useLiveSuspenseQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:151](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L151)
+Defined in: [useLiveSuspenseQuery.ts:152](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L152)
 
 Create a live query with React Suspense support
 
@@ -50,6 +50,12 @@ collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[
 
 ```ts
 data: InferResultType<TContext>;
+```
+
+#### health
+
+```ts
+health: HealthNode | undefined;
 ```
 
 #### state
@@ -162,7 +168,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:161](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L161)
+Defined in: [useLiveSuspenseQuery.ts:163](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L163)
 
 Create a live query with React Suspense support
 
@@ -195,6 +201,12 @@ collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[
 
 ```ts
 data: InferResultType<TContext>;
+```
+
+#### health
+
+```ts
+health: HealthNode | undefined;
 ```
 
 #### state
@@ -307,7 +319,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:170](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L170)
+Defined in: [useLiveSuspenseQuery.ts:173](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L173)
 
 Create a live query with React Suspense support
 
@@ -346,6 +358,12 @@ collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[
 
 ```ts
 data: InferResultType<TContext>;
+```
+
+#### health
+
+```ts
+health: HealthNode | undefined;
 ```
 
 #### state
@@ -458,7 +476,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:180](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L180)
+Defined in: [useLiveSuspenseQuery.ts:184](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L184)
 
 Create a live query with React Suspense support
 
@@ -498,6 +516,12 @@ collection: Collection<TResult, TKey, TUtils>;
 
 ```ts
 data: TResult[];
+```
+
+#### health
+
+```ts
+health: HealthNode | undefined;
 ```
 
 #### state
@@ -610,7 +634,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L193)
+Defined in: [useLiveSuspenseQuery.ts:198](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L198)
 
 Create a live query with React Suspense support
 
@@ -650,6 +674,12 @@ collection: Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>
 
 ```ts
 data: TResult | undefined;
+```
+
+#### health
+
+```ts
+health: HealthNode | undefined;
 ```
 
 #### state

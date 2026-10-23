@@ -5,6 +5,7 @@ import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
+import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -39,6 +40,9 @@ import type {
 } from './compiler/joins.js'
 import type {
   ChangeMessage,
+  CollectionDependent,
+  CollectionStatus,
+  HealthNode,
   KeyedStream,
   StringCollationConfig,
 } from '../types.js'
@@ -131,11 +135,22 @@ export interface EffectConfig<
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
-   * Called when a source collection enters an error or cleaned-up state.
-   * The effect is automatically disposed after this callback fires.
-   * If not provided, the error is logged to console.error.
+   * Called when a source crashes, fails its first load before the effect's
+   * initial-query readiness, or is cleaned up while the effect reads it, and
+   * when a subset load the effect requests from a source, or its release,
+   * fails, before or after that readiness. A cascade cleanup that ends the
+   * effect does not call it.
+   * The effect is automatically disposed after this callback fires. If not
+   * provided, the error is logged to console.error.
    */
   onSourceError?: (error: Error) => void
+
+  /**
+   * Called after the effect's initial-query readiness whenever its health tree
+   * changes. A sync problem after initial-query readiness does not dispose the
+   * effect; read the health tree to decide what to do.
+   */
+  onHealthChange?: (health: HealthNode) => void
 
   /**
    * Skip deltas during initial collection load.
@@ -199,6 +214,15 @@ let effectCounter = 0
  * await effect.dispose()
  * ```
  */
+/** The error that ends an Effect whose source crashed or failed its first load. */
+function stoppedSourceError(collectionId: string, status: CollectionStatus) {
+  return new Error(
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Source collection '${collectionId}' entered ${status} state`
+      : codedMessage(135, { collectionId, status }),
+  )
+}
+
 export function createEffect<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -300,11 +324,20 @@ export function createEffect<
     return attempt
   }
 
+  const effect: Effect = {
+    dispose,
+    get disposed() {
+      return disposed
+    },
+  }
+
   // Create and start the pipeline
   const runner = new EffectPipelineRunner<TRow, TKey>({
+    effect,
     query: config.query,
     skipInitial: config.skipInitial ?? false,
     onBatchProcessed,
+    onHealthChange: config.onHealthChange,
     onSourceError: (error: Error) => {
       if (disposed) return
 
@@ -354,12 +387,7 @@ export function createEffect<
     throw error
   }
 
-  return {
-    dispose,
-    get disposed() {
-      return disposed
-    },
-  }
+  return effect
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +403,9 @@ interface EffectPipelineRunnerConfig<
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
+  onHealthChange?: (health: HealthNode) => void
+  /** The Effect's handle, so its source subscriptions can name it. */
+  effect: Effect
 }
 
 /**
@@ -458,6 +489,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
+  // The Effect's initial gate: latched when every
+  // initial load has settled, with or without skipInitial. After it,
+  // a sync problem does not dispose the Effect.
+  private reachedReady = false
+  private reportedTree: HealthNode | undefined
+  private readonly onHealthChange: ((health: HealthNode) => void) | undefined
+  // This Effect as its sources' `subscribers` list it.
+  private readonly dependent: CollectionDependent
 
   // Scheduler integration
   private subscribedToAllCollections = false
@@ -477,6 +516,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.skipInitial = config.skipInitial
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
+    this.onHealthChange = config.onHealthChange
+    this.dependent = {
+      kind: `effect`,
+      active: true,
+      end: () => config.effect.dispose(),
+    }
 
     // Parse query
     this.query = buildQueryFromConfig({ query: config.query })
@@ -605,6 +650,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         else this.handleSourceChanges(sourceId, changes)
       }
 
+      // A source that stopped before this Effect sends no status change. End
+      // the Effect before any subscription or load reaches that source.
+      if (collection.status === `crashed` || collection.status === `error`) {
+        this.onSourceError(stoppedSourceError(collectionId, collection.status))
+        this.starting = false
+        return
+      }
+
       // Subscribe to source changes
       const subscription = collection.subscribeChanges(changeCallback, {
         ...this.buildSubscriptionOptions(
@@ -613,16 +666,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           orderByInfo,
           whereExpression,
         ),
-        onLoadSubsetError: ({ error }) => {
-          this.onSourceError(normalizeError(error))
-        },
+        owner: this.dependent,
+        onLoadSubsetError: ({ error }) =>
+          this.onSourceError(normalizeError(error)),
         // subscribeChanges can report a result before it returns the
         // subscription, so read it from the record when a load fails.
-        onLoadSubsetResult: (result) =>
+        onLoadSubsetResult: (result) => {
           this.trackInitialLoad(
             result,
             () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
-          ),
+          )
+        },
       })
 
       // Store subscription immediately so the join compiler can find it
@@ -677,6 +731,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           subscription,
           alias,
           (result, holdPublication) => {
+            this.trackInitialLoad(
+              result,
+              () => subscription.pendingTruncateReplacement,
+            )
             const holdsInitialPublication =
               this.skipInitial && !this.initialLoadComplete
             if (holdPublication || holdsInitialPublication) {
@@ -717,20 +775,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       }
 
       // Listen for status changes on source collections
-      const statusUnsubscribe = collection.on(`status:change`, (event) => {
+      const handleSourceStatus = (status: CollectionStatus) => {
         if (this.disposed) return
 
-        const { status } = event
-
-        // Source entered error state — effect can no longer function
-        if (status === `error`) {
-          this.onSourceError(
-            new Error(
-              devBuild() && process.env.NODE_ENV !== `production`
-                ? `Source collection '${collectionId}' entered error state`
-                : codedMessage(135, { collectionId }),
-            ),
-          )
+        // A crash ends the effect at any time. A failed first load ends it
+        // before its gate; after the gate it is a sync problem in the tree.
+        if (
+          status === `crashed` ||
+          (status === `error` && !this.reachedReady)
+        ) {
+          this.onSourceError(stoppedSourceError(collectionId, status))
           return
         }
 
@@ -748,8 +802,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         ) {
           this.initialLoadComplete = true
         }
-      })
+        // health:change follows every status change and reports the tree.
+        this.latchReady()
+      }
+      const statusUnsubscribe = collection.on(`status:change`, ({ status }) =>
+        handleSourceStatus(status),
+      )
       this.unsubscribeCallbacks.add(statusUnsubscribe)
+      this.unsubscribeCallbacks.add(
+        collection.on(`health:change`, () => this.reportHealth()),
+      )
       const cleanupStartUnsubscribe =
         collection._onCleanupStart(handleSourceCleanup)
       // Registration reports an already-active cleanup synchronously. That
@@ -787,6 +849,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // Initial graph run to process any synchronously-available data.
     // For skipInitial, this run's output is discarded (initialLoadComplete is still false).
     this.runGraph()
+    this.latchReady()
 
     // After the initial graph run, if all sources are ready,
     // mark initial load as complete so future events are processed.
@@ -872,27 +935,26 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
   }
 
-  /** Keep `skipInitial` suppression open until a pending initial load settles. */
+  /** Keep the Effect's gate, and `skipInitial` suppression, open until a pending initial load settles. */
   private trackInitialLoad(
     result: true | Promise<unknown>,
     replacementAfterFailure: () => Promise<void> | undefined,
   ): void {
-    if (
-      !(result instanceof Promise) ||
-      this.initialLoadComplete ||
-      this.disposed
-    )
+    if (!(result instanceof Promise) || this.reachedReady || this.disposed)
       return
     this.pendingInitialLoads.add(result)
     const release = () => {
       if (this.pendingInitialLoads.delete(result) && !this.disposed)
         this.scheduleGraphRun()
     }
-    // A load failure disposes the Effect through onLoadSubsetError. Any other
-    // rejection comes from an obsolete or aborted acquisition, so the hold
-    // fails open: it releases unless a truncate replacement takes it over.
+    // A load failure disposes the Effect through onLoadSubsetError, so a
+    // rejection releases one microtask later, after that event, as a live
+    // query's tracked rejection does. Any other rejection comes from an
+    // obsolete or aborted acquisition, so the hold fails open: it releases
+    // unless a truncate replacement takes it over.
     followHeldAcquisition(result, replacementAfterFailure, {
-      settled: release,
+      settled: (succeeded) =>
+        succeeded ? release() : void Promise.resolve().then(release),
       replaced: (replacement) => {
         this.trackInitialLoad(replacement, replacementAfterFailure)
         release()
@@ -984,6 +1046,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       }
       // Emit all accumulated events once the graph reaches quiescence
       this.flushPendingChanges()
+      this.latchReady()
       if (
         this.skipInitial &&
         !this.initialLoadComplete &&
@@ -1045,7 +1108,38 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )
   }
 
-  /** Initial callbacks start only after every source served its initial data. */
+  /** Latch the Effect's initial gate and report whether it has been reached. */
+  private latchReady(): boolean {
+    if (!this.reachedReady && this.canCompleteInitialLoad())
+      this.reachedReady = true
+    return this.reachedReady
+  }
+
+  /** The health tree for this effect's sources, in query order. */
+  private healthTree(): HealthNode {
+    return healthNode(this, undefined, {
+      alias: `root`,
+      collectionId: `effect`,
+      kind: `live-query`,
+      status: this.reachedReady ? `ready` : `loading`,
+      failureReason: null,
+      error: null,
+      reloading: false,
+      sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
+        buildHealthTree(collection, { alias, id: sourceId }, this),
+      ),
+    })
+  }
+
+  private reportHealth(): void {
+    if (this.disposed || !this.reachedReady || !this.onHealthChange) return
+    // An unchanged tree keeps its identity; report each change once.
+    const tree = this.healthTree()
+    if (tree === this.reportedTree) return
+    this.reportedTree = tree
+    this.onHealthChange(tree)
+  }
+
   private canCompleteInitialLoad(): boolean {
     return (
       !this.orderedPublicationFailed &&
@@ -1142,7 +1236,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Release every source in one attempt; the first failure wins after the
+    // Release every source in one pass; the first failure wins after the
     // peers finish. A reentrant dispose returns at the guard above, so this
     // call still owns each release exactly once.
     try {

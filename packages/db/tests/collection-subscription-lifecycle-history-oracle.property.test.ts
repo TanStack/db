@@ -55,7 +55,7 @@ const randomCampaign = (property: string) =>
  * The independent model in the lifecycle grammar crosses explicit eager,
  * default eager, and on-demand configuration with empty and nonempty
  * replacements and with or without an eager loader. Eager histories may also
- * truncate the loading replacement or enter recoverable error before ready.
+ * truncate the loading replacement, or fail their first load and reload.
  * The production driver publishes an old row, creates a direct subscription,
  * cleans up its source, requests a snapshot, and restarts the real Collection.
  * It holds eager readiness to prove the cleanup-detached
@@ -169,8 +169,8 @@ describe(`demand created while its Collection is cleaned up`, () => {
             operations.truncate({ markReady: false })
             const receipt = operations.commit()
             if (receipt !== true) await receipt
-          } else if (history.interruption === `recoverable-error`) {
-            operations.markError(new Error(`recoverable restart failure`))
+          } else if (history.interruption === `failed-then-reload`) {
+            operations.fail(new Error(`restart failure`))
           }
           if (expected.afterInterruption) {
             await flushPromises()
@@ -182,6 +182,12 @@ describe(`demand created while its Collection is cleaned up`, () => {
             }).toEqual(expected.afterInterruption)
           }
 
+          // A failed first load ends its sync run; only a reload starts the
+          // run that can serve the waiting demand.
+          if (history.interruption === `failed-then-reload`) {
+            void collection.reload().catch(() => undefined)
+            await flushPromises()
+          }
           releaseEagerReady!()
           await flushPromises()
         }

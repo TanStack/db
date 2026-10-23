@@ -15,7 +15,7 @@ type ResolvedLiveQueryWindowInput<TContext> =
 };
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L31)
+Defined in: [packages/db/src/live-query-window-controller.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L24)
 
 **`Internal`**
 

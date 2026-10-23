@@ -341,6 +341,41 @@ describe(`Sync Streams`, () => {
     }
   })
 
+  // A reload runs `sync` again while the Collection still shows `error`.
+  // The new run's readiness, not that status, decides its outcome.
+  it.each([`ok`, `fail`] as const)(
+    `eager mode: settles a reload after a failed first load: new run %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      const answers = [`fail`, outcome]
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          onLoad: () =>
+            answers.shift() === `fail`
+              ? Promise.reject(new Error(`PowerSync load failed`))
+              : Promise.resolve(),
+        }),
+      )
+      try {
+        await collection.preload().catch(() => undefined)
+        expect(collection.status).toBe(`error`)
+        const settled = await Promise.race([
+          collection.reload().then(
+            () => `resolved`,
+            () => `rejected`,
+          ),
+          new Promise((resolve) => setTimeout(() => resolve(`pending`), 1000)),
+        ])
+        expect(settled).toBe(outcome === `ok` ? `resolved` : `rejected`)
+        expect(collection.status).toBe(outcome === `ok` ? `ready` : `error`)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`eager mode: releases a load hook that resolves after cleanup`, async () => {
     const db = await createDatabase()
     const releaseLoad = pDefer<void>()
@@ -1194,7 +1229,7 @@ describe(`Sync Streams`, () => {
         await new Promise((resolve) => setImmediate(resolve))
         expect(cleanupSettled).toBe(false)
         expect(collection.status).toBe(`ready`)
-        expect(query.status).toBe(`error`)
+        expect(query.status).toBe(`crashed`)
 
         disposeGate.resolve()
         const cleanupResult = await cleanupOutcome
@@ -1564,7 +1599,10 @@ describe(`Sync Streams`, () => {
         expect(createDiffTrigger).not.toHaveBeenCalled()
         expect(query.status).toBe(`loading`)
         let cleanupSettled = false
-        const cleanupOutcome = collection.cleanup().then(
+        // An active query refuses the public cleanup; internal teardown that
+        // bypasses admission still settles the subset hook.
+        await expect(collection.cleanup()).rejects.toThrow(/dependent/)
+        const cleanupOutcome = collection._lifecycle.cleanup().then(
           () => {
             cleanupSettled = true
             return { status: `fulfilled` as const }
@@ -1577,7 +1615,7 @@ describe(`Sync Streams`, () => {
 
         expect(collection.status).toBe(`ready`)
         expect(cleanupSettled).toBe(false)
-        expect(query.status).toBe(`error`)
+        expect(query.status).toBe(`crashed`)
         const expected = { status: `rejected`, error: new Error(message) }
         expect(await preload).toEqual(expected)
         hook.resolve(cleanupHook)
@@ -1602,7 +1640,7 @@ describe(`Sync Streams`, () => {
         expect(unexpected).toEqual([])
         expect(cleanupHook).toHaveBeenCalledOnce()
         expect(collection.status).toBe(`cleaned-up`)
-        expect(query.status).toBe(`error`)
+        expect(query.status).toBe(`crashed`)
         expect(query.toArray).toEqual([])
         expect(collection.size).toBe(0)
         expect(publications.flat()).toEqual([])

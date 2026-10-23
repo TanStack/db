@@ -31,15 +31,15 @@ production queues, caches, or semantic helpers merely to share their names.
 | accepted sync transaction | A committed sync transaction that core, or a wrapping sync after its durable step, has taken. It always applies, in commit order. While an optimistic transaction is persisting it is held, and it applies in the publication that drops that transaction's optimistic state. Handler-facing writes and Collection readiness wait for acceptance; commit receipts and subset loads wait for visibility. | Visible or applied sync transaction. |
 | deferred sync transaction | A committed sync transaction that a wrapping sync has not handed to the Collection yet, because an earlier durable write is still running. Like a queued sync transaction, it holds settled optimistic rows on its keys until it applies. | Queued or accepted sync transaction. |
 | held optimistic row | A successful transaction's optimistic row kept only while a committed sync transaction that has not applied touches its key, so the drop and that transaction publish together. The transaction may be queued in the Collection or deferred behind a wrapping sync's durable step. Its source attribution follows the key-and-timing rules in [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md), not source-client identity. | Retained or accepted snapshot. |
-| Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, or `cleaned-up`. | Subscription status. |
+| Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, `crashed`, or `cleaned-up`. | Subscription status. |
 | subscription status | One subscription value: `ready` or `loadingSubset`. | Collection status. |
 | subscription | A consumer of Collection changes with its own subset demands and lifecycle. | Collection, query, or transport. |
 | sync adapter | The code supplied through Collection sync configuration that starts a sync run and translates between TanStack DB and a provider. | Provider or source Collection. |
 | provider | The external database, service, or SDK from which a sync adapter acquires data. | Sync adapter or source Collection. |
 | sync run | One invocation of a Collection's sync function, plus the callbacks and resources installed by that invocation, until cleanup invalidates them. A run may own zero or more provider requests and may outlive any one request. Component-owned `syncRunGeneration` counters fence this lifetime in Collection state, sync ownership, and live-query graph work. | Provider session, replay, generation, or request. |
 | provider session | A provider-defined remote stream, connection, or SDK lifetime. Always qualify it with the provider. | Sync run. |
-| cleanup | The transition that ends the current sync run and releases its resources. Callback invalidation and local teardown begin synchronously. The public cleanup promise and final `cleaned-up` status settle after adapter cleanup settles. The Collection object remains available for cleanup or restart. | Collection destruction, restart, or replay. |
-| cleanup start | The internal boundary at which cleanup synchronously closes restart admission, invalidates the current sync run, puts dependent live queries in terminal error, and marks dependent Effects disposed. The public Collection status keeps its prior value while adapter cleanup is pending. | A Collection status, cleanup settlement, or proof that adapter resources or Effect handlers settled. |
+| cleanup | The transition that ends the current sync run and releases its resources. Public `cleanup()` rejects while a live query or Effect reads the Collection; `cleanup({ dependents: true })` ends those dependents first. A direct subscription survives cleanup. Callback invalidation and local teardown begin synchronously. The public cleanup promise and final `cleaned-up` status settle after adapter cleanup settles. The Collection object remains available for cleanup or restart. | Collection destruction, restart, or replay. |
+| cleanup start | The internal boundary at which cleanup synchronously closes restart admission, invalidates the current sync run, crashes dependent live queries, and marks dependent Effects disposed. The public Collection status keeps its prior value while adapter cleanup is pending. | A Collection status, cleanup settlement, or proof that adapter resources or Effect handlers settled. |
 | restart | Starting a new sync run after the prior sync run has ended. | Same-run recovery or replay. |
 | truncate replay | An authoritative source replacement after a truncate, inside the current sync run. The Collection subscription remains active; any dependent live-query graph remains active behind its publication barrier. | Restart, reload, retry, or repair. |
 | source snapshot | The source rows established by one snapshot operation within its declared predicate and window. It proves full-source state only when the provider says that scope is authoritative and exhausted. | Public snapshot or proof of full-source coverage. |
@@ -50,14 +50,32 @@ production queues, caches, or semantic helpers merely to share their names.
 | atomic publication | One publication boundary at which state, events, and consumers observe the same result without an intermediate public state. | Any individual `commit()` call or source snapshot. |
 | readiness | Evidence that a named consumer may proceed. Always qualify Collection readiness, subscription readiness, or initial-query readiness; they settle at different boundaries. | Provider completion or publication in general. |
 | persisted restore | The eager persisted source Collection's startup read and publication of its durable rows, including an empty snapshot, in the current sync run. | Upstream/provider readiness or an SSR seed. |
-| persisted readiness | An opt-in live-query signal that every source Collection completed persisted restore in the current sync run; it is unavailable if any source did not opt in. | Collection readiness, network availability, or row nonemptiness. |
+| persisted readiness | The persisted wrapper's internal record that the current sync run's persisted restore completed or failed. Network-first initial render reads it; Collection status is the only public signal. | Collection readiness, network availability, or row nonemptiness. |
 | persisted cache generation | One version of an on-demand Collection's durable rows and resume metadata, identified by a monotonic generation number and a distinct storage ID. One current generation accepts new claims; a retired generation remains available to sync runs that already claim it. A stale run may create a new retired generation for its own recovery without replacing the current one. Rotating a generation does not change the public Collection identity. | Sync run, provider session, or source snapshot. |
 | persisted cache claim | A sync run's expiring authority to read and write one persisted cache generation. It is checked before durable access and is separate from a TanStack DB acquisition lease. | Acquisition lease, subset demand, or proof that cached rows are authoritative. |
-| network-first initial render | An opt-in Suspense gate that prefers Collection readiness until a configured deadline or network failure, then permits a completed persisted restore. A failed client query stream counts as network failure; a failed derived query does not. The gate does not stop network sync. | The persisted-readiness status itself or a change to ordinary live-query row publication. |
+| network-first initial render | An opt-in persisted Collection setting, `initialRender: { strategy: 'network-first', networkTimeoutMs }`. The Collection waits for its sync adapter until the deadline passes or the remote fails, then a completed persisted restore that installed rows makes it `ready`. An empty restore keeps it `loading`. A remote failure before the restore completes waits for the restore. Network sync continues. | Collection readiness from the sync adapter, an SSR seed, or a separate status. |
 
 `source` names a role in a data flow; it does not own a lifecycle. Do not coin a
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
+
+## Collection status and health terms
+
+Collection status and the health tree are separate axes. Status says whether the
+data can be shown; the health tree says whether the data on screen is still kept
+current. After Collection readiness in a sync run, only a crash changes status
+until cleanup ends the run.
+
+| Term | Meaning | Do not use as a synonym |
+| --- | --- | --- |
+| initial gate | The role of Collection status during a sync run's first load. The status stays `loading` while the sync adapter retries, then becomes `ready` through `markReady()` or `error` through `fail()`. After Collection readiness in a sync run, sync problems never change the status. | The health tree or a live query's request errors. |
+| loading error | The `fail()` that ends a sync run's first load in status `error` (`isLoadingError`). It is final for its sync run: `markReady()` afterward throws, and only a new sync run can reach `ready`. | Sync error or a retry. |
+| crash | Moving a Collection to status `crashed` (`isCrashed`) from any active status, because it can no longer serve reads or admit writes. Core uses it for IndexedDB closure, terminal local persistence failures, a throwing sync function, and internal invariant failures. It cannot be recovered in place: nothing restarts it and `reload()` rejects. Only cleanup leaves it, and cleanup discards all of the Collection's state, so a later start is a fresh start. After a crash, the sync adapter's status calls (`markReady()`, `fail()`, `reportError()`, `reportHealthy()`) do nothing. Sync data that the run commits still applies, because closure keeps accepted sync obligations such as the confirmation of a write admitted before it. | Loading error, sync error, or cleanup. |
+| sync error | A problem after Collection readiness on a source's health node, from the sync adapter: a failure reason (`reportError()`, still trying; `reportHealthy()` clears it) or an error (`fail()`, stopped; it stays for the sync run, and every later report throws). A live query's `isSyncError` is `true` when it is `ready` and its tree has any problem. It never changes status or rows. Cleanup resets it. | Loading error or subscription status. |
+| failure reason | A node's `failureReason`: the latest problem while the sync adapter keeps trying, after TanStack Query's `failureReason`. | An error or a retry count. |
+| request error | A rejected subset load for demand that a live query or Effect started after its initial-query readiness, shown as the `error` on that query's own node. The source Collection's node does not change. The public name stays general on purpose: an application sees a failed request for more data, not the subset-load mechanism. It clears when a later subset load for that demand fulfills, including one that a source's reload or the query's own reload issues, or when the demand retires. A source's reload whose replay cannot load the query's data again is also a request error. It clears when the replay succeeds for the demand that remains: a replay failure belongs to the logical demand that failed (ARCHITECTURE law 9), so when that demand retires, the rest of the replay's loads decide whether the error stays. | Sync error or request data. |
+| health tree | The `health` value of a Collection, live query, or Effect: one node for a Collection; for a query, one health node per query alias, in query order, fixed by the query definition. It keeps stable object identity while its content is unchanged, and `health:change` announces a change. | An error list. |
+| health node | One `HealthNode` in a health tree, for a source Collection, a nested live-query Collection, or one include. It shows at most one problem, `failureReason` or `error`. A nested live-query node carries its own health tree in `sources`. | Bucket or Collection facade. |
 
 ## Persistence coordination terms
 
@@ -210,6 +228,11 @@ Use nouns for state and verbs for transitions:
   `cleaned-up`. Restart then **starts** a new sync run.
 - Truncate replay **replaces** source state inside the current sync run and
   any current dependent graph.
+- A sync adapter **fails** with `fail()`: a loading error before Collection
+  readiness, a node `error` after it. While it keeps trying, it **reports an
+  error** (a failure reason) and **reports healthy**. A new sync run
+  **clears** a node `error`.
+- A Collection **crashes** when it can no longer serve reads or admit writes.
 
 Use `settled` for a promise that fulfilled or rejected. Use `complete` for named
 coverage, content, history, or a non-promise operation only when no stronger

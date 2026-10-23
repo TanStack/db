@@ -18,6 +18,7 @@ import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
+  CollectionDependent,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
   Subscription,
@@ -87,11 +88,19 @@ type CollectionSubscriptionOptions = {
   deferAcquisition?: boolean
   /** Called once when deferred acquisition resumes. */
   onResumeAcquisition?: () => void
+  /** The live query or Effect this subscription reads for. */
+  owner?: CollectionDependent
 }
 
 type TruncateReplayPublicationControl = Readonly<{
   start: () => void
   succeed: () => void
+  // The replay could not load every active demand again; a live query
+  // reports it on its node.
+  fail?: (error: Error) => void
+  // The live query still holds logical demand, even when no acquisition of
+  // it is left here, such as one whose load threw.
+  holdsDemand?: () => boolean
 }>
 
 type TruncatePublicationState = {
@@ -113,6 +122,12 @@ type SubsetDemand = {
   acquisition: SubsetAcquisitionRecord
   acquisitionState: `starting` | `active` | `detached`
   initialResult?: Deferred<void>
+  // A parked demand's wait in an open replay. An acquisition that replays
+  // it replaces the wait, which settles only with that replay.
+  parkedParticipant?: TruncateReplayParticipant
+  // The demands this one replaces for its owner: their replay failures no
+  // longer count once it loads (law 10: the latest load decides).
+  replaces?: Array<SubsetDemand>
 }
 
 type TruncateReplayAttempt = {
@@ -120,12 +135,17 @@ type TruncateReplayAttempt = {
   setupComplete: boolean
 }
 
+type TruncateReplayParticipant = {
+  demand: SubsetDemand
+  attempt: TruncateReplayAttempt
+}
+
 type TruncateReplayState = {
   syncRunGeneration: number
   publicationState: TruncatePublicationState
   /** Direct subscribers buffer the replacement here; delegated publication has no buffer. */
   privateRows: Map<string | number, object> | undefined
-  pending: Set<{ demand: SubsetDemand; attempt: TruncateReplayAttempt }>
+  pending: Set<TruncateReplayParticipant>
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
   failures: Map<SubsetDemand, Error>
@@ -197,6 +217,10 @@ export class CollectionSubscription
   // One replay state owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplayState: TruncateReplayState | undefined
+  // The reload that last retired the sync run started this subscription's
+  // replay; that reload's own truncate does not start another.
+  private reloadReplayed = false
+  private replacements = 0
   private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
     Error
@@ -204,6 +228,11 @@ export class CollectionSubscription
   private truncateReplacementPending = false
   private unsubscribed = false
   private defersAcquisition: boolean
+
+  /** @internal The live query or Effect this subscription reads for. */
+  public get owner(): CollectionSubscriptionOptions[`owner`] {
+    return this.options.owner
+  }
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -254,6 +283,14 @@ export class CollectionSubscription
     // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
     // We need to re-request all previously loaded subsets to repopulate the data.
     this.truncateCleanup = this.collection.on(`truncate`, () => {
+      // A reload that replays on-demand demand started its replay when it
+      // retired the run, and its own first-commit truncate is part of that
+      // replay. Every other truncate replays again.
+      const reloadTruncate = this.collection._state.isEmittingReloadTruncate()
+      if (reloadTruncate && this.reloadReplayed) {
+        this.reloadReplayed = false
+        return
+      }
       this.handleTruncate()
     })
     this.collectionCleanup = this.collection._onCleanupStart(() => {
@@ -302,14 +339,50 @@ export class CollectionSubscription
     }
   }
 
+  /**
+   * @internal A reload retired the sync run. Its demand detaches from the
+   * retired run. A live query's on-demand demand replays through the new run
+   * at once, as after a truncate, so a consumer of an aborted load follows
+   * that replay. Every other subscription keeps its rows published until the
+   * reload's first commit truncates them, and replays then.
+   */
+  public retireSyncRun(): void {
+    // A subscription that buffers a private replacement would publish it
+    // before the reload's truncate applies; it replays at that truncate.
+    this.reloadReplayed =
+      this.options.truncateReplayPublication !== undefined &&
+      this.replaysDemand() &&
+      this.subsetDemands.length > 0
+    // The replacement stays pending from the old replay to the new one, so
+    // nothing that runs during the detach sees a settled source.
+    this.handleCollectionCleanup(true, this.reloadReplayed)
+    if (this.reloadReplayed) this.handleTruncate()
+  }
+
+  /** Whether a truncate acquires this subscription's demand again. */
+  private replaysDemand(): boolean {
+    // Eager demand is satisfied by source readiness, even when the adapter
+    // happens to expose a loader. Deferred demand never acquired, so it
+    // acquires the replacement rows when acquisition resumes.
+    return (
+      this.collection.config.syncMode === `on-demand` && !this.defersAcquisition
+    )
+  }
+
   /** Detach logical demand from work owned by a discarded sync run. */
-  private handleCollectionCleanup(): void {
+  private handleCollectionCleanup(
+    keepWaitingCallers = false,
+    holdReplacement = false,
+  ): void {
     this.discardTruncateReplay()
+    this.truncateReplacementPending = holdReplacement
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
 
     for (const demand of [...this.subsetDemands]) {
-      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      if (!keepWaitingCallers || demand.acquisitionState === `starting`) {
+        demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      }
       cancelAcquisition(demand.acquisition)
       if (demand.acquisitionState === `starting`) {
         const index = this.subsetDemands.indexOf(demand)
@@ -338,6 +411,7 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `error` ||
+      this.collection.status === `crashed` ||
       (this.collection.config.syncMode === `on-demand` &&
         this.collection._sync.syncLoadSubsetFn === null)
     ) {
@@ -394,15 +468,10 @@ export class CollectionSubscription
    * authoritative replay succeeds.
    */
   private handleTruncate() {
-    // Eager demand is satisfied by source readiness, even when the adapter
-    // happens to expose a loader. Only on-demand demand reacquires a subset.
-    const reloadsSubsets =
-      this.collection.config.syncMode === `on-demand` &&
-      this.collection._sync.syncLoadSubsetFn !== null
-    // Deferred demand never acquired, so a truncate gives it nothing to
-    // reload; it acquires the replacement rows when acquisition resumes.
-    const demandsToReload =
-      reloadsSubsets && !this.defersAcquisition ? [...this.subsetDemands] : []
+    this.replacements++
+    // A reload's truncate can apply inside the new run's `sync()`, before it
+    // returns its loader; the requests below start after it has.
+    const demandsToReload = this.replaysDemand() ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
@@ -488,11 +557,18 @@ export class CollectionSubscription
         replayState.failed = true
       }
     }
-    if (demand.initialResult) {
-      void replayState.completion.promise.then(
-        demand.initialResult.resolve,
-        demand.initialResult.reject,
-      )
+    const waiting = demand.initialResult
+    const parked = demand.parkedParticipant
+    demand.parkedParticipant = undefined
+    if (parked && replayState.pending.delete(parked))
+      parked.attempt.pendingCount--
+    if (waiting) {
+      // A replay discarded by a later reload leaves the caller waiting for
+      // that reload's replay; cleanup rejects waiting callers itself.
+      void replayState.completion.promise.then(waiting.resolve, (error) => {
+        if (!(error instanceof LoadSubsetOperationAbortedError))
+          waiting.reject(error)
+      })
     }
 
     // Sequential handoff: retire the old acquisition lease while retaining its
@@ -561,7 +637,7 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
     result: LoadSubsetRequestResult,
-  ): void {
+  ): TruncateReplayParticipant | undefined {
     if (
       this.truncateReplayState !== replayState ||
       (replayState.currentAttempt !== attempt &&
@@ -569,7 +645,7 @@ export class CollectionSubscription
         attempt.pendingCount === 0) ||
       !(result instanceof Promise)
     ) {
-      return
+      return undefined
     }
 
     // An older attempt can still accept returning startup work while setup or
@@ -596,6 +672,7 @@ export class CollectionSubscription
         this.settleTruncateReplay(replayState, pending)
       },
     )
+    return pending
   }
 
   /** Stop obsolete logical demand from pinning a replay barrier. */
@@ -615,9 +692,17 @@ export class CollectionSubscription
   private checkTruncateReplayComplete(replayState: TruncateReplayState): void {
     if (this.truncateReplayState !== replayState) return
     if (replayState.pendingSetups > 0 || replayState.pending.size > 0) return
+    if (this.keepsFailedReplayOpen(replayState)) return
 
-    const activeFailure = [...replayState.failures].find(([demand]) =>
-      this.subsetDemands.includes(demand),
+    // A held replacement that loaded decides the demands it replaces.
+    const activeFailure = [...replayState.failures].find(
+      ([demand]) =>
+        this.subsetDemands.includes(demand) &&
+        !this.subsetDemands.some(
+          (replacement) =>
+            replacement.replaces?.includes(demand) &&
+            !replayState.failures.has(replacement),
+        ),
     )
     try {
       if (activeFailure) {
@@ -639,7 +724,10 @@ export class CollectionSubscription
     failure: Error,
   ): void {
     if (this.truncateReplayState !== replayState) return
+    // A later check of the same failed attempt reports nothing new.
+    const first = replayState.completion.isPending()
     replayState.completion.reject(failure)
+    if (first) this.options.truncateReplayPublication?.fail?.(failure)
     // Delegated publication already delivered its rows. Only a private buffer
     // returns the caller's pagination position to the public snapshot; the
     // private rows and their sent-key tracking stay together for a retry.
@@ -815,6 +903,11 @@ export class CollectionSubscription
     attempt.setupComplete = true
     replayState.pendingSetups--
     this.checkTruncateReplayComplete(replayState)
+  }
+
+  /** Changes each time a truncate or a reload replaces this subscription's loads. */
+  public get replacementCount(): number {
+    return this.replacements
   }
 
   public get hasPendingTruncateReplacement(): boolean {
@@ -1032,6 +1125,10 @@ export class CollectionSubscription
       },
       acquisitionState: `starting`,
     }
+    // A demand that starts during an open replay joins it, parked or not (law
+    // 9: a new demand joins the open replay).
+    const replayState = this.truncateReplayState
+    const replayAttempt = replayState?.currentAttempt
     if (
       this.collection.status === `cleaned-up` ||
       // A deferring subscription starts no acquisition attempt until it resumes.
@@ -1041,6 +1138,7 @@ export class CollectionSubscription
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&
         (this.collection.status === `error` ||
+          this.collection.status === `crashed` ||
           (this.collection.status !== `idle` &&
             this.collection._sync.syncLoadSubsetFn === null)))
     ) {
@@ -1056,12 +1154,17 @@ export class CollectionSubscription
         demand.initialResult = undefined
       }
       void initialResult.promise.then(finish, finish)
+      if (replayState && replayAttempt)
+        demand.parkedParticipant = this.trackTruncateReplayParticipant(
+          replayState,
+          replayAttempt,
+          demand,
+          initialResult.promise,
+        )
       return { demand, result: initialResult.promise, started: false }
     }
     const acquisition = this.createSubsetAcquisitionRecord(demand)
     demand.acquisition = acquisition
-    const replayState = this.truncateReplayState
-    const replayAttempt = replayState?.currentAttempt
     const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
@@ -1305,14 +1408,40 @@ export class CollectionSubscription
 
   /** Release one exact subset request while keeping the subscription alive. */
   releaseSnapshot(where: BasicExpression<boolean>): void {
-    const index = this.subsetDemands.findIndex(
-      (demand) =>
-        demand.requestOptions.where === where ||
-        this.requestedSubsetWhere.get(demand.requestOptions) === where,
+    const index = this.subsetDemands.findIndex((demand) =>
+      this.requestedWhere(demand, where),
     )
     if (index === -1) return
 
     this.releaseDemandAt(index)
+  }
+
+  /**
+   * @internal The snapshot for `where` replaces those for `replaced` for
+   * their owner, which releases them once it applies. Until then they keep
+   * their older work in the replay.
+   */
+  replaceSnapshots(
+    where: BasicExpression<boolean>,
+    replaced: Array<BasicExpression<boolean>>,
+  ): void {
+    const replacement = this.subsetDemands.find((demand) =>
+      this.requestedWhere(demand, where),
+    )
+    if (replacement)
+      replacement.replaces = this.subsetDemands.filter((demand) =>
+        replaced.some((other) => this.requestedWhere(demand, other)),
+      )
+  }
+
+  private requestedWhere(
+    demand: SubsetDemand,
+    where: BasicExpression<boolean>,
+  ): boolean {
+    return (
+      demand.requestOptions.where === where ||
+      this.requestedSubsetWhere.get(demand.requestOptions) === where
+    )
   }
 
   private releaseDemand(
@@ -1372,7 +1501,11 @@ export class CollectionSubscription
    */
   private retireEmptyReplay(): void {
     const replayState = this.truncateReplayState
-    if (this.subsetDemands.length !== 0 || !replayState) {
+    if (
+      this.subsetDemands.length !== 0 ||
+      !replayState ||
+      this.keepsFailedReplayOpen(replayState)
+    ) {
       return
     }
     if (replayState.privateRows && !replayState.failed) {
@@ -1383,6 +1516,20 @@ export class CollectionSubscription
     this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()
     this.options.truncateReplayPublication?.succeed()
+  }
+
+  /**
+   * A failed replay whose acquisitions are all gone loaded nothing more. While
+   * the live query still holds logical demand, it cannot succeed: it stays
+   * open with its error, and new demand joins it (law 9: replacing an
+   * acquisition does not release its owner).
+   */
+  private keepsFailedReplayOpen(replayState: TruncateReplayState): boolean {
+    return (
+      replayState.failed &&
+      this.subsetDemands.length === 0 &&
+      this.options.truncateReplayPublication?.holdsDemand?.() === true
+    )
   }
 
   /** Read source-derived ordered rows without starting demand. */

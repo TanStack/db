@@ -15,9 +15,9 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
@@ -56,18 +56,20 @@ export interface UseLiveInfiniteQueryReturn<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: ComputedRef<boolean>
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
+  isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  /** The data is shown, and a sync problem or failed request is in `health`. */
+  isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<InferResultType<TContext>[number]>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  error: ComputedRef<unknown>
+  health: ComputedRef<HealthNode | undefined>
 }
 
 export interface UseLiveInfiniteQueryReturnWithCollection<
@@ -81,18 +83,20 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: ComputedRef<boolean>
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
+  isCrashed: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  /** The data is shown, and a sync problem or failed request is in `health`. */
+  isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<TResult>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  error: ComputedRef<unknown>
+  health: ComputedRef<HealthNode | undefined>
 }
 
 /**
@@ -254,12 +258,11 @@ export function useLiveInfiniteQuery<
     status: computed(() => snapshot.value.status as CollectionStatus),
     isLoading: computed(() => snapshot.value.isLoading),
     isReady: computed(() => snapshot.value.isReady),
-    persistedStatus: computed(() => snapshot.value.persistedStatus),
-    isPersistedReady: computed(() => snapshot.value.isPersistedReady),
-    persistedError: computed(() => snapshot.value.persistedError),
     isIdle: computed(() => snapshot.value.isIdle),
-    isError: computed(() => snapshot.value.isError),
+    isLoadingError: computed(() => snapshot.value.isLoadingError),
+    isCrashed: computed(() => snapshot.value.isCrashed),
     isCleanedUp: computed(() => snapshot.value.isCleanedUp),
+    isSyncError: computed(() => snapshot.value.isSyncError),
     pages: computed(
       () =>
         snapshot.value.pages as Array<Array<InferResultType<TContext>[number]>>,
@@ -268,6 +271,6 @@ export function useLiveInfiniteQuery<
     fetchNextPage: () => fetchNextLiveQueryWindowPage(controller.value),
     hasNextPage: computed(() => snapshot.value.hasNextPage),
     isFetchingNextPage: computed(() => snapshot.value.isFetchingNextPage),
-    error: computed(() => snapshot.value.error),
+    health: computed(() => snapshot.value.health),
   }
 }

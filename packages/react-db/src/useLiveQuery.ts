@@ -28,11 +28,11 @@ import type {
   Context,
   DbClient,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -323,6 +323,21 @@ export function warnUnhashableDerivedIdentity(
   )
 }
 
+/** Status and error fields every `useLiveQuery` result has. */
+type UseLiveQueryFlags = {
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
+  isCrashed: boolean
+  isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed request is in `health`. */
+  isSyncError: boolean
+  health: HealthNode | undefined
+}
+
 /**
  * Create a live query using a query function.
  * @param queryFn - Query function that defines what data to fetch
@@ -379,12 +394,12 @@ export function warnUnhashableDerivedIdentity(
  *
  * @example
  * // Handle loading and error states
- * const { data, isLoading, isError, status } = useLiveQuery({
+ * const { data, isLoading, isLoadingError, status } = useLiveQuery({
  *   query: (q) => q.from({ todos: todoCollection })
  * })
  *
  * if (isLoading) return <div>Loading...</div>
- * if (isError) return <div>Error: {status}</div>
+ * if (isLoadingError) return <div>Error: {status}</div>
  *
  * return (
  *   <ul>
@@ -392,6 +407,7 @@ export function warnUnhashableDerivedIdentity(
  *   </ul>
  * )
  */
+
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
@@ -401,16 +417,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true if always returns QueryBuilder
-}
+} & UseLiveQueryFlags
 
 // Overload 2: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -423,16 +431,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-}
+} & UseLiveQueryFlags
 
 // Overload 3: Accept query function that can return LiveQueryCollectionConfig
 export function useLiveQuery<TContext extends Context>(
@@ -445,16 +445,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-}
+} & UseLiveQueryFlags
 
 // Overload 4: Accept query function that can return Collection
 export function useLiveQuery<
@@ -471,16 +463,8 @@ export function useLiveQuery<
   data: Array<TResult> | undefined
   collection: Collection<TResult, TKey, TUtils> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-}
+} & UseLiveQueryFlags
 
 // Overload 5: Accept query function that can return all types
 export function useLiveQuery<
@@ -507,16 +491,8 @@ export function useLiveQuery<
     | Collection<TResult, TKey, TUtils>
     | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-}
+} & UseLiveQueryFlags
 
 /**
  * Create a live query using configuration object
@@ -543,12 +519,12 @@ export function useLiveQuery<
  *
  * @example
  * // Handle all states uniformly
- * const { data, isLoading, isReady, isError } = useLiveQuery({
+ * const { data, isLoading, isReady, isLoadingError } = useLiveQuery({
  *   query: (q) => q.from({ items: itemCollection })
  * })
  *
  * if (isLoading) return <div>Loading...</div>
- * if (isError) return <div>Something went wrong</div>
+ * if (isLoadingError) return <div>Something went wrong</div>
  * if (!isReady) return <div>Preparing...</div>
  *
  * return <div>{data.length} items loaded</div>
@@ -561,16 +537,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled when query always returns a builder
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
-}
+} & UseLiveQueryFlags
 
 // Overload 7: Accept config object with a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -580,16 +548,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-}
+} & UseLiveQueryFlags
 
 // Overload 8: Accept config object with legacy deps
 export function useLiveQuery<TContext extends Context>(
@@ -600,16 +560,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled when query always returns a builder
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
-}
+} & UseLiveQueryFlags
 
 // Overload 9: Accept config object with legacy deps and a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -620,16 +572,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-}
+} & UseLiveQueryFlags
 
 /**
  * Subscribe to an existing live query collection
@@ -653,10 +597,10 @@ export function useLiveQuery<TContext extends Context>(
  *
  * @example
  * // Handle states consistently
- * const { data, isLoading, isError } = useLiveQuery(sharedCollection)
+ * const { data, isLoading, isLoadingError } = useLiveQuery(sharedCollection)
  *
  * if (isLoading) return <div>Loading...</div>
- * if (isError) return <div>Error loading data</div>
+ * if (isLoadingError) return <div>Error loading data</div>
  *
  * return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
  */
@@ -672,16 +616,8 @@ export function useLiveQuery<
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus // Can't be disabled for pre-created live query collections
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
-}
+} & UseLiveQueryFlags
 
 // Overload 10: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -695,16 +631,8 @@ export function useLiveQuery<
   data: TResult | undefined
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus // Can't be disabled for pre-created live query collections
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
-}
+} & UseLiveQueryFlags
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
@@ -969,10 +897,10 @@ function useLiveQueryImpl(
               collection,
             ),
           )
-          const removeErrorListener = collection.on(`status:error`, () => {
-            // Keep the failed collection through React's immediate retry so
-            // the hook can throw its actual load error to an ErrorBoundary.
-            // Retire it afterward so a later boundary reset starts fresh.
+          // Keep a failed or crashed collection through React's immediate
+          // retry so the hook can throw its actual error to an ErrorBoundary.
+          // Retire it afterward so a later boundary reset starts fresh.
+          const retireAfterRetry = () =>
             setTimeout(
               () =>
                 releaseSuspenseCollection(
@@ -982,12 +910,20 @@ function useLiveQueryImpl(
                 ),
               0,
             )
-          })
+          const removeErrorListener = collection.on(
+            `status:error`,
+            retireAfterRetry,
+          )
+          const removeCrashListener = collection.on(
+            `status:crashed`,
+            retireAfterRetry,
+          )
           const entry: SuspenseCollectionEntry = {
             collection,
             removeStatusListeners: () => {
               removeCleanupListener()
               removeErrorListener()
+              removeCrashListener()
             },
           }
           suspenseCollections.set(suspenseKey, entry)
@@ -1033,7 +969,7 @@ function useLiveQueryImpl(
     (instance.collection?.status === `idle` ||
       instance.collection?.status === `cleaned-up`)
   ) {
-    observer.preloadForInitialRender().catch(() => {})
+    observer.preload().catch(() => {})
   }
 
   // Stable subscribe bound to the current observer; the observer owns the

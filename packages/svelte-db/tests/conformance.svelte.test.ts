@@ -27,6 +27,8 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type {
   ConformanceResult,
@@ -104,27 +106,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-svelte-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-svelte-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 async function settle() {
@@ -143,10 +130,10 @@ function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
         state: query?.state,
         status: query?.status,
         isReady: query?.isReady,
-        persistedStatus: query?.persistedStatus,
-        isPersistedReady: query?.isPersistedReady,
-        persistedError: query?.persistedError,
-        isError: query?.isError,
+        isLoadingError: query?.isLoadingError,
+        isCrashed: query?.isCrashed,
+        isSyncError: query?.isSyncError,
+        health: query?.health,
         // svelte-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: query?.status !== `disabled`,
       })
@@ -225,6 +212,12 @@ const svelteDriver: LiveQueryDriver = {
       createCollection,
       `conformance-svelte-lagging-${sourceSeq++}`,
     ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-svelte-health-${sourceSeq++}`,
+      data,
+    ),
   makePrecreated,
   makeErrorSource,
   mount,
@@ -243,7 +236,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
   }
   const handle = makeHandle(
@@ -255,9 +250,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

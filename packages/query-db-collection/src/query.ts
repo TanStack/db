@@ -302,7 +302,8 @@ export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
-  TError = unknown,
+  // Kept so existing four-argument references still type-check.
+  _TError = unknown,
 > {
   // Keep this interface closed: extending UtilsRecord would make every
   // nonexistent adapter utility appear as `any`.
@@ -321,16 +322,8 @@ export interface QueryCollectionUtils<
   /** Execute direct writes as one atomic batch. Resolves when the sync commit applies. */
   writeBatch: (callback: () => void) => Promise<void>
 
-  // Query Observer State (getters)
-  /** Get the last error encountered by the query (if any); reset after a successful result applies */
-  lastError: TError | undefined
-  /** Check if the collection is in an error state */
-  isError: boolean
-  /**
-   * Get the number of consecutive sync failures.
-   * Incremented only when query fails completely (not per retry attempt); reset after a successful result applies.
-   */
-  errorCount: number
+  // Query Observer State (getters). Failures appear in `collection.health`
+  // and each live query's `health` tree.
   /** Check if query is currently fetching (initial or background) */
   isFetching: boolean
   /** Check if query is refetching in background (not initial fetch) */
@@ -345,24 +338,12 @@ export interface QueryCollectionUtils<
    * `idle` when every observer is idle or no observers exist.
    */
   fetchStatus: `fetching` | `paused` | `idle`
-
-  /**
-   * Refetch, retaining errors until a successful result applies. While a user
-   * mutation is persisting or its handler is active, this retains the Query
-   * fetch boundary so it cannot wait on publication blocked by that
-   * transaction.
-   * @returns Promise that resolves when the applicable refetch boundary completes
-   * @throws Error if the refetch fails
-   */
-  clearError: () => Promise<void>
 }
 
 /**
  * Internal state object for tracking query observer and errors
  */
 interface QueryCollectionState {
-  lastError: any
-  errorCount: number
   observers: Map<
     string,
     QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -425,23 +406,6 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
     this.writeDelete = writeUtils.writeDelete
     this.writeUpsert = writeUtils.writeUpsert
     this.writeBatch = writeUtils.writeBatch
-  }
-
-  public async clearError() {
-    await this.refetch({ throwOnError: true })
-  }
-
-  // Getters for error state
-  public get lastError() {
-    return this.state.lastError
-  }
-
-  public get isError() {
-    return !!this.state.lastError
-  }
-
-  public get errorCount() {
-    return this.state.errorCount
   }
 
   // Getters for QueryObserver state
@@ -831,8 +795,6 @@ export function queryCollectionOptions(
 
   /** State object to hold error tracking and observer reference */
   const state: QueryCollectionState = {
-    lastError: undefined as any,
-    errorCount: 0,
     observers: new Map<
       string,
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -1157,11 +1119,34 @@ export function queryCollectionOptions(
       write,
       commit,
       markReady,
-      markError,
+      fail,
+      reportError,
+      reportHealthy,
       invalidateLoadedSubsets,
       collection,
       metadata,
     } = params
+
+    // Readiness of this sync run. A reload calls `sync` again while the
+    // Collection still shows the previous run's status, so status cannot say
+    // whether this run has reached its first ready.
+    let runReady = false
+    let runFailed = false
+    const readyRun = () => {
+      if (runReady || runFailed) return
+      runReady = true
+      markReady()
+    }
+    // A failure before this run's first ready fails its load; after it, a
+    // failureReason, since TanStack Query fetches again.
+    const failBeforeReady = (error: unknown): boolean => {
+      if (runReady) return false
+      if (!runFailed) {
+        runFailed = true
+        fail(error)
+      }
+      return true
+    }
 
     /**
      * The LoadSubset contract: a sync adapter that refetches loaded subsets on
@@ -1290,8 +1275,32 @@ export function queryCollectionOptions(
     const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
     const retainedQueriesPendingRevalidation = new Set<string>()
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
-    let errorRevision = 0
+    // Per Query: a result application that started before that Query's
+    // latest failure does not establish its recovery.
+    const errorRevisions = new Map<string, number>()
+    const errorRevisionOf = (hashedQueryKey: string) =>
+      errorRevisions.get(hashedQueryKey) ?? 0
+    const bumpErrorRevision = (hashedQueryKey: string) => {
+      errorRevisions.set(hashedQueryKey, errorRevisionOf(hashedQueryKey) + 1)
+    }
     const failedResultApplications = new Map<string, unknown>()
+    // A failed fetch or result application after Collection readiness is a
+    // failureReason, since TanStack Query fetches again. It clears once no
+    // observed Query is failing.
+    // In failure order, so the latest failure still failing is last.
+    const failingQueries = new Map<string, unknown>()
+    const reportFailing = (hashedQueryKey: string, error: unknown) => {
+      failingQueries.delete(hashedQueryKey)
+      failingQueries.set(hashedQueryKey, error)
+      if (runReady) reportError(error)
+    }
+    const reportRecovered = (hashedQueryKey: string) => {
+      if (!failingQueries.delete(hashedQueryKey) || !runReady) return
+      // The node shows a Query that is still failing, or nothing.
+      const [stillFailing] = [...failingQueries.values()].slice(-1)
+      if (failingQueries.size > 0) reportError(stillFailing)
+      else reportHealthy()
+    }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,
       ExceptionalResultSettlement
@@ -2801,7 +2810,11 @@ export function queryCollectionOptions(
             if (unownedDirectWritePositions.get(key) === position)
               unownedDirectWritePositions.delete(key)
           })
-          if (!signal?.aborted) markReady()
+          if (!signal?.aborted) {
+            // A later successful refetch does not revive a failed initial
+            // load; only a reload does.
+            readyRun()
+          }
         }
         const accepted = whenSyncAccepted(applied)
         if (accepted === true) finishApplication()
@@ -2886,25 +2899,23 @@ export function queryCollectionOptions(
           if (finish()) {
             failedResultApplications.delete(hashedQueryKey)
             // Applying cached data during a fetch does not establish recovery.
-            if (!isFetching && applicationErrorRevision === errorRevision) {
-              state.lastError = undefined
-              state.errorCount = 0
+            if (
+              !isFetching &&
+              applicationErrorRevision === errorRevisionOf(hashedQueryKey)
+            ) {
+              reportRecovered(hashedQueryKey)
             }
           }
         },
         (error) => {
           if (!finish()) return
           failedResultApplications.set(hashedQueryKey, error)
-          state.lastError = error
-          state.errorCount++
-          errorRevision++
+          bumpErrorRevision(hashedQueryKey)
           console.error(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
-          if (collection.status === `loading`) {
-            markError(error)
-          }
+          if (!failBeforeReady(error)) reportFailing(hashedQueryKey, error)
         },
       )
     }
@@ -2918,7 +2929,7 @@ export function queryCollectionOptions(
       ) => true | Promise<void>,
     ): void => {
       invalidatePendingResultApplication(hashedQueryKey)
-      const currentErrorRevision = errorRevision
+      const currentErrorRevision = errorRevisionOf(hashedQueryKey)
       const controller: ResultApplicationController = new AbortController()
       let settleRefetchAtFetchBoundary = () => {}
       const fetchBoundary = new Promise<void>((resolve) => {
@@ -2943,9 +2954,11 @@ export function queryCollectionOptions(
           )
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
-          if (!result.isFetching && currentErrorRevision === errorRevision) {
-            state.lastError = undefined
-            state.errorCount = 0
+          if (
+            !result.isFetching &&
+            currentErrorRevision === errorRevisionOf(hashedQueryKey)
+          ) {
+            reportRecovered(hashedQueryKey)
           }
         }
         return
@@ -3262,9 +3275,7 @@ export function queryCollectionOptions(
             if (observedQuery) {
               observedErrorUpdates.set(observedQuery, result.errorUpdateCount)
             }
-            state.lastError = result.error
-            state.errorCount++
-            errorRevision++
+            bumpErrorRevision(hashedQueryKey)
           }
 
           console.error(
@@ -3274,10 +3285,11 @@ export function queryCollectionOptions(
 
           // A failure before the first successful snapshot leaves no usable
           // collection state. Later refetch failures keep the last ready
-          // snapshot available while utils expose the error.
-          if (collection.status === `loading`) {
-            markError(result.error)
-          }
+          // snapshot available and report a failureReason.
+          // A re-notified error is the same failure, so it is not reported
+          // again.
+          if (!failBeforeReady(result.error) && isNewError)
+            reportFailing(hashedQueryKey, result.error)
         }
       }
       return handleQueryResult
@@ -3384,15 +3396,11 @@ export function queryCollectionOptions(
       }
     } else {
       if (startupRetentionSettled) {
-        markReady()
+        readyRun()
       } else {
         // In on-demand mode, there is no initial query, but retained-placeholder
         // maintenance still needs to finish before the collection is treated as ready.
-        void startupRetentionMaintenancePromise.then(() => {
-          if (collection.status === `loading`) {
-            markReady()
-          }
-        })
+        void startupRetentionMaintenancePromise.then(readyRun)
       }
     }
 
@@ -3493,9 +3501,11 @@ export function queryCollectionOptions(
       else void applied.then(retireOwnership, () => undefined)
 
       state.observers.delete(hashedQueryKey)
+      reportRecovered(hashedQueryKey)
       if (query?.state.fetchStatus !== `fetching`)
         fetchStartGenerations.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
+      errorRevisions.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
       effectivePersistedGcTimes.delete(hashedQueryKey)
     }
@@ -3562,11 +3572,13 @@ export function queryCollectionOptions(
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         state.observers.delete(hashedQueryKey)
+        reportRecovered(hashedQueryKey)
         // Query Core may keep an empty-cache fetch alive without an observer.
         // A later lease can reuse that request, so keep its start position.
         if (observer?.getCurrentQuery().state.fetchStatus !== `fetching`)
           fetchStartGenerations.delete(hashedQueryKey)
         hashToQueryKey.delete(hashedQueryKey)
+        errorRevisions.delete(hashedQueryKey)
         queryRefCounts.set(hashedQueryKey, 0)
         return
       }

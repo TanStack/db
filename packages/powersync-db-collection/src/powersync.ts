@@ -325,7 +325,22 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const { begin, write, collection, commit, markReady, markError } = params
+      const { begin, write, collection, commit, reportError, reportHealthy } =
+        params
+      // Readiness of this sync run: a reload runs `sync` again while the
+      // Collection still shows the previous run's status.
+      let ready = false
+      let failed = false
+      const markReady = () => {
+        ready = true
+        params.markReady()
+      }
+      // A failure before this run's first ready fails its load, once.
+      const fail = (error: unknown) => {
+        if (failed) return
+        failed = true
+        params.fail(error)
+      }
       const abortController = new AbortController()
 
       let disposeTracking:
@@ -625,9 +640,7 @@ function createPowerSyncCollectionConfig<
             message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
           })
-          if (collection.status === `loading`) {
-            markError(error)
-          }
+          if (!ready) fail(error)
         })
 
         const invokeOnUnload = (): void | Promise<void> => {
@@ -733,6 +746,8 @@ function createPowerSyncCollectionConfig<
 
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
+        // Set while a failed rebuild may have left the source untracked.
+        let trackingOutage = false
         const reconcileTracking = async (): Promise<void> => {
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             const revision = trackingRevision
@@ -747,12 +762,11 @@ function createPowerSyncCollectionConfig<
               if (!isCurrent()) return
 
               const active = activeWhereExpressions()
-              // Tracking was absent during an error. Positive baseline rows
+              // Tracking was absent during an outage. Positive baseline rows
               // alone cannot reveal deletes or predicate exits from that gap.
-              const missing =
-                collection.status === `error`
-                  ? new Set(collection.keys())
-                  : undefined
+              const missing = trackingOutage
+                ? new Set(collection.keys())
+                : undefined
               if (active.length > 0) {
                 const combinedWhere =
                   active.length === 1
@@ -808,9 +822,12 @@ function createPowerSyncCollectionConfig<
             await Promise.all(appliedReceipts)
             if (isCurrent()) {
               reconciledTrackingRevision = revision
-              // Replacing the trigger alone is not recovery: its baseline
-              // writes must also be applied before the source is ready again.
-              if (collection.status === `error`) markReady()
+              // Replacing the trigger alone does not restore change tracking:
+              // its baseline writes must also apply before sync works again.
+              if (trackingOutage) {
+                trackingOutage = false
+                reportHealthy()
+              }
             }
           }
         }
@@ -821,9 +838,15 @@ function createPowerSyncCollectionConfig<
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             await (rebuildPromise ??= reconcileTracking()
               .catch((error) => {
-                // A rebuild may already have removed every active diff trigger.
-                // Do not leave healthy consumers ready against a stale source.
-                if (!stopped) markError(error)
+                // A rebuild may already have removed every active diff trigger,
+                // so rows can grow stale. Later demand rebuilds again, so after
+                // Collection readiness this is a failureReason, not fail().
+                if (stopped) {
+                  // Cleanup owns the outcome.
+                } else if (ready) {
+                  trackingOutage = true
+                  reportError(error)
+                } else fail(error)
                 throw error
               })
               .finally(() => {

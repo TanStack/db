@@ -181,6 +181,46 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
+  // Cleaning up one view ends that view only. A sibling built during a
+  // render, still inside its grace period to subscribe, keeps its rows and
+  // its partition, as its own live-query Collection would.
+  it(`keeps a built sibling's rows when another view is cleaned up`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `pooled-gc-sibling-${serial++}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: `a`, g: `x` },
+          { id: `b`, g: `y` },
+        ],
+      }),
+    )
+    const view = (g: string) =>
+      createPooledLiveQuery(
+        new Query()
+          .from({ r: source })
+          .where(({ r }: any) => eq(r.g, g)) as any,
+        { gcTime: 100 },
+      )!
+    const first = view(`x`)
+    const sibling = view(`y`)
+    const stop = createLiveQueryObserver(first, {
+      mode: `wholesale`,
+    }).subscribe(() => {})
+    // Read the sibling without subscribing: it stays inside its grace period.
+    const siblingRows = () => [
+      ...createLiveQueryObserver(sibling, { mode: `wholesale` })
+        .getSnapshot()
+        .state!.keys(),
+    ]
+    await vi.advanceTimersByTimeAsync(0)
+    expect(siblingRows()).toEqual([`b`])
+    stop()
+    await first.cleanup()
+    expect(siblingRows()).toEqual([`b`])
+    expect(source.subscriberCount).toBe(1)
+  })
+
   it(`keeps a newer partition when an older one releases again`, async () => {
     const source = makeSource()
     const mount = () => {
@@ -203,7 +243,7 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
-  it(`turns terminal when source cleanup starts, before it settles`, async () => {
+  it(`ends with its source's dependents, before the source's cleanup settles`, async () => {
     let release!: () => void
     const source = createCollection<Row, string | number>({
       id: `pooled-gc-${serial++}`,
@@ -234,10 +274,13 @@ describe(`pooled live query gcTime`, () => {
       createLiveQueryCollection({ query: query(source), startSync: true }),
     )
     await vi.advanceTimersByTimeAsync(1)
-    const cleanup = source.cleanup()
+    // Cleanup refuses while they read the source; with its dependents it
+    // ends both views like their live queries, before the adapter settles.
+    await expect(source.cleanup()).rejects.toThrow(/dependent/)
+    const cleanup = source.cleanup({ dependents: true })
     await vi.advanceTimersByTimeAsync(1)
-    expect(compiledView.observer.getSnapshot().status).toBe(`error`)
-    expect(pooledView.observer.getSnapshot().status).toBe(`error`)
+    expect(compiledView.observer.getSnapshot().status).toBe(`cleaned-up`)
+    expect(pooledView.observer.getSnapshot().status).toBe(`cleaned-up`)
     release()
     await cleanup
     pooledView.stop()

@@ -17,12 +17,6 @@ Defined in: [packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts:51](https://g
 data: InferResultType<TContext>;
 ```
 
-### error
-
-```ts
-error: unknown;
-```
-
 ### fetchNextPage()
 
 ```ts

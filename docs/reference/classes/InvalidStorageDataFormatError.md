@@ -3,7 +3,7 @@ id: InvalidStorageDataFormatError
 title: InvalidStorageDataFormatError
 ---
 
-Defined in: [packages/db/src/errors.ts:1023](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1023)
+Defined in: [packages/db/src/errors.ts:1053](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1053)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:1023](https://github.com/TanStack/db/blob
 new InvalidStorageDataFormatError(storageKey, key): InvalidStorageDataFormatError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1024](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1024)
+Defined in: [packages/db/src/errors.ts:1054](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1054)
 
 #### Parameters
 

@@ -547,7 +547,7 @@ async function runRejectedDurablePrefixWitness(
     subscriber!([secondMessage, upToDate])
     if (acceptedPrefix) {
       await atCheckpoint(rejectedAttempt.promise, `second durability rejection`)
-      await vi.waitFor(() => expect(collection.status).toBe(`error`))
+      await vi.waitFor(() => expect(collection.status).toBe(`crashed`))
       // A later source callback may arrive after the failed durability turn.
       // It cannot become part of the accepted prefix or start another write.
       subscriber!([change(`insert`, 3, `retired`), upToDate])
@@ -576,7 +576,7 @@ async function runRejectedDurablePrefixWitness(
     // A rejected durability boundary is terminal: it cannot retry, admit the
     // later source commit, or publish a resume claim for an undurable prefix.
     // Clearing the accepted prefix on a later rejection is also a wrong rule.
-    expect(statusAtTerminalCut).toBe(`error`)
+    expect(statusAtTerminalCut).toBe(`crashed`)
     expect(durableOffset).toBe(acceptedPrefix ? `21_0` : undefined)
     expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(acceptedRows))
   }, [() => collection.cleanup()])
@@ -1849,6 +1849,19 @@ type ProcessCommand =
   | { kind: `cleanup`; slot: ProcessSlot }
   | { kind: `restart`; slot: ProcessSlot }
 
+/**
+ * After Collection readiness, an Electric sync adapter that gives up reports a
+ * stopped sync: the Collection's `error`. Status and rows stay, and only a restart recovers; the
+ * reset resume state is what lets that restart refetch.
+ */
+function expectGaveUpAfterReadiness(
+  collection: Collection<OracleRow, string | number>,
+) {
+  expect(collection.status).toBe(`ready`)
+  expect(collection.health.failureReason).toBeNull()
+  expect(collection.health.error).toBeTruthy()
+}
+
 type ProcessRuntime = {
   collection: Collection<OracleRow, string | number>
   subscriber?: (messages: Array<Message<OracleRow>>) => void
@@ -1858,7 +1871,12 @@ type ProcessRuntime = {
   resumeAvailable: boolean
   requiresCompleteResume: boolean
   resettingSnapshot: boolean
+  // Electric reaches Collection readiness at its first up-to-date. Only a
+  // delivered snapshot or batch carries one, so the model records it there.
+  reachedReadiness: boolean
   terminalError: boolean
+  // A give-up after readiness is the Collection's `error`, not status `error`.
+  terminalAfterReadiness: boolean
   active: boolean
   retired: boolean
   preloads: Array<ObservedPreload>
@@ -2148,9 +2166,9 @@ async function runPersistenceFailureCrashOnlyWitness(
         publicationsBeforeRetiredWork,
       ),
     }).toEqual({
-      statusAtAdmissionCut: `error`,
+      statusAtAdmissionCut: `crashed`,
       publicErrorNameAtAdmissionCut: `PersistedCollectionDurabilityError`,
-      status: `error`,
+      status: `crashed`,
       publicErrorName: `PersistedCollectionDurabilityError`,
       hasNamedPersistenceSemantics: true,
       preservesCause: true,
@@ -2415,7 +2433,9 @@ async function runProcessGrammar(
       resumeAvailable: false,
       requiresCompleteResume: false,
       resettingSnapshot: false,
+      reachedReadiness: false,
       terminalError: false,
+      terminalAfterReadiness: false,
       active: false,
       retired: false,
       preloads: [],
@@ -2437,7 +2457,9 @@ async function runProcessGrammar(
     runtime.subscriber = subscriber
     runtime.requiresCompleteResume = runtime.resumeAvailable
     runtime.resettingSnapshot = false
+    runtime.reachedReadiness = false
     runtime.terminalError = false
+    runtime.terminalAfterReadiness = false
     runtime.active = true
     runtime.retired = false
   }
@@ -2449,7 +2471,11 @@ async function runProcessGrammar(
         : []
       expect(rowsFromCollection(runtime.collection)).toEqual(expected)
       if (runtime.terminalError) {
-        expect(runtime.collection.status).toBe(`error`)
+        if (runtime.terminalAfterReadiness) {
+          expectGaveUpAfterReadiness(runtime.collection)
+        } else {
+          expect(runtime.collection.status).toBe(`error`)
+        }
       }
       if (!runtime.active && runtime.retired) {
         expect(runtime.collection.status).toBe(`cleaned-up`)
@@ -2524,7 +2550,9 @@ async function runProcessGrammar(
       runtime.resumeAvailable = false
       runtime.requiresCompleteResume = false
       runtime.resettingSnapshot = false
+      runtime.reachedReadiness = false
       runtime.terminalError = false
+      runtime.terminalAfterReadiness = false
       return `cleaned up`
     }
     if (command.kind === `retired-callback`) {
@@ -2566,6 +2594,7 @@ async function runProcessGrammar(
       applyReferenceBatch(runtime.reference, messages)
       runtime.resettingSnapshot = false
       runtime.resumeAvailable = true
+      runtime.reachedReadiness = true
       return `delivered: snapshot`
     }
 
@@ -2595,6 +2624,7 @@ async function runProcessGrammar(
     runtime.subscriber(messages)
     if (invalidResume) {
       runtime.terminalError = true
+      runtime.terminalAfterReadiness = runtime.reachedReadiness
       runtime.resumeAvailable = false
       runtime.retiredSubscriber = runtime.subscriber
       return `delivered: invalid resume`
@@ -2602,6 +2632,7 @@ async function runProcessGrammar(
     applyReferenceBatch(runtime.reference, messages)
     runtime.resettingSnapshot = false
     runtime.resumeAvailable = true
+    runtime.reachedReadiness = true
     if (txidOutcome) {
       await expect(txidOutcome).resolves.toBe(true)
       runtime.seenTxids.add(command.txid)
@@ -4212,7 +4243,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             ])
             for (const batch of partition) trace.subscriber(batch)
 
-            expect(trace.collection.status).toBe(`error`)
+            expectGaveUpAfterReadiness(trace.collection)
             expect(trace.collection.get(id)).toEqual(
               expect.objectContaining({ stable: `stable-${id}` }),
             )
@@ -4306,7 +4337,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         trace.subscriber([change(`insert`, 1, `complete`), upToDate])
         for (const batch of partition) trace.subscriber(batch)
 
-        expect(trace.collection.status).toBe(`error`)
+        expectGaveUpAfterReadiness(trace.collection)
         expect(trace.collection.get(1)).toEqual(
           expect.objectContaining({ stable: `stable-1` }),
         )

@@ -13,7 +13,6 @@ import {
   eq,
   getStableValueHash,
   gt,
-  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { Component, StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -89,19 +88,6 @@ describe(`useLiveSuspenseQuery`, () => {
       getKey: (row) => row.id,
       sync: { sync: () => ({}) },
     })
-    Object.defineProperty(
-      source.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 60_000,
-          waitForInitialRender: waitForPersistedInitialRender,
-          getOrStartNetworkDeadline: () => Date.now() + 60_000,
-          getSnapshot: () => ({ status: `ready` }),
-          subscribe: () => () => {},
-        },
-      },
-    )
     const query = createLiveQueryCollection((q) => q.from({ person: source }))
     const failure = new Error(`query failed independently of its source`)
     const preload = vi.spyOn(query, `preload`).mockRejectedValue(failure)
@@ -155,19 +141,6 @@ describe(`useLiveSuspenseQuery`, () => {
           },
         },
       })
-      Object.defineProperty(
-        source.config,
-        Symbol.for(`@tanstack/db.persistedReadiness`),
-        {
-          value: {
-            networkTimeoutMs: 60_000,
-            waitForInitialRender: waitForPersistedInitialRender,
-            getOrStartNetworkDeadline: () => Date.now() + 60_000,
-            getSnapshot: () => ({ status: `ready` }),
-            subscribe: () => () => {},
-          },
-        },
-      )
       const query = createLiveQueryCollection((q) =>
         q.from({ person: source }).where(({ person }) => gt(person.age, 20)),
       )
@@ -308,19 +281,6 @@ describe(`useLiveSuspenseQuery`, () => {
       getKey: (row) => row.id,
       sync: { sync: () => ({}) },
     })
-    Object.defineProperty(
-      source.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 60_000,
-          waitForInitialRender: waitForPersistedInitialRender,
-          getOrStartNetworkDeadline: () => Date.now() + 60_000,
-          getSnapshot: () => ({ status: `ready` }),
-          subscribe: () => () => {},
-        },
-      },
-    )
     const query = createLiveQueryCollection((q) => q.from({ person: source }))
     const failure = new Error(`first query run failed`)
     const pendingRetry = new Promise<void>(() => {})
@@ -366,121 +326,6 @@ describe(`useLiveSuspenseQuery`, () => {
       await source.cleanup()
     }
   })
-
-  it.each([
-    {
-      name: `immediate persisted fallback`,
-      networkTimeoutMs: 0,
-      outcome: `pending`,
-    },
-    {
-      name: `persisted fallback after the deadline`,
-      networkTimeoutMs: 30,
-      outcome: `timeout`,
-    },
-    { name: `network readiness`, networkTimeoutMs: 60_000, outcome: `ready` },
-    {
-      name: `early network failure`,
-      networkTimeoutMs: 60_000,
-      outcome: `error`,
-    },
-  ] as const)(
-    `gates the first render: $name`,
-    async ({ networkTimeoutMs, outcome }) => {
-      let sync:
-        | {
-            begin: () => void
-            write: (row: Person) => void
-            commit: () => void
-            markReady: () => void
-            markError: (error: unknown) => void
-          }
-        | undefined
-      const source = createCollection<Person>({
-        id: `suspense-persisted-${outcome}`,
-        getKey: (row) => row.id,
-        sync: {
-          sync: ({ begin, write, commit, markReady, markError }) => {
-            sync = {
-              begin,
-              write: (row) => write({ type: `insert`, value: row }),
-              commit: () => {
-                commit()
-              },
-              markReady,
-              markError,
-            }
-            return {}
-          },
-        },
-      })
-      let persistedStatus: `loading` | `ready` = `loading`
-      let networkDeadlineAt: number | undefined
-      const listeners = new Set<() => void>()
-      Object.defineProperty(
-        source.config,
-        Symbol.for(`@tanstack/db.persistedReadiness`),
-        {
-          value: {
-            networkTimeoutMs,
-            waitForInitialRender: waitForPersistedInitialRender,
-            getOrStartNetworkDeadline: () =>
-              (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
-            getSnapshot: () => ({ status: persistedStatus }),
-            subscribe: (listener: () => void) => {
-              listeners.add(listener)
-              return () => listeners.delete(listener)
-            },
-          },
-        },
-      )
-      let cleanupQuery: (() => Promise<void>) | undefined
-
-      function LocalPerson() {
-        const result = useLiveSuspenseQuery((q) => q.from({ person: source }))
-        cleanupQuery = () => result.collection.cleanup()
-        const { data } = result
-        return <div>{data[0]?.name}</div>
-      }
-      const statusView = renderHook(() => useLiveQuery(source))
-      const view = renderComponent(
-        <Suspense fallback={<div>Waiting for network</div>}>
-          <LocalPerson />
-        </Suspense>,
-      )
-      try {
-        expect(view.getByText(`Waiting for network`)).toBeTruthy()
-        await waitFor(() => expect(sync).toBeDefined())
-        await act(() => {
-          sync!.begin()
-          sync!.write(initialPersons[0]!)
-          sync!.commit()
-          persistedStatus = `ready`
-          for (const listener of listeners) listener()
-        })
-        await waitFor(() =>
-          expect(statusView.result.current.persistedStatus).toBe(`ready`),
-        )
-        if (outcome === `pending` || outcome === `timeout`) {
-          await waitFor(() => expect(view.getByText(`John Doe`)).toBeTruthy())
-          expect(source.status).toBe(`loading`)
-        } else {
-          expect(view.getByText(`Waiting for network`)).toBeTruthy()
-          await act(() => {
-            if (outcome === `ready`) sync!.markReady()
-            else sync!.markError(new Error(`network failed`))
-          })
-          await waitFor(() => expect(view.getByText(`John Doe`)).toBeTruthy())
-          expect(source.status).toBe(outcome)
-        }
-      } finally {
-        view.unmount()
-        statusView.unmount()
-        await cleanupQuery?.()
-        await source.cleanup()
-      }
-    },
-  )
 
   it(`renders a streamed query snapshot until browser sync is authoritative`, async () => {
     let resolveServerLoad!: () => void

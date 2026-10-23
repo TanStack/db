@@ -2186,7 +2186,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     expect(() => collection.subscribeChanges(() => {})).toThrow(failure)
     expect(collection.subscriberCount).toBe(0)
-    expect(collection.status).toBe(`error`)
+    expect(collection.status).toBe(`crashed`)
   })
 
   it(`preserves setup failure when subscription cleanup also throws`, async () => {
@@ -2928,7 +2928,7 @@ describe(`Virtual properties`, () => {
     expect(liveRow.$collectionId).toBe(`virtual-props-source`)
 
     liveSub.unsubscribe()
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
     await live.cleanup()
   })
 
@@ -2979,7 +2979,7 @@ describe(`Virtual properties`, () => {
     ).toBe(false)
 
     liveSub.unsubscribe()
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
     await syncedOnly.cleanup()
   })
 
@@ -3051,7 +3051,7 @@ describe(`Virtual properties`, () => {
     expect(groupRow!.$collectionId).toBe(`virtual-props-aggregate-source`)
 
     persistInsert()
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
     await grouped.cleanup()
   })
 

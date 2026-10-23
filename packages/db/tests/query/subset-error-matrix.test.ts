@@ -357,7 +357,16 @@ describe(`loadSubset failure matrix`, () => {
             expect(() => triggerFailure()).not.toThrow()
             await flushFailures()
 
-            expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
+            // After the first ready, a failed lazy request is a request error
+            // on the live query's node; the query keeps its status and rows.
+            expect(live.status).toBe(`ready`)
+            if (path === `lazy`) {
+              expect(live.health).toMatchObject({
+                hasErrors: true,
+                failureReason: null,
+                error: expect.anything(),
+              })
+            }
             if (failureValue === `error`) {
               expect(live.utils.lastSubsetError).toBe(error)
             } else {

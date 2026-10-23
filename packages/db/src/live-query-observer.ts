@@ -6,55 +6,11 @@ import {
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
-import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
-import type { PersistedReadinessSource } from './persisted-readiness.js'
-import type { ChangeMessage, CollectionStatus } from './types.js'
+import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
 
-export type LiveQueryPersistedStatus =
-  `unavailable` | `loading` | `ready` | `error`
-
-// React may discard an uncommitted Suspense render and construct a new observer
-// on retry. The Collection survives that retry; its initial-render preload
-// must remain observable without treating source readiness as query readiness.
-const INITIAL_RENDER_PRELOADS = new WeakSet<Collection<any, any, any>>()
-
-const NO_PERSISTED_READINESS = {
-  status: `unavailable`,
-  error: undefined,
-} as const
 const noop = () => {}
-
-interface PersistedSourceEntry {
-  collection: Collection<any, any, any>
-  readiness: PersistedReadinessSource
-}
-
-function collectPersistedReadinessSources(
-  root: Collection<any, any, any>,
-): ReadonlyArray<PersistedSourceEntry> | undefined {
-  // A few integrations provide Collection-compatible objects without config.
-  if (!(root as { config?: unknown }).config) return undefined
-  const seen = new Set<Collection<any, any, any>>()
-  const sources: Array<PersistedSourceEntry> = []
-  const visit = (collection: Collection<any, any, any>): boolean => {
-    if (seen.has(collection)) return true
-    seen.add(collection)
-    // A few integrations provide Collection-compatible objects without config.
-    const config = (collection as { config?: typeof collection.config }).config
-    if (!config) return false
-    const builder = getBuilderFromConfig(config)
-    if (builder) {
-      return builder.getSourceCollections().every(visit)
-    }
-    const source = getPersistedReadinessSource(config)
-    if (!source) return false
-    sources.push({ collection, readiness: source })
-    return true
-  }
-  return visit(root) && sources.length > 0 ? sources : undefined
-}
 
 /**
  * The canonical, adapter-agnostic view of a live query at a point in time.
@@ -88,14 +44,24 @@ export interface LiveQuerySnapshot<
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
-  /** Persisted restore is separate from upstream/Collection readiness. */
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
+  isCrashed: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  /**
+   * The data is shown, and something keeps it from staying current: a sync
+   * problem or a failed request somewhere in `health`.
+   */
+  isSyncError: boolean
+  /**
+   * The health tree for the query and every Collection it depends on, or
+   * `undefined` for a disabled query. After the first ready, a source
+   * problem shows here and the data stays.
+   */
+  health: HealthNode | undefined
 }
 
 /**
@@ -138,10 +104,6 @@ export interface LiveQueryObserver<
   subscribe: (listener: LiveQueryObserverListener<T, TKey>) => () => void
   /** Resolve once the collection has loaded its first data. */
   preload: () => Promise<void>
-  /** Resolve at network readiness or a permitted persisted fallback. */
-  preloadForInitialRender: () => Promise<void>
-  /** Whether a persisted fallback has already passed the network-first gate. */
-  isInitialRenderReady: () => boolean
   /** The transport or preload error for this query, if it has not produced data. */
   getError: () => unknown
   /** Capture the ordered query result without serializing its source collections. */
@@ -178,13 +140,13 @@ const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   status: `disabled`,
   isLoading: false,
   isReady: true,
-  persistedStatus: `unavailable`,
-  isPersistedReady: false,
-  persistedError: undefined,
   isIdle: false,
-  isError: false,
+  isLoadingError: false,
+  isCrashed: false,
   isCleanedUp: false,
   isEnabled: false,
+  isSyncError: false,
+  health: undefined,
 }
 
 class LiveQueryObserverImpl<
@@ -195,14 +157,15 @@ class LiveQueryObserverImpl<
   private readonly wholesale: boolean
   private readonly client: DbClient | undefined
   private readonly queryHash: string | undefined
-  private readonly persistedSources:
-    ReadonlyArray<PersistedSourceEntry> | undefined
   private readonly onPreload: (() => void) | undefined
   private visibleStatus: CollectionStatus | undefined
   private cachedEntries: Array<[TKey, T]> | undefined
   private cachedCollectionRevision: number | undefined
   private cachedCollectionLayoutRevision: number | undefined
   private snapshotDirty = true
+  // While attached, the tree from the last status or health change. Every
+  // tree change is announced, so a snapshot reuses it instead of rebuilding.
+  private publishedHealth: { tree: HealthNode | undefined } | undefined
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
   private lastLayoutKeys: Array<TKey> | undefined
@@ -228,9 +191,6 @@ class LiveQueryObserverImpl<
   private liveResultIsAuthoritative = false
   private handoffScheduled = false
   private preloadPromise: Promise<void> | undefined
-  private initialRenderPromise: Promise<void> | undefined
-  private initialRenderReady = false
-  private cancelInitialRenderWait: (() => void) | undefined
   private disposed = false
 
   // Sync activation belongs to the first subscription (attach), so building
@@ -248,9 +208,6 @@ class LiveQueryObserverImpl<
     this.wholesale = wholesale
     this.client = client
     this.queryHash = queryHash
-    this.persistedSources = collection
-      ? collectPersistedReadinessSources(collection)
-      : undefined
     this.onPreload = onPreload
     this.registerClientResource()
   }
@@ -261,18 +218,6 @@ class LiveQueryObserverImpl<
 
     this.syncHydrationState()
     if (!this.attached) this.refreshDetachedState(collection)
-
-    const local = this.readPersistedReadiness()
-    const persistedStatus =
-      this.hasHydrationSeed() && local.status === `ready`
-        ? `loading`
-        : local.status
-    if (
-      this.cachedSnapshot.persistedStatus !== persistedStatus ||
-      this.cachedSnapshot.persistedError !== local.error
-    ) {
-      this.snapshotDirty = true
-    }
 
     if (this.snapshotDirty) {
       const entries = this.getVisibleEntries(collection)
@@ -309,6 +254,9 @@ class LiveQueryObserverImpl<
         this.layoutRevision++
       }
 
+      const health = this.publishedHealth
+        ? this.publishedHealth.tree
+        : (collection as { health?: HealthNode }).health
       // Most consumers read only `data`; build the keyed view on first read.
       let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
@@ -320,10 +268,9 @@ class LiveQueryObserverImpl<
         layoutRevision: this.layoutRevision,
         status,
         ...getLiveQueryStatusFlags(status),
-        persistedStatus,
-        isPersistedReady: persistedStatus === `ready`,
-        persistedError: local.error,
         isEnabled: true,
+        isSyncError: status === `ready` && health?.hasErrors === true,
+        health,
       }
       this.snapshotDirty = false
     }
@@ -357,29 +304,6 @@ class LiveQueryObserverImpl<
 
   private hasHydrationSeed(): boolean {
     return this.hydrationSeed !== undefined && !this.liveResultIsAuthoritative
-  }
-
-  private readPersistedReadiness(): {
-    status: LiveQueryPersistedStatus
-    error: unknown | undefined
-  } {
-    const sources = this.persistedSources
-    if (!sources) return NO_PERSISTED_READINESS
-    let loading = false
-    let error: unknown | undefined
-    let failed = false
-    for (const source of sources) {
-      const snapshot = source.readiness.getSnapshot()
-      if (snapshot.status === `error` && !failed) {
-        error = snapshot.error
-        failed = true
-      } else if (snapshot.status === `loading`) {
-        loading = true
-      }
-    }
-    return failed
-      ? { status: `error`, error }
-      : { status: loading ? `loading` : `ready`, error: undefined }
   }
 
   private getVisibleEntries(
@@ -508,8 +432,7 @@ class LiveQueryObserverImpl<
         !this.attached ||
         !collection ||
         !this.hasHydrationSeed() ||
-        (collection.status !== `ready` &&
-          this.readPersistedReadiness().status !== `ready`) ||
+        collection.status !== `ready` ||
         collection.isLoadingSubset
       ) {
         return
@@ -751,9 +674,23 @@ class LiveQueryObserverImpl<
     // any status change publishes a synthetic notify so consumers re-read the
     // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
     // detached attachment leaves nothing behind.
-    const statusUnsub = collection.on(`status:change`, ({ status }) =>
-      notify(undefined, status),
-    )
+    // A health change below the query changes its health tree, not its rows.
+    // Each status change is followed by a health change; tree identity
+    // tells whether the health change has anything left to publish.
+    const healthOf = () => (collection as { health?: HealthNode }).health
+    this.publishedHealth = { tree: healthOf() }
+    const statusUnsub = collection.on(`status:change`, ({ status }) => {
+      this.publishedHealth = { tree: healthOf() }
+      notify(undefined, status)
+    })
+    const healthUnsub = collection.on(`health:change`, () => {
+      const health = healthOf()
+      if (health === this.publishedHealth?.tree) return
+      this.publishedHealth = { tree: health }
+      // No rows or status changed, so only this marks the snapshot stale.
+      this.snapshotDirty = true
+      notify(undefined, collection.status)
+    })
     const subscribeLayoutChanges = (
       collection as Collection<T, TKey, any> & {
         _subscribeLayoutChanges?: (listener: () => void) => () => void
@@ -765,20 +702,6 @@ class LiveQueryObserverImpl<
             notify([], collection.status, true),
           )
         : noop
-    const persistedUnsubs = this.persistedSources?.map((source) =>
-      source.readiness.subscribe(() => {
-        if (this.disposed || this.subscriptions.size === 0) return
-        this.snapshotDirty = true
-        if (
-          this.hasHydrationSeed() &&
-          this.readPersistedReadiness().status === `ready`
-        ) {
-          this.scheduleHydrationHandoff()
-        } else {
-          this.emit(undefined)
-        }
-      }),
-    )
 
     // `subscribeChanges` delivers the initial state synchronously, so a
     // listener can dispose the observer while the collection subscription is
@@ -807,10 +730,11 @@ class LiveQueryObserverImpl<
           })
         : noop
     const release = () => {
+      this.publishedHealth = undefined
       clientUnsub()
       statusUnsub()
+      healthUnsub()
       layoutUnsub()
-      persistedUnsubs?.forEach((unsubscribe) => unsubscribe())
       subscription?.unsubscribe()
     }
     this.collectionUnsub = release
@@ -845,12 +769,7 @@ class LiveQueryObserverImpl<
     }
     if (this.hasHydrationSeed()) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
-      if (
-        collection.status === `ready` ||
-        this.readPersistedReadiness().status === `ready`
-      ) {
-        this.scheduleHydrationHandoff()
-      }
+      if (collection.status === `ready`) this.scheduleHydrationHandoff()
     }
   }
 
@@ -880,7 +799,7 @@ class LiveQueryObserverImpl<
       async () => {
         const collection = this.collection
         this.dispose()
-        await collection?.cleanup()
+        await collection?.cleanup({ dependents: true })
       },
     )
   }
@@ -1015,79 +934,9 @@ class LiveQueryObserverImpl<
     return preloadPromise
   }
 
-  isInitialRenderReady(): boolean {
-    if (this.initialRenderReady) return true
-    const collection = this.collection
-    const sources = this.persistedSources
-    if (
-      !collection ||
-      !INITIAL_RENDER_PRELOADS.has(collection) ||
-      !sources ||
-      this.readPersistedReadiness().status !== `ready`
-    ) {
-      return false
-    }
-    const sourceFailed = sources.some(
-      (source) => source.collection.status === `error`,
-    )
-    if (collection.status === `error`) return sourceFailed
-    const clientQuery =
-      this.client && this.queryHash
-        ? this.client._getLiveQuery(this.queryHash)
-        : undefined
-    if (clientQuery?.status === `error`) return true
-    return sources.every(
-      (source) => Date.now() >= source.readiness.getOrStartNetworkDeadline(),
-    )
-  }
-
-  preloadForInitialRender(): Promise<void> {
-    if (this.disposed)
-      return Promise.reject(new LiveQueryObserverDisposedError())
-    const sources = this.persistedSources
-    if (!sources) return this.preload()
-    if (this.initialRenderReady) return Promise.resolve()
-    if (this.initialRenderPromise) return this.initialRenderPromise
-
-    const network = this.preload()
-    const currentClientQuery = () =>
-      this.client && this.queryHash
-        ? this.client._getLiveQuery(this.queryHash)
-        : undefined
-    if (this.collection) INITIAL_RENDER_PRELOADS.add(this.collection)
-
-    // The persistence adapter supplies the network-first wait with its
-    // readiness, so an app with no persisted source does not ship it.
-    const { promise: initialRender, cancel } =
-      sources[0]!.readiness.waitForInitialRender({
-        sources,
-        network,
-        clientQuery: currentClientQuery(),
-        currentClientQuery,
-        collectionStatus: () => this.collection?.status,
-        readPersisted: () => this.readPersistedReadiness(),
-        onReady: () => {
-          this.initialRenderReady = true
-        },
-      })
-    this.cancelInitialRenderWait = cancel
-    const promise = initialRender.finally(() => {
-      if (this.cancelInitialRenderWait === cancel) {
-        this.cancelInitialRenderWait = undefined
-      }
-      if (this.initialRenderPromise === promise) {
-        this.initialRenderPromise = undefined
-      }
-    })
-    this.initialRenderPromise = promise
-    return promise
-  }
-
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    this.cancelInitialRenderWait?.()
-    this.cancelInitialRenderWait = undefined
     this.detach()
     for (const subRecord of this.subscriptions) subRecord.active = false
     this.subscriptions.clear()

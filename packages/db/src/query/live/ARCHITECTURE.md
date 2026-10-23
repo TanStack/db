@@ -782,10 +782,18 @@ source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
 
+Public cleanup first checks admission. `cleanup()` rejects with
+`CollectionHasSubscribersError` while a live query or Effect reads the
+Collection; `cleanup({ dependents: true })` first cleans up each such live query,
+with its own dependents, and disposes each such Effect. A pooled live query
+counts as one live-query dependent per equality partition. A direct
+subscription is not refused. `collection.subscribers` lists all three kinds.
+Internal teardown, such as a retiring Collection facade, bypasses admission.
+
 Collection cleanup has two boundaries. Cleanup start is an internal synchronous
 boundary. It closes restart admission, invalidates the current sync run, detaches
-its demand, puts dependent live queries in terminal error, and marks dependent
-Effects disposed. Both dependent transitions happen before adapter cleanup
+its demand, crashes dependent live queries, and marks dependent Effects
+disposed. Both dependent transitions happen before adapter cleanup
 settles. This prevents either dependent from using work that belongs to the
 discarded sync run. The Effect becomes disposed and releases its source
 subscription synchronously. Its disposal promise may still wait for in-flight
@@ -823,23 +831,26 @@ fresh private publication barrier. Settlements from the old sync run cannot
 publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
-a dependent live query. Manually cleaning up a source puts its live queries in
-a terminal error state. Restarting that source alone does not revive their
+a dependent live query. Public cleanup refuses while a live query reads the
+source; internal teardown that bypasses admission crashes its live
+queries. Restarting that source alone does not revive their
 graphs or publish replacement results; callers must restart or recreate the
 live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
-the adapter has installed a loader. `markReady()` in the same sync run resumes that
-demand; releasing it before recovery creates no physical acquisition or unload.
-Queued reacquisition must not retry a failed attempt merely because both
-loading and ready notifications scheduled it.
+the adapter has installed a loader. The error is final for its sync run:
+`markReady()` in the same sync run is a contract violation and throws, and
+only a restart, which begins a new sync run, acquires that demand. Releasing it
+before the restart creates no physical acquisition or unload. Queued
+reacquisition must not retry a failed attempt merely because both loading and
+ready notifications scheduled it.
 
 Requests waiting for a loader report one pending promise synchronously through
 `onLoadSubsetResult`, including requests made during initial error or after
 cleanup. The callback is not delayed until acquisition: query callers capture
 its result before the snapshot request returns. This promise waits for the
-recovery's publication barrier, not just adapter return. Failure rejects it with
+restart's publication barrier, not just adapter return. Failure rejects it with
 the replay error; release, external abort, unsubscribe, or another cleanup
 rejects it with `AbortError`. Later transport settlement cannot change that
 outcome. Cleanup may retain logical demand for the next sync run, but it does
@@ -1416,7 +1427,10 @@ snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
 replacement. Replay failure is scoped to the logical demand that failed. If
 that demand retires, its failure cannot poison a successful replacement for the
-remaining demand. If the last logical demand retires, the now-unreachable source
+remaining demand. A demand change is one step: the demand it starts and the
+demand it retires count together, so a change that asks for data again does not
+retire the last logical demand, and its new demand joins the open replay. If the
+last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
 graph; unrelated parent or sibling changes may then publish. A direct
 subscriber's replay whose current attempt has not failed instead publishes the
@@ -1475,12 +1489,14 @@ Every consumer of initial readiness uses the same rule:
 `sourcePermitsInitialReadiness()` in `utils.ts` holds it. Framework adapters
 derive `isReady` and Suspense release from live-query readiness, so they
 release together. A read that waits for readiness, such as `queryOnce`,
-resolves at the same point. An Effect with `skipInitial` ends its initial
-suppression there too. Its initial subset loads and lazy demand hold
-suppression until they settle. An obsolete or aborted initial load releases its
-hold, and a truncate replacement takes the hold over. Neither can keep
-suppression open or close it for good. A real load failure disposes the
-Effect.
+resolves at the same point. Every Effect passes its gate there too, with or
+without `skipInitial`: its initial subset loads and lazy demand hold the gate
+until they settle. `skipInitial` only decides whether the initial rows are
+delivered, so with it the gate also ends initial suppression. An obsolete or
+aborted initial load releases its hold, and a truncate replacement takes the
+hold over. Neither can keep the gate open or close it for good. A real load
+failure before the gate disposes the Effect; after the gate, a source problem
+is health tree detail, delivered through `onHealthChange`.
 
 Two limits remain. Before an on-demand source completes a full sync, a ready
 query can hold rows that the source does not yet update. The source contract,
@@ -1638,8 +1654,8 @@ full acquisition cannot abort work still owned by those narrower acquisitions.
 ### Pooled live queries
 
 A framework adapter may serve a live query from an equality partition instead
-of this graph. That applies only when the query reads one eager,
-non-persisted source Collection, its `where` has at least one
+of this graph. That applies only when the query reads one eager
+source Collection, its `where` has at least one
 `eq(field, literal)` conjunct, every other conjunct reads only that row's own fields, any `orderBy` reads
 only that row's own fields without a custom string comparator, and it has no
 other clause, `limit`, `offset`, `DbClient`, or Suspense key. Such a
@@ -1650,8 +1666,11 @@ the compiler's comparator and break ties by key
 (`packages/db/src/query/pooled-live-query.ts`). It builds its live-query
 Collection only when the application reads it.
 
-A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. When its source
-starts cleanup, it enters the same terminal error and keeps its last rows.
+A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. Its
+partition is one live-query dependent of the source: cleanup with dependents
+ends it like a live-query Collection, `cleaned-up` with no rows, and cleaning
+up a view releases an idle partition at once. Internal teardown that starts
+source cleanup under it crashes it the same way and keeps its last rows.
 The pooled live query oracle compares the two over generated histories.
 
 ### Physical planning and work
@@ -1722,7 +1741,8 @@ every row before the top-K (a recorded limit).
    started by its active replay demands settles; failure keeps the prior public
    result and later partial source changes private until an authoritative replay
    succeeds. A failed replay with no remaining logical demand cannot gate other
-   graph work.
+   graph work. A demand change counts as one step, so a change that asks for
+   data again leaves the replay its new demand.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered and every eager source is ready; obsolete demand does not block
     it, and an on-demand source's own Collection readiness does not gate it.
@@ -1736,9 +1756,11 @@ every row before the top-K (a recorded limit).
     materialization cells, visible rows, the current private replay state, and
     required Collection facades—not with settled historical replay attempts or
     raw delta history.
-14. **Cleanup:** cleanup start synchronously closes restart admission, puts
-    dependent live queries in terminal error, and marks dependent Effects
-    disposed. The source Collection keeps its prior status until adapter cleanup
+14. **Cleanup:** public cleanup rejects while a live query or Effect reads the
+    Collection, and with `{ dependents: true }` it ends those dependents
+    first; a direct subscription survives cleanup. Cleanup start
+    synchronously closes restart admission, crashes any dependent live query
+    left by internal teardown, and marks dependent Effects disposed. The source Collection keeps its prior status until adapter cleanup
     settles; only then does it publish `cleaned-up` and settle its cleanup
     promise.
 15. **Deferred acquisition:** a live-query Collection or pooled live query
@@ -1750,6 +1772,64 @@ every row before the top-K (a recorded limit).
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
+16. **Status and the health tree:** status says whether the data can be
+    shown; the health tree says whether it is still kept current. A sync run's
+    failed first load (`fail()` before Collection readiness) is status
+    `error` and is final for that sync run. A crash (IndexedDB closure, a
+    terminal local persistence failure, a throwing sync function, or an
+    internal invariant failure) is status `crashed` from any active status.
+    Nothing recovers it in place; only cleanup, which discards all state,
+    leaves it. A live query takes its sources'
+    worst status until its initial-query readiness (`crashed` over `error`
+    over `loading`). After it, only `crashed` propagates: a query cannot keep
+    serving rows from a Collection that cannot serve reads. Every other
+    problem after initial-query readiness, including an on-demand source
+    whose own first load fails then, leaves the query's status and rows
+    alone and shows on the node that owns it. A source's `reportError()` is
+    its node's `failureReason`, which `reportHealthy()` clears; its `fail()`
+    after Collection readiness is its node's `error`, which stays for the
+    sync run, and every later report from that sync adapter throws. A lazy
+    load or a root Collection's load that fails after initial-query readiness
+    is an `error` on the query's own node. A lazy demand's error clears when
+    that demand settles or is released; a root Collection's error clears when
+    a later load of that Collection settles. A source reload starts a live
+    query's replay when it retires the sync run, as a truncate does. A
+    direct subscriber or an Effect keeps its rows until the reload's first
+    commit truncates them, and replays then. The replay decides every load
+    it replaces: a replaced load's own outcome decides
+    nothing, even when it settles after the replay. A load that fails while
+    the replay is in flight fails with its own error once the replay
+    settles. A lazy demand's error clears as soon as a later load of its
+    failed key succeeds, without waiting for its other loads. The replay loads
+    the query's demand again as one unit: the query's first load waits for
+    the whole replay, the replay fails only for a demand the query still
+    holds when it settles, and its success clears only the errors of demands
+    it loaded again. A load that threw holds no demand, so a replay does not
+    load it again and its error stays. Query failures and contract
+    violations, such as a graph failure or a Collection cleaned up under the
+    query, crash the query. An Effect follows the same rules, with its
+    initial-query readiness at its settled initial loads: a crashed source,
+    a source whose first load fails before that readiness, or a failed load
+    it needs ends it through `onSourceError`, because its incremental result
+    can no longer be complete. An Effect has no request errors; after that
+    readiness, a source's sync problem is health tree detail delivered through
+    `onHealthChange`, while the Effect keeps running.
+17. **Health tree:** a Collection's `health` is one node; a live query's has
+    one node for itself and one per source alias in query order, recursing
+    through nested live queries. A node shows at most one problem:
+    `failureReason` (the sync adapter still tries) or `error` (the first load
+    failed, the sync adapter stopped, the Collection crashed, or, on a
+    query's own node, a request for more data failed). An include's source
+    has `kind: 'include'`; its per-row child Collections are not in the tree,
+    so adding a child changes nothing. Every change to the tree is announced
+    by `health:change`, so readers can keep a tree until the next event. A pooled live query's tree is the tree a live-query Collection
+    over its source would have, so it also reaches deeper levels. The shape
+    is fixed by the query. Each node mirrors its Collection when read, and
+    the query emits `health:change` whenever a node below it changes. When a
+    Collection's status changes, its `status:change` fires first and its
+    `health:change` follows at once; the tree is current when either fires.
+    A node keeps its object identity until something in its subtree changes,
+    and a change replaces only the nodes on its path.
 
 ## Glossary
 
@@ -1783,30 +1863,30 @@ keep the meanings defined there.
 
 ## Executable contracts
 
-| Contract                                                                                | Test suite                                                                                                                      |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition             | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
-| Joined multiplicity, alias identity, and null-key normalization                         | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
-| Alias reuse, captured bindings, public keys, and `SourceId` preservation                | (`packages/db/tests/query/includes-oracle.property.test.ts`, `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`) |
-| Same-scope and union alias rejection                                                    | `packages/db/tests/query/validate-aliases.test.ts`                                                                              |
-| Demand, cancellation, progressive timing, and source readiness                          | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
-| Optimistic confirmation, rollback, and later reactivity                                 | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
-| Coherent layered publication                                                            | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
-| Collection facades, event coherence, and route activation                               | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
-| Correlated physical work                                                                | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
-| Constructed and retained facades in a nested Collection tree                            | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
-| Route-context discovery and transport across recursive and join boundaries              | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
-| Functional projection input boundaries, timing, and output preservation                 | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
-| Functional input rejection and inline alternatives                                      | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
-| Public-container descriptors and reference-key matches across internal query stages     | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
-| Cross-formulation equivalence and reference-sensitive route identity                    | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
-| Query-db ownership                                                                      | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
-| Failed replay retention, peer isolation, and explicit consumer-only recovery            | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
-| Replay lease balance, reference-counted peers, and failed-start recovery                | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
-| Reachable nested shape                                                                  | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
-| Cleanup-start invalidation, settlement, and restart admission                           | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
-| Pooled live queries match their live-query Collection, including cleanup                | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
-| Deferred acquisition before a subscriber or preload, readiness, and the synchronous cut | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts`                                                              |
+| Contract                                                                                   | Test suite                                                                                                                      |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition                | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
+| Joined multiplicity, alias identity, and null-key normalization                            | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
+| Alias reuse, captured bindings, public keys, and `SourceId` preservation                   | (`packages/db/tests/query/includes-oracle.property.test.ts`, `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`) |
+| Same-scope and union alias rejection                                                       | `packages/db/tests/query/validate-aliases.test.ts`                                                                              |
+| Demand, cancellation, progressive timing, and source readiness                             | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
+| Optimistic confirmation, rollback, and later reactivity                                    | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
+| Coherent layered publication                                                               | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
+| Collection facades, event coherence, and route activation                                  | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
+| Correlated physical work                                                                   | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
+| Constructed and retained facades in a nested Collection tree                               | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
+| Route-context discovery and transport across recursive and join boundaries                 | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
+| Functional projection input boundaries, timing, and output preservation                    | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
+| Functional input rejection and inline alternatives                                         | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
+| Public-container descriptors and reference-key matches across internal query stages        | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
+| Cross-formulation equivalence and reference-sensitive route identity                       | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
+| Query-db ownership                                                                         | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
+| Failed replay retention, peer isolation, and explicit consumer-only recovery               | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
+| Replay lease balance, reference-counted peers, and failed-start recovery                   | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
+| Reachable nested shape                                                                     | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
+| Cleanup-start invalidation, settlement, and restart admission                              | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
+| Pooled live queries match their live-query Collection, including cleanup of a mounted view | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
+| Deferred acquisition before a subscriber or preload, readiness, and the synchronous cut    | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts`                                                              |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization
