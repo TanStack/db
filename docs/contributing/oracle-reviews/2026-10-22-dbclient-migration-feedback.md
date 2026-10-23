@@ -1598,3 +1598,18 @@ SHA-256 values. The subsequent closeout entry pins the resulting commit.
 | `packages/db/tests/oracle-replay-manifest.ts` | `eef645f84c09044ac06bbd369b237b427a3cee1ab5bcb198020abc4d3724ba9b` |
 | `packages/db/tests/query/pooled-live-query-gc-oracle.test.ts` | `029a28a9210c7c8981994f83044a454b6934c3cd61e29ae3e5c079c167ef6507` |
 | `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx` | `979091a554ac15c6f24f8b1d81112473c1e1b9db048e25a3031095e3a36cb4b5` |
+
+### Ten-finding implementation closeout
+
+Implementation and oracle commit: `83bd08ded8b74254515536233d7d82a32a85d3c3`. The source
+identities above match this commit after the commit hook. The following
+closeout commit changes documentation only. The earlier REDs target parent
+`929c1d418a84c2d9ed57fb68aa829ba8c85c5ab7`; the final GREEN commands and six
+guarded replays target the implementation identified here.
+
+Scoped ESLint passes with zero errors and four warnings on unchanged lines.
+Prettier, `git diff --check`, and the 418-name mangle-cache check pass.
+The historical audit prefix remains byte-identical. The changeset now records
+readable source errors and partial-attachment release. No published commit
+was amended or rebased. The production changes preserve the approved cleanup
+rejection policy. The loss totals and non-ready verdict above still apply.
