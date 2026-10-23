@@ -6,10 +6,10 @@ import { describe, expect, it } from 'vitest'
 /**
  * # Does an app pay only for the operators it imports?
  *
- * Joins, grouping, includes, and pooling are opt-in. Each one's code arrives
- * with the value that names it: a join operator (`leftJoin`), an aggregate
- * (`count`) or `groupKeys`, an include function (`include`, `toArray`,
- * `materialize`), and `pooledLiveQueries`. The law: an app's production
+ * Grouping, includes, and pooling are opt-in. Each one's code arrives with
+ * the value that names it: an aggregate (`count`) or `groupKeys`, an include
+ * function (`include`, `toArray`, `materialize`), and `pooledLiveQueries`.
+ * Joins stay in core, so every live-query app bundles them. The law: an app's production
  * bundle contains an operator's modules exactly when the app imports one of
  * those values. A static import from shared code would break it silently, so
  * this bundles small apps from source as an app's build would and reads which
@@ -19,17 +19,11 @@ import { describe, expect, it } from 'vitest'
  * for its own modules: without them, a module renamed or moved would make the
  * absence checks pass vacuously. It also runs every combination of operator
  * families, each family named by one of its values in turn, so a module that
- * only a combination reaches is checked too. The modules shared by joins and
- * includes must arrive exactly when an app imports one of the two.
+ * only a combination reaches is checked too.
  */
 const index = fileURLToPath(new URL(`../src/index.ts`, import.meta.url))
 
 const modules = {
-  joins: [
-    `src/query/compiler/joins.ts`,
-    `src/query/compiler/join-runtime.ts`,
-    `src/query/optimizer-joins.ts`,
-  ],
   grouping: [
     `src/query/compiler/grouping.ts`,
     `src/query/compiler/group-by.ts`,
@@ -45,15 +39,17 @@ type Family = keyof typeof modules
 
 /** The values that bring each family's code in. */
 const values: Record<Family, ReadonlyArray<string>> = {
-  joins: [`leftJoin`, `innerJoin`, `rightJoin`, `fullJoin`, `joinOf`],
   grouping: [`count`, `sum`, `avg`, `min`, `max`, `groupKeys`],
   includes: [`include`, `toArray`, `materialize`],
   pooling: [`pooledLiveQueries`],
 }
 
-// Joins and includes share public-key reduction; an app with neither keeps it
-// out.
-const shared = [`src/query/live/public-key-reduction.ts`]
+// Joins are core: their modules, and the public-key reduction that joins and
+// includes share, are in every live-query app.
+const core = [
+  `src/query/compiler/joins.ts`,
+  `src/query/live/public-key-reduction.ts`,
+]
 const families = Object.keys(modules) as Array<Family>
 
 /** Bundles an app that exports `names` and returns its modules' output bytes. */
@@ -102,10 +98,7 @@ function expectOperators(
   for (const family of families)
     for (const file of modules[family])
       expect(bytes.has(file), `${family}: ${file}`).toBe(imported.has(family))
-  for (const file of shared)
-    expect(bytes.has(file), file).toBe(
-      imported.has(`joins`) || imported.has(`includes`),
-    )
+  for (const file of core) expect(bytes.has(file), file).toBe(true)
 }
 
 describe(`opt-in operator bundles`, () => {

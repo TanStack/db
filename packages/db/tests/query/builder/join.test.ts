@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { fullJoin, innerJoin, leftJoin, rightJoin } from '@tanstack/db'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { and, eq, gt } from '../../../src/query/builder/functions.js'
-import { JoinOperatorRequiredError } from '../../../src/errors.js'
 
 // Test schema
 interface Employee {
@@ -39,11 +37,9 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
 
     const builtQuery = getQueryIR(query)
@@ -74,18 +70,12 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
-      .join(
-        leftJoin(
-          { projects: projectsCollection },
-          ({ departments, projects }) =>
-            eq(departments.id, projects.department_id),
-        ),
+      .join({ projects: projectsCollection }, ({ departments, projects }) =>
+        eq(departments.id, projects.department_id),
       )
 
     const builtQuery = getQueryIR(query)
@@ -104,11 +94,9 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
       .select(({ employees, departments }) => ({
         id: employees.id,
@@ -130,11 +118,9 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
       .where(({ departments }) => gt(departments.budget, 1000000))
 
@@ -151,10 +137,8 @@ describe(`QueryBuilder.join`, () => {
     const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
-      .join(
-        leftJoin({ bigDepts: subQuery as any }, ({ employees, bigDepts }) =>
-          eq(employees.department_id, (bigDepts as any).id),
-        ),
+      .join({ bigDepts: subQuery as any }, ({ employees, bigDepts }) =>
+        eq(employees.department_id, (bigDepts as any).id),
       )
 
     const builtQuery = getQueryIR(query)
@@ -171,11 +155,9 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
       .where(({ employees, departments }) =>
         and(gt(employees.salary, 50000), gt(departments.budget, 1000000)),
@@ -212,16 +194,12 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
-      .join(
-        leftJoin({ users: usersCollection }, ({ employees, users }) =>
-          eq(employees.id, users.employee_id),
-        ),
+      .join({ users: usersCollection }, ({ employees, users }) =>
+        eq(employees.id, users.employee_id),
       )
 
     const builtQuery = getQueryIR(query)
@@ -240,11 +218,9 @@ describe(`QueryBuilder.join`, () => {
     const query = builder
       .from({ employees: employeesCollection })
       .join(
-        leftJoin(
-          { departments: departmentsCollection },
-          ({ employees, departments }) =>
-            eq(employees.department_id, departments.id),
-        ),
+        { departments: departmentsCollection },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
       )
       .select(({ employees, departments }) => ({
         employee: employees,
@@ -263,21 +239,18 @@ describe(`QueryBuilder.join`, () => {
       const explicitQuery = builder
         .from({ employees: employeesCollection })
         .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
+          `left`,
         )
 
       const aliasQuery = builder
         .from({ employees: employeesCollection })
-        .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+        .leftJoin(
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
 
       const explicitQueryIR = getQueryIR(explicitQuery)
@@ -292,21 +265,18 @@ describe(`QueryBuilder.join`, () => {
       const explicitQuery = builder
         .from({ employees: employeesCollection })
         .join(
-          rightJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
+          `right`,
         )
 
       const aliasQuery = builder
         .from({ employees: employeesCollection })
-        .join(
-          rightJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+        .rightJoin(
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
 
       const explicitQueryIR = getQueryIR(explicitQuery)
@@ -321,21 +291,18 @@ describe(`QueryBuilder.join`, () => {
       const explicitQuery = builder
         .from({ employees: employeesCollection })
         .join(
-          innerJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
+          `inner`,
         )
 
       const aliasQuery = builder
         .from({ employees: employeesCollection })
-        .join(
-          innerJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+        .innerJoin(
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
 
       const explicitQueryIR = getQueryIR(explicitQuery)
@@ -350,21 +317,18 @@ describe(`QueryBuilder.join`, () => {
       const explicitQuery = builder
         .from({ employees: employeesCollection })
         .join(
-          fullJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
+          `full`,
         )
 
       const aliasQuery = builder
         .from({ employees: employeesCollection })
-        .join(
-          fullJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+        .fullJoin(
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
 
       const explicitQueryIR = getQueryIR(explicitQuery)
@@ -388,19 +352,15 @@ describe(`QueryBuilder.join`, () => {
       const builder = new Query()
       const query = builder
         .from({ employees: employeesCollection })
-        .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+        .leftJoin(
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
-        .join(
-          innerJoin(
-            { projects: projectsCollection },
-            ({ departments, projects }) =>
-              eq(departments.id, projects.department_id),
-          ),
+        .innerJoin(
+          { projects: projectsCollection },
+          ({ departments, projects }) =>
+            eq(departments.id, projects.department_id),
         )
 
       const builtQuery = getQueryIR(query)
@@ -420,12 +380,10 @@ describe(`QueryBuilder.join`, () => {
       const builder = new Query()
       const query = builder
         .from({ employees: employeesCollection })
-        .join(
-          innerJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+        .innerJoin(
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
         .where(({ departments }) => gt(departments.budget, 1000000))
         .select(({ employees, departments }) => ({
@@ -442,15 +400,5 @@ describe(`QueryBuilder.join`, () => {
       expect(builtQuery.select).toBeDefined()
       expect(builtQuery.select).toHaveProperty(`department_name`)
     })
-  })
-})
-
-describe(`join operator values`, () => {
-  it(`rejects the removed source-and-callback call shape with a coded error`, () => {
-    const builder = new Query().from({ employees: employeesCollection }) as any
-    expect(() =>
-      builder.join({ departments: departmentsCollection }, () => true),
-    ).toThrow(JoinOperatorRequiredError)
-    expect(() => builder.join(undefined)).toThrow(/Got: undefined/)
   })
 })

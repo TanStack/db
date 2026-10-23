@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { leftJoin } from '@tanstack/db'
 import { include, pooledLiveQueries } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
@@ -124,9 +123,8 @@ describe(`live query preparation`, () => {
     renderDeferrals.clear()
 
     const continued = prepared.join(
-      leftJoin({ later: laterDescriptor }, ({ source, later }) =>
-        eq(source.id, later.id),
-      ),
+      { later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id),
     )
     expect(
       collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
@@ -169,9 +167,8 @@ describe(`live query preparation`, () => {
       deferrals,
     ) as typeof base
     const continued = prepared.join(
-      leftJoin({ later: laterDescriptor }, ({ source, later }) =>
-        eq(source.id, later.id),
-      ),
+      { later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id),
     )
 
     expect(starts).toBe(0)
@@ -216,9 +213,8 @@ describe(`live query preparation`, () => {
     )
 
     const continued = captured!.join(
-      leftJoin({ later: laterDescriptor }, ({ source, later }) =>
-        eq(source.id, later.id),
-      ),
+      { later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id),
     )
     expect(
       collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),

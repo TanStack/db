@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { MultiSet } from '@tanstack/db-ivm'
-import { createLiveQueryCollection, eq, innerJoin } from '../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
@@ -67,7 +67,7 @@ it.each([0, 2])(`opens an inner-join window from limit %s`, async (limit) => {
     query: (q) =>
       q
         .from({ a: parent })
-        .join(innerJoin({ b: child }, ({ a, b }) => eq(a.id, b.id)))
+        .join({ b: child }, ({ a, b }) => eq(a.id, b.id), `inner`)
         .orderBy(({ a }) => a.value)
         .limit(limit)
         .select(({ a }) => ({ id: a.id, value: a.value })),

@@ -29,7 +29,6 @@ import {
 } from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
-import { registerLazyDemandPlan } from './lazy-demand.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
 import {
@@ -41,7 +40,6 @@ import {
   getRoutedScalarMetadata,
   stripRouteMetadata,
 } from './route-metadata.js'
-import type { LazyCollectionCallbacks } from './lazy-demand.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
@@ -64,13 +62,26 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 
-export type { LazyCollectionCallbacks, LazyDemandPlan } from './lazy-demand.js'
+export type LazyDemandPlan = {
+  id: string
+  path: Array<string>
+  collectionId: string
+  initialKeys: Set<unknown>
+}
+
+/** Callbacks for managing lazy-loaded collections in optimized joins */
+export type LazyCollectionCallbacks = {
+  plans?: Array<LazyDemandPlan>
+  setDemand?: (plan: LazyDemandPlan, keys: Set<unknown>) => void
+}
 
 type JoinInputValue = [
   originalKey: unknown,
   namespacedRow: NamespacedRow,
   joinValue: unknown,
 ]
+
+let nextLazyDemandPlanId = 0
 
 function parameterizeJoinInputByParentRoutes(
   input: KeyedStream,
@@ -178,6 +189,22 @@ function keyJoinInput(
       : serializeValue(key),
     input,
   ]
+}
+
+export function registerLazyDemandPlan(
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  target: { sourceId: string; path: Array<string>; collection: Collection },
+  initialKeys: Set<unknown> = new Set(),
+): LazyDemandPlan {
+  const plan: LazyDemandPlan = {
+    id: `lazy-demand-${++nextLazyDemandPlanId}`,
+    path: target.path,
+    collectionId: target.collection.id,
+    initialKeys: new Set(initialKeys),
+  }
+  const state = (callbacks[target.sourceId] ??= {})
+  ;(state.plans ??= []).push(plan)
+  return plan
 }
 
 /**

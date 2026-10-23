@@ -3,7 +3,6 @@ import { describe, expect } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
-  innerJoin,
   materialize,
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -126,11 +125,9 @@ function createMultiplicityQuery(sources: MultiplicitySources) {
     query: (q) =>
       q
         .from({ parent: sources.parents.collection })
-        .join(
-          innerJoin(
-            { child: sources.children.collection },
-            ({ parent, child }) => eq(parent.id, child.parentId),
-          ),
+        .innerJoin(
+          { child: sources.children.collection },
+          ({ parent, child }) => eq(parent.id, child.parentId),
         )
         .select(({ parent }) => ({ id: parent.id })),
     getKey: (row) => row.id,
@@ -234,11 +231,9 @@ function createCorrelationQuery(
       .select(({ part }) => {
         const joined = q
           .from({ production: sources.productions.collection })
-          .join(
-            innerJoin(
-              { order: sources.orders.collection },
-              ({ production, order }) => eq(production.orderId, order.id),
-            ),
+          .innerJoin(
+            { order: sources.orders.collection },
+            ({ production, order }) => eq(production.orderId, order.id),
           )
         const correlated =
           target === `joined`

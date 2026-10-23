@@ -5,8 +5,6 @@ import {
   eq,
   inArray,
   include,
-  innerJoin,
-  leftJoin,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -325,12 +323,10 @@ async function observeWork({
                         links: joinTargets
                           ? materialize(
                               selectedLinks
-                                .join(
-                                  innerJoin(
-                                    { target: sources.terms },
-                                    ({ link, target }) =>
-                                      eq(link.targetId, target.id),
-                                  ),
+                                .innerJoin(
+                                  { target: sources.terms },
+                                  ({ link, target }) =>
+                                    eq(link.targetId, target.id),
                                 )
                                 .select(({ link, target }) => ({
                                   id: link.id,
@@ -2087,11 +2083,7 @@ describe(`static include demand and setWindow ownership`, () => {
           ? q.from({ page })
           : q
               .from({ row: rows })
-              .join(
-                leftJoin({ page }, ({ row, page: paged }) =>
-                  eq(row.id, paged.id),
-                ),
-              )
+              .join({ page }, ({ row, page: paged }) => eq(row.id, paged.id))
       })
       try {
         await live.preload()

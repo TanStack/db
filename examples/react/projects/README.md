@@ -78,7 +78,7 @@ Now that you have two routes you can use a `Link` component to navigate between 
 To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
 
 ```tsx
-import { Link } from '@tanstack/react-router'
+import { Link } from "@tanstack/react-router"
 ```
 
 Then anywhere in your JSX you can use it like so:
@@ -98,10 +98,10 @@ In the File Based Routing setup the layout is located in `src/routes/__root.tsx`
 Here is an example layout that includes a header:
 
 ```tsx
-import { Outlet, createRootRoute } from '@tanstack/react-router'
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { Outlet, createRootRoute } from "@tanstack/react-router"
+import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
 
-import { Link } from '@tanstack/react-router'
+import { Link } from "@tanstack/react-router"
 
 export const Route = createRootRoute({
   component: () => (
@@ -132,9 +132,9 @@ For example:
 ```tsx
 const peopleRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/people',
+  path: "/people",
   loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
+    const response = await fetch("https://swapi.dev/api/people")
     return response.json() as Promise<{
       results: {
         name: string
@@ -180,16 +180,16 @@ Built on a TypeScript implementation of differential dataflow, TanStack DB provi
 This example uses Query Collections for server-state synchronization with tRPC:
 
 ```tsx
-import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { QueryClient } from '@tanstack/query-core'
+import { createCollection } from "@tanstack/react-db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { QueryClient } from "@tanstack/query-core"
 
 const queryClient = new QueryClient()
 
 export const todoCollection = createCollection(
   queryCollectionOptions<Todo>({
-    id: 'todos',
-    queryKey: ['todos'],
+    id: "todos",
+    queryKey: ["todos"],
     queryFn: async () => {
       const todos = await trpc.todos.getAll.query()
       return todos.map((todo) => ({
@@ -228,7 +228,7 @@ const AddTodo = () => {
       onClick={() =>
         todoCollection.insert({
           id: crypto.randomUUID(),
-          text: '🔥 Make app faster',
+          text: "🔥 Make app faster",
           completed: false,
         })
       }
@@ -242,14 +242,14 @@ const AddTodo = () => {
 Use live queries to read data reactively across collections:
 
 ```tsx
-import { eq, innerJoin, useLiveQuery } from '@tanstack/react-db'
+import { eq, useLiveQuery } from "@tanstack/react-db"
 
 const Todos = () => {
   // Read data using live queries with cross-collection joins
   const { data: todos } = useLiveQuery((query) =>
     query
       .from({ t: todoCollection })
-      .join(innerJoin({ l: listCollection }, ({ t, l }) => eq(l.id, t.list_id)))
+      .innerJoin({ l: listCollection }, ({ t, l }) => eq(l.id, t.list_id))
       .where(({ l }) => eq(l.active, true))
       .select(({ t, l }) => ({
         id: t.id,

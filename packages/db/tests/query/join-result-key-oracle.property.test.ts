@@ -42,7 +42,7 @@
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq, joinOf } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
   oraclePropertyOptions,
@@ -224,7 +224,7 @@ async function runHistory(history: History): Promise<void> {
   const live = createLiveQueryCollection((q) =>
     q
       .from({ l: left })
-      .join(joinOf(history.join, { r: right }, ({ l, r }) => eq(l.g, r.g)))
+      .join({ r: right }, ({ l, r }) => eq(l.g, r.g), history.join)
       .select(({ l, r }) => ({ l: l.id, r: r.id })),
   )
   const check = (checkpoint: string) => {

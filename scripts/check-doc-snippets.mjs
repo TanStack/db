@@ -87,21 +87,23 @@ for (const pkg of readdirSync(join(root, `packages`))) {
   }
 }
 
-const fence = /```(ts|tsx|typescript)([^\n]*)\n([\s\S]*?)```/g
+// A fence closes with as many backticks as it opened with, so a ````ts
+// example can hold a ``` block.
+const fence = /^(`{3,})(ts|tsx|typescript)([^\n]*)\n([\s\S]*?)^\1[ \t]*$/gm
 const snippets = []
 for (const file of markdown) {
   const text = readFileSync(file, `utf8`)
   for (const match of text.matchAll(fence)) {
-    if (match[2].includes(`nocheck`)) continue
+    if (match[3].includes(`nocheck`)) continue
     const line = text.slice(0, match.index).split(`\n`).length
     snippets.push({
       file: relative(root, file),
       line,
-      code: match[3],
+      code: match[4],
       name: join(
         root,
         `.snippet-check`,
-        `${snippets.length}.${/<\/|<[A-Z][A-Za-z]*[ />]/.test(match[3]) ? `tsx` : `ts`}`,
+        `${snippets.length}.${/<\/|<[A-Z][A-Za-z]*[ />]/.test(match[4]) ? `tsx` : `ts`}`,
       ),
     })
   }

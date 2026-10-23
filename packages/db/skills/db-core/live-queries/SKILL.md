@@ -115,18 +115,16 @@ non-null value.
 
 ### 2. Joining two collections
 
-Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Joins take an imported operator: `.join(leftJoin(source, on))`, and likewise `innerJoin`, `rightJoin`, `fullJoin`, and `joinOf(type, source, on)`. The `.join(source, on)` call shape throws `JoinOperatorRequiredError`. The `.leftJoin()`, `.innerJoin()`, `.rightJoin()`, and `.fullJoin()` methods are removed.
+Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
 
 ```ts
-import { createLiveQueryCollection, eq, innerJoin } from '@tanstack/db'
+import { createLiveQueryCollection, eq } from '@tanstack/db'
 
 const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join(
-      innerJoin({ post: postsCollection }, ({ user, post }) =>
-        eq(user.id, post.userId),
-      ),
+    .innerJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
     )
     .select(({ user, post }) => ({
       userName: user.name,
@@ -139,35 +137,15 @@ Multiple joins:
 
 ```ts
 q.from({ user: usersCollection })
-  .join(
-    leftJoin({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId),
-    ),
+  .join({ post: postsCollection }, ({ user, post }) => eq(user.id, post.userId))
+  .join({ comment: commentsCollection }, ({ post, comment }) =>
+    eq(post.id, comment.postId),
   )
-  .join(
-    leftJoin({ comment: commentsCollection }, ({ post, comment }) =>
-      eq(post.id, comment.postId),
-    ),
-  )
-```
-
-A reusable operator built outside `.join()` needs the query's context as a type argument. Without it, the condition is untyped:
-
-```ts
-import { eq, leftJoin } from '@tanstack/db'
-import type { ContextFromSource } from '@tanstack/db'
-
-type UserQuery = ContextFromSource<{ user: typeof usersCollection }>
-export const withPosts = leftJoin<{ post: typeof postsCollection }, UserQuery>(
-  { post: postsCollection },
-  ({ user, post }) => eq(user.id, post.userId),
-)
-q.from({ user: usersCollection }).join(withPosts)
 ```
 
 ### 3. Aggregation with groupBy + having
 
-Use `groupBy` to group rows, then aggregate in `select`. Filter groups with `having`. The `$selected` namespace lets `having` and `orderBy` reference fields defined in `select`. A `groupBy` with no aggregate wraps its keys in `groupKeys()`: `.groupBy(groupKeys(({ order }) => order.status))`; without it the query throws `GroupingOperatorRequiredError`. A `groupKeys()` built outside `.groupBy()` takes the context as a type argument, `groupKeys<ContextFromSource<{ order: typeof ordersCollection }>>(...)`, as a reusable join does; without it the callback is untyped.
+Use `groupBy` to group rows, then aggregate in `select`. Filter groups with `having`. The `$selected` namespace lets `having` and `orderBy` reference fields defined in `select`. A `groupBy` with no aggregate wraps its keys in `groupKeys()`: `.groupBy(groupKeys(({ order }) => order.status))`; without it the query throws `GroupingOperatorRequiredError`. A `groupKeys()` built outside `.groupBy()` takes the context as a type argument, `groupKeys<ContextFromSource<{ order: typeof ordersCollection }>>(...)`; without it the callback is untyped.
 
 ```ts
 import { count, sum, gt } from '@tanstack/db'
@@ -212,10 +190,8 @@ const activeUsers = createLiveQueryCollection((q) =>
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: activeUsers })
-    .join(
-      leftJoin({ post: postsCollection }, ({ user, post }) =>
-        eq(user.id, post.userId),
-      ),
+    .join({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
     )
     .select(({ user, post }) => ({
       userName: user.name,
@@ -556,12 +532,12 @@ q.from({ order: ordersCollection })
 ### Compound joins and acquisition
 
 ```ts
-import { and, eq, leftJoin } from '@tanstack/db'
+import { and, eq } from '@tanstack/db'
 
-q.from({ product: productsCollection }).join(
-  leftJoin({ stock: stockCollection }, ({ product, stock }) =>
+q.from({ product: productsCollection }).leftJoin(
+  { stock: stockCollection },
+  ({ product, stock }) =>
     and(eq(product.sku, stock.sku), eq(product.region, stock.region)),
-  ),
 )
 ```
 
@@ -595,16 +571,14 @@ The differential dataflow join operator supports a single equality or nested `an
 ```ts
 // WRONG
 q.from({ user: usersCollection }).join(
-  leftJoin({ post: postsCollection }, ({ user, post }) =>
-    gt(user.id, post.userId),
-  ),
+  { post: postsCollection },
+  ({ user, post }) => gt(user.id, post.userId),
 )
 
 // CORRECT
 q.from({ user: usersCollection }).join(
-  leftJoin({ post: postsCollection }, ({ user, post }) =>
-    eq(user.id, post.userId),
-  ),
+  { post: postsCollection },
+  ({ user, post }) => eq(user.id, post.userId),
 )
 ```
 

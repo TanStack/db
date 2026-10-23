@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import {
-  concat,
-  createLiveQueryCollection,
-  leftJoin,
-} from '../../src/query/index.js'
+import { concat, createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { DistinctRequiresSelectError } from '../../src/errors'
@@ -701,11 +697,9 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
             q
               .from({ users: usersCollection })
               .join(
-                leftJoin(
-                  { departments: departmentsCollection },
-                  ({ users, departments }) =>
-                    eq(users.department, departments.id),
-                ),
+                { departments: departmentsCollection },
+                ({ users, departments }) =>
+                  eq(users.department, departments.id),
               )
               .where(({ users }) => eq(users.active, true))
               .select(({ departments }) => ({

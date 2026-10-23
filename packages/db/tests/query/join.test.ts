@@ -4,18 +4,13 @@ import {
   concat,
   createLiveQueryCollection,
   eq,
-  fullJoin,
   gt,
   inArray,
-  innerJoin,
   isNull,
   isUndefined,
-  joinOf,
-  leftJoin,
   lt,
   not,
   or,
-  rightJoin,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
@@ -125,11 +120,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .join(
-              joinOf(
-                joinType,
-                { dept: departmentsCollection },
-                ({ user, dept }) => eq(user.department_id, dept.id),
-              ),
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType,
             )
             .select(({ user, dept }) => ({
               user_name: user.name,
@@ -215,11 +208,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .join(
-              joinOf(
-                joinType,
-                { dept: departmentsCollection },
-                ({ user, dept }) => eq(user.department_id, dept.id),
-              ),
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType,
             ),
       })
 
@@ -310,11 +301,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .join(
-              joinOf(
-                joinType,
-                { dept: departmentsCollection },
-                ({ user, dept }) => eq(user.department_id, dept.id),
-              ),
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType,
             )
             .select(({ user, dept }) => ({
               user_name: user.name,
@@ -355,11 +344,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .join(
-              joinOf(
-                joinType,
-                { dept: departmentsCollection },
-                ({ user, dept }) => eq(user.department_id, dept.id),
-              ),
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType,
             )
             .select(({ user, dept }) => ({
               user_name: user.name,
@@ -396,11 +383,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             q
               .from({ user: usersCollection })
               .join(
-                joinOf(
-                  joinType,
-                  { dept: departmentsCollection },
-                  ({ user, dept }) => eq(user.department_id, dept.id),
-                ),
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                joinType,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -447,11 +432,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             q
               .from({ user: usersCollection })
               .join(
-                joinOf(
-                  joinType,
-                  { dept: departmentsCollection },
-                  ({ user, dept }) => eq(user.department_id, dept.id),
-                ),
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                joinType,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -551,11 +534,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           query: (q) =>
             q
               .from({ team: teamsCollection })
-              .join(
-                leftJoin(
-                  { member: teamMembersCollection },
-                  ({ team, member }) => eq(team.id, member.team_id),
-                ),
+              .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
+                eq(team.id, member.team_id),
               )
               .where(({ member }) => eq(member.user_id, 100))
               .select(({ team, member }) => ({
@@ -573,11 +553,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           query: (q) =>
             q
               .from({ team: teamsCollection })
-              .join(
-                rightJoin(
-                  { member: teamMembersCollection },
-                  ({ team, member }) => eq(team.id, member.team_id),
-                ),
+              .rightJoin(
+                { member: teamMembersCollection },
+                ({ team, member }) => eq(team.id, member.team_id),
               )
               .where(({ team }) => eq(team.active, true))
               .select(({ team, member }) => ({
@@ -595,11 +573,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           query: (q) =>
             q
               .from({ team: teamsCollection })
-              .join(
-                fullJoin(
-                  { member: teamMembersCollection },
-                  ({ team, member }) => eq(team.id, member.team_id),
-                ),
+              .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
+                eq(team.id, member.team_id),
               )
               .where(({ member }) => eq(member.role, `admin`))
               .select(({ team, member }) => ({
@@ -617,11 +592,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           query: (q) =>
             q
               .from({ team: teamsCollection })
-              .join(
-                innerJoin(
-                  { member: teamMembersCollection },
-                  ({ team, member }) => eq(team.id, member.team_id),
-                ),
+              .innerJoin(
+                { member: teamMembersCollection },
+                ({ team, member }) => eq(team.id, member.team_id),
               )
               .where(({ member }) => eq(member.user_id, 100))
               .select(({ team, member }) => ({
@@ -761,16 +734,14 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           q
             .from({ company: companiesCollection })
             .join(
-              joinOf(
-                joinType,
-                { project: projectsCollection },
-                ({ company, project }) => eq(project.company_id, company.id),
-              ),
+              { project: projectsCollection },
+              ({ company, project }) => eq(project.company_id, company.id),
+              joinType,
             )
             .join(
-              joinOf(joinType, { task: tasksCollection }, ({ task, project }) =>
-                eq(task.project_id, project.id),
-              ),
+              { task: tasksCollection },
+              ({ task, project }) => eq(task.project_id, project.id),
+              joinType,
             )
             .select(({ company, project, task }) => ({
               company_name: company.name,
@@ -852,9 +823,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q
               .from({ user: usersCollection })
               .join(
-                innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                  eq(user.department_id, dept.id),
-                ),
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -927,9 +898,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q
               .from({ user: emptyUsers })
               .join(
-                innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                  eq(user.department_id, dept.id),
-                ),
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -966,9 +937,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q
               .from({ user: usersCollection })
               .join(
-                leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                  eq(user.department_id, dept.id),
-                ),
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                `left`,
               )
               .select(({ user, dept }) => ({
                 user_id: user.id,
@@ -1002,12 +973,13 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q
               .from({ user: usersCollection })
               .join(
-                innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+                { dept: departmentsCollection },
+                ({ user, dept }) =>
                   eq(
                     concat(`dept`, user.department_id),
                     concat(`dept`, dept.id),
                   ),
-                ),
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -1059,10 +1031,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ left: leftCollection })
-              .join(
-                innerJoin({ right: rightCollection }, ({ left, right }) =>
-                  eq(left.joinedAt, right.joinedAt),
-                ),
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
               )
               .select(({ left, right }) => ({
                 leftId: left.id,
@@ -1113,10 +1083,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ left: leftCollection })
-              .join(
-                innerJoin({ right: rightCollection }, ({ left, right }) =>
-                  eq(left.joinedAt, right.joinedAt),
-                ),
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
               )
               .select(({ left, right }) => ({
                 leftId: left.id,
@@ -1221,16 +1189,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         query: (q) =>
           q
             .from({ player: playersCollection })
-            .join(
-              innerJoin({ client: clientsCollection }, ({ client, player }) =>
-                eq(client.player, player.name),
-              ),
+            .innerJoin({ client: clientsCollection }, ({ client, player }) =>
+              eq(client.player, player.name),
             )
-            .join(
-              innerJoin(
-                { balance: balancesCollection },
-                ({ balance, client }) => eq(balance.client, client.name),
-              ),
+            .innerJoin({ balance: balancesCollection }, ({ balance, client }) =>
+              eq(balance.client, client.name),
             )
             .select(({ player, client, balance }) => ({
               player_name: player.name,
@@ -1375,10 +1338,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           q
             .from({ users: selfJoinUsersCollection })
             .join(
-              innerJoin(
-                { parentUsers: selfJoinUsersCollection },
-                ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
-              ),
+              { parentUsers: selfJoinUsersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`,
             )
             .select(({ users, parentUsers }) => ({
               user_id: users.id,
@@ -1448,10 +1410,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           q
             .from({ users: bidirectionalUsersCollection })
             .join(
-              innerJoin(
-                { parentUsers: bidirectionalUsersCollection },
-                ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
-              ),
+              { parentUsers: bidirectionalUsersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`,
             )
             .select(({ users, parentUsers }) => ({
               user_name: users.name,
@@ -1471,10 +1432,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           q
             .from({ users: bidirectionalUsersCollection })
             .join(
-              innerJoin(
-                { parentUsers: bidirectionalUsersCollection },
-                ({ users, parentUsers }) => eq(parentUsers.id, users.parentId),
-              ),
+              { parentUsers: bidirectionalUsersCollection },
+              ({ users, parentUsers }) => eq(parentUsers.id, users.parentId),
+              `inner`,
             )
             .select(({ users, parentUsers }) => ({
               user_name: users.name,
@@ -1515,13 +1475,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         createLiveQueryCollection({
           startSync: true,
           query: (q) =>
-            q
-              .from({ user: usersCollection })
-              .join(
-                innerJoin({ dept: departmentsCollection }, ({ user }) =>
-                  eq(user.id, user.department_id),
-                ),
-              ),
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              ({ user }) => eq(user.id, user.department_id), // Both refer to 'user' table
+              `inner`,
+            ),
         })
       }).toThrow(
         `Invalid join condition: both expressions refer to the same source "user"`,
@@ -1543,9 +1501,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         createLiveQueryCollection({
           startSync: true,
           query: (q) =>
-            q
-              .from({ user: usersCollection })
-              .join(innerJoin({ dept: departmentsCollection }, () => eq(1, 2))),
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              () => eq(1, 2), // Constants, no table references
+              `inner`,
+            ),
         })
       }).toThrow(
         `Invalid join condition: expressions must reference source aliases`,
@@ -1572,14 +1532,14 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q
               .from({ user: usersCollection })
               .join(
-                innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                  eq(dept.id, user.department_id),
-                ),
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(dept.id, user.department_id),
+                `inner`,
               )
               .join(
-                innerJoin({ dept2: departmentsCollection2 }, ({ user, dept }) =>
-                  eq(dept.id, user.department_id),
-                ),
+                { dept2: departmentsCollection2 },
+                ({ user, dept }) => eq(dept.id, user.department_id),
+                `inner`,
               ),
         })
       }).toThrow(
@@ -1602,13 +1562,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         createLiveQueryCollection({
           startSync: true,
           query: (q) =>
-            q
-              .from({ user: usersCollection })
-              .join(
-                innerJoin({ dept: departmentsCollection }, ({ user }) =>
-                  eq(user.id, user.department_id),
-                ),
-              ),
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              ({ user }) => eq(user.id, user.department_id), // Both refer to 'user' table
+              `inner`,
+            ),
         })
       }).toThrow(
         `Invalid join condition: both expressions refer to the same source "user"`,
@@ -1630,11 +1588,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .join(
-              leftJoin(
-                { special: specialUsersCollection },
-                ({ user, special }) => eq(user.id, special.id),
-              ),
+            .leftJoin(
+              { special: specialUsersCollection },
+              ({ user, special }) => eq(user.id, special.id),
             )
             .where(({ special }) => isUndefined(special)),
       })
@@ -1703,9 +1659,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               eq(event.id, `3770a4a6-3260-4566-9f79-f50864ebdd46`),
             )
             .join(
-              leftJoin({ parent: eventCollection }, ({ event, parent }) =>
-                eq(parent.id, event.parent_id),
-              ),
+              { parent: eventCollection },
+              ({ event, parent }) => eq(parent.id, event.parent_id),
+              `left`,
             )
             .select(({ event, parent }) => ({
               id: event.id,
@@ -1768,9 +1724,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             .from({ employee: peopleCollection })
             .where(({ employee }) => gt(employee.age, 30))
             .join(
-              leftJoin({ manager: peopleCollection }, ({ employee, manager }) =>
-                eq(employee.manager_id, manager.id),
-              ),
+              { manager: peopleCollection },
+              ({ employee, manager }) => eq(employee.manager_id, manager.id),
+              `left`,
             )
             .where(({ manager }) => or(isNull(manager.id), gt(manager.age, 35)))
             .select(({ employee, manager }) => ({
@@ -1857,24 +1813,22 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         q
           .from({ main: collection1 })
           .join(
-            leftJoin(
-              {
-                join1: q
-                  .from({ join1: collection2 })
-                  .where(({ join1 }) => not(gt(join1.other, 20))),
-              },
-              ({ main, join1 }) => eq(main.value, join1.value),
-            ),
+            {
+              join1: q
+                .from({ join1: collection2 })
+                .where(({ join1 }) => not(gt(join1.other, 20))),
+            },
+            ({ main, join1 }) => eq(main.value, join1.value),
+            `left`,
           )
           .join(
-            leftJoin(
-              {
-                join2: q
-                  .from({ join2: collection2 })
-                  .where(({ join2 }) => not(lt(join2.other, 20))),
-              },
-              ({ main, join2 }) => eq(main.value, join2.value),
-            ),
+            {
+              join2: q
+                .from({ join2: collection2 })
+                .where(({ join2 }) => not(lt(join2.other, 20))),
+            },
+            ({ main, join2 }) => eq(main.value, join2.value),
+            `left`,
           ),
     })
 
@@ -1945,9 +1899,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       query: (q) =>
         q
           .from({ l: leftCollection })
-          .join(
-            leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id)),
-          )
+          .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
           .where(({ r }) => isUndefined(r.payload))
           .select(({ l, r }) => ({ leftId: l.id, right: r })),
     })
@@ -2042,14 +1994,14 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         q
           .from({ player: playersCollection })
           .join(
-            leftJoin({ client: clientsCollection }, ({ client, player }) =>
-              eq(client.player, player.name),
-            ),
+            { client: clientsCollection },
+            ({ client, player }) => eq(client.player, player.name),
+            `left`,
           )
           .join(
-            leftJoin({ balance: balancesCollection }, ({ balance, client }) =>
-              eq(balance.client, client.name),
-            ),
+            { balance: balancesCollection },
+            ({ balance, client }) => eq(balance.client, client.name),
+            `left`,
           )
           .select(({ player, client, balance }) => ({
             player_name: player.name,
@@ -2140,10 +2092,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         q
           .from({ task: taskCollection })
           .where(({ task }) => inArray(task.id, [1]))
-          .join(
-            innerJoin({ project: projectCollection }, ({ task, project }) =>
-              eq(task.project_id, project.id),
-            ),
+          .innerJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
           )
           .select(({ task, project }) => ({
             task,

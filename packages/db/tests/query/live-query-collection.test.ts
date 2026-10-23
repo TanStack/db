@@ -6,8 +6,6 @@ import {
   createLiveQueryCollection,
   eq,
   ilike,
-  innerJoin,
-  leftJoin,
   liveQueryCollectionOptions,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -917,9 +915,10 @@ describe(`createLiveQueryCollection`, () => {
           q
             .from({ thread: sourceLQ })
             .join(
-              innerJoin({ label: labelsByEmail }, ({ thread, label }: any) =>
+              { label: labelsByEmail },
+              ({ thread, label }: any) =>
                 eq(thread.last_email_id, label.email_id),
-              ),
+              `inner`,
             )
             .orderBy(({ thread }: any) => thread.last_sent_at, {
               direction: `desc`,
@@ -1108,17 +1107,13 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ player: playerCollection })
-          .join(
-            leftJoin(
-              { challenge1: challenge1Collection },
-              ({ player, challenge1 }) => eq(player.id, challenge1.id),
-            ),
+          .leftJoin(
+            { challenge1: challenge1Collection },
+            ({ player, challenge1 }) => eq(player.id, challenge1.id),
           )
-          .join(
-            leftJoin(
-              { challenge2: challenge2Collection },
-              ({ player, challenge2 }) => eq(player.id, challenge2.id),
-            ),
+          .leftJoin(
+            { challenge2: challenge2Collection },
+            ({ player, challenge2 }) => eq(player.id, challenge2.id),
           ),
       )
 
@@ -1976,10 +1971,8 @@ describe(`createLiveQueryCollection`, () => {
       const live = createLiveQueryCollection((q) =>
         q
           .from({ user: users })
-          .join(
-            leftJoin({ issue: issues }, ({ user, issue }) =>
-              eq(user.id, issue.userId),
-            ),
+          .leftJoin({ issue: issues }, ({ user, issue }) =>
+            eq(user.id, issue.userId),
           )
           .select(({ user, issue }) => ({
             id: user.id,
@@ -2024,10 +2017,8 @@ describe(`createLiveQueryCollection`, () => {
       const live = createLiveQueryCollection((q) =>
         q
           .from({ user: users })
-          .join(
-            leftJoin({ issue: issues }, ({ user, issue }) =>
-              eq(user.id, issue.userId),
-            ),
+          .leftJoin({ issue: issues }, ({ user, issue }) =>
+            eq(user.id, issue.userId),
           )
           .select(({ user, issue }) => ({
             id: user.id,
@@ -2125,10 +2116,8 @@ describe(`createLiveQueryCollection`, () => {
         const live = createLiveQueryCollection((q) =>
           q
             .from({ parent: parents })
-            .join(
-              leftJoin({ child: children }, ({ parent, child }) =>
-                eq(parent.id, child.parentId),
-              ),
+            .leftJoin({ child: children }, ({ parent, child }) =>
+              eq(parent.id, child.parentId),
             )
             .orderBy(({ parent }) => parent.rank, `asc`)
             .limit(1)
@@ -3988,9 +3977,9 @@ describe(`createLiveQueryCollection`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            innerJoin({ post: posts }, ({ user, post }) =>
-              eq(user.id, post.authorId),
-            ),
+            { post: posts },
+            ({ user, post }) => eq(user.id, post.authorId),
+            `inner`,
           )
           .where(({ user, post }) =>
             and(eq(user.active, true), eq(post.published, true)),
@@ -4497,11 +4486,7 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ base })
-            .join(
-              leftJoin({ related }, ({ base: b, related: r }) =>
-                eq(b.id, r.id),
-              ),
-            )
+            .join({ related }, ({ base: b, related: r }) => eq(b.id, r.id))
             .select(({ base: b, related: r }) => ({
               id: b.id,
               name: b.name,
@@ -4542,11 +4527,7 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ comments })
-            .join(
-              leftJoin({ users }, ({ comments: c, users: u }) =>
-                eq(c.userId, u.id),
-              ),
-            )
+            .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
             .select(({ comments: c, users: u }) => ({
               id: c.id,
               userId: coalesce(u.id, c.userId),
@@ -4939,10 +4920,8 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ task: taskCollection })
-          .join(
-            leftJoin({ project: projectCollection }, ({ task, project }) =>
-              eq(task.project_id, project.id),
-            ),
+          .leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
           ),
       )
 
@@ -5057,10 +5036,8 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection((q) =>
         q
           .from({ task: taskCollection })
-          .join(
-            leftJoin({ project: projectCollection }, ({ task, project }) =>
-              eq(task.project_id, project.id),
-            ),
+          .leftJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
           ),
       )
 
@@ -5144,10 +5121,8 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ team: teamsCollection })
-            .join(
-              leftJoin({ user: usersCollection }, ({ team, user }) =>
-                eq(team.lead_id, user.id),
-              ),
+            .join({ user: usersCollection }, ({ team, user }) =>
+              eq(team.lead_id, user.id),
             )
             .select(({ team, user }) => ({
               teamName: team.name,

@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createLiveQueryCollection,
-  eq,
-  leftJoin,
-} from '../../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
@@ -96,10 +92,8 @@ function createJoinedQuery(
   const live = createLiveQueryCollection((query) =>
     query
       .from({ parent: parentCollection })
-      .join(
-        leftJoin({ child: childCollection }, ({ parent, child }) =>
-          eq(child.parentId, parent.id),
-        ),
+      .join({ child: childCollection }, ({ parent, child }) =>
+        eq(child.parentId, parent.id),
       ),
   )
   cleanups.push(() => live.cleanup())

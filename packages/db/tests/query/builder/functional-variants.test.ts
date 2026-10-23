@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { leftJoin } from '@tanstack/db'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import { eq, gt } from '../../../src/query/builder/functions.js'
@@ -74,11 +73,9 @@ describe(`QueryBuilder functional variants (fn)`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
         .fn.select((row) => ({
           employeeName: row.employees.name,
@@ -146,11 +143,9 @@ describe(`QueryBuilder functional variants (fn)`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
         .fn.where(
           (row) =>
@@ -222,11 +217,9 @@ describe(`QueryBuilder functional variants (fn)`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
         .groupBy(({ departments }) => departments.name)
         .fn.having(
@@ -246,11 +239,9 @@ describe(`QueryBuilder functional variants (fn)`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .join(
-          leftJoin(
-            { departments: departmentsCollection },
-            ({ employees, departments }) =>
-              eq(employees.department_id, departments.id),
-          ),
+          { departments: departmentsCollection },
+          ({ employees, departments }) =>
+            eq(employees.department_id, departments.id),
         )
         .fn.where((row) => row.employees.active)
         .fn.where((row) => row.employees.salary > 40000)

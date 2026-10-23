@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
 import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import {
   IR,
@@ -107,7 +106,6 @@ describe(`CollectionRef public shape`, () => {
           from: ref(`root`),
           join: [
             {
-              runtime: joinRuntime,
               from: ref(`joined`),
               type: `inner`,
               on: new IR.Func(`eq`, [

@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
-  leftJoin,
   materialize,
   queryOnce,
   toArray,
@@ -2986,9 +2985,7 @@ function laggingSourceQuery(
       }))
     return q
       .from({ user: users! })
-      .join(
-        leftJoin({ post: posts }, ({ user, post }) => eq(user.id, post.userId)),
-      )
+      .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
       .select(({ user, post }) => ({ id: user.id, postId: post.id }))
   }
 }

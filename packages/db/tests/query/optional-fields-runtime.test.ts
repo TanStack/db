@@ -3,7 +3,6 @@ import {
   createLiveQueryCollection,
   eq,
   groupKeys,
-  leftJoin,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -165,9 +164,9 @@ describe(`Optional Fields - Runtime Tests`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `left`,
           )
           .select(({ user, dept }) => ({
             user_name: user.name,

@@ -11,7 +11,6 @@ import { Temporal } from 'temporal-polyfill'
 import {
   createLiveQueryCollection,
   groupKeys,
-  leftJoin,
   toArray,
 } from '../../src/query/index.js'
 import {
@@ -2423,10 +2422,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
             return q
               .from({ customer: customersCollection })
-              .join(
-                leftJoin({ oc: orderCountSubquery }, ({ customer, oc }) =>
-                  eq(customer.id, oc.customer_id),
-                ),
+              .leftJoin({ oc: orderCountSubquery }, ({ customer, oc }) =>
+                eq(customer.id, oc.customer_id),
               )
               .select(({ customer, oc }) => ({
                 name: customer.name,

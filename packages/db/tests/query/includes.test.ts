@@ -10,7 +10,6 @@ import {
   gt,
   gte,
   include,
-  innerJoin,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -3532,11 +3531,10 @@ describe(`includes subqueries`, () => {
             q
               .from({ joinedChild: children })
               .join(
-                innerJoin(
-                  { metadata: metadataRows },
-                  ({ joinedChild, metadata }) =>
-                    eq(joinedChild.metadataId, metadata.id),
-                ),
+                { metadata: metadataRows },
+                ({ joinedChild, metadata }) =>
+                  eq(joinedChild.metadataId, metadata.id),
+                `inner`,
               )
               .where(({ metadata }) => eq(metadata.groupId, parent.groupId))
               .where(({ metadata }) => eq(metadata.tag, parent.tag))

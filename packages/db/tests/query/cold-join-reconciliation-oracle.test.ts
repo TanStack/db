@@ -6,11 +6,7 @@ import {
   and,
   createLiveQueryCollection,
   eq,
-  fullJoin as fullJoinOperator,
   gt,
-  innerJoin,
-  joinOf,
-  leftJoin,
   or,
 } from '../../src/query/index.js'
 import { Func } from '../../src/query/ir.js'
@@ -150,10 +146,8 @@ async function runColdJoin(
   const live = createLiveQueryCollection((q) =>
     q
       .from({ parent: parentSource })
-      .join(
-        innerJoin({ child: children }, ({ parent, child }) =>
-          eq(parent.id, child.parentId),
-        ),
+      .innerJoin({ child: children }, ({ parent, child }) =>
+        eq(parent.id, child.parentId),
       )
       .select(({ parent, child }) => ({
         id: child.id,
@@ -512,10 +506,8 @@ describe.each([`off`, `eager`] as const)(
           query: (q) =>
             q
               .from({ left })
-              .join(
-                innerJoin({ right }, ({ left: l, right: r }) =>
-                  eq(l.value, r.value),
-                ),
+              .innerJoin({ right }, ({ left: l, right: r }) =>
+                eq(l.value, r.value),
               )
               .select(({ right: row }) => ({ id: row.id })),
         })
@@ -578,10 +570,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left: binaryLeft })
-            .join(
-              innerJoin({ right: binaryRight }, ({ left, right }) =>
-                eq(left.value, right.value),
-              ),
+            .innerJoin({ right: binaryRight }, ({ left, right }) =>
+              eq(left.value, right.value),
             )
             .select(({ right }) => ({ id: right.id })),
       })
@@ -608,10 +598,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left: nullishLeft })
-            .join(
-              fullJoinOperator({ right: nullishRight }, ({ left, right }) =>
-                eq(left.value, right.value),
-              ),
+            .fullJoin({ right: nullishRight }, ({ left, right }) =>
+              eq(left.value, right.value),
             )
             .select(({ left, right }) => ({
               leftId: left.id,
@@ -671,10 +659,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left })
-            .join(
-              fullJoinOperator({ right }, ({ left: l, right: r }) =>
-                eq(l.value, r.value),
-              ),
+            .fullJoin({ right }, ({ left: l, right: r }) =>
+              eq(l.value, r.value),
             )
             .select(({ left: l, right: r }) => ({
               leftId: l.id,
@@ -812,10 +798,8 @@ describe.each([`off`, `eager`] as const)(
         query: (q) =>
           q
             .from({ left: active })
-            .join(
-              leftJoin({ right: lazy }, ({ left, right }) =>
-                eq(left.binaryId, right.binaryId),
-              ),
+            .leftJoin({ right: lazy }, ({ left, right }) =>
+              eq(left.binaryId, right.binaryId),
             )
             .select(({ left, right }) => ({
               leftId: left.id,
@@ -1140,7 +1124,8 @@ async function runCompoundHistory(
         q
           .from({ left })
           .join(
-            joinOf(scenario.join, { right }, ({ left: l, right: r }) => {
+            { right },
+            ({ left: l, right: r }) => {
               const a = scenario.reversed ? eq(r.a, l.a) : eq(l.a, r.a)
               const b = scenario.reversed ? eq(l.b, r.b) : eq(r.b, l.b)
               const c = eq(l.c, r.c)
@@ -1148,7 +1133,8 @@ async function runCompoundHistory(
               if (scenario.width === 2) return and(first, second)
               if (scenario.nested) return and(first, and(second, c))
               return and(first, second, c)
-            }),
+            },
+            scenario.join,
           )
           .select(({ left: l, right: r }) => ({ leftId: l.id, rightId: r.id })),
       )
@@ -1420,15 +1406,15 @@ it.each([`or`, `inequality`, `empty`, `nested-invalid`] as const)(
     await checkWithCleanup(
       () => {
         expect(() =>
-          new Query().from({ left }).join(
-            innerJoin({ right }, ({ left: l, right: r }) => {
+          new Query()
+            .from({ left })
+            .innerJoin({ right }, ({ left: l, right: r }) => {
               const equality = eq(l.id, r.id)
               if (shape === `or`) return or(equality, equality)
               if (shape === `inequality`) return gt(l.id, r.id)
               if (shape === `empty`) return new Func<boolean>(`and`, [])
               return and(equality, and(equality, gt(l.id, r.id)))
             }),
-          ),
         ).toThrow(JoinConditionMustBeEqualityError)
         return Promise.resolve()
       },

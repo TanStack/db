@@ -1,11 +1,5 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import {
-  createLiveQueryCollection,
-  eq,
-  gt,
-  innerJoin,
-  leftJoin,
-} from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -91,10 +85,12 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     const query = createLiveQueryCollection({
       query: (q) =>
         q.from({ user: usersCollection }).join(
-          innerJoin({ dept: departmentsCollection }, ({ user, dept }) => {
+          { dept: departmentsCollection },
+          ({ user, dept }) => {
             // This should work correctly - department_id is optional but can be used in join
             return eq(user.department_id, dept.id)
-          }),
+          },
+          `inner`,
         ),
     })
 
@@ -167,9 +163,9 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `left`,
           )
           .select(({ user, dept }) => ({
             user_name: user.name,

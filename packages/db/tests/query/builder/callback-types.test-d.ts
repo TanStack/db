@@ -1,5 +1,4 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { leftJoin } from '@tanstack/db'
 import { createCollection } from '../../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../../utils.js'
 import { Query } from '../../../src/query/builder/index.js'
@@ -115,10 +114,8 @@ describe(`Query Builder Callback Types`, () => {
     test(`refProxy with joins in select callback`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id),
-          ),
+        .join({ dept: departmentsCollection }, ({ user, dept }) =>
+          eq(user.department_id, dept.id),
         )
         .select(({ user, dept }) => {
           // Test cross-table property access
@@ -271,10 +268,8 @@ describe(`Query Builder Callback Types`, () => {
     test(`refProxy with joins in where callback`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id),
-          ),
+        .join({ dept: departmentsCollection }, ({ user, dept }) =>
+          eq(user.department_id, dept.id),
         )
         .where(({ user, dept }) => {
           expectTypeOf(user.active).toEqualTypeOf<RefLeaf<boolean>>()
@@ -292,8 +287,9 @@ describe(`Query Builder Callback Types`, () => {
 
   describe(`JOIN callback types`, () => {
     test(`refProxy types in join on callback`, () => {
-      new Query().from({ user: usersCollection }).join(
-        leftJoin({ dept: departmentsCollection }, ({ user, dept }) => {
+      new Query()
+        .from({ user: usersCollection })
+        .join({ dept: departmentsCollection }, ({ user, dept }) => {
           // Test property access for join conditions
           expectTypeOf(
             user.department_id,
@@ -301,49 +297,39 @@ describe(`Query Builder Callback Types`, () => {
           expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number>>()
 
           return eq(user.department_id, dept.id)
-        }),
-      )
+        })
     })
 
     test(`complex join conditions`, () => {
-      new Query().from({ user: usersCollection }).join(
-        leftJoin({ dept: departmentsCollection }, ({ user, dept }) => {
+      new Query()
+        .from({ user: usersCollection })
+        .join({ dept: departmentsCollection }, ({ user, dept }) => {
           // Test complex join conditions with multiple operators
           expectTypeOf(
             and(eq(user.department_id, dept.id), eq(dept.active, true)),
           ).toEqualTypeOf<BasicExpression<boolean>>()
 
           return and(eq(user.department_id, dept.id), eq(dept.active, true))
-        }),
-      )
+        })
     })
 
     test(`multiple joins with correct context`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id),
-          ),
+        .join({ dept: departmentsCollection }, ({ user, dept }) =>
+          eq(user.department_id, dept.id),
         )
-        .join(
-          leftJoin(
-            { project: projectsCollection },
-            ({ user, dept, project }) => {
-              expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-              expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number, true>>()
-              expectTypeOf(project.user_id).toEqualTypeOf<RefLeaf<number>>()
-              expectTypeOf(project.department_id).toEqualTypeOf<
-                RefLeaf<number>
-              >()
+        .join({ project: projectsCollection }, ({ user, dept, project }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number, true>>()
+          expectTypeOf(project.user_id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(project.department_id).toEqualTypeOf<RefLeaf<number>>()
 
-              return and(
-                eq(project.user_id, user.id),
-                eq(project.department_id, dept.id),
-              )
-            },
-          ),
-        )
+          return and(
+            eq(project.user_id, user.id),
+            eq(project.department_id, dept.id),
+          )
+        })
     })
   })
 
@@ -375,10 +361,8 @@ describe(`Query Builder Callback Types`, () => {
     test(`orderBy with joins`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id),
-          ),
+        .join({ dept: departmentsCollection }, ({ user, dept }) =>
+          eq(user.department_id, dept.id),
         )
         .orderBy(({ user, dept }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
@@ -417,10 +401,8 @@ describe(`Query Builder Callback Types`, () => {
     test(`groupBy with joins`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id),
-          ),
+        .join({ dept: departmentsCollection }, ({ user, dept }) =>
+          eq(user.department_id, dept.id),
         )
         .groupBy(({ user, dept }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
@@ -500,10 +482,8 @@ describe(`Query Builder Callback Types`, () => {
     test(`having with joins`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id),
-          ),
+        .join({ dept: departmentsCollection }, ({ user, dept }) =>
+          eq(user.department_id, dept.id),
         )
         .groupBy(({ dept }) => dept.location)
         .having(({ user, dept }) => {
@@ -520,29 +500,20 @@ describe(`Query Builder Callback Types`, () => {
     test(`complex query with all callback types`, () => {
       new Query()
         .from({ user: usersCollection })
-        .join(
-          leftJoin({ dept: departmentsCollection }, ({ user, dept }) => {
-            expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-            expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number>>()
-            expectTypeOf(dept.location).toEqualTypeOf<RefLeaf<string>>()
-            return eq(user.department_id, dept.id)
-          }),
-        )
-        .join(
-          leftJoin(
-            { project: projectsCollection },
-            ({ user, dept, project }) => {
-              expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-              expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number, true>>()
-              expectTypeOf(dept.location).toEqualTypeOf<RefLeaf<string, true>>()
-              expectTypeOf(project.user_id).toEqualTypeOf<RefLeaf<number>>()
-              expectTypeOf(project.department_id).toEqualTypeOf<
-                RefLeaf<number>
-              >()
-              return eq(project.user_id, user.id)
-            },
-          ),
-        )
+        .join({ dept: departmentsCollection }, ({ user, dept }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(dept.location).toEqualTypeOf<RefLeaf<string>>()
+          return eq(user.department_id, dept.id)
+        })
+        .join({ project: projectsCollection }, ({ user, dept, project }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number, true>>()
+          expectTypeOf(dept.location).toEqualTypeOf<RefLeaf<string, true>>()
+          expectTypeOf(project.user_id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(project.department_id).toEqualTypeOf<RefLeaf<number>>()
+          return eq(project.user_id, user.id)
+        })
         .where(({ user, dept, project }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number, true>>()

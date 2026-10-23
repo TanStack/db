@@ -8,7 +8,6 @@ import {
   getLiveQueryHash,
   getStableValueHash,
   gt,
-  leftJoin,
 } from '@tanstack/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { flushSync } from 'svelte'
@@ -490,10 +489,8 @@ describe(`Query Collections`, () => {
       const query = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(
-            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            ),
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
@@ -778,10 +775,8 @@ describe(`Query Collections`, () => {
       const queryResult = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(
-            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            ),
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
@@ -1295,10 +1290,8 @@ describe(`Query Collections`, () => {
         const query = useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(
-              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-                eq(issues.userId, persons.id),
-              ),
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
@@ -1849,10 +1842,8 @@ describe(`Query Collections`, () => {
         const query = useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(
-              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-                eq(issues.userId, persons.id),
-              ),
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,

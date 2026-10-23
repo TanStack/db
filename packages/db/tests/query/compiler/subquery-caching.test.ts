@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { D2 } from '@tanstack/db-ivm'
-import { joinRuntime } from '../../../src/query/compiler/join-runtime.js'
 import { compileQuery } from '../../../src/query/compiler/index.js'
 import { queriesMatchForCaching } from '../../../src/query/compiler/query-equivalence.js'
 import {
@@ -105,7 +104,6 @@ describe(`Subquery Caching`, () => {
       from: new QueryRef(subquery, `main_users`),
       join: [
         {
-          runtime: joinRuntime,
           type: `inner`,
           from: new QueryRef(subquery, `joined_users`), // Same subquery object reference
           on: new Func('eq', [
@@ -382,7 +380,6 @@ describe(`Subquery Caching`, () => {
       from: new QueryRef(innerSubquery, `inner1`),
       join: [
         {
-          runtime: joinRuntime,
           type: `left`,
           from: new QueryRef(innerSubquery, `inner2`), // Same innerSubquery
           on: new Func('eq', [
@@ -397,7 +394,6 @@ describe(`Subquery Caching`, () => {
       from: new QueryRef(middleSubquery, `middle`),
       join: [
         {
-          runtime: joinRuntime,
           type: `inner`,
           from: new QueryRef(innerSubquery, `direct`), // innerSubquery again at top level
           on: new Func('eq', [

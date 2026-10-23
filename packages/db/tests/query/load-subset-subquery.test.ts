@@ -4,7 +4,6 @@ import {
   coalesce,
   createLiveQueryCollection,
   eq,
-  fullJoin,
   gt,
   gte,
   inArray,
@@ -288,12 +287,8 @@ describe(`loadSubset with subqueries`, () => {
       // Use subquery in main query
       return q
         .from({ charge: chargesCollection })
-        .join(
-          fullJoin(
-            { prepaidOrder: prepaidOrderQ },
-            ({ charge, prepaidOrder }) =>
-              eq(charge.address_id, prepaidOrder.address_id),
-          ),
+        .fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
+          eq(charge.address_id, prepaidOrder.address_id),
         )
     })
     cleanups.push(ordersCollection, subqueryQuery)
@@ -366,12 +361,8 @@ describe(`loadSubset with subqueries`, () => {
       // Use subquery in main query
       return q
         .from({ charge: chargesCollection })
-        .join(
-          fullJoin(
-            { prepaidOrder: prepaidOrderQ },
-            ({ charge, prepaidOrder }) =>
-              eq(charge.address_id, prepaidOrder.address_id),
-          ),
+        .fullJoin({ prepaidOrder: prepaidOrderQ }, ({ charge, prepaidOrder }) =>
+          eq(charge.address_id, prepaidOrder.address_id),
         )
     })
     cleanups.push(ordersCollection, subqueryQuery)
@@ -416,10 +407,8 @@ describe(`loadSubset with subqueries`, () => {
 
       return q
         .from({ charge: chargesCollection })
-        .join(
-          fullJoin({ order: orderedOrders }, ({ charge, order }) =>
-            eq(charge.address_id, order.address_id),
-          ),
+        .fullJoin({ order: orderedOrders }, ({ charge, order }) =>
+          eq(charge.address_id, order.address_id),
         )
     })
     cleanups.push(ordersCollection, query)

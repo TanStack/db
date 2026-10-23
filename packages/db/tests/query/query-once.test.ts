@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { eq, innerJoin, queryOnce } from '../../src/query/index.js'
+import { eq, queryOnce } from '../../src/query/index.js'
 import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { Query } from '../../src/query/builder/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -234,9 +234,9 @@ describe(`queryOnce`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            innerJoin({ post: postsCollection }, ({ user, post }) =>
-              eq(user.id, post.authorId),
-            ),
+            { post: postsCollection },
+            ({ user, post }) => eq(user.id, post.authorId),
+            `inner`,
           )
           .select(({ user, post }) => ({
             userName: user.name,

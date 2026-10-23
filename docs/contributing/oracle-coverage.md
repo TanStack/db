@@ -3769,16 +3769,16 @@ review record is `docs/contributing/oracle-reviews/issue-2058-paced-serializatio
 
 ## Opt-in operator bundles
 
-Joins, grouping, includes, and pooling ship only with the value that names
-them: a join operator, an aggregate or `groupKeys`, an include function, or
-`pooledLiveQueries`. `packages/db/tests/opt-in-operator-bundle.test.ts` owns
-that law. It bundles small apps from source with esbuild and reads which
-modules reach the output. Each of the 15 operator values runs alone, and every
-one of the 16 combinations of operator families runs with rotating values. An
-operator's modules must be present exactly when the app imports one of its
-values, and public-key reduction exactly when it imports a join or an include.
-The single-value runs are positive controls, so a renamed or moved module
-cannot pass the absence checks. A mutant that statically imports
+Grouping, includes, and pooling ship only with the value that names them: an
+aggregate or `groupKeys`, an include function, or `pooledLiveQueries`. Joins
+are core. `packages/db/tests/opt-in-operator-bundle.test.ts` owns that law. It
+bundles small apps from source with esbuild and reads which modules reach the
+output. Each of the 10 operator values runs alone, and every one of the 8
+combinations of operator families runs with rotating values. An operator's
+modules must be present exactly when the app imports one of its values. The
+join compiler and public-key reduction must be present in every app. The
+single-value runs are positive controls, so a renamed or moved module cannot
+pass the absence checks. A mutant that statically imports
 `BucketFacadeAdapter` into the live-query builder, and one that uses a
 `group-by.ts` helper from the live-query Collection builder, fail it.
 

@@ -89,10 +89,7 @@ import {
   createCollection,
   eq,
   getStableQueryBuilderHash,
-  innerJoin,
   isUndefined,
-  joinOf,
-  leftJoin,
   prepareLiveQueryValue,
   toArray,
 } from '@tanstack/db'
@@ -190,11 +187,7 @@ describe(`standalone descriptor query binding`, () => {
     firstRenderDeferrals.clear()
 
     const continued = prepared
-      .join(
-        leftJoin({ late: lateDescriptor }, ({ base, late }) =>
-          eq(base.id, late.id),
-        ),
-      )
+      .join({ late: lateDescriptor }, ({ base, late }) => eq(base.id, late.id))
       .select(({ base, late }) => ({ id: base.id, value: late.value }))
     expect(lateStarts).toBe(0)
 
@@ -242,10 +235,8 @@ describe(`standalone descriptor query binding`, () => {
         client,
         deferrals,
       ) as typeof original
-      prepared.join(
-        leftJoin({ late: lateDescriptor }, ({ base, late }) =>
-          eq(base.id, late.id),
-        ),
+      prepared.join({ late: lateDescriptor }, ({ base, late }) =>
+        eq(base.id, late.id),
       )
       throw never
     }
@@ -866,10 +857,8 @@ describe(`standalone descriptor query binding`, () => {
       const joined = () =>
         new Query()
           .from({ parent: parentDescriptor })
-          .join(
-            innerJoin({ child: childDescriptor }, ({ parent, child }) =>
-              eq(parent.id, child.parentId),
-            ),
+          .innerJoin({ child: childDescriptor }, ({ parent, child }) =>
+            eq(parent.id, child.parentId),
           )
           .select(({ parent, child }) => ({
             id: parent.id,
@@ -1355,15 +1344,13 @@ describe(`standalone descriptor query binding`, () => {
               const child = new Query()
                 .from({ [alias]: mains })
                 .join(
-                  joinOf(
-                    kind,
-                    { anchor: joinedSource },
-                    (context: Record<string, unknown>) =>
-                      eq(
-                        (context[alias] as Main).anchorId,
-                        (context.anchor as Anchor).id,
-                      ),
-                  ),
+                  { anchor: joinedSource },
+                  (context: Record<string, unknown>) =>
+                    eq(
+                      (context[alias] as Main).anchorId,
+                      (context.anchor as Anchor).id,
+                    ),
+                  kind,
                 )
                 .where((context: Record<string, unknown>) =>
                   correlation === `joined`

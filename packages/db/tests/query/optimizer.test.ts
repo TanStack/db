@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'vitest'
-import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
 import { grouping } from '../../src/query/compiler/grouping.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
@@ -136,7 +135,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -168,7 +166,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -211,7 +208,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new QueryRef(distinctSource, `p`),
             type: `inner`,
             on: createEq(createPropRef(`u`, `id`), createPropRef(`p`, `id`)),
@@ -233,7 +229,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -282,7 +277,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -322,7 +316,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -360,7 +353,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -398,7 +390,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -442,7 +433,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -503,7 +493,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -538,7 +527,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -580,7 +568,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -618,7 +605,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(existingSubquery, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -664,7 +650,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(deeplyNestedQuery, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -693,7 +678,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -719,7 +703,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -775,7 +758,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -799,7 +781,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -835,7 +816,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -879,7 +859,6 @@ describe(`Query Optimizer`, () => {
         ),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -928,7 +907,6 @@ describe(`Query Optimizer`, () => {
         ),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -985,7 +963,6 @@ describe(`Query Optimizer`, () => {
         ),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1023,7 +1000,6 @@ describe(`Query Optimizer`, () => {
         ),
         join: [
           {
-            runtime: joinRuntime,
             from: new QueryRef(
               {
                 from: new CollectionRef(mockCollection, `p`),
@@ -1104,7 +1080,6 @@ describe(`Query Optimizer`, () => {
         ),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1138,7 +1113,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1175,7 +1149,6 @@ describe(`Query Optimizer`, () => {
       // Add JOIN and WHERE to make it optimizable
       deepQuery.join = [
         {
-          runtime: joinRuntime,
           from: new CollectionRef(mockCollection, `p`),
           type: `inner`,
           on: createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
@@ -1202,7 +1175,6 @@ describe(`Query Optimizer`, () => {
         ),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1259,7 +1231,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(sharedSubquery, `main_users`),
         join: [
           {
-            runtime: joinRuntime,
             from: new QueryRef(sharedSubquery, `other_users`), // Same subquery object!
             type: `inner`,
             on: createEq(
@@ -1320,7 +1291,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithAggregates, `stats`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1364,7 +1334,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithLimitedOrder, `top_users`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1402,7 +1371,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithSelect, `filtered_users`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1451,7 +1419,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithHaving, `dept_stats`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1487,7 +1454,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithFnSelect, `computed_users`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1536,7 +1502,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithOrderOnly, `sorted_users`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1589,7 +1554,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(safeSubquery, `users`),
         join: [
           {
-            runtime: joinRuntime,
             from: new QueryRef(unsafeSubquery, `dept_stats`),
             type: `inner`,
             on: createEq(
@@ -1637,7 +1601,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithAggregates, `stats`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1698,7 +1661,6 @@ describe(`Query Optimizer`, () => {
         from: new QueryRef(subqueryWithAggregates, `stats`),
         join: [
           {
-            runtime: joinRuntime,
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
             on: createEq(
@@ -1789,7 +1751,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(teamsCollection, `team`),
         join: [
           {
-            runtime: joinRuntime,
             type: `left`,
             from: new CollectionRef(teamMembersCollection, `teamMember`),
             on: createEq(
@@ -1835,7 +1796,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(usersCollection, `user`),
         join: [
           {
-            runtime: joinRuntime,
             type: `right`,
             from: new CollectionRef(profilesCollection, `profile`),
             on: createEq(
@@ -1886,7 +1846,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(ordersCollection, `order`),
         join: [
           {
-            runtime: joinRuntime,
             type: `full`,
             from: new CollectionRef(paymentsCollection, `payment`),
             on: createEq(
@@ -1932,7 +1891,6 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(usersCollection, `user`),
         join: [
           {
-            runtime: joinRuntime,
             type: `inner`,
             from: new CollectionRef(departmentsCollection, `dept`),
             on: createEq(

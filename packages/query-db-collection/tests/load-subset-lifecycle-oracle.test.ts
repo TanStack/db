@@ -5,7 +5,6 @@ import {
   createLiveQueryCollection,
   eq,
   getLoadSubsetDemandKey,
-  leftJoin,
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { describe, expect, it, vi } from 'vitest'
@@ -1302,11 +1301,8 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
   const live = createLiveQueryCollection((query) =>
     query
       .from({ left: left.collection })
-      .join(
-        leftJoin(
-          { right: right.collection },
-          ({ left: leftRow, right: rightRow }) => eq(leftRow.id, rightRow.id),
-        ),
+      .join({ right: right.collection }, ({ left: leftRow, right: rightRow }) =>
+        eq(leftRow.id, rightRow.id),
       )
       .select(({ left: row }) => ({ id: row.id })),
   )

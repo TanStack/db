@@ -7,4 +7,4 @@ title: IncludesMaterialization
 type IncludesMaterialization = "collection" | "array" | "singleton" | "concat";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L38)
+Defined in: [packages/db/src/query/ir.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L37)

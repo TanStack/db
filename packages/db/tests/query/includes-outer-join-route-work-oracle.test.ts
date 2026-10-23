@@ -3,7 +3,6 @@ import {
   Query,
   createLiveQueryCollection,
   eq,
-  joinOf,
   toArray,
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -155,11 +154,9 @@ describe(`direct outer-join route work`, () => {
                   new Query()
                     .from({ main: mains.collection })
                     .join(
-                      joinOf(
-                        kind,
-                        { anchor: anchors.collection },
-                        ({ main, anchor }) => eq(main.anchorId, anchor.id),
-                      ),
+                      { anchor: anchors.collection },
+                      ({ main, anchor }) => eq(main.anchorId, anchor.id),
+                      kind,
                     )
                     .where(({ main }) => eq(main.parentId, parent.id))
                     .select(({ main, anchor }) => ({

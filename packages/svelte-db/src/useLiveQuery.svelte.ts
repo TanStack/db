@@ -177,7 +177,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * // Join pattern
  * const issuesQuery = useLiveQuery((q) =>
  *   q.from({ issues: issueCollection })
- *    .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+ *    .join({ persons: personCollection }, ({ issues, persons }) =>
  *      eq(issues.userId, persons.id)
  *    ))
  *    .select(({ issues, persons }) => ({

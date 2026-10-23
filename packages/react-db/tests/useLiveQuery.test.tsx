@@ -10,7 +10,6 @@ import {
   eq,
   gt,
   include,
-  leftJoin,
   localOnlyCollectionOptions,
   lte,
   sum,
@@ -449,10 +448,8 @@ describe(`Query Collections`, () => {
       return useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(
-            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            ),
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
@@ -826,10 +823,8 @@ describe(`Query Collections`, () => {
       const queryResult = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(
-            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            ),
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
@@ -1466,10 +1461,8 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(
-              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-                eq(issues.userId, persons.id),
-              ),
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
@@ -1894,10 +1887,8 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(
-              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-                eq(issues.userId, persons.id),
-              ),
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
@@ -2650,10 +2641,8 @@ describe(`Query Collections`, () => {
 
           return q
             .from({ persons: personCollection })
-            .join(
-              leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
-                eq(persons.id, ic.userId),
-              ),
+            .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
+              eq(persons.id, ic.userId),
             )
             .select(({ persons, ic }) => ({
               name: persons.name,

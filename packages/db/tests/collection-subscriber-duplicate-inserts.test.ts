@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq, leftJoin } from '../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { mockSyncCollectionOptions } from './utils.js'
@@ -505,10 +505,8 @@ describe(`CollectionSubscriber duplicate insert prevention`, () => {
     const liveQueryCollection = createLiveQueryCollection((q) =>
       q
         .from({ users: usersCollection })
-        .join(
-          leftJoin({ orders: ordersCollection }, ({ users: u, orders: o }) =>
-            eq(u.id, o.userId),
-          ),
+        .join({ orders: ordersCollection }, ({ users: u, orders: o }) =>
+          eq(u.id, o.userId),
         )
         .select(({ users: u2, orders: o2 }) => ({
           orderId: o2.id,

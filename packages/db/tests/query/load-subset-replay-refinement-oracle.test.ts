@@ -3,9 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
-  innerJoin,
   isUndefined,
-  leftJoin,
   not,
   toArray,
 } from '../../src/query/index.js'
@@ -927,12 +925,10 @@ describe(`loadSubset replay refinement`, () => {
     const live = createLiveQueryCollection((q) =>
       q
         .from({ primary: primary.collection })
-        .join(
-          innerJoin(
-            { secondary: secondary.collection },
-            ({ primary: left, secondary: right }) =>
-              eq(left.joinKey, right.joinKey),
-          ),
+        .innerJoin(
+          { secondary: secondary.collection },
+          ({ primary: left, secondary: right }) =>
+            eq(left.joinKey, right.joinKey),
         )
         .orderBy(({ primary: row }) => row.version)
         .limit(1)
@@ -1592,17 +1588,13 @@ async function checkOrderedReplay(
       const from = q.from({ row: source })
       const filtered =
         scenario.joined === `inner`
-          ? from.join(
-              innerJoin({ marker: markers }, ({ row, marker }) =>
-                eq(row.id, marker.rowId),
-              ),
+          ? from.innerJoin({ marker: markers }, ({ row, marker }) =>
+              eq(row.id, marker.rowId),
             )
           : scenario.joined
             ? from
-                .join(
-                  leftJoin({ marker: markers }, ({ row, marker }) =>
-                    eq(row.id, marker.rowId),
-                  ),
+                .leftJoin({ marker: markers }, ({ row, marker }) =>
+                  eq(row.id, marker.rowId),
                 )
                 .where(({ marker }) =>
                   scenario.joined === `none`

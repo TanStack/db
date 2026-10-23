@@ -54,7 +54,7 @@ const todosQuery = useLiveQuery(
 // Join pattern
 const personIssues = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
-   .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+   .join({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
    ))
    .select(({ issues, persons }) => ({
@@ -154,7 +154,7 @@ const todosQuery = useLiveQuery(
 // Join pattern
 const personIssues = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
-   .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+   .join({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
    ))
    .select(({ issues, persons }) => ({
@@ -401,7 +401,7 @@ const todosQuery = useLiveQuery(
 // Join pattern
 const personIssues = useLiveQuery((q) =>
   q.from({ issues: issueCollection })
-   .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+   .join({ persons: personCollection }, ({ issues, persons }) =>
      eq(issues.userId, persons.id)
    ))
    .select(({ issues, persons }) => ({

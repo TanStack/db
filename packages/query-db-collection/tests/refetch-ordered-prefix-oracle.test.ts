@@ -6,7 +6,6 @@ import {
   eq,
   getLoadSubsetDemandKey,
   isUndefined,
-  leftJoin,
   not,
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
@@ -640,10 +639,8 @@ async function startRun(testCase: Case): Promise<Run> {
   const window = createLiveQueryCollection((q) => {
     const ordered = q
       .from({ item: items })
-      .join(
-        leftJoin({ marker: markerCollection }, ({ item, marker }) =>
-          eq(item.id, marker.itemId),
-        ),
+      .leftJoin({ marker: markerCollection }, ({ item, marker }) =>
+        eq(item.id, marker.itemId),
       )
       .where(({ marker }) => not(isUndefined(marker.itemId)))
       .orderBy(

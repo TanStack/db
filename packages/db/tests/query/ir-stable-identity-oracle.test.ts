@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { innerJoin, leftJoin } from '@tanstack/db'
-import { joinRuntime } from '../../src/query/compiler/join-runtime.js'
 import { include } from '../../src/query/index.js'
 import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import { CollectionImpl } from '../../src/collection/index.js'
@@ -873,7 +871,6 @@ function createAlphaRenamedJoinQuery(
     ),
     join: [
       {
-        runtime: joinRuntime,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -916,7 +913,6 @@ function createAlphaRenamedImplicitJoinQuery(
     ),
     join: [
       {
-        runtime: joinRuntime,
         type: `inner`,
         from: new CollectionRef(
           postsCollection as unknown as ConstructorParameters<
@@ -1283,9 +1279,9 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
         new Query()
           .from({ user: usersCollection })
           .join(
-            leftJoin({ post: postsCollection }, ({ user, post }) =>
-              eq(user.id, post.userId),
-            ),
+            { post: postsCollection },
+            ({ user, post }) => eq(user.id, post.userId),
+            `left`,
           )
           .where(({ post }) => eq(post.published, true))
           .select(({ user, post }) => ({
@@ -1305,14 +1301,13 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
               .where(({ post }) => gt(post.views, 100)),
           })
           .join(
-            innerJoin(
-              {
-                activeUser: new Query()
-                  .from({ user: usersCollection })
-                  .where(({ user }) => eq(user.status, `active`)),
-              },
-              ({ post, activeUser }) => eq(post.userId, activeUser.id),
-            ),
+            {
+              activeUser: new Query()
+                .from({ user: usersCollection })
+                .where(({ user }) => eq(user.status, `active`)),
+            },
+            ({ post, activeUser }) => eq(post.userId, activeUser.id),
+            `inner`,
           ),
       ),
   ],

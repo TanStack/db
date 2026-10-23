@@ -3,7 +3,7 @@ id: InvalidJoinConditionSourceMismatchError
 title: InvalidJoinConditionSourceMismatchError
 ---
 
-Defined in: [packages/db/src/errors.ts:919](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L919)
+Defined in: [packages/db/src/errors.ts:909](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L909)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:919](https://github.com/TanStack/db/blob/
 new InvalidJoinConditionSourceMismatchError(): InvalidJoinConditionSourceMismatchError;
 ```
 
-Defined in: [packages/db/src/errors.ts:920](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L920)
+Defined in: [packages/db/src/errors.ts:910](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L910)
 
 #### Returns
 

@@ -3,7 +3,7 @@ id: ConditionalSelect
 title: ConditionalSelect
 ---
 
-Defined in: [packages/db/src/query/ir.ts:317](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L317)
+Defined in: [packages/db/src/query/ir.ts:313](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L313)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:317](https://github.com/TanStack/db/blo
 new ConditionalSelect(branches, defaultValue?): ConditionalSelect;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L319)
+Defined in: [packages/db/src/query/ir.ts:315](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L315)
 
 #### Parameters
 
@@ -47,7 +47,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 **`Internal`**
 
@@ -67,7 +67,7 @@ BaseExpression.__returnType
 branches: ConditionalSelectBranch[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:320](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L320)
+Defined in: [packages/db/src/query/ir.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L316)
 
 ***
 
@@ -77,7 +77,7 @@ Defined in: [packages/db/src/query/ir.ts:320](https://github.com/TanStack/db/blo
 optional defaultValue: SelectValueExpression;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L321)
+Defined in: [packages/db/src/query/ir.ts:317](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L317)
 
 ***
 
@@ -87,7 +87,7 @@ Defined in: [packages/db/src/query/ir.ts:321](https://github.com/TanStack/db/blo
 type: "conditionalSelect";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L318)
+Defined in: [packages/db/src/query/ir.ts:314](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L314)
 
 #### Overrides
 

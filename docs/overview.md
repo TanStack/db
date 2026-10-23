@@ -323,15 +323,18 @@ You can also query across collections with joins:
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
-import { eq, innerJoin } from '@tanstack/db'
+import { eq } from '@tanstack/db'
 
 const Todos = () => {
   const { data: todos } = useLiveQuery({
     query: (q) =>
       q
         .from({ todos: todoCollection })
-        .join(innerJoin({ lists: listCollection },
-          ({ todos, lists }) => eq(lists.id, todos.listId)))
+        .join(
+          { lists: listCollection },
+          ({ todos, lists }) => eq(lists.id, todos.listId),
+          'inner'
+        )
         .where(({ lists }) => eq(lists.active, true))
         .select(({ todos, lists }) => ({
           id: todos.id,
@@ -494,8 +497,11 @@ const Todos = () => {
     query: (q) =>
       q
         .from({ todo: todoCollection })
-        .join(innerJoin({ list: listCollection },
-          ({ todo, list }) => eq(list.id, todo.list_id)))
+        .join(
+          { list: listCollection },
+          ({ todo, list }) => eq(list.id, todo.list_id),
+          "inner"
+        )
         .where(({ list }) => eq(list.active, true))
         .select(({ todo, list }) => ({
           id: todo.id,

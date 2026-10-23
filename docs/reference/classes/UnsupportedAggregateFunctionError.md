@@ -3,7 +3,7 @@ id: UnsupportedAggregateFunctionError
 title: UnsupportedAggregateFunctionError
 ---
 
-Defined in: [packages/db/src/errors.ts:987](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L987)
+Defined in: [packages/db/src/errors.ts:977](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L977)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:987](https://github.com/TanStack/db/blob/
 new UnsupportedAggregateFunctionError(functionName): UnsupportedAggregateFunctionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:988](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L988)
+Defined in: [packages/db/src/errors.ts:978](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L978)
 
 #### Parameters
 

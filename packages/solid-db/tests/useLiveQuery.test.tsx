@@ -7,7 +7,6 @@ import {
   eq,
   gt,
   include,
-  leftJoin,
   toArray,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
@@ -384,10 +383,8 @@ describe(`Query Collections`, () => {
       return useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(
-            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            ),
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
@@ -870,10 +867,8 @@ describe(`Query Collections`, () => {
       const queryResult = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
-          .join(
-            leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id),
-            ),
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
@@ -1446,10 +1441,8 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(
-              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-                eq(issues.userId, persons.id),
-              ),
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
@@ -1846,10 +1839,8 @@ describe(`Query Collections`, () => {
         return useLiveQuery((q) =>
           q
             .from({ issues: issueCollection })
-            .join(
-              leftJoin({ persons: personCollection }, ({ issues, persons }) =>
-                eq(issues.userId, persons.id),
-              ),
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,

@@ -6,8 +6,6 @@ import {
   eq,
   gt,
   include,
-  innerJoin,
-  leftJoin,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -441,9 +439,9 @@ describe(`caseWhen`, () => {
       q
         .from({ user: users })
         .join(
-          leftJoin({ post: posts }, ({ user, post }) =>
-            eq(user.id, post.userId),
-          ),
+          { post: posts },
+          ({ user, post }) => eq(user.id, post.userId),
+          `left`,
         )
         .select(({ user, post }) => ({
           id: user.id,
@@ -472,9 +470,10 @@ describe(`caseWhen`, () => {
       q
         .from({ user: users })
         .join(
-          innerJoin({ post: posts }, ({ user, post }) =>
+          { post: posts },
+          ({ user, post }) =>
             eq(caseWhen(eq(user.active, true), user.id, -1), post.userId),
-          ),
+          `inner`,
         )
         .select(({ user, post }) => ({
           userId: user.id,

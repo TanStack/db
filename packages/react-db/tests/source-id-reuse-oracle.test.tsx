@@ -34,7 +34,6 @@ import {
   createCollection,
   eq,
   gt,
-  leftJoin,
 } from '@tanstack/db'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
@@ -151,21 +150,14 @@ describe(`React source ID reuse`, () => {
           include
             ? q
                 .from({ failingA: failing[0]! })
-                .join(
-                  leftJoin(
-                    { failingB: failing[1]! },
-                    ({ failingA, failingB }) => eq(failingA.id, failingB.id),
-                  ),
+                .join({ failingB: failing[1]! }, ({ failingA, failingB }) =>
+                  eq(failingA.id, failingB.id),
                 )
-                .join(
-                  leftJoin({ healthy }, ({ failingA, healthy }) =>
-                    eq(failingA.id, healthy.id),
-                  ),
+                .join({ healthy }, ({ failingA, healthy }) =>
+                  eq(failingA.id, healthy.id),
                 )
-                .join(
-                  leftJoin({ settings: current }, ({ failingA, settings }) =>
-                    eq(failingA.id, settings.id),
-                  ),
+                .join({ settings: current }, ({ failingA, settings }) =>
+                  eq(failingA.id, settings.id),
                 )
             : q.from({ settings: current }),
       })
@@ -234,10 +226,8 @@ describe(`React source ID reuse`, () => {
           includeShared
             ? q
                 .from({ settings: current })
-                .join(
-                  leftJoin({ shared: descriptor }, ({ settings, shared }) =>
-                    eq(settings.id, shared.id),
-                  ),
+                .join({ shared: descriptor }, ({ settings, shared }) =>
+                  eq(settings.id, shared.id),
                 )
             : q.from({ settings: current }),
       })
@@ -349,10 +339,8 @@ describe(`React source ID reuse`, () => {
           query: (q) =>
             q
               .from({ first: leftSource })
-              .join(
-                leftJoin({ second: rightSource }, ({ first, second }) =>
-                  eq(first.id, second.id),
-                ),
+              .join({ second: rightSource }, ({ first, second }) =>
+                eq(first.id, second.id),
               ),
         }),
       ),
@@ -738,10 +726,8 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
           includeShared
             ? q
                 .from({ settings: current })
-                .join(
-                  leftJoin({ shared: descriptor }, ({ settings, shared }) =>
-                    eq(settings.id, shared.id),
-                  ),
+                .join({ shared: descriptor }, ({ settings, shared }) =>
+                  eq(settings.id, shared.id),
                 )
                 .orderBy(({ settings }) => settings.rank)
             : q

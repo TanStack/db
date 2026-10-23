@@ -40,7 +40,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   include,
-  leftJoin,
   pooledLiveQueries,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
@@ -212,11 +211,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const h = driver.mount((q) =>
           q
             .from({ left: left.collection })
-            .join(
-              leftJoin(
-                { right: right.collection },
-                ({ left: a, right: b }: any) => ops.eq(a.id, b.id),
-              ),
+            .join({ right: right.collection }, ({ left: a, right: b }: any) =>
+              ops.eq(a.id, b.id),
             ),
         )
         await h.flush()
@@ -257,10 +253,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           q
             .from({ opted: opted.collection })
             .join(
-              leftJoin(
-                { ordinary: ordinary.collection },
-                ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
-              ),
+              { ordinary: ordinary.collection },
+              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
             ),
         )
         await h.apply(settle)
@@ -733,11 +727,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       const h = driver.mount((q) =>
         q
           .from({ issues: issues.collection })
-          .join(
-            leftJoin(
-              { persons: people.collection },
-              ({ issues: i, persons }: any) => ops.eq(i.userId, persons.id),
-            ),
+          .join({ persons: people.collection }, ({ issues: i, persons }: any) =>
+            ops.eq(i.userId, persons.id),
           )
           .select(({ issues: i, persons }: any) => ({
             id: i.id,
@@ -801,10 +792,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             }))
           return q
             .from({ persons: people.collection })
-            .join(
-              leftJoin({ ic: issueCounts }, ({ persons, ic }: any) =>
-                ops.eq(persons.id, ic.userId),
-              ),
+            .leftJoin({ ic: issueCounts }, ({ persons, ic }: any) =>
+              ops.eq(persons.id, ic.userId),
             )
             .select(({ persons, ic }: any) => ({
               name: persons.name,

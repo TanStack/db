@@ -3,7 +3,7 @@ id: LoadSubsetOperationAbortedError
 title: LoadSubsetOperationAbortedError
 ---
 
-Defined in: [packages/db/src/errors.ts:1110](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1110)
+Defined in: [packages/db/src/errors.ts:1100](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1100)
 
 A subset operation was canceled before its result became visible.
 
@@ -19,7 +19,7 @@ A subset operation was canceled before its result became visible.
 new LoadSubsetOperationAbortedError(): LoadSubsetOperationAbortedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1111](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1111)
+Defined in: [packages/db/src/errors.ts:1101](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1101)
 
 #### Returns
 

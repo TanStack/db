@@ -10,7 +10,6 @@ import {
   groupKeys,
   gt,
   include,
-  innerJoin,
   lt,
   lte,
   materialize,
@@ -161,10 +160,8 @@ test('keeps dotted ancestor aliases distinct in nested includes', async () => {
   const live = createLiveQueryCollection((q) =>
     q
       .from({ 'p.q': dotted.collection })
-      .join(
-        innerJoin({ p: nested.collection }, ({ 'p.q': left, p }) =>
-          eq(left.id, p.id),
-        ),
+      .innerJoin({ p: nested.collection }, ({ 'p.q': left, p }) =>
+        eq(left.id, p.id),
       )
       .select(({ 'p.q': left, p }) => ({
         id: left.id,
@@ -1245,11 +1242,9 @@ async function runRecursiveSourceCell({
           case `joined-query-ref`: {
             const routed = q
               .from({ anchor: anchors.collection })
-              .join(
-                innerJoin(
-                  { result: buildCandidates(candidates.collection) },
-                  ({ anchor, result }) => eq(anchor.id, result.id),
-                ),
+              .innerJoin(
+                { result: buildCandidates(candidates.collection) },
+                ({ anchor, result }) => eq(anchor.id, result.id),
               )
               .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
               .select(({ result }) => ({
@@ -1261,10 +1256,8 @@ async function runRecursiveSourceCell({
           case `union-branch`: {
             const routed = q
               .unionAll(buildLeftCandidates(), buildRightCandidates())
-              .join(
-                innerJoin({ anchor: anchors.collection }, ({ id, anchor }) =>
-                  eq(id, anchor.id),
-                ),
+              .innerJoin({ anchor: anchors.collection }, ({ id, anchor }) =>
+                eq(id, anchor.id),
               )
               .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
               .select(({ id, value }) => ({ id, value }))
@@ -1409,10 +1402,8 @@ async function runUnionIdentityCell({
             }))
           return q
             .unionAll(leftRows, rightRows)
-            .join(
-              innerJoin({ anchor: anchors.collection }, ({ id, anchor }) =>
-                eq(id, anchor.id),
-              ),
+            .innerJoin({ anchor: anchors.collection }, ({ id, anchor }) =>
+              eq(id, anchor.id),
             )
             .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
             .select(({ id, value }) => ({ id, value }))
@@ -1423,12 +1414,10 @@ async function runUnionIdentityCell({
               leftCandidate: left.collection,
               rightCandidate: right.collection,
             })
-            .join(
-              innerJoin(
-                { anchor: anchors.collection },
-                ({ leftCandidate, rightCandidate, anchor }) =>
-                  eq(coalesce(leftCandidate.id, rightCandidate.id), anchor.id),
-              ),
+            .innerJoin(
+              { anchor: anchors.collection },
+              ({ leftCandidate, rightCandidate, anchor }) =>
+                eq(coalesce(leftCandidate.id, rightCandidate.id), anchor.id),
             )
             .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
             .select(({ leftCandidate, rightCandidate }) => ({
@@ -1555,10 +1544,8 @@ async function runDerivedResultCell({
                 )
           const rows = q
             .from({ anchor: anchors.collection })
-            .join(
-              innerJoin({ value: values }, ({ anchor, value }) =>
-                eq(anchor.value, value),
-              ),
+            .innerJoin({ value: values }, ({ anchor, value }) =>
+              eq(anchor.value, value),
             )
             .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
             .select(({ anchor, value }) => ({ id: anchor.id, value }))
@@ -1572,10 +1559,8 @@ async function runDerivedResultCell({
           if (boundary === `from-query-ref`) {
             const rows = q
               .from({ value: values })
-              .join(
-                innerJoin({ anchor: anchors.collection }, ({ value, anchor }) =>
-                  eq(value, anchor.value),
-                ),
+              .innerJoin({ anchor: anchors.collection }, ({ value, anchor }) =>
+                eq(value, anchor.value),
               )
               .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
               .select(({ anchor, value }) => ({ id: anchor.id, value }))
@@ -1584,10 +1569,8 @@ async function runDerivedResultCell({
 
           const rows = q
             .from({ anchor: anchors.collection })
-            .join(
-              innerJoin({ value: values }, ({ anchor, value }) =>
-                eq(anchor.value, value),
-              ),
+            .innerJoin({ value: values }, ({ anchor, value }) =>
+              eq(anchor.value, value),
             )
             .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
             .select(({ anchor, value }) => ({ id: anchor.id, value }))
@@ -1600,10 +1583,8 @@ async function runDerivedResultCell({
         if (boundary === `from-query-ref`) {
           const rows = q
             .from({ value: values })
-            .join(
-              innerJoin({ anchor: anchors.collection }, ({ value, anchor }) =>
-                eq(value, anchor.value),
-              ),
+            .innerJoin({ anchor: anchors.collection }, ({ value, anchor }) =>
+              eq(value, anchor.value),
             )
             .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
             .select(({ anchor, value }) => ({ id: anchor.id, value }))
@@ -1612,10 +1593,8 @@ async function runDerivedResultCell({
 
         const rows = q
           .from({ anchor: anchors.collection })
-          .join(
-            innerJoin({ value: values }, ({ anchor, value }) =>
-              eq(anchor.value, value),
-            ),
+          .innerJoin({ value: values }, ({ anchor, value }) =>
+            eq(anchor.value, value),
           )
           .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
           .select(({ anchor, value }) => ({ id: anchor.id, value }))
@@ -1736,12 +1715,10 @@ async function runQueryRefMetadataCell(
         }))
       return q
         .from({ anchor: anchors.collection })
-        .join(
-          innerJoin(
-            { candidateResult: projectedCandidates },
-            ({ anchor, candidateResult }) =>
-              eq(anchor.candidateId, candidateResult.id),
-          ),
+        .innerJoin(
+          { candidateResult: projectedCandidates },
+          ({ anchor, candidateResult }) =>
+            eq(anchor.candidateId, candidateResult.id),
         )
         .select(({ candidateResult }) => candidateResult)
     })
@@ -1773,12 +1750,10 @@ async function runQueryRefMetadataCell(
         }))
       const rows = q
         .from({ anchor: anchors.collection })
-        .join(
-          innerJoin(
-            { candidateResult: projectedCandidates },
-            ({ anchor, candidateResult }) =>
-              eq(anchor.candidateId, candidateResult.id),
-          ),
+        .innerJoin(
+          { candidateResult: projectedCandidates },
+          ({ anchor, candidateResult }) =>
+            eq(anchor.candidateId, candidateResult.id),
         )
         .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
         .select(({ candidateResult }) => candidateResult)
@@ -1837,17 +1812,13 @@ async function runJoinCell({
           keySide === `main`
             ? q
                 .from({ child: children.collection })
-                .join(
-                  innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                    eq(tag.id, add(child.tagId, parent.offset)),
-                  ),
+                .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                  eq(tag.id, add(child.tagId, parent.offset)),
                 )
             : q
                 .from({ child: children.collection })
-                .join(
-                  innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                    eq(add(tag.id, parent.offset), child.tagId),
-                  ),
+                .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                  eq(add(tag.id, parent.offset), child.tagId),
                 )
         const routed = (
           correlationAttachment === `main`
@@ -1966,10 +1937,8 @@ async function runNamespaceCollisionCell({
                 case `join`:
                   return includeInEveryForm(
                     correlated
-                      .join(
-                        innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                          eq(child.id, tag.id),
-                        ),
+                      .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                        eq(child.id, tag.id),
                       )
                       .select(({ child }) => ({
                         id: child.id,
@@ -2032,10 +2001,8 @@ async function runNamespaceCollisionCell({
                 case `join`:
                   return includeInEveryForm(
                     correlated
-                      .join(
-                        innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                          eq(child.id, tag.id),
-                        ),
+                      .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                        eq(child.id, tag.id),
                       )
                       .select(({ child }) => ({
                         id: child.id,
@@ -2209,10 +2176,8 @@ async function runPublicSurfaceCell({
           .fn.select(({ candidate }) => candidate.value)
         const rows = q
           .from({ anchor: anchors.collection })
-          .join(
-            innerJoin({ value: values }, ({ anchor, value }) =>
-              eq(anchor.value, value),
-            ),
+          .innerJoin({ value: values }, ({ anchor, value }) =>
+            eq(anchor.value, value),
           )
           .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
           .select(({ anchor, value }) => ({ id: anchor.id, value }))
@@ -2282,10 +2247,9 @@ async function runPublicSurfaceCell({
         return { id: parent.id, ...includeInEveryForm(rows) }
       }
 
-      const rows = correlated.join(
-        innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-          eq(child.id, tag.childId),
-        ),
+      const rows = correlated.innerJoin(
+        { tag: tags.collection },
+        ({ child, tag }) => eq(child.id, tag.childId),
       )
       return { id: parent.id, ...includeInEveryForm(rows) }
     }),
@@ -2742,22 +2706,18 @@ describe(`compound join parent context`, () => {
                   )
                 const joined =
                   boundary === `direct`
-                    ? base.join(
-                        innerJoin({ peer: peers.collection }, joinCondition),
-                      )
-                    : base.join(
-                        innerJoin(
-                          {
-                            peer: q
-                              .from({ peer: peers.collection })
-                              .select(({ peer }) => ({
-                                id: peer.id,
-                                a: peer.a,
-                                b: peer.b,
-                              })),
-                          },
-                          joinCondition,
-                        ),
+                    ? base.innerJoin({ peer: peers.collection }, joinCondition)
+                    : base.innerJoin(
+                        {
+                          peer: q
+                            .from({ peer: peers.collection })
+                            .select(({ peer }) => ({
+                              id: peer.id,
+                              a: peer.a,
+                              b: peer.b,
+                            })),
+                        },
+                        joinCondition,
                       )
                 const rows = joined.select(({ child, peer }) => ({
                   id: child.id,

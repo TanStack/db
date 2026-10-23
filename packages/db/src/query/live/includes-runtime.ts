@@ -3,8 +3,7 @@ import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
 
 /**
  * The include materializer. `include()`, `toArray()`, and `materialize()`
- * carry it onto the query IR, so other apps do not bundle it. Join operators
- * carry only public-key reduction.
+ * carry it onto the query IR, so other apps do not bundle it.
  */
 export const includesRuntime = {
   materializeCompilation,

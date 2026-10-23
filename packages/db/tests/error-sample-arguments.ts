@@ -91,7 +91,6 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
     ['join clause', 'number'],
     ['unionAll clause', 'undefined'],
   ],
-  JoinOperatorRequiredError: [['object']],
   IncludeOperatorRequiredError: [['issues']],
   GroupingOperatorRequiredError: [[]],
   JoinConditionMustBeEqualityError: [[]],

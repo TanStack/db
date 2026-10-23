@@ -7,7 +7,6 @@ import {
   createLiveQueryCollection,
   eq,
   isNull,
-  leftJoin,
   lt,
   not,
   queryOnce,
@@ -542,10 +541,8 @@ function createFlatQuery(
     query: (q) =>
       q
         .from({ parent: parents })
-        .join(
-          leftJoin({ child: children }, ({ parent, child }) =>
-            eq(parent.group, child.parentGroup),
-          ),
+        .leftJoin({ child: children }, ({ parent, child }) =>
+          eq(parent.group, child.parentGroup),
         )
         .select(({ parent, child }) => ({
           parentId: parent.id,

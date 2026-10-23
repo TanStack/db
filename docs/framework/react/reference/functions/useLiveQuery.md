@@ -163,7 +163,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -354,7 +354,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -548,7 +548,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -747,7 +747,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -957,7 +957,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -1284,7 +1284,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -1469,7 +1469,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -1658,7 +1658,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({
@@ -1990,7 +1990,7 @@ const { data, isEnabled } = useLiveQuery({
 const { data } = useLiveQuery({
   query: (q) =>
     q.from({ issues: issueCollection })
-     .join(leftJoin({ persons: personCollection }, ({ issues, persons }) =>
+     .join({ persons: personCollection }, ({ issues, persons }) =>
        eq(issues.userId, persons.id)
      ))
      .select(({ issues, persons }) => ({

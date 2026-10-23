@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  Query,
-  createEffect,
-  createTransaction,
-  eq,
-  leftJoin,
-} from '../src/index.js'
+import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import {
@@ -925,10 +919,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ issue: issues })
-            .join(
-              leftJoin({ user: users }, ({ issue, user }) =>
-                eq(issue.userId, user.id),
-              ),
+            .join({ user: users }, ({ issue, user }) =>
+              eq(issue.userId, user.id),
             )
             .select(({ issue, user }) => ({
               issueId: issue.id,
@@ -1674,12 +1666,8 @@ describe(`createEffect`, () => {
 
           return q
             .from({ left: leftTop })
-            .join(
-              leftJoin(
-                { right: rightTop },
-                ({ left: leftRow, right: rightRow }) =>
-                  eq(leftRow.id, rightRow.id),
-              ),
+            .join({ right: rightTop }, ({ left: leftRow, right: rightRow }) =>
+              eq(leftRow.id, rightRow.id),
             )
             .select(({ left: leftRow, right: rightRow }) => ({
               id: leftRow.id,
@@ -1734,10 +1722,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ user: users })
-            .join(
-              leftJoin({ issue: issues }, ({ user, issue }) =>
-                eq(user.id, issue.userId),
-              ),
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
             )
             .select(({ user, issue }) => ({
               id: user.id,
@@ -1779,10 +1765,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ left })
-            .join(
-              leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
-                eq(leftRow.id, rightRow.id),
-              ),
+            .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+              eq(leftRow.id, rightRow.id),
             ),
         onBatch: () => {},
       })
@@ -1844,10 +1828,8 @@ describe(`createEffect`, () => {
             query: (q) =>
               q
                 .from({ left })
-                .join(
-                  leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
-                    eq(leftRow.id, rightRow.id),
-                  ),
+                .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+                  eq(leftRow.id, rightRow.id),
                 ),
             onBatch: () => {},
           }),
@@ -1957,10 +1939,8 @@ describe(`createEffect`, () => {
           query: (q) =>
             q
               .from({ user: users })
-              .join(
-                leftJoin({ issue: issues }, ({ user, issue }) =>
-                  eq(user.id, issue.userId),
-                ),
+              .leftJoin({ issue: issues }, ({ user, issue }) =>
+                eq(user.id, issue.userId),
               )
               .select(({ user, issue }) => ({
                 id: user.id,
@@ -2006,10 +1986,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ user: users })
-            .join(
-              leftJoin({ issue: issues }, ({ user, issue }) =>
-                eq(user.id, issue.userId),
-              ),
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
             )
             .select(({ user, issue }) => ({
               id: user.id,
@@ -2079,10 +2057,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ user: users })
-            .join(
-              leftJoin({ issue: issues }, ({ user, issue }) =>
-                eq(user.id, issue.userId),
-              ),
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
             )
             .select(({ user, issue }) => ({
               id: user.id,
@@ -2251,10 +2227,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ user: users })
-            .join(
-              leftJoin({ issue: issues }, ({ user, issue }) =>
-                eq(user.id, issue.userId),
-              ),
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
             )
             .select(({ user, issue }) => ({
               id: user.id,
@@ -2310,10 +2284,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ user: users })
-            .join(
-              leftJoin({ issue: issues }, ({ user, issue }) =>
-                eq(user.id, issue.userId),
-              ),
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
             )
             .select(({ user, issue }) => ({
               id: user.id,
@@ -2513,10 +2485,8 @@ describe(`createEffect`, () => {
           query: (q) =>
             q
               .from({ user: users })
-              .join(
-                leftJoin({ issue: issues }, ({ user, issue }) =>
-                  eq(user.id, issue.userId),
-                ),
+              .leftJoin({ issue: issues }, ({ user, issue }) =>
+                eq(user.id, issue.userId),
               )
               .fn.select(({ user }) => {
                 if (phase === `projection`) disposeInTurn?.()

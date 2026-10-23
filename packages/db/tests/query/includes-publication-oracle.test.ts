@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
-  innerJoin,
   materialize,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -136,11 +135,10 @@ function createLayeredQuery(
         q1Shape === `direct`
           ? source
           : source.join(
-              innerJoin(
-                { metadata: metadata.collection },
-                ({ item, metadata: rowMetadata }) =>
-                  eq(item.id, rowMetadata.parentId),
-              ),
+              { metadata: metadata.collection },
+              ({ item, metadata: rowMetadata }) =>
+                eq(item.id, rowMetadata.parentId),
+              `inner`,
             )
 
       return parentRows.select(({ item }) => ({

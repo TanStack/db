@@ -9,8 +9,6 @@ import {
   eq,
   gt,
   include,
-  innerJoin,
-  leftJoin,
   lt,
   materialize,
   multiply,
@@ -1674,10 +1672,8 @@ describe(`Collection-valued includes oracle`, () => {
           query: (q) => {
             const joined = q
               .from({ comment: comments.collection })
-              .join(
-                leftJoin({ user: users.collection }, ({ comment, user }) =>
-                  eq(comment.userId, user.id),
-                ),
+              .join({ user: users.collection }, ({ comment, user }) =>
+                eq(comment.userId, user.id),
               )
             return mode === `value`
               ? joined.select(({ comment }) => ({
@@ -3130,10 +3126,8 @@ describe(`Collection-valued includes oracle`, () => {
           const childRows = () =>
             q
               .from({ child: children.collection })
-              .join(
-                innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                  eq(tag.id, add(child.tagId, parent.offset)),
-                ),
+              .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                eq(tag.id, add(child.tagId, parent.offset)),
               )
               .where(({ child }) => eq(child.parentGroup, parent.group))
               .select(({ child, tag }) => ({

@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createLiveQueryCollection, leftJoin } from '../../src/query/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
   add,
@@ -244,10 +244,8 @@ describe(`aggregate value contracts`, () => {
       query: (q) =>
         q
           .from({ row: rows })
-          .join(
-            leftJoin({ detail: details }, ({ row, detail }) =>
-              eq(row.id, detail.rowId),
-            ),
+          .leftJoin({ detail: details }, ({ row, detail }) =>
+            eq(row.id, detail.rowId),
           )
           .groupBy(({ row }) => row.group)
           .select(({ row, detail }) => {

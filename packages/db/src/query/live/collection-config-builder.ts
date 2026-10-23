@@ -14,6 +14,7 @@ import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { reducePublicKeys } from './public-key-reduction.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -28,7 +29,6 @@ import {
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { IncludesRuntime } from './includes-runtime.js'
-import type { BasicExpression, JoinClause, QueryIR } from '../ir.js'
 import type { BucketFacadeAdapter } from './bucket-facade-adapter.js'
 import type { materializeCompilation } from './materialized-pipeline.js'
 import type { WindowOptions } from '../compiler/index.js'
@@ -46,6 +46,7 @@ import type {
   UtilsRecord,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
+import type { BasicExpression, QueryIR } from '../ir.js'
 import type { LazyCollectionCallbacks } from '../compiler/joins.js'
 import type { Deferred } from '../../deferred.js'
 import type {
@@ -240,30 +241,34 @@ export class CollectionConfigBuilder<
   }
 
   /**
-   * Returns a join clause from the query or any of its subqueries
+   * Recursively checks if a query or any of its subqueries contains joins
    */
-  private findJoinClause(query: QueryIR): JoinClause | undefined {
-    if (query.join && query.join.length > 0) return query.join[0]
-    const from = query.from
-    const nested =
-      from.type === `queryRef`
-        ? [from.query]
-        : from.type === `unionFrom`
-          ? from.sources.flatMap((source) =>
-              source.type === `queryRef` ? [source.query] : [],
-            )
-          : from.type === `unionAll`
-            ? from.queries
-            : []
-    for (const subquery of nested) {
-      const joinClause = this.findJoinClause(subquery)
-      if (joinClause) return joinClause
-    }
-    return undefined
-  }
-
   private hasJoins(query: QueryIR): boolean {
-    return this.findJoinClause(query) !== undefined
+    // Check if this query has joins
+    if (query.join && query.join.length > 0) {
+      return true
+    }
+
+    // Recursively check subqueries in the from clause
+    if (query.from.type === `queryRef`) {
+      if (this.hasJoins(query.from.query)) {
+        return true
+      }
+    } else if (query.from.type === `unionFrom`) {
+      for (const source of query.from.sources) {
+        if (source.type === `queryRef` && this.hasJoins(source.query)) {
+          return true
+        }
+      }
+    } else if (query.from.type === `unionAll`) {
+      for (const branch of query.from.queries) {
+        if (this.hasJoins(branch)) {
+          return true
+        }
+      }
+    }
+
+    return false
   }
 
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
@@ -910,14 +915,13 @@ export class CollectionConfigBuilder<
     )
 
     // Includes bring the materializer. A joined query with a custom key
-    // reduces its public keys, so its join operator brings the reduction.
+    // reduces its public keys without it.
     const includesRuntime = compilation.includes?.[0]?.runtime
-    const joinClause = this.findJoinClause(this.query)
     const getKey = this.config.getKey
     const materialized = includesRuntime
       ? includesRuntime.materializeCompilation(compilation, getKey)
-      : getKey && joinClause
-        ? joinClause.runtime.reducePublicKeys(compilation, getKey)
+      : getKey && this.hasJoins(this.query)
+        ? reducePublicKeys(compilation, getKey)
         : { pipeline: compilation.pipeline, facades: undefined }
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses

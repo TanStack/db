@@ -3,7 +3,7 @@ id: GroupingOperatorRequiredError
 title: GroupingOperatorRequiredError
 ---
 
-Defined in: [packages/db/src/errors.ts:739](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L739)
+Defined in: [packages/db/src/errors.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L729)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:739](https://github.com/TanStack/db/blob/
 new GroupingOperatorRequiredError(): GroupingOperatorRequiredError;
 ```
 
-Defined in: [packages/db/src/errors.ts:740](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L740)
+Defined in: [packages/db/src/errors.ts:730](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L730)
 
 #### Returns
 

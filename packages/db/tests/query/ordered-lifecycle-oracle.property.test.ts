@@ -4,9 +4,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import {
   createLiveQueryCollection,
   eq,
-  innerJoin,
   isUndefined,
-  leftJoin,
   not,
   toArray,
 } from '../../src/query/index.js'
@@ -1117,10 +1115,8 @@ describe(`synchronous initial settlement refinement`, () => {
       query: (q) =>
         q
           .from({ row: rows })
-          .join(
-            leftJoin({ marker: markers }, ({ row, marker }) =>
-              eq(row.id, marker.rowId),
-            ),
+          .leftJoin({ marker: markers }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
           )
           .where(({ marker }) => not(isUndefined(marker.rowId)))
           .fn.where(({ row }) => row.rank > 0)
@@ -1223,10 +1219,8 @@ describe(`synchronous initial settlement refinement`, () => {
       query: (q) =>
         q
           .from({ left })
-          .join(
-            leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
-              eq(leftRow.group, rightRow.group),
-            ),
+          .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+            eq(leftRow.group, rightRow.group),
           )
           .orderBy(({ left: leftRow }) => leftRow.rank)
           .limit(2)
@@ -2026,10 +2020,8 @@ async function observeLaterFallback(
     query: (q) =>
       q
         .from({ root: rootCollection })
-        .join(
-          leftJoin({ marker: markerCollection }, ({ root, marker }) =>
-            eq(root.id, marker.rootId),
-          ),
+        .leftJoin({ marker: markerCollection }, ({ root, marker }) =>
+          eq(root.id, marker.rootId),
         )
         .where(({ marker }) => not(isUndefined(marker.id)))
         .orderBy(({ root }) => root.at, {
@@ -3080,9 +3072,7 @@ function createFullSourceQuery(
       switch (feature) {
         case `inner-join`:
           return base
-            .join(
-              innerJoin({ tag: tags }, ({ row, tag }) => eq(row.tag, tag.tag)),
-            )
+            .innerJoin({ tag: tags }, ({ row, tag }) => eq(row.tag, tag.tag))
             .orderBy(({ row }) => row.rank)
             .limit(2)
             .select(({ row }) => ({ id: row.id }))

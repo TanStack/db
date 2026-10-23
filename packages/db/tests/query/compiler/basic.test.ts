@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest'
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
-import { joinRuntime } from '../../../src/query/compiler/join-runtime.js'
 import { compileQuery } from '../../../src/query/compiler/index.js'
 import { materializeCompilation } from '../../../src/query/live/materialized-pipeline.js'
 import { CollectionRef, Func, PropRef, Value } from '../../../src/query/ir.js'
@@ -213,7 +212,6 @@ describe(`Query2 Compiler`, () => {
           from: new CollectionRef(usersCollection, userAlias),
           join: [
             {
-              runtime: joinRuntime,
               type: `inner`,
               from: new CollectionRef(postsCollection, postAlias),
               on: new Func('eq', [

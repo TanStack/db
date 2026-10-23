@@ -5,7 +5,6 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
-  innerJoin,
   lower,
   lt,
   lte,
@@ -271,9 +270,9 @@ describe(`Composables`, () => {
           q
             .from({ user: usersCollection })
             .join(
-              innerJoin({ post: postsCollection }, ({ user, post }) =>
-                eq(user.id, post.authorId),
-              ),
+              { post: postsCollection },
+              ({ user, post }) => eq(user.id, post.authorId),
+              `inner`,
             )
             .where(userIsActive)
             .where(postIsPublished)
@@ -425,9 +424,9 @@ describe(`Composables`, () => {
           q
             .from({ u: usersCollection })
             .join(
-              innerJoin({ p: postsCollection }, ({ u, p }) =>
-                eq(u.id, p.authorId),
-              ),
+              { p: postsCollection },
+              ({ u, p }) => eq(u.id, p.authorId),
+              `inner`,
             )
             .where(joinedUserPostPredicate)
             .select(joinedSelect),

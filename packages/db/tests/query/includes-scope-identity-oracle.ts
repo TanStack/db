@@ -3,9 +3,6 @@ import {
   and,
   createLiveQueryCollection,
   eq,
-  innerJoin,
-  joinOf,
-  leftJoin,
   materialize,
   not,
   toArray,
@@ -617,10 +614,8 @@ export function createScopedQuery(
           branch(n.activeBranch!, true),
           branch(n.inactiveBranch!, false),
         )
-        .join(
-          innerJoin({ [n.anchor!]: sources.parts.collection }, (c: Context) =>
-            eq(c.id, c[n.anchor!].id),
-          ),
+        .innerJoin({ [n.anchor!]: sources.parts.collection }, (c: Context) =>
+          eq(c.id, c[n.anchor!].id),
         )
         .select((c: Context) => ({
           id: c.id,
@@ -653,9 +648,9 @@ export function createScopedQuery(
         } as any) as any
       )
         .join(
-          joinOf(shape.wrapperJoin, { [n.joinSub!]: clientOne }, (c: Context) =>
-            eq(c[n.joinSub!].partId, c[n.wrapped!].id),
-          ),
+          { [n.joinSub!]: clientOne },
+          (c: Context) => eq(c[n.joinSub!].partId, c[n.wrapped!].id),
+          shape.wrapperJoin,
         )
         .select((c: Context) => ({
           id: c[n.wrapped!].id,
@@ -668,18 +663,16 @@ export function createScopedQuery(
     let sub: any = q.from({ [n.sub!]: sources.parts.collection })
     if (subquery.joins !== `none`) {
       sub = sub.join(
-        joinOf(
-          subquery.refsJoin,
-          { [n.joined!]: sources.refs.collection },
-          (c: Context) => eq(c[n.joined!].partId, c[n.sub!].id),
-        ),
+        { [n.joined!]: sources.refs.collection },
+        (c: Context) => eq(c[n.joined!].partId, c[n.sub!].id),
+        subquery.refsJoin,
       )
     }
     if (subquery.joins === `refsThenNotes`) {
       sub = sub.join(
-        leftJoin({ [n.noted!]: sources.notes.collection }, (c: Context) =>
-          eq(c[n.noted!].partId, c[n.sub!].id),
-        ),
+        { [n.noted!]: sources.notes.collection },
+        (c: Context) => eq(c[n.noted!].partId, c[n.sub!].id),
+        `left`,
       )
     }
     const predicates = subquery.predicates.map((predicate) =>
@@ -736,11 +729,9 @@ export function createScopedQuery(
               branch(n.include!, clientOne),
               branch(n.includeOther!, (member) => not(clientOne(member))),
             )
-            .join(
-              innerJoin(
-                { [n.includeAnchor!]: includeCollection },
-                (cc: Context) => eq(cc.memberId, cc[n.includeAnchor!].id),
-              ),
+            .innerJoin(
+              { [n.includeAnchor!]: includeCollection },
+              (cc: Context) => eq(cc.memberId, cc[n.includeAnchor!].id),
             )
             .where((cc: Context) => eq(cc[n.includeAnchor!].partId, outer.id))
           if (include.clientFilter) {
@@ -771,10 +762,9 @@ export function createScopedQuery(
               : q.from({ [member]: includeCollection })
           if (include.body === `joined`) {
             child = child.join(
-              innerJoin(
-                { [n.includeJoin!]: sources.parts.collection },
-                (cc: Context) => eq(cc[n.includeJoin!].id, cc[member].partId),
-              ),
+              { [n.includeJoin!]: sources.parts.collection },
+              (cc: Context) => eq(cc[n.includeJoin!].id, cc[member].partId),
+              `inner`,
             )
           }
           child = child.where((cc: Context) => eq(cc[member].partId, outer.id))

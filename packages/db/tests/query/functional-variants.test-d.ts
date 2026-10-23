@@ -7,7 +7,6 @@ import {
   eq,
   gt,
   include,
-  leftJoin,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -273,10 +272,8 @@ describe(`Functional Variants Types`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .join({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .fn.select((row) => ({
             employeeInfo: `${row.user.name} works in ${row.dept?.name || `Unknown`}`,
@@ -310,10 +307,8 @@ describe(`Functional Variants Types`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .join({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .fn.where(
             (row) =>
@@ -338,10 +333,8 @@ describe(`Functional Variants Types`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .join({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .fn.where((row) => row.user.active)
           .fn.where((row) => row.user.salary > 60000)
@@ -539,10 +532,8 @@ describe(`Functional Variants Types`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .join({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .groupBy(({ dept }) => dept.name)
           .fn.having((row) => row.dept?.name !== `HR`)

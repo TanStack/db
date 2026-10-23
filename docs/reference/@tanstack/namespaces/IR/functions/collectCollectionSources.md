@@ -7,7 +7,7 @@ title: collectCollectionSources
 function collectCollectionSources(query): CollectionRef[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L397)
+Defined in: [packages/db/src/query/ir.ts:393](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L393)
 
 Returns concrete Collection sources after requiring client binding.
 

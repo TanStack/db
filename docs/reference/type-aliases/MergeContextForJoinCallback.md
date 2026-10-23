@@ -22,7 +22,7 @@ Optionality is only applied to the result AFTER the join logic executes.
 **Example**:
 ```typescript
 .from({ users })
-.join(leftJoin({ orders }, ({ users, orders }) => {
+.leftJoin({ orders }, ({ users, orders }) => {
   // users is NOT optional here - we can access users.id directly
   // orders is NOT optional here - we can access orders.userId directly
   return eq(users.id, orders.userId)

@@ -6,7 +6,6 @@ import {
   eq,
   gt,
   include,
-  leftJoin,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -194,10 +193,8 @@ describe(`Functional Variants Query`, () => {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .join(
-              leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                eq(user.department_id, dept.id),
-              ),
+            .join({ dept: departmentsCollection }, ({ user, dept }) =>
+              eq(user.department_id, dept.id),
             )
             .fn.select((row) => ({
               employeeInfo: `${row.user.name} works in ${row.dept?.name || `Unknown`}`,
@@ -870,10 +867,8 @@ describe(`Functional Variants Query`, () => {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .join(
-              leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                eq(user.department_id, dept.id),
-              ),
+            .join({ dept: departmentsCollection }, ({ user, dept }) =>
+              eq(user.department_id, dept.id),
             )
             .fn.where((row) => row.user.active)
             .fn.where((row) => row.user.salary > 60000)

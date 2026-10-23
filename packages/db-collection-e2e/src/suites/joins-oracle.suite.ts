@@ -4,13 +4,7 @@
  * Tests multi-collection joins with various syncMode combinations
  */
 import { randomUUID } from 'node:crypto'
-import {
-  createLiveQueryCollection,
-  eq,
-  gt,
-  isNull,
-  leftJoin,
-} from '@tanstack/db'
+import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
 
 import { describe, expect, it, vi } from 'vitest'
 import { waitFor, waitForQueryData } from '../utils/helpers'
@@ -388,10 +382,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           const query = createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .join(
-                leftJoin({ post: postsCollection }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: postsCollection }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .select(({ user, post }) => ({
                 id: post.id,
@@ -443,10 +435,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             q
               .from({ user: usersCollection })
               .where(({ user }) => eq(user.isActive, true))
-              .join(
-                leftJoin({ post: postsCollection }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: postsCollection }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .where(({ post }) => gt(post.viewCount, 10))
               .select(({ user, post }) => ({
@@ -496,10 +486,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             const query = createLiveQueryCollection((q) =>
               q
                 .from({ user: usersEager })
-                .join(
-                  leftJoin({ post: postsOnDemand }, ({ user, post }) =>
-                    eq(user.id, post.userId),
-                  ),
+                .join({ post: postsOnDemand }, ({ user, post }) =>
+                  eq(user.id, post.userId),
                 )
                 .select(({ user, post }) => ({
                   id: post.id,
@@ -548,10 +536,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           const query = createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .join(
-                leftJoin({ post: postsCollection }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: postsCollection }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .orderBy(({ post }) => post.viewCount, `desc`)
               .select(({ user, post }) => ({
@@ -620,10 +606,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           const query = createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .join(
-                leftJoin({ post: postsCollection }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: postsCollection }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .orderBy(({ post }) => post.id, `asc`)
               .limit(10)
@@ -670,15 +654,11 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           const query = createLiveQueryCollection((q) =>
             q
               .from({ user: users })
-              .join(
-                leftJoin({ post: posts }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: posts }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
-              .join(
-                leftJoin({ comment: comments }, ({ post, comment }) =>
-                  eq(post.id, comment.postId),
-                ),
+              .join({ comment: comments }, ({ post, comment }) =>
+                eq(post.id, comment.postId),
               )
               .select(({ user, post, comment }) => ({
                 id: comment.id,
@@ -732,16 +712,12 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             q
               .from({ user: users })
               .where(({ user }) => eq(user.isActive, true))
-              .join(
-                leftJoin({ post: posts }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: posts }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .where(({ post }) => isNull(post.deletedAt))
-              .join(
-                leftJoin({ comment: comments }, ({ post, comment }) =>
-                  eq(post.id, comment.postId),
-                ),
+              .join({ comment: comments }, ({ post, comment }) =>
+                eq(post.id, comment.postId),
               )
               .where(({ comment }) => isNull(comment.deletedAt))
               .select(({ user, post, comment }) => ({
@@ -793,15 +769,11 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             const query = createLiveQueryCollection((q) =>
               q
                 .from({ user: usersEager })
-                .join(
-                  leftJoin({ post: postsOnDemand }, ({ user, post }) =>
-                    eq(user.id, post.userId),
-                  ),
+                .join({ post: postsOnDemand }, ({ user, post }) =>
+                  eq(user.id, post.userId),
                 )
-                .join(
-                  leftJoin({ comment: commentsOnDemand }, ({ post, comment }) =>
-                    eq(post.id, comment.postId),
-                  ),
+                .join({ comment: commentsOnDemand }, ({ post, comment }) =>
+                  eq(post.id, comment.postId),
                 )
                 .select(({ user, post, comment }) => ({
                   id: comment.id,
@@ -850,10 +822,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           const query = createLiveQueryCollection((q) =>
             q
               .from({ user: users })
-              .join(
-                leftJoin({ post: posts }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: posts }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .where(({ post }) => gt(post.viewCount, 50))
               .select(({ user, post }) => ({
@@ -901,10 +871,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             q
               .from({ user: users })
               .where(({ user }) => gt(user.age, 30))
-              .join(
-                leftJoin({ post: posts }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .join({ post: posts }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .select(({ user, post }) => ({
                 id: post.id,
@@ -951,10 +919,8 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           const query = createLiveQueryCollection((q) =>
             q
               .from({ user: users })
-              .join(
-                leftJoin({ post: posts }, ({ user, post }) =>
-                  eq(user.id, post.userId),
-                ),
+              .leftJoin({ post: posts }, ({ user, post }) =>
+                eq(user.id, post.userId),
               )
               .select(({ user, post }) => ({
                 id: user.id,

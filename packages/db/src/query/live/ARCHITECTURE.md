@@ -109,11 +109,11 @@ operators and a few boundary adapters:
 
 Operator values carry their compilers, so an app bundles only the operators it
 imports. `include()`, `toArray()`, and `materialize()` carry the materializer
-and the Collection-facade adapter (`includes-runtime.ts`); join operators carry
-the join compiler, the optimizer's join pushdown, and public-key reduction
-(`public-key-reduction.ts`), without the include materializer; aggregates and `groupKeys()` carry the grouping compiler. A query
-that uses an operator always holds the value that carries it, so compilation
-stays synchronous.
+and the Collection-facade adapter (`includes-runtime.ts`); aggregates and
+`groupKeys()` carry the grouping compiler. A query that uses an operator always
+holds the value that carries it, so compilation stays synchronous. Joins are
+core: the join compiler and public-key reduction (`public-key-reduction.ts`)
+ship with every live query, without the include materializer.
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key

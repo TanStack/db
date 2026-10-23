@@ -3,7 +3,7 @@ id: QueryCompilationError
 title: QueryCompilationError
 ---
 
-Defined in: [packages/db/src/errors.ts:697](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L697)
+Defined in: [packages/db/src/errors.ts:687](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L687)
 
 ## Extends
 
@@ -38,7 +38,7 @@ Defined in: [packages/db/src/errors.ts:697](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:698](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L698)
+Defined in: [packages/db/src/errors.ts:688](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L688)
 
 #### Parameters
 

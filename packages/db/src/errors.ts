@@ -620,16 +620,6 @@ export class IncludeOperatorRequiredError extends QueryBuilderError {
   }
 }
 
-export class JoinOperatorRequiredError extends QueryBuilderError {
-  constructor(type: string) {
-    super(
-      devBuild() && process.env.NODE_ENV !== `production`
-        ? `.join() takes a join operator, such as .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Import leftJoin, innerJoin, rightJoin, fullJoin, or joinOf from @tanstack/db. Got: ${type}`
-        : codedMessage(245, { type }),
-    )
-  }
-}
-
 export type SourceClauseContext =
   `from clause` | `unionAll clause` | `join clause`
 
@@ -646,7 +636,7 @@ export class InvalidSourceTypeError extends QueryBuilderError {
               context === `unionAll clause`
                 ? `.unionAll({ todos: todosCollection, events: eventsCollection })`
                 : context === `join clause`
-                  ? `.join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id)))`
+                  ? `.join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))`
                   : `.from({ todos: todosCollection })`
             return (
               `Invalid source for ${context}: Expected ${expected}. ` +

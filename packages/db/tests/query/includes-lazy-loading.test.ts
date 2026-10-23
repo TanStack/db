@@ -5,7 +5,6 @@ import {
   eq,
   gte,
   include,
-  leftJoin,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -193,10 +192,8 @@ describe(`includes lazy loading`, () => {
         matches: toArray(
           q
             .from({ left: items })
-            .join(
-              leftJoin({ right: items }, ({ left, right }) =>
-                eq(left.peerId, right.id),
-              ),
+            .join({ right: items }, ({ left, right }) =>
+              eq(left.peerId, right.id),
             )
             .where(({ right }) => eq(right.rootId, root.id))
             .select(({ left, right }) => ({

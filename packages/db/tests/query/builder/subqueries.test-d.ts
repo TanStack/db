@@ -1,5 +1,4 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { leftJoin } from '@tanstack/db'
 import { Query } from '../../../src/query/builder/index.js'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { avg, count, eq } from '../../../src/query/builder/functions.js'
@@ -119,10 +118,8 @@ describe(`Subquery Types`, () => {
       // This should work WITHOUT any cast
       const _query = new Query()
         .from({ issue: issuesCollection })
-        .join(
-          leftJoin({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-            eq(issue.userId, activeUser.id),
-          ),
+        .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
@@ -153,10 +150,8 @@ describe(`Subquery Types`, () => {
       // This should work WITHOUT any cast
       const _query = new Query()
         .from({ issue: issuesCollection })
-        .join(
-          leftJoin({ activeUser: userNamesQuery }, ({ issue, activeUser }) =>
-            eq(issue.userId, activeUser.id),
-          ),
+        .join({ activeUser: userNamesQuery }, ({ issue, activeUser }) =>
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
@@ -265,10 +260,8 @@ describe(`Subquery Types`, () => {
       // Join regular collection with subquery - NO CAST!
       const _query = new Query()
         .from({ issue: issuesCollection })
-        .join(
-          leftJoin({ activeUser: activeUsers }, ({ issue, activeUser }) =>
-            eq(issue.userId, activeUser.id),
-          ),
+        .join({ activeUser: activeUsers }, ({ issue, activeUser }) =>
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
@@ -293,10 +286,8 @@ describe(`Subquery Types`, () => {
       // Join subquery with regular collection - NO CAST!
       const _query = new Query()
         .from({ issue: filteredIssues })
-        .join(
-          leftJoin({ user: usersCollection }, ({ issue, user }) =>
-            eq(issue.userId, user.id),
-          ),
+        .join({ user: usersCollection }, ({ issue, user }) =>
+          eq(issue.userId, user.id),
         )
         .select(({ issue, user }) => ({
           issueId: issue.id,

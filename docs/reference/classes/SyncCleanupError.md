@@ -3,7 +3,7 @@ id: SyncCleanupError
 title: SyncCleanupError
 ---
 
-Defined in: [packages/db/src/errors.ts:1074](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1074)
+Defined in: [packages/db/src/errors.ts:1064](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1064)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:1074](https://github.com/TanStack/db/blob
 new SyncCleanupError(collectionId, error): SyncCleanupError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1075](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1075)
+Defined in: [packages/db/src/errors.ts:1065](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1065)
 
 #### Parameters
 

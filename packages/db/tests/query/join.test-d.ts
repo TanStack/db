@@ -1,14 +1,7 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import { z } from 'zod'
 import { type } from 'arktype'
-import {
-  createLiveQueryCollection,
-  eq,
-  fullJoin,
-  innerJoin,
-  leftJoin,
-  rightJoin,
-} from '../../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, omitVirtualProps } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
@@ -60,9 +53,9 @@ describe(`Join Types - Type Safety`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `inner`,
           ),
     })
 
@@ -88,9 +81,9 @@ describe(`Join Types - Type Safety`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `left`,
           ),
     })
 
@@ -116,9 +109,9 @@ describe(`Join Types - Type Safety`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `right`,
           ),
     })
 
@@ -144,9 +137,9 @@ describe(`Join Types - Type Safety`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `full`,
           ),
     })
 
@@ -187,14 +180,14 @@ describe(`Join Types - Type Safety`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `left`,
           )
           .join(
-            rightJoin({ project: projectsCollection }, ({ user, project }) =>
-              eq(user.id, project.user_id),
-            ),
+            { project: projectsCollection },
+            ({ user, project }) => eq(user.id, project.user_id),
+            `right`,
           ),
     })
 
@@ -224,9 +217,9 @@ describe(`Join Types - Type Safety`, () => {
         q
           .from({ user: usersCollection })
           .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+            { dept: departmentsCollection },
+            ({ user, dept }) => eq(user.department_id, dept.id),
+            `left`,
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -259,10 +252,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           ),
     })
 
@@ -287,10 +278,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           ),
     })
 
@@ -315,10 +304,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           ),
     })
 
@@ -343,10 +330,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           ),
     })
 
@@ -386,15 +371,11 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
-          .join(
-            rightJoin({ project: projectsCollection }, ({ user, project }) =>
-              eq(user.id, project.user_id),
-            ),
+          .rightJoin({ project: projectsCollection }, ({ user, project }) =>
+            eq(user.id, project.user_id),
           ),
     })
 
@@ -423,10 +404,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -457,10 +436,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -505,15 +482,13 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .join(
-            innerJoin({ project: projectsCollection }, ({ dept, project }) =>
-              eq(dept.id, project.department_id),
-            ),
+            { project: projectsCollection },
+            ({ dept, project }) => eq(dept.id, project.department_id),
+            `inner`,
           ),
     })
 
@@ -568,10 +543,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ event, user }) =>
-              eq(event.user_id, user.id),
-            ),
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(event.user_id, user.id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -584,10 +557,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ event, user }) =>
-              eq(user.id, event.user_id),
-            ),
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(user.id, event.user_id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -659,10 +630,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ event, user }) =>
-              eq(event.user_id, user.id),
-            ),
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(event.user_id, user.id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -675,10 +644,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ event, user }) =>
-              eq(user.id, event.user_id),
-            ),
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(user.id, event.user_id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -750,10 +717,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
       query: (q) =>
         q
           .from({ post: postCollection })
-          .join(
-            leftJoin({ user: userCollection }, ({ post, user }) =>
-              eq(post.author_id, user.id),
-            ),
+          .leftJoin({ user: userCollection }, ({ post, user }) =>
+            eq(post.author_id, user.id),
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
@@ -782,10 +747,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -819,10 +782,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             // user is the nullable side in a right join
@@ -851,10 +812,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -883,10 +842,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -919,10 +876,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -954,10 +909,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             // user is the nullable side in a right join
@@ -984,10 +937,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -1014,10 +965,8 @@ describe(`Declarative select refs should not use union with undefined for nullab
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .join(
-            innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id),
-            ),
+          .innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
           )
           .select(({ user, dept }) => ({
             userName: user.name,
@@ -1082,10 +1031,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ event, user }) =>
-              eq(event.user_id, user.id),
-            ),
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(event.user_id, user.id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -1098,10 +1045,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ event: eventCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ event, user }) =>
-              eq(user.id, event.user_id),
-            ),
+          .innerJoin({ user: userCollection }, ({ event, user }) =>
+            eq(user.id, event.user_id),
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -1173,10 +1118,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ post: postCollection })
-          .join(
-            leftJoin({ user: userCollection }, ({ post, user }) =>
-              eq(post.author_id, user.id),
-            ),
+          .leftJoin({ user: userCollection }, ({ post, user }) =>
+            eq(post.author_id, user.id),
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
@@ -1241,10 +1184,8 @@ describe(`Join with ArkType Schemas`, () => {
       query: (q) =>
         q
           .from({ post: postCollection })
-          .join(
-            innerJoin({ user: userCollection }, ({ post, user }) =>
-              eq(post.user_id, user.id),
-            ),
+          .innerJoin({ user: userCollection }, ({ post, user }) =>
+            eq(post.user_id, user.id),
           )
           .select(({ post, user }) => ({
             postTitle: post.title,

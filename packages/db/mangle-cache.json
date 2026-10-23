@@ -416,6 +416,5 @@
   "coverSource": "fN",
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
-  "includesRuntimeCache": "gT",
-  "findJoinClause": "gU"
+  "includesRuntimeCache": "gT"
 }

@@ -5,7 +5,6 @@ import {
   createEffect,
   createLiveQueryCollection,
   eq,
-  innerJoin,
   withCollectionSyncConfigCleanup,
 } from '../src'
 import { createDeferred } from '../src/deferred'
@@ -522,9 +521,9 @@ describe(`Collection cleanup admission oracle`, () => {
       q
         .from({ left: source })
         .join(
-          innerJoin({ right: source }, ({ left, right }) =>
-            eq(left.id, right.id),
-          ),
+          { right: source },
+          ({ left, right }) => eq(left.id, right.id),
+          `inner`,
         ),
     )
     const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
@@ -884,9 +883,9 @@ describe(`Collection cleanup admission oracle`, () => {
           q
             .from({ first: firstSource })
             .join(
-              innerJoin({ second: secondSource }, ({ first, second }) =>
-                eq(first.id, second.id),
-              ),
+              { second: secondSource },
+              ({ first, second }) => eq(first.id, second.id),
+              `inner`,
             ),
         )
         const message =

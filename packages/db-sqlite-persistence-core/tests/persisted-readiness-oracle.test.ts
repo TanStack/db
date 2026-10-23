@@ -6,7 +6,6 @@ import {
   createLiveQueryObserver,
   eq,
   getPersistedReadinessSource,
-  leftJoin,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
@@ -264,11 +263,7 @@ describe(`persisted-readiness oracle`, () => {
               query: (q) =>
                 q
                   .from({ left })
-                  .join(
-                    leftJoin({ right }, ({ left: a, right: b }) =>
-                      eq(a.id, b.id),
-                    ),
-                  ),
+                  .join({ right }, ({ left: a, right: b }) => eq(a.id, b.id)),
             })
             const observer = createLiveQueryObserver(query)
             await checkWithCleanup(() => {
@@ -347,7 +342,7 @@ describe(`persisted-readiness oracle`, () => {
       query: (q) =>
         q
           .from({ a: sourceA })
-          .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
+          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
     })
     const observer = createLiveQueryObserver(query)
     const unsubscribe = observer.subscribe(() => {})
@@ -408,7 +403,7 @@ describe(`persisted-readiness oracle`, () => {
       query: (q) =>
         q
           .from({ a: sourceA })
-          .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
+          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
     })
     const observer = createLiveQueryObserver(query)
     const unsubscribe = observer.subscribe(() => {})
@@ -671,7 +666,7 @@ describe(`persisted-readiness oracle`, () => {
         query: (q) =>
           q
             .from({ a: sourceA })
-            .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
+            .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
       })
       observer = createLiveQueryObserver(query)
       unsubscribe = observer.subscribe(() => {})
@@ -1150,7 +1145,7 @@ describe(`persisted-readiness oracle`, () => {
       query: (q) =>
         q
           .from({ a: sourceA })
-          .join(leftJoin({ b: sourceB }, ({ a, b }) => eq(a.id, b.id))),
+          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
     })
     const observer = createLiveQueryObserver(query)
     const unsubscribe = observer.subscribe(() => {})

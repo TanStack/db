@@ -4,11 +4,7 @@ import {
   count,
   createLiveQueryCollection,
   eq,
-  fullJoin,
   gt,
-  innerJoin,
-  leftJoin,
-  rightJoin,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -337,7 +333,9 @@ describe(`unionAll types`, () => {
       return q
         .unionAll(messageRows, toolCallRows)
         .join(
-          innerJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
+          { user: users },
+          ({ userId, user }) => eq(userId, user.id),
+          `inner`,
         )
         .select(({ kind, id, user }) => ({
           kind,
@@ -373,9 +371,9 @@ describe(`unionAll types`, () => {
       const messagesWithUsers = q
         .from({ message: messages })
         .join(
-          innerJoin({ user: users }, ({ message, user }) =>
-            eq(message.userId, user.id),
-          ),
+          { user: users },
+          ({ message, user }) => eq(message.userId, user.id),
+          `inner`,
         )
       const toolCallRows = q.from({ toolCall: toolCalls })
 
@@ -404,9 +402,9 @@ describe(`unionAll types`, () => {
       const messagesWithUsers = q
         .from({ message: messages })
         .join(
-          innerJoin({ user: users }, ({ message, user }) =>
-            eq(message.userId, user.id),
-          ),
+          { user: users },
+          ({ message, user }) => eq(message.userId, user.id),
+          `inner`,
         )
         .select(({ message, user }) => ({
           id: message.id,
@@ -451,10 +449,8 @@ describe(`unionAll types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(
-          leftJoin({ user: users }, ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
-          ),
+        .leftJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         ),
     )
 
@@ -487,10 +483,8 @@ describe(`unionAll types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(
-          rightJoin({ user: users }, ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
-          ),
+        .rightJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         ),
     )
 
@@ -516,10 +510,8 @@ describe(`unionAll types`, () => {
           message: messages,
           toolCall: toolCalls,
         })
-        .join(
-          fullJoin({ user: users }, ({ message, toolCall, user }) =>
-            eq(coalesce(message.userId, toolCall.userId), user.id),
-          ),
+        .fullJoin({ user: users }, ({ message, toolCall, user }) =>
+          eq(coalesce(message.userId, toolCall.userId), user.id),
         ),
     )
 
@@ -569,9 +561,7 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(
-          rightJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
-        )
+        .rightJoin({ user: users }, ({ userId, user }) => eq(userId, user.id))
         .select(({ kind, id, user }) => ({
           kind,
           id,
@@ -613,9 +603,7 @@ describe(`unionAll types`, () => {
 
       return q
         .unionAll(messageRows, toolCallRows)
-        .join(
-          fullJoin({ user: users }, ({ userId, user }) => eq(userId, user.id)),
-        )
+        .fullJoin({ user: users }, ({ userId, user }) => eq(userId, user.id))
         .select(({ kind, id, user }) => ({
           kind,
           id,

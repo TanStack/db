@@ -8,7 +8,7 @@ import type { CompilationResult } from '../compiler/index.js'
 import type { ResultStream } from '../../types.js'
 
 // Public-key reduction. A joined query with a custom key needs only this
-// part of materialization, so join operators carry it without the include
+// part of materialization, so it ships in core without the include
 // materializer.
 
 export type ResultTuple = [

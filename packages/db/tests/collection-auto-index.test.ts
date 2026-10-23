@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createLiveQueryCollection, leftJoin } from '../src'
+import { createLiveQueryCollection } from '../src'
 import { CollectionConfigurationError } from '../src/errors'
 import { createCollection } from '../src/collection/index.js'
 import {
@@ -583,9 +583,9 @@ describe(`Collection Auto-Indexing`, () => {
         q
           .from({ item: leftCollection })
           .join(
-            leftJoin({ other: rightCollection }, ({ item, other }: any) =>
-              eq(item.id, other.id2),
-            ),
+            { other: rightCollection },
+            ({ item, other }: any) => eq(item.id, other.id2),
+            `left`,
           )
           .select(({ item, other }: any) => ({
             id: item.id,
@@ -697,17 +697,16 @@ describe(`Collection Auto-Indexing`, () => {
         q
           .from({ item: leftCollection })
           .join(
-            leftJoin(
-              {
-                other: q
-                  .from({ other: rightCollection })
-                  .select(({ other }: any) => ({
-                    id2: other.id2,
-                    name: other.name,
-                  })),
-              },
-              ({ item, other }: any) => eq(item.id, other.id2),
-            ),
+            {
+              other: q
+                .from({ other: rightCollection })
+                .select(({ other }: any) => ({
+                  id2: other.id2,
+                  name: other.name,
+                })),
+            },
+            ({ item, other }: any) => eq(item.id, other.id2),
+            `left`,
           )
           .select(({ item, other }: any) => ({
             id: item.id,

@@ -22,11 +22,11 @@ import {
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
-  JoinOperatorRequiredError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
+import { validateJoinConditions } from '../join-conditions.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import { getQueryIR } from './query-ir.js'
 import { cloneQueryForPlacement } from './clone-query.js'
@@ -44,7 +44,6 @@ import {
   ToArrayWrapper,
 } from './functions.js'
 import type { CollectionResolver } from './clone-query.js'
-import type { JoinOperator, JoinType } from './join-operators.js'
 import type { GroupKeys } from './group-keys.js'
 import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { SourceClauseContext } from '../../errors.js'
@@ -69,6 +68,7 @@ import type {
   FunctionalHavingRow,
   GetResult,
   GroupByCallback,
+  JoinOnCallback,
   MergeContextForJoinCallback,
   MergeContextWithJoinType,
   NonScalarSelectObject,
@@ -315,11 +315,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   /**
    * Join another table or subquery to the current query
    *
-   * @param operator - A join operator: `leftJoin`, `innerJoin`, `rightJoin`,
-   *   `fullJoin`, or `joinOf(type, ...)`. Each takes an object with a single
-   *   key-value pair (the alias and a Collection or subquery) and a callback
-   *   that returns the join condition. Pass it inline so the callback is typed
-   *   from this query.
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @param type - The type of join: 'inner', 'left', 'right', or 'full' (defaults to 'left')
    * @returns A QueryBuilder with the joined table available
    *
    * @example
@@ -327,39 +325,33 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * // Left join users with posts
    * query
    *   .from({ users: usersCollection })
-   *   .join(leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId)))
+   *   .join({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
    *
-   * // Inner join
+   * // Inner join with explicit type
    * query
    *   .from({ u: usersCollection })
-   *   .join(innerJoin({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId)))
-   *
-   * // Join type chosen at run time
-   * query
-   *   .from({ u: usersCollection })
-   *   .join(joinOf(type, { p: postsCollection }, ({u, p}) => eq(u.id, p.userId)))
+   *   .join({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId), 'inner')
    * ```
+   *
+   * // Join with a subquery
+   * const activeUsers = query.from({ u: usersCollection }).where(({u}) => u.active)
+   * query
+   *   .from({ activeUsers })
+   *   .join({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId))
    */
-  join<TSource extends Source, TJoinType extends JoinType>(
-    operator: JoinOperator<TContext, TSource, TJoinType>,
+  join<
+    TSource extends Source,
+    TJoinType extends `inner` | `left` | `right` | `full` = `left`,
+  >(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+    >,
+    type: TJoinType = `left` as TJoinType,
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>
   > {
-    // Untyped callers can still pass the removed (source, on, type) shape.
-    const value: unknown = operator
-    if (
-      typeof value !== `object` ||
-      value === null ||
-      typeof (value as { runtime?: { compile?: unknown } }).runtime?.compile !==
-        `function`
-    )
-      throw new JoinOperatorRequiredError(
-        value === null ? `null` : typeof value,
-      )
-    const [alias, from] = this._createRefForSource(
-      operator.source,
-      `join clause`,
-    )
+    const [alias, from] = this._createRefForSource(source, `join clause`)
 
     // Create a temporary context for the callback
     const currentAliases = this._getCurrentAliases()
@@ -372,15 +364,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     >
 
     // Get the join condition expression
-    const onExpression = operator.on(refProxy)
+    const onExpression = onCallback(refProxy)
 
-    operator.runtime.validate(onExpression)
-    const joinClause: JoinClause = {
-      from,
-      type: operator.type,
-      on: onExpression,
-      runtime: operator.runtime,
-    }
+    validateJoinConditions(onExpression)
+    const joinClause: JoinClause = { from, type, on: onExpression }
 
     const existingJoins = this.query.join || []
 
@@ -388,6 +375,110 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       ...this.query,
       join: [...existingJoins, joinClause],
     }) as any
+  }
+
+  /**
+   * Perform a LEFT JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the left joined table available
+   *
+   * @example
+   * ```ts
+   * // Left join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  leftJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+    >,
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
+  > {
+    return this.join(source, onCallback, `left`)
+  }
+
+  /**
+   * Perform a RIGHT JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the right joined table available
+   *
+   * @example
+   * ```ts
+   * // Right join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .rightJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  rightJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+    >,
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
+  > {
+    return this.join(source, onCallback, `right`)
+  }
+
+  /**
+   * Perform an INNER JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the inner joined table available
+   *
+   * @example
+   * ```ts
+   * // Inner join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .innerJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  innerJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+    >,
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
+  > {
+    return this.join(source, onCallback, `inner`)
+  }
+
+  /**
+   * Perform a FULL JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the full joined table available
+   *
+   * @example
+   * ```ts
+   * // Full join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .fullJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  fullJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+    >,
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>
+  > {
+    return this.join(source, onCallback, `full`)
   }
 
   /**

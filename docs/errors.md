@@ -490,7 +490,7 @@ Invalid source for from clause: Expected an object with a single key-value pair 
 ```
 
 ```text
-Invalid source for join clause: Expected an object with a single key-value pair like { alias: collection }. For example: .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Got: number
+Invalid source for join clause: Expected an object with a single key-value pair like { alias: collection }. For example: .join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id)). Got: number
 ```
 
 ```text
@@ -988,16 +988,6 @@ Development builds show the full message. For example:
 
 ```text
 setWindow() cannot change the limit of a findOne() query.
-```
-
-<a id="error-245"></a>
-
-## Error 245: `JoinOperatorRequiredError`
-
-Development builds show the full message. For example:
-
-```text
-.join() takes a join operator, such as .join(leftJoin({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))). Import leftJoin, innerJoin, rightJoin, fullJoin, or joinOf from @tanstack/db. Got: object
 ```
 
 <a id="error-246"></a>

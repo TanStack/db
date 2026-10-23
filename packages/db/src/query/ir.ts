@@ -10,7 +10,6 @@ import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
-import type { JoinRuntime } from './compiler/join-runtime.js'
 import type { Grouping } from './compiler/grouping.js'
 import type { IncludesRuntime } from './live/includes-runtime.js'
 
@@ -55,9 +54,6 @@ export interface JoinClause {
   from: CollectionSourceRef | QueryRef
   type: `left` | `right` | `inner` | `outer` | `full` | `cross`
   on: BasicExpression<boolean>
-  // The join operator value that built this clause supplies the compiler,
-  // so apps without joins never import it.
-  runtime: JoinRuntime
 }
 
 export type Where =

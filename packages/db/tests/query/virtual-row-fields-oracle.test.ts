@@ -36,7 +36,6 @@ import { describe, expect, test } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
-  leftJoin,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -283,10 +282,8 @@ describe(`virtual row field runtime boundary`, () => {
           q
             .from({ child: rows })
             .where(({ child }) => eq(child.id, row.id))
-            .join(
-              leftJoin({ missing: missingRows }, ({ child, missing }) =>
-                eq(child.id, missing.id),
-              ),
+            .leftJoin({ missing: missingRows }, ({ child, missing }) =>
+              eq(child.id, missing.id),
             )
             .select(({ missing }) => missing),
         ),
