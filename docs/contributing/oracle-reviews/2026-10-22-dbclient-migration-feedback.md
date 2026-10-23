@@ -1030,3 +1030,155 @@ cuts. F02's initial-snapshot decision and F07's application fixture remain
 separate readiness obligations.
 
 Oracle source SHA-256 at this follow-up: `86f652fadc3ddeddfd5188d18b049969293209efdda51641e28ec38122884ea2`.
+
+
+## Audit against the declared-reach rules from PR #2233
+
+This self-review starts at `38eb2831f6005faa51f4021f0c29dd532c3a6cf4`.
+It uses rule proposal `91ee6db4f1e37fffb44ca4432d01e27c63bed45c`, now merged
+as `65d9ada508114f199464f753d50eb3447eb0eaf9`. The audit changes tests and
+coverage evidence only. It preserves the maintainer's cleanup-rejection decision.
+The scratch ledger and raw logs are in `/tmp/tanstack-rule-2233/`.
+
+### Law, experiment and inference
+
+**Law.** An ordinary lazy demand failure is terminal. A settled demand's failed
+truncate renewal preserves the last complete publication and permits a later
+authoritative replay. Authority is the live-query architecture's demand and
+replay-participant rules, publication law 9, and this owner's terminal-error
+contract. Subscription identity and immutable predicate membership distinguish
+renewal from new demand; sharing a Collection does not establish renewal.
+
+**Reach.** The existing 300-history fixed campaign reached zero failures of new
+demand during marker replay and one failed settled renewal. A calibrated random
+campaign reached zero of either. Both fail when both states are required.
+The old grammar can express the CI counterexample, but its normal budget does
+not reliably enforce that interaction. More named examples would not fix this
+missing sampling dimension.
+
+The primary replay owner now runs `replay.subscription-demand-origin`: 75 fixed
+histories with seed `2233`, then 75 random histories with the same grammar and
+judgment. It varies ordinary versus renewal origin, zero to three prior
+successful replays, a marked row from 1/3/4/5, and its rank from 1 to 9.
+The ordinary branch holds work, moves the row, truncates markers, succeeds one
+held request, then fails the next. The renewal branch holds, truncates, and fails
+the held renewal. Both use the existing production driver and independent
+five-key predicate projection. Actual adapter entry, prior demand, public
+readiness and a non-aborted failure establish reach, independently of the
+expected terminal status. Named neighbors calibrate the recorder.
+
+The original broad grammar, seed, 300-run budget and replay coordinates remain.
+Its seventeen existing required dimensions now count histories, once per state,
+instead of events. Both new states require at least one history per campaign.
+Explicit seed/path replay skips campaign minima. Public terminal status is
+checked after actions and at convergence. A new positive assertion also requires
+an observed ordinary failure to become terminal at convergence.
+
+**RED.** `replay-broad-reach-calibrated-red.log` records both broad campaigns
+failing their added critical reach requirements on unchanged production.
+This is a reach failure, not a product defect. The initial
+`replay-reach-original.log` used an uncalibrated new-subscription witness that
+missed the named regression. It supplies no reliable zero-reach claim and is
+superseded. A new logical demand can use an already-seen subscription token.
+The calibrated recorder checks demand renewal rather than token novelty alone.
+
+**GREEN.** `final-owners-green.log` passes 1,006 tests in eight files, with no
+type errors. It includes the replay owner, reach helper, subscription lifecycle,
+cleanup, deferred acquisition, observer construction/publication, partition
+release and DbClient tests. Scoped ESLint passes. Production source is unchanged
+in this audit. Earlier full core and React counts remain evidence at their
+recorded heads, not new runs against an integrated tree.
+
+Each count below is the number of histories in that normal GREEN run.
+
+| Property / declared state | Fixed | Random |
+| --- | ---: | ---: |
+| `replay.ordered-window-faults` / `settlementThrows` | 12 | 23 |
+| `replay.ordered-window-faults` / `throwsAfterReplay` | 50 | 53 |
+| `replay.ordered-window-faults` / `replayStartThrows` | 56 | 64 |
+| `replay.ordered-window-faults` / `heldAcrossTruncate` | 26 | 19 |
+| `replay.ordered-window-faults` / `failedLoads` | 9 | 6 |
+| `replay.ordered-window-faults` / `settledWindowChecks` | 246 | 238 |
+| `replay.ordered-window-faults` / `tiedWindows` | 15 | 13 |
+| `replay.ordered-window-faults` / `peerChecks` | 127 | 107 |
+| `replay.ordered-window-faults` / `windowMoves` | 92 | 86 |
+| `replay.ordered-window-faults` / `descendingRuns` | 139 | 149 |
+| `replay.ordered-window-faults` / `joinedRuns` | 225 | 238 |
+| `replay.ordered-window-faults` / `includeChecks` | 152 | 149 |
+| `replay.ordered-window-faults` / `markChanges` | 87 | 79 |
+| `replay.ordered-window-faults` / `antiJoinedRuns` | 76 | 87 |
+| `replay.ordered-window-faults` / `innerJoinedRuns` | 81 | 74 |
+| `replay.ordered-window-faults` / `markerLoads` | 132 | 120 |
+| `replay.ordered-window-faults` / `markerTruncates` | 80 | 71 |
+| `replay.subscription-demand-origin` / `new-demand-failed-during-marker-replay` | 9 | 10 |
+| `replay.subscription-demand-origin` / `settled-marker-demand-replay-failed` | 32 | 38 |
+
+**Mutant.** The generated focused campaigns reject all four semantic controls
+at assertions, with no setup, timeout or type failure:
+
+| Exact semantic edit | Distinguishing assertion | Evidence log |
+| --- | --- | --- |
+| Classify marker loads from the source-wide synchronous truncate flag | Illegal terminal error after ordinary demand is mislabeled renewal | `replay-mutant-source-wide.log` |
+| Remove subscription identity from the captured-demand match, retaining predicates | Same illegal terminal classification | `replay-mutant-no-subscription.log` |
+| Make `recordSubsetError` terminal regardless of `fatalBeforeReady` | Settled renewal must remain nonterminal | `replay-mutant-fatal-renewal.log` |
+| Remove `failDemand`'s terminal transition | Ordinary failure must be terminal: zero observed versus one required | `replay-mutant-ignore-ordinary-failure.log` |
+
+The first control shrinks at seed `2233`, path `1:0`, to ordinary origin, zero
+previous replays, row 1 and rank 1. Direct replay rejects that mutant and passes
+after byte restoration (`replay-direct-mutant-red.log`,
+`replay-direct-green.log`). The all-terminal control shrinks at the same seed,
+path `2:1:1:1`, to renewal with zero previous replays. Removing the rank move
+from the grammar leaves ordinary-demand reach at zero and fails both campaign
+minima (`replay-mutant-no-rank-move.log`). All mutated files were restored in
+`finally`, with byte identity verified. The new positive assertion was added
+before its ignored-failure production mutant ran.
+
+**Limits.** Five numeric keys, one-level inline includes, one live query in the
+focused grammar, ascending offset-zero limit-one windows and controlled adapter
+settlement. The unchanged broad grammar covers other window/order/peer forms.
+Neither property proves arbitrary predicates, actual provider cancellation,
+unbounded replay histories or framework scheduling. The coverage map names the
+same primary owner and these remaining receiving boundaries.
+
+### Audit of the seven shortcuts
+
+| Obligation | Result and remaining qualification |
+| --- | --- |
+| A01 production-first | No new production repair in this pass. Earlier entries retain their recorded finite-oracle REDs and original/narrow-mutant evidence. The new generated reach was added after those historical product commits. It cannot establish historical generated-oracle-first chronology. Under a literal requirement for generated RED before every historical repair, that chronology remains a deviation. A retrospective run cannot erase it. |
+| A02 model authority | No reference semantics changed in this pass. Earlier rejection, explicit-restart and terminal-Effect rules follow the approved cleanup decision. The stream-preload expectation follows demand law 15, while server rows remain protected until local acquisition settles. Replay classification follows captured logical demand, not observed terminal output. F02's competing snapshot policies remain undecided. |
+| A03 unmeasured reach | Confirmed gap in the normal replay campaigns, repaired with a focused process grammar, mandatory minima and reported history counts. Broad publication campaigns in other owners remain compatibility evidence only for the new construction cuts. |
+| A04 quiet exclusions | No comparison was relaxed. Existing broad aborted-move and terminal-error reach exceptions remain explicit, with named witnesses. The new property requires the two terminality premises. The deferred owner's unchecked status/rows apply only while no live-query sync run exists, not after an owed ready result. Changed cancellation fixtures retain queued-load and release assertions. No new product exclusion or retired promise was introduced. |
+| A05 pinned-only coverage | Replay terminality needed a focused generated interaction and now has one. The other review repairs use bounded enumerations: admission/status/mode, six promise outcomes, 28 retirement forms, 192 interrupted ownership transfers, eight observer construction forms plus two healthy-peer seed cases, twelve partition forms plus two startup cases, and twelve late-Effect receiving cases. Those are finite boundary matrices with original or hostile controls. They do not claim arbitrary generated construction histories. The deferred owner now calls its eleven command histories finite. |
+| A06 older counterexamples | F02 remains a demonstrated warm-source SSR mismatch with a real hydrateRoot trace and a pending initial-snapshot decision. Its descriptor receiving owner and missing witnesses remain in the coverage map. F07 remains an unconfirmed Date typing report whose reliable strict compiler probe passes. It needs the failing application assignment and resolved dependency versions. Neither is dismissed because it predates this audit. |
+| A07 no failing mutant | Earlier finite owners retain the exact assertion controls documented above. The new generated property rejects source-wide, identity-blind, always-terminal and ignored-ordinary-failure designs, plus grammar ablation. No setup-only failure receives calibration credit. |
+
+These results preserve the eight-item ledger: five fixed-now and three
+accepted-design, with S01–S04 separately fixed in their declared finite bounds.
+The audit adds a reach-enforcement repair, not another product-policy change.
+Whole-PR readiness remains **not ready** because F02 needs a product decision.
+F07 remains an evidence gap. Green finite evidence does not resolve either.
+
+### ORC-001–015 result for this repair
+
+Authority, limits and the unchanged independent projection satisfy 001/002.
+Prose, grammar, driver and comparison remain beside executable code (003/009).
+The shrunk ordinary and renewal histories reconstruct the known witnesses.
+Removing rank movement loses the ordinary premise. Rank bounds avoid existing
+starting ranks, and the constructive grammar places failure after holding work
+rather than requesting failure without a pending request (004). Real Collection
+entry points, action cuts and convergence supply 005/013. The four assertion
+controls and reach ablation supply 006. Equal fixed/random budgets and the
+checked direct replay supply 007. No model state or equivalence class changed
+(008). Existing primary/secondary cleanup fidelity remains, and experimental
+mutations restore exact bytes (010). No new shared semantic hypothesis calls
+for a second formulation (011). This versioned record, starting revision and
+source identities supply 012. Controlled-boundary claims require no new
+provider handoff (014). Mandatory campaign minima and the table supply 015.
+
+SHA-256 identities for the repaired executable sources:
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `34aec1038062a15957642c35de2fafe2576b2941a326f449c75b6a3b28cb9da1` |
+| `packages/db/tests/oracle-config.ts` | `a3464344b04bfdc59bc4ab42489eeea540aed1461f9fb440e2da0f5b0a0b0c46` |
+| `packages/db/tests/oracle-reach.ts` | `d38c86d0a2d197d566108cfb59cdd6cb624619df8ab570afa2c7e09b7f00ba63` |

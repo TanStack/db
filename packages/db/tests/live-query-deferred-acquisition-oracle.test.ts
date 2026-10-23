@@ -1098,8 +1098,8 @@ describe(`DbClient preload releases independent source starts`, () => {
  * Cleanup ends a live-query Collection's sync run but keeps its subscriptions.
  * A subscriber that survives is still a subscriber in the next sync run, so a
  * restarted live-query Collection acquires for it at once instead of
- * deferring until another subscriber or preload arrives. The generated grammar
- * unsubscribes before cleanup, so this block pins the history: subscribe,
+ * deferring until another subscriber or preload arrives. The finite command
+ * histories above unsubscribe before cleanup. This block pins the history: subscribe,
  * clean up while subscribed, restart, then settle.
  */
 describe(`a subscriber that outlives cleanup`, () => {

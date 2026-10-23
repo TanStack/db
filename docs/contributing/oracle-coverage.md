@@ -332,6 +332,17 @@ remain ordinary demand. Terminal-error assertions run after each history action
 and at convergence. Named neighbors require a new include demand's failure to
 be terminal and a settled joined demand's failed replay to remain nonterminal.
 The CI seed `-1751969525`, path `67:11:10:12:1:8:7:7`, reaches the former.
+The normal broad campaigns did not each reach both critical failure origins
+in the declared-reach audit. A second property in the same owner,
+`replay.subscription-demand-origin`, generates zero to three prior replays,
+marked-row rank moves and ordinary/renewal failure schedules. Its 75-history
+fixed and random campaigns must each reach new demand failing during marker
+replay and a settled demand's failed renewal. The adapter witnesses non-aborted
+failure independently of expected terminal status. A positive terminality check
+rejects ignored ordinary failures. Source-wide, subscription-blind and
+always-terminal controls also fail. Broad reach counts each of its existing
+seventeen required dimensions once per history. The [declared-reach audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md#audit-against-the-declared-reach-rules-from-pr-2233)
+records counts, exact replay coordinates, calibration and chronology limits.
 This projection covers the grammar's five numeric keys and one-level includes;
 it does not establish arbitrary predicates or provider-driven replay schedules.
 
@@ -575,6 +586,11 @@ receiving owner once the product chooses automatic result capture or an initial
 empty/loading policy; partial nonready rows, status flags, normalized-source
 transport, mixed Suspense/plain schedules, and the real Start/Electric path
 remain needed witnesses. This diagnostic is not claimed as repaired coverage.
+The Date descriptor typing report remains an evidence gap. The reliable strict
+compiler probe accepts the reported Date forms. The receiving owners are
+`packages/db/tests/db-client.test-d.ts` and
+`packages/electric-db-collection/tests/electric.test-d.ts`; extending them needs
+the failing application assignment and its resolved dependency versions.
 Its no-client diagnostic also covers explicit `queryKey` and legacy dependency
 identity for both `useLiveQuery` and `useLiveSuspenseQuery` at first consumption.
 A local hook-first SSR stream over a concrete
