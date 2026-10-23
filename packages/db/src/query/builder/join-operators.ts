@@ -29,14 +29,26 @@ export interface JoinOperator<
 
 /** A function that builds one join type's operator. */
 export type JoinOperatorFunction<TJoinType extends JoinType> = <
-  TContext extends Context,
   TSource extends Source,
+  TContext extends Context = any,
 >(
   source: TSource,
-  on: JoinOnCallback<
-    MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
-  >,
+  on: JoinCondition<TContext, TSource>,
 ) => JoinOperator<TContext, TSource, TJoinType>
+
+/**
+ * A join condition. `.join()` supplies the query's context; when TypeScript
+ * runs without noImplicitAny it skips that inference, and the condition is
+ * then untyped, as other unannotated callbacks are in that mode.
+ */
+export type JoinCondition<
+  TContext extends Context,
+  TSource extends Source,
+> = 0 extends 1 & TContext
+  ? (refs: any) => any
+  : JoinOnCallback<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+    >
 
 function joinOperator<TJoinType extends JoinType>(
   type: TJoinType,
@@ -62,14 +74,12 @@ export const fullJoin: JoinOperatorFunction<`full`> = joinOperator(`full`)
 /** A join whose type is chosen at run time. */
 export function joinOf<
   TJoinType extends JoinType,
-  TContext extends Context,
   TSource extends Source,
+  TContext extends Context = any,
 >(
   type: TJoinType,
   source: TSource,
-  on: JoinOnCallback<
-    MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
-  >,
+  on: JoinCondition<TContext, TSource>,
 ): JoinOperator<TContext, TSource, TJoinType> {
-  return joinOperator(type)<TContext, TSource>(source, on)
+  return joinOperator(type)<TSource, TContext>(source, on)
 }
