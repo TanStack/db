@@ -12,12 +12,17 @@
   let {
     client,
     descriptor,
+    onInitial,
   }: {
     client: DbClient
+    onInitial?: (
+      rows: Array<{ id: string; name: string }>,
+      status: string,
+    ) => void
     descriptor: CollectionOptions<Person, string>
   } = $props()
 </script>
 
 <DbProvider {client}>
-  <SsrDbQuery {descriptor} />
+  <SsrDbQuery {descriptor} {onInitial} />
 </DbProvider>

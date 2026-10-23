@@ -2,11 +2,13 @@
 
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
+  UnhashableQueryIRError,
   assertLiveQueryWindowManyResult,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
   fetchNextLiveQueryWindowPage,
+  getLiveQueryHash,
   getLiveQueryWindowCollectionWarning,
   getLiveQueryWindowInputKind,
   liveQueryWindowMatches,
@@ -113,6 +115,7 @@ type InfiniteQueryRenderState = {
   inputCollection: Collection<any, any, any> | null
   inputQuery: unknown
   client: DbClient | undefined
+  queryHash: string | undefined
   identityMode: `collection` | `queryKey` | `legacyDeps` | `derived`
   dependencies: Array<unknown> | null
   pageSize: number
@@ -128,6 +131,7 @@ type InfiniteQueryRenderState = {
 
 type RenderedWindowCollection = {
   client: DbClient | undefined
+  queryHash: string | undefined
   dependencies: Array<unknown>
   collection: Collection<any, any, any>
   deferredCollections: Set<
@@ -293,6 +297,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   let renderState = committed
   if (needsNewController) {
     let collection = committed?.collection
+    let queryHash = committed?.queryHash
     let warning: string | null = null
     let startInRender = false
     let suppliedCollection = false
@@ -349,6 +354,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         // collection in terminal error, such as after its source restarted,
         // cannot serve the query again, so a new one replaces it.
         collection = rendered.collection
+        queryHash = rendered.queryHash
         for (const deferred of rendered.deferredCollections) {
           deferredCollections.add(deferred)
         }
@@ -364,8 +370,24 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           // so a collection that starts syncing now never publishes fewer rows
           // than the controller's pages. The controller grows the limit via
           // setWindow.
+          const windowQuery = input.query.limit(requiredLimit).offset(0)
+          queryHash = undefined
+          if (dbClient) {
+            try {
+              queryHash = getLiveQueryHash(
+                { query: windowQuery },
+                config.queryKey,
+              )
+            } catch (error) {
+              if (
+                !(error instanceof UnhashableQueryIRError) ||
+                config.queryKey !== undefined
+              )
+                throw error
+            }
+          }
           collection = createLiveQueryCollection({
-            query: input.query.limit(requiredLimit).offset(0),
+            query: windowQuery,
             gcTime: DEFAULT_GC_TIME_MS,
           })
           startInRender = true
@@ -378,7 +400,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       throw new Error(`useLiveInfiniteQuery: Failed to create a collection.`)
     }
 
-    if (inputIsCollection) {
+    if (inputIsCollection || suppliedCollection) {
+      queryHash = dbClient
+        ? getLiveQueryHash(collection, config.queryKey)
+        : undefined
       warning =
         getLiveQueryWindowCollectionWarning(collection, pageSize + 1) ?? null
     } else {
@@ -398,6 +423,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (createdCollection) {
       renderedCollectionRef.current = {
         client: dbClient,
+        queryHash,
         dependencies: [...identityDeps],
         collection,
         deferredCollections,
@@ -409,6 +435,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       inputCollection: inputIsCollection ? collection : null,
       inputQuery: inputIsCollection ? null : queryFnOrCollection,
       client: dbClient,
+      queryHash,
       identityMode,
       dependencies: inputIsCollection ? null : [...identityDeps],
       pageSize,
@@ -418,6 +445,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         pageSize,
         initialPageParam,
         initialPageCount,
+        client: dbClient,
+        queryHash,
       }),
       warning,
       warned: false,
@@ -441,7 +470,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     [controller, currentRenderState],
   )
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () =>
+    controller.getServerSnapshot(),
+  )
 
   const fetchNextPage = useCallback(
     () => fetchNextLiveQueryWindowPage(controller),

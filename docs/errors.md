@@ -2469,3 +2469,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 A windowed or findOne result row has no include route
 ```
+
+<a id="error-245"></a>
+
+## Error 245: `live-query-observer.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.
+```

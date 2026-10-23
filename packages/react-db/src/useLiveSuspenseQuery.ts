@@ -267,6 +267,14 @@ export function useLiveSuspenseQuery(
     throw observerError === undefined ? clientQuery?.error : observerError
   }
 
+  if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
+    const reason = queryInfo.identityError
+      ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
+      : `the query has no stable identity`
+    throw new Error(
+      `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
+    )
+  }
   const errorEntry = initialRenderErrors.get(result.collection)
   const initialRenderError = queryInfo.client
     ? errorEntry?.byClient.get(queryInfo.client)
@@ -304,14 +312,6 @@ export function useLiveSuspenseQuery(
       (collectionStatus === `error` &&
         result.persistedStatus !== `unavailable`))
   ) {
-    if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
-      const reason = queryInfo.identityError
-        ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
-        : `the query has no stable identity`
-      throw new Error(
-        `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
-      )
-    }
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
       const collection = result.collection

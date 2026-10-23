@@ -691,3 +691,48 @@ describe(`DbClient preload source identity`, () => {
     }
   })
 })
+
+// The same source-identity judgment applies to a captured loading view. That
+// view is not a completed preload, but its declared source claim still belongs
+// to the result. A conflicting preload must reject before starting its adapter.
+it(`keeps a loading server view's source claim before preload startup`, async () => {
+  const client = new DbClient()
+  const first = createCollection<Row>({
+    id: `provisional-identity`,
+    getKey: (row) => row.id,
+    sync: { sync: () => {} },
+  })
+  let starts = 0
+  const other = createCollection<Row>({
+    id: first.id,
+    getKey: (row) => row.id,
+    sync: {
+      sync: ({ markReady }) => {
+        starts++
+        markReady()
+      },
+    },
+  })
+  const query = new Query().from({ row: first })
+  const collection = resolveLiveQueryValue({ query })!
+  const observer = createLiveQueryObserver(collection, {
+    client,
+    queryHash: getLiveQueryHash({ query }),
+  })
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    expect(observer.getServerSnapshot().status).toBe(`loading`)
+    expect(() =>
+      client.preloadLiveQuery({ query: new Query().from({ row: other }) }),
+    ).toThrow(/different source Collections/)
+    expect(starts, `source contradiction fails before acquisition`).toBe(0)
+  } finally {
+    vi.stubGlobal(`window`, browserWindow)
+    observer.dispose()
+    await collection.cleanup()
+    await client.cleanup()
+    await first.cleanup()
+    await other.cleanup()
+  }
+})

@@ -3,6 +3,18 @@ import { oracleReplayReporter } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `react.ssr-ordinary`,
+  `react.ssr-infinite`,
+  `react.ssr-stream-cut`,
+  `svelte.ssr-snapshot`,
+  `svelte.ssr-handoff`,
+  `pooled-live-query.late-cleanup`,
+  `live-query-observer.partial-attach`,
+  `live-query-observer.release-failure`,
+  `subscription-lifecycle.notification-error`,
+  `live-query.start-handoff`,
+  `react.descriptor-error-surface`,
+  `react.descriptor-ownership`,
   `cursor-pagination.no-peek`,
   `cursor-pagination.history`,
   `cursor-pagination.cache`,
@@ -21,6 +33,7 @@ const staticOracleProperties = [
   `query-db.refetch-ordered-prefix`,
   `ordered-loader.request-authority`,
   `replay.ordered-window-faults`,
+  `replay.subscription-demand-origin`,
   `oracle-replay.calibration`,
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,

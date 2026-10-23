@@ -41,6 +41,82 @@ import { fc } from '@fast-check/vitest'
 export type DemandName = `a` | `b`
 
 /**
+ * Ordinary subscription admission may start one sync run. Cleanup from its
+ * loading or ready callback retires that start; admission must not retry it.
+ * A loading callback runs before the adapter enters, so it can prevent even
+ * that first adapter invocation. A pending adapter cleanup retains the ready
+ * public status until cleanup settles, as specified in the glossary.
+ *
+ * These finite histories and their independent judgment are shared by the core
+ * admission driver and the real React abandoned-render receiving driver. A
+ * pending cleanup is legal only after ready, when an adapter resource exists.
+ */
+export const subscriberStartCleanupHistories = [
+  { cleanupAt: `none`, cleanupPending: false },
+  { cleanupAt: `loading`, cleanupPending: false },
+  { cleanupAt: `ready`, cleanupPending: false },
+  { cleanupAt: `ready`, cleanupPending: true },
+] as const
+
+export function modelSubscriberStartCleanup({
+  cleanupAt,
+  cleanupPending,
+}: (typeof subscriberStartCleanupHistories)[number]) {
+  const starts = cleanupAt === `loading` ? 0 : 1
+  const cleanups = cleanupAt === `ready` ? 1 : 0
+  const statusOnReturn =
+    cleanupAt === `none` || cleanupPending ? `ready` : `cleaned-up`
+  const statusAfterCleanup = cleanupAt === `none` ? `ready` : `cleaned-up`
+  const statusesOnReturn: Array<`loading` | `ready` | `cleaned-up`> = [
+    `loading`,
+  ]
+  if (starts) statusesOnReturn.push(`ready`)
+  if (statusOnReturn === `cleaned-up`) statusesOnReturn.push(`cleaned-up`)
+  const statusesAfterCleanup = cleanupPending
+    ? [...statusesOnReturn, `cleaned-up`]
+    : statusesOnReturn
+  return {
+    starts,
+    cleanups,
+    statusOnReturn,
+    statusAfterCleanup,
+    statusesOnReturn,
+    statusesAfterCleanup,
+  }
+}
+
+/**
+ * Resumption transfers one logical subscription from deferred to acquiring.
+ * Unsubscription at any startup callback removes that owner permanently.
+ * Cleanup can additionally invalidate the sync run, before or after adapter
+ * entry. Notification happens only for a transfer that actually committed;
+ * an unsubscribe from that notification contributes its matching decrement.
+ * This token-count judgment uses no production acquisition state machine.
+ */
+export const subscriberResumeRetirementHistories = (
+  [`none`, `loading`, `ready`, `subscribers`] as const
+).flatMap((retireAt) =>
+  (retireAt === `none` ? [false] : [false, true]).map((cleanup) => ({
+    retireAt,
+    cleanup,
+  })),
+)
+
+export function modelSubscriberResumeRetirement({
+  retireAt,
+  cleanup,
+}: (typeof subscriberResumeRetirementHistories)[number]) {
+  return {
+    starts: cleanup && retireAt === `loading` ? 0 : 1,
+    acquiring: retireAt === `none` ? 1 : 0,
+    // Cleanup forgets first demand when no acquiring owner survives.
+    subscriberOrPreload: !cleanup || retireAt === `none`,
+    counts:
+      retireAt === `none` ? [1] : retireAt === `subscribers` ? [1, 0] : [],
+  }
+}
+
+/**
  * A bounded callback-reentry grammar for direct snapshots. The callback phase
  * is an observation cut, not a second subscription state machine. A released
  * or unsubscribed request has no authority to publish its local snapshot.
@@ -965,4 +1041,28 @@ export function expectedDeferralBatches(
         })),
       ]
     : []
+}
+
+/**
+ * A render sync-start handoff reports exceptions from the starts it performs.
+ * A Collection's recorded error is a readable status, not evidence that this
+ * handoff threw. The ordinary React contract exposes that status as isError;
+ * an explicit preload separately owns reporting its source startup failure.
+ *
+ * This projection retains error origin and timing because either changes the
+ * permitted synchronous result. It does not model source rows or recovery.
+ * Before-release histories use independent demand to release the same gate.
+ */
+export type StartHandoffHistory = {
+  outcome: `ready` | `mark-error` | `throw`
+  timing: `before-release` | `during-release`
+  cause: `error` | `undefined`
+}
+
+export function expectedStartHandoff(history: StartHandoffHistory) {
+  return {
+    throws: history.outcome === `throw` && history.timing === `during-release`,
+    status: history.outcome === `ready` ? `ready` : `error`,
+    starts: 1,
+  } as const
 }

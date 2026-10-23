@@ -292,6 +292,111 @@ const state = dbClient.dehydrate()
 This payload contains the projected query result and no source collection rows
 unless that collection was also materialized explicitly.
 
+Use the config object form in both the loader and the hook when they share a
+preloaded result:
+
+```tsx
+const openTodos = {
+  query: (q: InitialQueryBuilder) =>
+    q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.status, 'open')),
+}
+
+await dbClient.preloadLiveQuery(openTodos)
+// In the component:
+const { data } = useLiveQuery(openTodos)
+```
+
+The function form `useLiveQuery(openTodos.query)` currently derives a different
+identity from `useLiveQuery(openTodos)`. It will not reuse the loader's result.
+Sharing the query callback alone is insufficient. To use an explicit `queryKey`,
+pass config objects with the same `queryKey` to both `preloadLiveQuery` and
+`useLiveQuery`. Their sources and result configuration must still describe the
+same query.
+
+### Prepare every server snapshot
+
+An ordinary server hook can render empty/loading state without a preload. To
+render data, await a matching `preloadLiveQuery()` or explicitly preload the
+source Collections. A different query warming the same source does not prepare
+this query's result for transport. Reading those incidental rows or their
+readiness during SSR throws an error with the required preparation steps.
+Normal browser reads and runtime query errors keep their usual behavior.
+
+Normalized source transport carries rows without query readiness. When a server
+hook reads explicitly prepared sources, it captures the query's render-time
+rows and status as a query result. Ready prepared queries can therefore finish
+non-streaming Suspense; loading queries remain loading. Later server writes and
+browser writes before hydration do not change that initial view. Browser commit
+starts acquisition and publishes the live status normally. A loading capture
+does not complete an explicit data preload.
+
+An ordinary hook can render loading before a Suspense sibling completes the
+same query. Each hook retains its own server-rendered view during hydration.
+The Router stream forwards a newer result for that query without replacing the
+ordinary hook's earlier view. A later boundary waits for its missing streamed
+result instead of substituting browser rows. DbClient retains transported server
+snapshots until cleanup, so one reader's commit cannot consume another
+boundary's initial view. New ordinary browser reads still use live results.
+
+Streaming `useLiveSuspenseQuery` discovers and prepares its result during render,
+including when another query already warmed the source. Ordinary hooks require
+explicit preparation to render that data. Opaque SSR queries require a serializable
+`queryKey`, including when the source is already warm.
+
+For `useLiveInfiniteQuery`, preload the initial window plus its one-row peek:
+
+```tsx
+const orderedTodos = new Query()
+  .from({ todo: todoCollection })
+  .orderBy(({ todo }) => todo.id)
+const pageSize = 20
+
+await dbClient.preloadLiveQuery({
+  query: orderedTodos.limit(pageSize + 1).offset(0),
+})
+// In the component:
+const result = useLiveInfiniteQuery(() => orderedTodos, { pageSize })
+```
+
+An explicit `queryKey` also includes the query's limit and offset in its transport
+identity. Use the same initial window in the preload and the infinite hook.
+
+Custom dehydration filters must retain the query result that the markup requires.
+
+### Indexes before query compilation
+
+Create manual indexes when initializing each request or browser client, before
+preloading or rendering queries that use them:
+
+```tsx
+function createDbClient() {
+  const client = new DbClient()
+  client.collection(todoCollection).createIndex((todo) => todo.id, {
+    indexType: BasicIndex,
+  })
+  return client
+}
+```
+
+Collection materialization does not start sync unless its config requests it.
+An index installed inside the sync callback can arrive after the ordered query
+has compiled. `autoIndex: 'eager'` with `defaultIndexType: BasicIndex` is an
+alternative when indexes should be created as queries compile. Descriptors
+currently have no `indexes` or `onCreate` option.
+
+### Preload lifetime
+
+`preloadLiveQuery()` has no built-in deadline or `AbortSignal` option. A source
+that keeps retrying without becoming ready can keep its preload pending. Apply
+an application deadline to request work and clean up its request-scoped client
+when abandoning it; a timer race alone does not stop the underlying sync.
+
+Preloaded results belong to the client. There is no public method to release
+one preloaded query. `cleanup()` releases the entire client and its Collections.
+Avoid accumulating route-specific preloads in a browser client without an
+application lifetime policy. A separately owned `createLiveQueryCollection()`
+can be preloaded and cleaned up explicitly when per-query ownership is needed.
+
 ### Browser
 
 Hydrate the browser client before rendering components that read from DB.

@@ -1020,6 +1020,7 @@ function useLiveQueryImpl(
       client: dbClient,
       queryHash: instance.queryHash,
       onPreload: resumeDeferredCollections,
+      suspendUntilReady: forSuspense,
     })
   }
   const observer = instance.observer!
@@ -1049,7 +1050,14 @@ function useLiveQueryImpl(
   const returned = useSyncExternalStore(
     instance.subscribe,
     () => observer.getSnapshot(),
-    () => observer.getServerSnapshot(),
+    () => {
+      // Streaming Suspense discovers a query even when a peer warmed its source.
+      if (forSuspense && dbClient?._isSsrStreamingEnabled()) {
+        observer.preloadForInitialRender().catch(() => {})
+        return observer.getServerSnapshot(true)
+      }
+      return observer.getServerSnapshot()
+    },
   )
   // Only useLiveSuspenseQuery reads this, and it costs a define per render.
   if (forSuspense) {

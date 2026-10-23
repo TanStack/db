@@ -2,6 +2,7 @@ import { BaseQueryBuilder } from './query/builder/index.js'
 import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
+import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
   createPooledLiveQuery,
   getPooledQueryIdentity,
@@ -35,6 +36,7 @@ export type DeferredLiveQueryCollections = Set<
 /** Release every deferred source, then report the first startup failure. */
 export function resumeDeferredLiveQueryCollections(
   collections: DeferredLiveQueryCollections,
+  reportSourceErrors = false,
 ): void {
   const pending = Array.from(collections)
   collections.clear()
@@ -42,6 +44,11 @@ export function resumeDeferredLiveQueryCollections(
   for (const collection of pending) {
     try {
       collection._resumeSyncStart()
+      // An explicit preload owns source failure reporting even when graph
+      // demand already released the gate. Ordinary hooks read error status.
+      if (reportSourceErrors && collection.status === `error`) {
+        throw collection._lifecycle.getSyncError()
+      }
     } catch (error) {
       firstFailure ??= { error }
     }
@@ -194,11 +201,29 @@ export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,
 ): string {
-  const identity = queryKey?.length
-    ? [`queryKey`, queryKey]
-    : isCollection(preparedValue)
-      ? [`collection`, preparedValue.id]
-      : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
+  if (queryKey?.length) {
+    const query =
+      preparedValue instanceof BaseQueryBuilder
+        ? preparedValue
+        : preparedValue &&
+            typeof preparedValue === `object` &&
+            `query` in preparedValue
+          ? preparedValue.query
+          : undefined
+    const ir = isCollection(preparedValue)
+      ? getBuilderFromConfig(preparedValue.config)?.getWindow()
+      : query instanceof BaseQueryBuilder
+        ? query._getQuery()
+        : undefined
+    const window =
+      ir && (ir.limit !== undefined || (ir.offset ?? 0) !== 0)
+        ? [{ limit: ir.limit, offset: ir.offset ?? 0 }]
+        : []
+    return getStableValueHash([`queryKey`, queryKey, ...window], `queryKey`)
+  }
+  const identity = isCollection(preparedValue)
+    ? [`collection`, preparedValue.id]
+    : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
   return getStableValueHash(identity, `queryKey`)
 }

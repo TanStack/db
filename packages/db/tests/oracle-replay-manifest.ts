@@ -9,6 +9,36 @@ import { registeredOracleProperties } from './oracle-config.js'
  */
 const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
+    `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
+    `live-query`,
+    `start-handoff`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
+    `pooled-live-query`,
+    `late-cleanup`,
+  ],
+  [
+    `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
+    `react`,
+    `descriptor-error-surface descriptor-ownership ssr-ordinary ssr-infinite ssr-stream-cut`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-snapshot`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-handoff`,
+  ],
+  [
+    `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
+    `live-query-observer`,
+    `retained-snapshot`,
+  ],
+  [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
     `cleanup-queue`,
     `history`,
@@ -112,7 +142,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
     `subscription-lifecycle`,
-    `async-statistics async-restart`,
+    `async-statistics async-restart notification-error`,
   ],
   [
     `db/tests/collection-subscription-replay-oracle.property.test.ts`,
@@ -132,7 +162,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/live-query-observer-history-oracle.property.test.ts`,
     `live-query-observer`,
-    `granular-history wholesale-history`,
+    `granular-history wholesale-history partial-attach release-failure`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
@@ -267,6 +297,37 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `live-query-observer.retained-snapshot`,
+    `first reads match the capture-time rows.*random`,
+  ],
+  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
+  [
+    `pooled-live-query.late-cleanup`,
+    `releases late cleanup registration channels.*random`,
+  ],
+  [
+    `live-query-observer.partial-attach`,
+    `releases every acquired channel before retry.*random`,
+  ],
+  [
+    `subscription-lifecycle.notification-error`,
+    `acquires retained demand after replacement readiness.*random`,
+  ],
+  [
+    `react.descriptor-error-surface`,
+    `error-surface after descriptor failure.*random`,
+  ],
+  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
+  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
+  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
+  [`react.ssr-stream-cut`, `transports the rendered view.*random`],
+  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
+  [`svelte.ssr-handoff`, `matches the actual browser initialization.*random`],
+  [
+    `live-query-observer.release-failure`,
+    `reattaches after reporting a release failure.*random`,
+  ],
   [
     `structural-identity.equal-representations`,
     `agrees with D2 value identity for equal representations`,
