@@ -399,3 +399,187 @@ stranded demand after notification failure), and F07 (Date assignment and exact
 dependency versions). This review neither closes those reports nor invents a
 recovery state machine for them. CodeRabbit remains paused. No external review
 request was sent.
+
+
+## Follow-up: mixed streaming readers — 2026-10-23
+
+Starting head: `a0991825ea326fcdbfadbeb61c2029ff130b1a88`.
+Production repair: `10e0e6fed7f127d515144e1a14c4e69805425cc2`.
+Final oracle instrumentation: `ce8f99d350556cf461cca059db41e4f490eea74d`.
+This is a self-review. No independent agent or external review ran.
+The earlier record remains historical. This section supersedes its exclusion
+of the mixed-reader schedules exercised below.
+
+### Joint law and the missing experiment
+
+Each reader's first browser rows and readiness must reproduce that reader's
+server-rendered view. Keeping an ordinary loading view cannot prevent explicit
+Suspense preparation from completing. One committed reader cannot consume a
+later boundary's server view. The SSR guide supplies initial-view equality and
+explicit preload completion. React's hydration API supplies the receiving cut.
+The maintainer's programming-error policy does not permit a crash for these
+legal schedules. Active Collection cleanup retains its separately approved rule.
+
+The old stream-cut property compared one Suspense render with its transported
+rows. It omitted an ordinary sibling and never hydrated this mixed tree. Its
+narrower green result did not establish the joint promise. The expanded
+metamorphic judgment retains each server reader's projected primitive values
+and status, then compares that same reader's first browser result. It imports
+no production classification to predict equality.
+
+The grammar varies zero to three authored rows and zero to three microtask
+publications. An ordinary reader appears before Suspense, after Suspense, or
+not at all. Browser startup may publish different rows under the same key.
+An async React act cut and a synchronous act cut distinguish hydration together
+from ordinary commit before Suspense hydration. Snapshots and resolved Promise
+values cross through JSON. The real Router adapter supplies the stream under
+controlled SSR callbacks. Actual renderToPipeableStream and hydrateRoot supply
+the React receiving path. Suspense-only histories compare server markup and
+transport. Only mixed histories receive browser-hydration credit.
+
+Removing placement loses the competing loading/ready views. Removing browser
+variation permits local recomputation to conceal missing transport. Removing
+the split cut permits an early commit to consume another boundary's view.
+Empty rows distinguish readiness without row evidence. Microtask writes retain
+the original rendered-view versus later-publication distinction. The grammar
+reconstructs each known witness below. It permits one ordinary sibling, so the
+mapping excludes both placement flags being true. Generated writes insert a
+missing key and update an existing key, including the browser-only row.
+
+### Additional findings and pre-edit evidence
+
+These findings supplement N01–N08 and do not replace any raw SR item.
+
+| ID | Finding and test gap | Decisive evidence | Disposition |
+| --- | --- | --- | --- |
+| N09 | Completing a shared Suspense query replaced an ordinary reader's initial loading view. The previous owner lacked the second reader and its first-browser observation. | On unchanged a0991825e, three failures and three passes. Fixed seed 2229, path 0:0:0, and random seed -1274793130, path 0:0:0, reduce to zero rows and ready instead of loading. | fixed-now, within the mixed grammar above. |
+| N10 | Router suppressed every later record with an already-streamed hash. Core snapshot repair alone could not deliver the replacement. | The actual Router receiving test ran before production edits. Its second read reported done:true instead of forwarding the completed preload. | fixed-now. The same Router adapter also supplies the generated receiving path. |
+| N11 | A split hydration cut used local rows before the stream delivered its result, or lost a result after a sibling consumed it. Async-only hydration hid this schedule. | The expanded owner ran before the retention/wait repair: three failures, five passes. Seed 2229, path 3:0:0:1, reduces to empty rows with incorrect readiness. Random seed -45443823, path 0:0, reaches the same mismatch. A retained-record-only attempt still failed all three comparisons. | fixed-now, including retained transport and waiting for missing rows. |
+| N12 | CI rejected a dynamically spread one-run replay override as oracle/no-disabled. Local ESLint does not include that installed CI rule. | Lint at a0991825e failed while all unit shards passed. Shared replay options replace the override. Normal fixed/random campaigns still run 75 histories each, and direct seed 2233/path 1:0 passes. | Local repair complete. Final CI must supply rule-specific confirmation. |
+
+N09 and N10 reached their receiving assertions on unchanged production before
+its first edit. N11 reached its assertions on the first mixed-reader repair
+before adding retained server records or the pending-result wait. These are
+assertion failures at the promised first-view cuts, not timeout kills. The
+retention-only attempt demonstrates why a narrower repair is insufficient.
+
+Fixture mistakes receive separate treatment. One browser-row fixture attempted
+a duplicate insert and produced four uncaught exceptions. The corrected fixture
+passes but those exceptions supply no calibration credit. Another run passed
+519 assertions but reported a private-option TypeCheckError. It was not clean
+GREEN. The fixture now uses its known client identity. Initial bundle checks
+stopped at their stale-dist guard before execution. Later checks used a fresh
+build. An incorrectly addressed diagnostic command changed no test source and
+supplies no scheduling evidence. Temporary diagnostics are absent from the final
+oracle. Development multiple-renderer warnings remain distinguishable from
+uncaught errors and recoverable hydration mismatches.
+
+### Repair, alternatives, and cost
+
+The transport reuses the record's existing initial snapshot field. It sends a
+second view only when that view differs from the completed result. Ordinary
+readers retain their earlier view. Suspense reads the completed result. Router
+replaces its hash Set with a version Map so replacement records can arrive.
+
+DbClient retains a reference to each transported query record until cleanup.
+Only the server getter can recover that record after ordinary consumption.
+Normal new browser observers continue to read live results. If hydration lacks
+the server-rendered rows, its getter suspends on the stream Promise. Explicit
+Suspense demand can still start local work. No retry timer, generation, queue,
+or replacement lifecycle was added.
+
+Reusing only the active record was smaller but failed the split schedule.
+Retention alone also failed while the Promise still lacked its snapshot. Reader
+counts cannot include a boundary React has not instantiated. A separate root
+hydration-completion lifecycle would require an architectural signal this API
+does not expose. The chosen map keeps references rather than copying rows.
+Its memory cost lasts for the DbClient lifetime and grows with distinct hydrated
+query hashes. cleanup clears it. Those costs earn their place through the
+receiving law and the rejected narrower designs.
+
+Compared with a0991825e, production grows by 45 net source lines. Tests grow by
+225 net lines after correcting reach counters. Guide, coverage-map and changeset
+text grow by 24 net lines, excluding this audit. The mangle cache adds two names
+and drops none, for 421 names. Tests and documentation are separate from shipped
+bytes. Against merged main 65d9ada508114f199464f753d50eb3447eb0eaf9,
+size:compare over db, react-db and react-router-with-db reports:
+
+| Output | Gzip change | Brotli change |
+| --- | ---: | ---: |
+| db | +799 bytes | +891 bytes |
+| react-db | +117 bytes | +129 bytes |
+| react-router-with-db | +25 bytes | +27 bytes |
+| Package total | +941 bytes | +1,047 bytes |
+| Typical app | +479 bytes | +527 bytes |
+| Other app scenarios | +437 to +488 bytes | +329 to +443 bytes |
+
+### Final evidence and self-review
+
+The full React package passes 520 tests in 23 files with coverage and type
+checks. Svelte passes 163 tests in 11 files. Core checks cover 379 distinct tests
+in 13 files, including observer lifecycle, DbClient transport and identity,
+pooled queries, windows, and errors. Router passes ten tests in two files.
+The full DB test compiler passes. The final reach-only adjustment runs the
+same eight stream-cut tests again without broadening unrelated testing.
+
+Both normal stream campaigns retain a 40-history budget. Fixed seed 2229 and
+the final unseeded run report these actual counts. Browser states count only
+histories that reached hydrateRoot, not Suspense-only transport histories.
+
+| Declared state | Fixed | Random |
+| --- | ---: | ---: |
+| empty | 11 | 9 |
+| nonempty | 29 | 31 |
+| later-publication | 31 | 29 |
+| unchanged | 9 | 11 |
+| ordinary-first | 21 | 18 |
+| suspense-first | 11 | 9 |
+| suspense-only | 8 | 13 |
+| browser-different | 12 | 18 |
+| browser-same | 20 | 9 |
+| split-hydration | 16 | 12 |
+| together-hydration | 16 | 15 |
+
+Every normal campaign asserts minimum reach. The guarded stream replay at seed
+2229/path 3:0:0:1 completes one execution with two runs and failed:false. The
+older replay-demand property's wrapper stops at no-named-owner before execution.
+Its direct replay passes but receives no guarded-replay credit. No manifest
+entry was invented for this lint repair.
+
+Scoped ESLint has zero errors or warnings. Prettier, whitespace and the 421-name
+mangle check pass. The minified consumer passes 107 error names, index metadata,
+query rows and live updates. Production-error checks erase 248 literals,
+including 20 shared literals, in production ESM and CommonJS while preserving
+development text.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 | SSR guide and hydration equality authorize the joint law. The finite source and host limits remain explicit. |
+| ORC-002 | The relation compares each rendered primitive projection with that reader's first browser projection. Expected equality does not use the transport classifier. |
+| ORC-003 | Local prose explains the law, placements, scheduling cuts, public observations and controlled Router premise beside the existing owner. |
+| ORC-004 | The reconstruction, ablation, zero/three bounds and mutually exclusive placement mapping appear above. Duplicate inserts are invalid and no longer enter the fixture. |
+| ORC-005 | Real React APIs receive actual Router adapter chunks. First hook rows/status and recoverable errors are compared. Suspense-only cases claim transport evidence only. Missing result data causes a wait rather than local substitution. |
+| ORC-006 | Original mixed-reader and Router comparisons fail. The split comparison also rejects retention without waiting for the missing result. Setup/type failures receive no credit. |
+| ORC-007 | The same grammar and comparison run 40 fixed and 40 unseeded histories. Named seed/path replay completes directly. No command-model replayPath applies. |
+| ORC-008 | The relation needs a separate first view per reader: loading versus completed readiness predicts different hydration. It introduces no reference lifecycle state machine. |
+| ORC-009 | Rows, Collection readiness, cleanup and publication retain glossary meanings. split-hydration names a host scheduling cut, not a new Collection state. |
+| ORC-010 | Shrinking preserves the first-view mismatch. Diagnostics distinguish primary mismatches, fixture exceptions, compiler failures and cleanup. Roots, readers and clients are released. |
+| ORC-011 | Browser-local variation challenges the concrete shared-fault hypothesis that both sides recompute from equal local rows. The relation needs no second copy of production semantics. |
+| ORC-012 | This append-only section identifies production and final oracle commits, exact failures, reach, alternatives and finite limits. |
+| ORC-013 | Empty readiness, both reader orders, async versus split hydration, and same/different browser rows distinguish nearby wrong consequences. |
+| ORC-014 | Actual React supplies the split cut. Router callbacks remain controlled. This is not a deployed Start or real-provider claim. |
+| ORC-015 | Each declared receiving state requires actual browser execution. The table records the final normal campaigns. |
+
+The ten raw SR findings remain accounted for as ten fixed-now. This follow-up
+adds N09–N11 repairs and the local N12 CI repair without losing earlier evidence.
+It makes no independent-reviewer quality claim. The earlier reviewer assessment
+remains historical.
+
+Whole-PR readiness remains unproven. At a0991825e every unit shard passed, Lint
+failed and browser E2E was canceled. Final pushed-head CI still needs inspection.
+Earlier H04/H08/F07 evidence gaps remain in their migration audit. The coverage
+map retains arbitrary asynchronous providers, persistence readiness, later
+infinite-page changes, custom filters, concurrent-root schedules and deployed
+Start/Electric receiving paths. No known counterexample remains in the exercised
+mixed-reader scope. Passing these finite histories is not universal proof.
+CodeRabbit remains paused. No new external review request was sent.
