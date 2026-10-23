@@ -313,6 +313,42 @@ pass config objects with the same `queryKey` to both `preloadLiveQuery` and
 `useLiveQuery`. Their sources and result configuration must still describe the
 same query.
 
+### Prepare every server snapshot
+
+An ordinary server hook can render empty/loading state without a preload. To
+render data, await a matching `preloadLiveQuery()` or explicitly preload the
+source Collections. A different query warming the same source does not prepare
+this query's result for transport. Reading those incidental rows or their
+readiness during SSR throws an error with the required preparation steps.
+Normal browser reads and runtime query errors keep their usual behavior.
+
+Normalized source transport carries rows without query readiness. Queries that
+use only those rows report `loading` for both server markup and the first
+browser snapshot. A matching completed query result reports `ready`. Browser
+commit starts acquisition and publishes the live status normally.
+
+Streaming `useLiveSuspenseQuery` discovers and prepares its result during render,
+including when another query already warmed the source. Ordinary hooks require
+explicit preparation to render that data.
+
+For `useLiveInfiniteQuery`, preload the initial window plus its one-row peek:
+
+```tsx
+const orderedTodos = new Query()
+  .from({ todo: todoCollection })
+  .orderBy(({ todo }) => todo.id)
+const pageSize = 20
+
+await dbClient.preloadLiveQuery({
+  query: orderedTodos.limit(pageSize + 1).offset(0),
+})
+// In the component:
+const result = useLiveInfiniteQuery(() => orderedTodos, { pageSize })
+```
+
+Custom dehydration filters must retain the Collection rows or query result that
+the markup requires.
+
 ### Indexes before query compilation
 
 Create manual indexes when initializing each request or browser client, before

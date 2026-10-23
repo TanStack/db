@@ -183,6 +183,7 @@ export type DehydrateDbClientOptions = {
 type CollectionRecord = {
   collection: AnyCollection
   shouldDehydrate: boolean
+  hydrated: boolean
 }
 
 type LiveQueryRecord = {
@@ -564,6 +565,7 @@ export class DbClient {
     this.collectionsById.set(collection.id, {
       collection,
       shouldDehydrate: !deferSyncStart,
+      hydrated: this.pendingHydration.has(collection.id),
     })
 
     if (materializeOptions?.initialData?.length) {
@@ -669,6 +671,7 @@ export class DbClient {
     for (const chunk of state.collections) {
       const record = this.collectionsById.get(chunk.collectionId)
       if (record) {
+        record.hydrated = true
         this.applyRows(record.collection, chunk, `hydration`)
         continue
       }
@@ -690,6 +693,20 @@ export class DbClient {
   subscribe(listener: (event: DbClientEvent) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** @internal Normalized source transport carries rows, not readiness. */
+  _hasSsrCollectionSnapshot(collection: AnyCollection): boolean {
+    const sources = getBuilderFromConfig(
+      collection.config,
+    )?.getSourceCollections()
+    if (sources)
+      return sources.every((source) => this._hasSsrCollectionSnapshot(source))
+    const record = this.collectionsById.get(collection.id)
+    return (
+      record?.collection === collection &&
+      (record.shouldDehydrate || record.hydrated)
+    )
   }
 
   /** @internal */

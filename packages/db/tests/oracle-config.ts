@@ -3,6 +3,9 @@ import { oracleReplayReporter } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `react.ssr-ordinary`,
+  `react.ssr-infinite`,
+  `svelte.ssr-snapshot`,
   `pooled-live-query.late-cleanup`,
   `live-query-observer.partial-attach`,
   `subscription-lifecycle.notification-error`,

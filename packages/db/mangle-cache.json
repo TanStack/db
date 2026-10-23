@@ -416,5 +416,7 @@
   "coverSource": "fN",
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
-  "startSyncForSubscriber": "gT"
+  "startSyncForSubscriber": "gT",
+  "snapshotFrom": "gV",
+  "serverSnapshots": "gU"
 }

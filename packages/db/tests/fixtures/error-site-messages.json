@@ -928,5 +928,12 @@
     "file": "query/compiler/index.ts",
     "template": "A windowed or findOne result row has no include route",
     "literals": ["A windowed or findOne result row has no include route"]
+  },
+  "245": {
+    "file": "live-query-observer.ts",
+    "template": "SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration.",
+    "literals": [
+      "SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration."
+    ]
   }
 }

@@ -613,14 +613,34 @@ calibration of a previously-requested-start mutant predates the final call
 reorder and is not evidence against that mutant on the current path.
 This does not establish arbitrary concurrent-render schedules, failed-provider
 histories, or Electric txid delivery. The [migration feedback review](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
-records calibration and the still-open SSR hydration law: a warm server source
-lets a second unregistered plain hook render rows absent from result-only
-transport. A task-local real React hydrateRoot witness recovers for that query
-and passes when it is explicitly preloaded. The descriptor owner is the next
-receiving owner once the product chooses automatic result capture or an initial
-empty/loading policy; partial nonready rows, status flags, normalized-source
-transport, mixed Suspense/plain schedules, and the real Start/Electric path
-remain needed witnesses. This diagnostic is not claimed as repaired coverage.
+records the SSR admission repair. The maintainer chose a programming-error
+rejection when an ordinary server hook reads incidental rows or readiness that
+its first browser render cannot reproduce. Cold/loading SSR remains legal.
+`packages/db/tests/ssr-snapshot-admission-oracle.ts` owns the independent
+preparation judgment and history grammar. The descriptor owner drives React's
+ordinary and infinite hooks independently. The Svelte server driver is
+`packages/svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`.
+Each compares rejection, projected rows and status before browser commit across
+no preparation, completed or pending query preload, and normalized source
+transport, including ready-empty and partial-loading sources. Normalized rows
+remain provisional. React also runs real `hydrateRoot`, observes recoverable
+errors, and checks the committed browser result. Svelte's
+`hydration.svelte.test.ts` receives normalized transport and normal warm-browser
+initialization through its native effect scheduler. Real React streaming checks
+cold and warm Suspense discovery. The audit records RED on unchanged production,
+GREEN, narrow mutants, and exact receiving replays.
+The separate `live-query-observer-snapshot-oracle.property.test.ts` owner checks
+unchanged getter identity with and without a completed DbClient query. It runs
+ordered/single-result and attached/detached histories through ordinary and server
+getters. It does not model provisional hydration replacement or host scheduling.
+Limits: the generated sources are synchronous and eager with zero to three rows.
+Infinite receiving coverage uses a one-row initial page and its peek-ahead row.
+Arbitrary asynchronous providers, later page-shape changes during a pending
+hydration stream, persistence readiness, mixed Suspense/plain streaming schedules,
+custom dehydration filters, and the real Start/Electric host remain open paths
+for these same receiving owners. There is no demonstrated counterexample in
+these unexercised paths. Transport deliberately discarding required state and
+rendering local Collection object identity are outside the portable snapshot law.
 The Date descriptor typing report remains an evidence gap. The reliable strict
 compiler probe accepts the reported Date forms. The receiving owners are
 `packages/db/tests/db-client.test-d.ts` and

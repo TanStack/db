@@ -21,7 +21,17 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
     `react`,
-    `descriptor-error-surface descriptor-ownership`,
+    `descriptor-error-surface descriptor-ownership ssr-ordinary ssr-infinite`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-snapshot`,
+  ],
+  [
+    `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
+    `live-query-observer`,
+    `retained-snapshot`,
   ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
@@ -282,6 +292,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `live-query-observer.retained-snapshot`,
+    `first reads match the capture-time rows.*random`,
+  ],
   [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
   [
     `pooled-live-query.late-cleanup`,
@@ -300,6 +314,9 @@ const replayTestNames = new Map([
     `error-surface after descriptor failure.*random`,
   ],
   [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
+  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
+  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
+  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
   [
     `structural-identity.equal-representations`,
     `agrees with D2 value identity for equal representations`,

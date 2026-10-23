@@ -1,3 +1,4 @@
+import { codedMessage, devBuild } from './error-message.js'
 import { LiveQueryObserverDisposedError } from './errors.js'
 import { runAllCallbacks } from './utils/callbacks.js'
 import {
@@ -203,6 +204,8 @@ class LiveQueryObserverImpl<
   private cachedEntries: Array<[TKey, T]> | undefined
   private cachedCollectionRevision: number | undefined
   private cachedCollectionLayoutRevision: number | undefined
+  private serverSnapshots:
+    WeakMap<LiveQuerySnapshot<T, TKey>, LiveQuerySnapshot<T, TKey>> | undefined
   private snapshotDirty = true
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
@@ -332,7 +335,49 @@ class LiveQueryObserverImpl<
   }
 
   getServerSnapshot(): LiveQuerySnapshot<T, TKey> {
-    return this.getSnapshot()
+    const snapshot = this.getSnapshot()
+    const collection = this.collection
+    if (
+      !this.client ||
+      !collection ||
+      this.hasHydrationSeed() ||
+      snapshot.isError
+    )
+      return snapshot
+
+    // Only completed query results transfer readiness. Source rows remain
+    // provisional, and incidental server state needs explicit preparation.
+    if (snapshot.state?.size || snapshot.isReady) {
+      const { sources } = this.getSourceInfo()
+      if (
+        !(sources ?? [collection]).every((source) =>
+          this.client!._hasSsrCollectionSnapshot(source),
+        )
+      ) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration.`
+            : codedMessage(245),
+        )
+      }
+    }
+
+    // Keep the ordinary cache intact. Weak keys let obsolete revisions retire
+    // even when a browser observer survives its hydration render.
+    let serverSnapshot = this.serverSnapshots?.get(snapshot)
+    if (!serverSnapshot) {
+      serverSnapshot = {
+        ...snapshot,
+        status: `loading`,
+        ...getLiveQueryStatusFlags(`loading`),
+        persistedStatus: snapshot.isPersistedReady
+          ? `loading`
+          : snapshot.persistedStatus,
+        isPersistedReady: false,
+      }
+      ;(this.serverSnapshots ??= new WeakMap()).set(snapshot, serverSnapshot)
+    }
+    return serverSnapshot
   }
 
   getError(): unknown {

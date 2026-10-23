@@ -90,6 +90,7 @@
  * not request rows. These histories do not cover arbitrary concurrent render
  * schedules or Electric transaction evidence.
  */
+import { Writable } from 'node:stream'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   BTreeIndex,
@@ -98,6 +99,7 @@ import {
   collectionOptions,
   createCollection,
   eq,
+  getLiveQueryHash,
   getStableQueryBuilderHash,
   isUndefined,
   prepareLiveQueryValue,
@@ -106,6 +108,13 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { Component, Suspense } from 'react'
+import { renderToPipeableStream, renderToString } from 'react-dom/server'
+import { hydrateRoot } from 'react-dom/client'
+import {
+  expectedSsrSnapshot,
+  ssrSnapshotExamples,
+  ssrSnapshotHistoryArbitrary,
+} from '../../db/tests/ssr-snapshot-admission-oracle'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
@@ -120,12 +129,14 @@ import {
   modelSubscriberStartCleanup,
   subscriberStartCleanupHistories,
 } from '../../db/tests/collection-subscription-lifecycle-grammar-oracle'
+import type { SsrSnapshotHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
 import type {
   Context,
   DeferredLiveQueryCollections,
   QueryBuilder,
 } from '@tanstack/db'
 import type { ReactNode } from 'react'
+import type { Root } from 'react-dom/client'
 
 type Row = { id: string; value: string }
 
@@ -1861,5 +1872,332 @@ describe(`descriptor error handoff at React commit`, () => {
         })
       }
     }
+  }
+})
+
+/**
+ * The shared SSR admission judgment rejects server-only rows/readiness, while
+ * cold loading, completed query results and normalized sources remain legal.
+ * Each hook independently generates the same preparation histories. Both real
+ * React server renders compare before browser commit; hydrateRoot must then
+ * report no recovery, and committed sync must replace the seed normally.
+ * Query-only infinite preparation includes its first-page peek-ahead window.
+ * This driver supplies host scheduling, not another expected-result model.
+ */
+describe(`SSR snapshot admission`, () => {
+  const properties = {
+    ordinary: `react.ssr-ordinary`,
+    infinite: `react.ssr-infinite`,
+  } as const
+  for (const hook of [`ordinary`, `infinite`] as const) {
+    const makeReach = () =>
+      createOracleReach(`ssr-${hook}`, [
+        `cold-loading`,
+        `unbacked-ready-empty`,
+        `unbacked-rows`,
+        `query-result`,
+        `normalized-ready`,
+        `normalized-partial`,
+        `pending-query`,
+      ])
+    async function checkHistory(
+      history: SsrSnapshotHistory,
+      reach: ReturnType<typeof makeReach>,
+    ) {
+      reach.beginHistory()
+      const expected = expectedSsrSnapshot(history)
+      const starts = { server: 0, browser: 0 }
+      const descriptor = collectionOptions(`ssr-admission`, (client) => ({
+        id: `ssr-admission`,
+        getKey: (row: { id: string; name: string }) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            const runtime = client.requireDependency<`server` | `browser`>(
+              `runtime`,
+            )
+            starts[runtime]++
+            begin()
+            for (const row of history.rows)
+              write({
+                type: `insert`,
+                value: {
+                  ...row,
+                  name: runtime === `server` ? row.name : `browser ${row.id}`,
+                },
+              })
+            commit()
+            if (runtime === `browser` || history.sourceState === `ready`)
+              markReady()
+          },
+        },
+      }))
+      const query = new Query()
+        .from({ person: descriptor })
+        .orderBy(({ person }) => person.id)
+        .select(({ person }) => ({ id: person.id, name: person.name }))
+      const server = new DbClient({ runtime: `server` })
+      const browser = new DbClient({ runtime: `browser` })
+      server._setSsrServerCleanupEnabled(true)
+      browser._setSsrServerCleanupEnabled(true)
+      let root: Root | undefined
+      const host = document.createElement(`div`)
+      const recoveries: Array<unknown> = []
+      let unmount: (() => void) | undefined
+      const useResult = () =>
+        hook === `ordinary`
+          ? useLiveQuery({ query })
+          : useLiveInfiniteQuery(() => query, { pageSize: 1 })
+      function Consumer() {
+        const result = useResult()
+        return (
+          <output
+            data-status={result.status}
+            data-ready={result.isReady}
+            data-loading={result.isLoading}
+            data-idle={result.isIdle}
+            data-error={result.isError}
+            data-persisted={result.persistedStatus}
+          >
+            {result.data.map((row) => (
+              <span key={row.id}>{row.name}</span>
+            ))}
+          </output>
+        )
+      }
+      const app = (client: DbClient) => (
+        <DbProvider client={client}>
+          <Consumer />
+        </DbProvider>
+      )
+      try {
+        if (history.sourceState !== `idle`) {
+          const warming = server.preloadLiveQuery({
+            query: new Query()
+              .from({ person: descriptor })
+              .select(({ person }) => ({ id: person.id })),
+          })
+          if (history.sourceState === `ready`) await warming
+          else void warming.catch(() => {})
+        }
+        if (history.preparation === `source`) server.collection(descriptor)
+        if (
+          history.preparation === `query` ||
+          history.preparation === `pending-query`
+        ) {
+          const preload = server.preloadLiveQuery({
+            query: hook === `ordinary` ? query : query.limit(2).offset(0),
+          })
+          if (history.preparation === `query`) await preload
+          else void preload.catch(() => {})
+        }
+        let html: string | undefined
+        let failure: unknown
+        try {
+          html = renderToString(app(server))
+        } catch (error) {
+          failure = error
+        }
+        if (expected.rejects) {
+          expect(
+            failure,
+            `SSR must reject untransported rows or readiness`,
+          ).toBeInstanceOf(Error)
+          expect(String(failure)).toMatch(/SSR.*(?:preload|hydrat)/i)
+          // The same warm source is ordinary valid browser usage.
+          const mounted = renderHook(useResult, {
+            wrapper: ({ children }: { children: ReactNode }) => (
+              <DbProvider client={server}>{children}</DbProvider>
+            ),
+          })
+          unmount = mounted.unmount
+          expect(
+            mounted.result.current.data.map((row) => ({
+              id: row.id,
+              name: row.name,
+            })),
+          ).toEqual(
+            hook === `ordinary` ? history.rows : history.rows.slice(0, 1),
+          )
+          reach.reach(
+            history.rows.length ? `unbacked-rows` : `unbacked-ready-empty`,
+          )
+        } else {
+          expect(failure, `prepared and cold SSR remain legal`).toBeUndefined()
+          browser.hydrate(server.dehydrate())
+          const initialBrowserHtml = renderToString(app(browser))
+          expect(
+            initialBrowserHtml,
+            `initial rows and every rendered status flag match`,
+          ).toBe(html)
+          host.innerHTML = html!
+          expect(
+            host.querySelector(`output`)?.getAttribute(`data-status`),
+          ).toBe(expected.status)
+          expect(
+            [...host.querySelectorAll(`span`)].map((span) => span.textContent),
+          ).toEqual(
+            (hook === `ordinary`
+              ? expected.rows
+              : expected.rows.slice(0, 1)
+            ).map((row) => row.name),
+          )
+          expect(starts.browser, `hydration read starts no source`).toBe(0)
+          document.body.append(host)
+          await act(async () => {
+            root = hydrateRoot(host, app(browser), {
+              onRecoverableError: (error) => recoveries.push(error),
+            })
+            await Promise.resolve()
+          })
+          expect(
+            recoveries,
+            `React receives the same snapshot without recovery`,
+          ).toEqual([])
+          expect(
+            starts.browser,
+            `committed browser demand starts the source`,
+          ).toBe(1)
+          expect(
+            host.querySelector(`output`)?.getAttribute(`data-status`),
+          ).toBe(`ready`)
+          expect(
+            [...host.querySelectorAll(`span`)].map((span) => span.textContent),
+          ).toEqual(
+            (hook === `ordinary` ? history.rows : history.rows.slice(0, 1)).map(
+              (row) => `browser ${row.id}`,
+            ),
+          )
+          if (history.preparation === `query`) reach.reach(`query-result`)
+          else if (
+            history.preparation === `source` &&
+            history.sourceState !== `idle`
+          )
+            reach.reach(
+              history.sourceState === `loading`
+                ? `normalized-partial`
+                : `normalized-ready`,
+            )
+          else reach.reach(`cold-loading`)
+        }
+        if (history.preparation === `pending-query`)
+          reach.reach(`pending-query`)
+      } finally {
+        unmount?.()
+        act(() => root?.unmount())
+        host.remove()
+        await browser.cleanup()
+        await server.cleanup()
+      }
+    }
+    for (const history of ssrSnapshotExamples) {
+      it(`replays ${hook} SSR ${history.preparation}/${history.sourceState}/${history.rows.length}`, async () => {
+        await checkHistory(history, makeReach())
+      })
+    }
+    for (const campaign of [`fixed`, `random`] as const) {
+      it(`${hook} admits reproducible SSR snapshots (${campaign})`, async () => {
+        const reach = makeReach()
+        await fc.assert(
+          fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
+            checkHistory(history, reach),
+          ),
+          {
+            ...(campaign === `fixed`
+              ? { numRuns: oracleRuns(120), seed: 2229 }
+              : oraclePropertyOptions(120, properties[hook])),
+            examples: ssrSnapshotExamples.map((history) => [history]),
+          },
+        )
+        reach.assertReached()
+        console.info(
+          `ssr-admission ${hook} ${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      })
+    }
+  }
+})
+
+// Suspense discovery is explicit data demand in streaming mode. A warm source
+// must still register this query, rather than bypassing transport because its
+// live-query Collection happens to be ready before the wrapper reads it.
+describe(`SSR Suspense discovery`, () => {
+  for (const warm of [false, true]) {
+    it(`streams a render-discovered result with warm=${warm}`, async () => {
+      const descriptor = collectionOptions(`ssr-suspense-discovery`, () => ({
+        id: `ssr-suspense-discovery`,
+        getKey: (row: { id: string; name: string }) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, name: `server 1` } })
+            commit()
+            markReady()
+          },
+        },
+      }))
+      const client = new DbClient()
+      client._setSsrStreamingEnabled(true)
+      const query = new Query()
+        .from({ person: descriptor })
+        .select(({ person }) => ({ name: person.name }))
+      function Consumer() {
+        const result = useLiveSuspenseQuery({ query })
+        return <span>{result.data[0]?.name}</span>
+      }
+      try {
+        if (warm)
+          await client.preloadLiveQuery({
+            query: new Query()
+              .from({ person: descriptor })
+              .select(({ person }) => ({ id: person.id })),
+          })
+        const errors: Array<unknown> = []
+        const html = await new Promise<string>((resolve, reject) => {
+          let text = ``
+          const sink = new Writable({
+            write(chunk, _encoding, done) {
+              text += chunk.toString()
+              done()
+            },
+          })
+          sink.on(`finish`, () => resolve(text))
+          sink.on(`error`, reject)
+          const stream = renderToPipeableStream(
+            <DbProvider client={client}>
+              <Suspense fallback={<span>loading</span>}>
+                <Consumer />
+              </Suspense>
+            </DbProvider>,
+            {
+              onAllReady() {
+                stream.pipe(sink)
+              },
+              onError(error) {
+                errors.push(error)
+              },
+            },
+          )
+        })
+        expect(errors).toEqual([])
+        expect(html).toContain(`<span>server 1</span>`)
+        const hash = getLiveQueryHash({ query })
+        const result = client
+          .dehydrate({ shouldDehydrateLiveQuery: () => true })
+          .liveQueries?.find((entry) => entry.queryHash === hash)
+        expect(
+          result,
+          `render-discovered warm and cold results enter transport`,
+        ).toBeDefined()
+        const snapshot = result?.snapshot ?? (await result?.promise)
+        expect(snapshot?.rows.map((row) => row.value)).toEqual([
+          expect.objectContaining({ name: `server 1` }),
+        ])
+      } finally {
+        await client.cleanup()
+      }
+    })
   }
 })

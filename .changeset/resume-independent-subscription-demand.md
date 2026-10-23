@@ -1,5 +1,7 @@
 ---
 '@tanstack/db': patch
+'@tanstack/react-db': patch
+'@tanstack/svelte-db': patch
 ---
 
 Resume Collection sync when a new subscriber follows a suspended render, while preserving cleanup during startup.
@@ -11,3 +13,5 @@ Release partial observer and pooled-query subscriptions when setup fails or clea
 Subscribers that survive cleanup during admission retain demand for an explicit restart. Cleanup in a first-demand callback does not start a replacement implicitly.
 
 Keep ordinary hook errors readable when deferred sync startup records an error. Explicit preloads still report source startup failures. Release channels acquired before synchronous cleanup registration or observer attachment fails.
+
+Reject SSR reads of incidental server-only rows or readiness with an actionable preparation error. Preserve cold loading and normalized source hydration, consume prepared infinite-query snapshots, and register warm Suspense results for streaming.

@@ -452,7 +452,10 @@ export function useLiveQuery(
     queryHash: currentResolved.queryHash,
     onPreload: currentResolved.resumeDeferredCollections,
   })
-  const initialSnapshot = currentObserver.getServerSnapshot()
+  const initialSnapshot =
+    typeof window === `undefined`
+      ? currentObserver.getServerSnapshot()
+      : currentObserver.getSnapshot()
 
   // Reactive state that gets updated granularly through change events
   const state = new SvelteMap<string | number, any>(initialSnapshot.state ?? [])

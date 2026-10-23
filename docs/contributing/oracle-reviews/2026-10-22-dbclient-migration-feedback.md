@@ -1718,3 +1718,277 @@ The React owner SHA-256 is
 Production remains pinned to the starting head. All 26 CI checks passed on that
 head; later-head CI must be assessed separately. F02's initial-snapshot decision
 still prevents a ready verdict. H04/H08 and F07 retain their evidence gaps.
+
+## SSR preparation admission — 2026-10-23
+
+This entry implements the maintainer's decision: fail on programming errors that
+expose incidental server-only rows or readiness. An ordinary cold/loading render
+remains legal. The SSR guide already permits normalized source rows and prepared
+query results. Normalized rows carry no query readiness. A completed query result
+can carry readiness. Runtime provider failures retain their existing error surface.
+This is a product decision, rather than authority inferred from production output.
+
+**Pre-edit gate.** Production was unchanged at `90a30827fd32c5444243206f136a89e738ee6099`
+while the shared SSR judgment and receiving drivers were added. The inventory named
+React ordinary and infinite reads, Svelte server reads, normal browser warm reads,
+normalized hydration, and cold/warm Suspense discovery. Named replays ran all seven
+preparation boundaries before either generated campaign could stop at its first
+mismatch. The React drivers use real `renderToString`, `hydrateRoot`, commit, and
+unmount. Svelte uses real server compilation and its native browser effect root.
+A new real `renderToPipeableStream` witness checks Suspense discovery.
+
+**RED.** In `packages/react-db`:
+
+```sh
+pnpm exec vitest run tests/descriptor-query-binding-oracle.test.tsx \
+  -t 'SSR snapshot admission|SSR Suspense discovery' --coverage.enabled=false \
+  --pool-options.threads.maxThreads=2 --pool-options.threads.minThreads=1
+```
+
+In `packages/svelte-db`:
+
+```sh
+pnpm exec vitest run tests/ssr-snapshot-admission-oracle.svelte.test.ts \
+  tests/hydration.svelte.test.ts --coverage.enabled=false \
+  --pool-options.threads.maxThreads=2 --pool-options.threads.minThreads=1
+```
+
+All three receiving paths accepted unsupported ready-empty snapshots and incidental
+rows. Pending query registration did not transport partial rows. Normalized ready
+sources differed at the first browser status observation. React infinite reads also
+ignored a completed query result. Cold/loading, ordinary completed query transport,
+normalized partial-loading rows, and Svelte browser initialization supplied passing
+neighbor controls. The first streaming control had a missing test import. Correcting
+that setup before production edits produced a passing cold discovery control and an
+assertion RED for the warm query's absent transport entry. The setup error receives
+no defect or calibration credit.
+
+**Repair.** The shared observer checks server reads against completed query results
+or explicit/hydrated normalized sources. Unsupported server reads throw the coded
+preparation error. Normalized source snapshots report loading on both hosts until
+browser acquisition proves readiness. A Collection record remembers hydration,
+including an empty chunk. It preserves the existing dehydration selection policy.
+The infinite controller consumes a matching result through the same observer and
+uses its own server snapshot. Streaming Suspense preloads before its server snapshot,
+including when a peer warmed the source. Svelte distinguishes server reads from
+ordinary browser initialization.
+
+**Model and grammar.** The pure judgment reads caller preparation, authored source
+state, and zero to three authored rows. It imports no production classifier. The
+source-state abstraction combines synchronous eager startup and readiness. Query
+preparation distinguishes completed and pending preload. Removing that distinction
+admits partial untransported data. Removing rows misses partial-loading data.
+Removing readiness misses ready-empty markup. Removing source preparation rejects
+valid normalized hydration. Idle plus nonempty rows, a completed preload with an
+unready source, and a pending preload over a synchronously ready source are outside
+this grammar. Named examples reconstruct F02 and every admission boundary. Campaign
+examples preserve boundary reach even when random sampling omits one. Fixed and
+random campaigns execute the same property and budget.
+
+**Self-review.** ORC-001/002: maintainer decision and SSR guide authorize the judgment,
+which stays independent. ORC-003/005/009: literate model and directly named receiving
+drivers keep the grammar, paths, observations, and canonical terms visible. ORC-004:
+the reconstruction, ablation, bounded range and invalid neighbors are stated above.
+ORC-008 does not apply to this stateless judgment. ORC-010: cleanup does not throw in
+the controlled grammar, including the calibrated production mutants. ORC-011:
+server/browser markup equality independently challenges the preparation judgment's
+claim that accepted state is reproducible. ORC-013: partial-loading rows and
+ready-empty status distinguish row-only and readiness-only checks. ORC-014: both
+React hooks and Svelte each receive their premise through their real host paths.
+ORC-006/007/012/015 results, counts, replays and artifact identities follow below.
+
+**Limits.** This closes F02 for the bounded preparation histories and named receiving
+cuts. It is not a proof of arbitrary providers or schedules. The coverage map keeps
+asynchronous providers, persistence readiness, pending-stream page-shape changes,
+mixed plain/Suspense streaming, and real Start/Electric execution with their owners.
+Custom filters that deliberately discard needed state and rendering local Collection
+identity are outside portable hydration. H04/H08 still need legal failing traces.
+F07 still needs the failing application type assignment and dependency versions.
+
+**GREEN and reach.** React passes 486 tests in 23 files. After the final reach
+classifier correction, its SSR owner passes all 20 selected tests again. Svelte
+passes all 146 tests in 10 files, including type checks, with no unhandled errors.
+Core observer, snapshot, controller, DbClient, hydration-authority, preload-identity,
+and production-error owners pass 274 tests in eight files. The unchanged replay
+protocol and manifest suite also passed in the preceding 311-test core run.
+The final scoped ESLint and Prettier checks pass. Generated error documentation
+matches its fixture. The private-member cache validates all 420 names. The consumer
+minified check passes 107 error names, index metadata, query rows and live updates.
+
+Every campaign executes 120 property samples at fixed seed 2229 or without a seed.
+The seven boundary examples are samples in each campaign. Counts below include
+those examples. `normalized-ready` now requires an actually ready source, rather
+than counting idle normalized sources. No observation expectation changed.
+
+| Receiving path / campaign | Cold/loading | Unbacked ready-empty | Unbacked rows | Query result | Normalized ready | Normalized partial | Pending query |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ordinary / fixed | 23 | 4 | 38 | 23 | 18 | 14 | 16 |
+| ordinary / random | 26 | 2 | 38 | 19 | 18 | 17 | 19 |
+| infinite / fixed | 23 | 4 | 38 | 23 | 18 | 14 | 16 |
+| infinite / random | 17 | 5 | 45 | 21 | 19 | 13 | 22 |
+| svelte / fixed | 23 | 4 | 38 | 23 | 18 | 14 | 16 |
+| svelte / random | 18 | 12 | 44 | 14 | 16 | 16 | 18 |
+
+**Calibration.** These are assertion failures at the stated public comparisons:
+
+| Hostile change | Distinguishing comparison |
+| --- | --- |
+| Check only nonempty rows | React ordinary, React infinite and Svelte all accept an unsupported ready-empty snapshot, failing the rejection assertion. |
+| Bypass admission | React accepts incidental rows/readiness and fails 10 admission assertions. |
+| Preserve live readiness for normalized SSR | Both React paths fail server/first-browser markup equality, six assertions. |
+| Omit the infinite controller's client binding | Infinite admission and prepared-result handoff fail seven assertions. |
+| Skip streaming Suspense preload | The warm real-stream result is absent from transport. The cold discovery control still passes. |
+| Apply the server getter to Svelte browser initialization | Both warm-browser controls fail the explicit no-initialization-error assertion. Normalized controls still pass. |
+
+An initial constant-false bypass failed TypeScript compilation. It receives no
+calibration credit. The corrected bypass retained type-valid control flow and
+failed the intended assertions. The first browser-guard mutant threw directly
+at the intended public call. A later run captures that call and fails the explicit
+no-error comparison instead. All temporary source mutations were restored, db was
+rebuilt, and the same receiving checks passed.
+
+Guarded replays each execute one selected receiving campaign and pass on restored
+production. React ordinary uses seed `451253809`, path `1`. React infinite uses
+seed `-348951204`, path `1`. Svelte uses seed `2229`, path `1`, captured by its own
+ready-empty hostile run. The old Svelte path `0:0` no longer selects a sample after
+adding campaign examples. The replay guard correctly rejected its zero-execution
+run. Only the replacement replay receives evidence credit.
+
+From the relevant framework package, the guarded command is:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=<property> TANSTACK_DB_ORACLE_SEED=<seed> \
+TANSTACK_DB_ORACLE_PATH=<path> node --import tsx ../db/tests/oracle-replay.ts \
+  tests/<owner> --coverage.enabled=false \
+  --pool-options.threads.maxThreads=2 --pool-options.threads.minThreads=1
+```
+
+Property IDs are `react.ssr-ordinary`, `react.ssr-infinite`, and
+`svelte.ssr-snapshot`. The React owner is `descriptor-query-binding-oracle.test.tsx`.
+The Svelte owner is `ssr-snapshot-admission-oracle.svelte.test.ts`.
+
+**Production weight.** `pnpm size:compare --packages db,react-db --files` compares
+the full branch with merged main `65d9ada50`. db grows 372 gzip / 345 brotli bytes.
+React grows 103 gzip / 106 brotli bytes. The typical app grows 294 gzip / 346 brotli
+bytes. Other app scenarios grow 272–297 gzip bytes. These totals include the earlier
+lifecycle repair, rather than measuring only this follow-up.
+
+The repair reuses one observer snapshot builder and one window pagination builder.
+It combines the persisted-readiness condition instead of adding another publication
+path. Private-member minification includes both new private names. Narrower
+alternatives were tried as the row-only, source-readiness, and omitted-window-binding
+mutants above. Their intended assertion failures rule out those byte reductions.
+A separate hydration fact preserves existing dehydration selection and represents
+empty hydration chunks. Source rows and query readiness require distinct evidence.
+The remaining shipped growth pays for admission, that provenance, the matching
+infinite observer, and host selection. It adds no retry or recovery lifecycle.
+Tests, oracle metadata and contract documentation grow separately from production.
+
+This entry is tied to the following artifact hashes and the commit that contains it.
+The starting production head is recorded above. Hashes cover final oracle artifacts:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `packages/db/tests/ssr-snapshot-admission-oracle.ts` | `6da03f17b4b8244f0c7b60825f33b42188faa457582eecfadc5a71d3c83d85d3` |
+| `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx` | `ac2b11d9894fbf4df35432f9f4a62ffaeb5081021e55e5f873846477b9411ca3` |
+| `packages/svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts` | `9a8fc2ad26688559887d6b37cd17bf43bfb8dcbfb887abe6e13981900f120789` |
+| `packages/svelte-db/tests/hydration.svelte.test.ts` | `6ef9c10936885165d9ace242e9caf1846b83fa1c439fd124288ba53b6f634379` |
+
+
+### Final SSR cache check and publication evidence
+
+The preceding SSR results and size figures describe the first candidate. This
+entry records the final cache design and supersedes those size figures. The
+maintainer's programming-error policy and the bounded SSR judgment are unchanged.
+
+**Adjacent cache law.** With no write between reads, an ordinary observer getter
+retains its snapshot identity. Without a DbClient, its server getter exposes that
+same snapshot. A completed client query also shares its ready snapshot. Reading
+the server view cannot invalidate the ordinary view's cache. This follows from the
+existing retained-snapshot contract, independently of SSR admission.
+
+The markup comparisons did not observe cross-getter object identity. Before the
+cache fix, the retained-snapshot owner added those observations to its existing
+sorted-map histories. Its four ordered/single-result × attached/detached paths
+all failed on the global server-mode cache. The focused replay also failed. A
+narrower client-only mode passed the no-client checks, but all four prepared-client
+paths and the focused replay still failed their identity comparisons. Each RED
+run had five assertion failures at the promised getter checkpoint. A malformed
+preload fixture failed setup before that corrected RED and receives no credit.
+
+The final observer leaves `getSnapshot()` unchanged. It caches only provisional
+server copies in a separate WeakMap keyed by the ordinary snapshot. Completed
+query results and no-client reads use the original object. Weak keys allow obsolete
+revisions to retire. This adds no retry, rollback, or recovery lifecycle. These
+failed candidates supply hostile controls for cache invalidation. The previously
+recorded admission mutants still challenge the unchanged admission judgment.
+
+**Cache oracle conformance.** ORC-001/002: the retained-snapshot promise authorizes
+identity at an unchanged revision, independently of production cache fields.
+ORC-003/005/009: the literate owner explains its sorted-map model, history, real
+observer/client preload path and getter checkpoint. ORC-004: the existing one-to-24
+command grammar keeps keys a..d, versions 0..9, and delayed read orders. Both query
+shapes and both attachment modes reconstruct the reported failures. Removing
+client preparation misses the narrower failed candidate. No-write capture is the
+marginal identity case. Deletes of absent keys do not mutate the model or source.
+ORC-008: the reference model retains its existing state. ORC-010: the recorded
+controlled runs had no cleanup failure that replaced an assertion. ORC-011: no
+separate shared semantic-fault hypothesis applies to object identity. ORC-013:
+no-client and prepared-client observations distinguish the two failed cache modes.
+ORC-014: these are core getter claims, with no host handoff inferred. ORC-006/007/015:
+each of eight normal campaigns reaches both `server-getter` and `client-getter`
+40 times. Fixed seed 2043 and an unsupplied seed use the same property and budget.
+The existing wrong-lazy-snapshot calibration still fails its row comparison.
+
+The guarded cache replay uses property `live-query-observer.retained-snapshot`,
+seed `2043`, and captured shrink path `0:0:0`. It executes all four random/replay
+variants and passes. Separating the campaign test cases lets the manifest select
+those variants without running fixed campaigns. A preliminary guarded command
+rejected the missing owner mapping, which was then registered. That rejected
+command is not successful replay evidence. The final run reports four nonzero
+executions, four passing tests, and six skipped unrelated/fixed tests.
+
+**Final receiving reach.** Each SSR path again runs 120 samples per campaign,
+including the seven boundary examples. The fixed campaigns retain their counts
+above. Final random counts, in the same column order, are:
+
+| Receiving path | Cold/loading | Unbacked ready-empty | Unbacked rows | Query result | Normalized ready | Normalized partial | Pending query |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| React ordinary | 18 | 4 | 42 | 21 | 17 | 18 | 16 |
+| React infinite | 18 | 8 | 34 | 24 | 21 | 15 | 15 |
+| Svelte | 13 | 4 | 48 | 13 | 20 | 22 | 16 |
+
+React passes 486 tests in 23 files and Svelte passes 146 in 10 files on the final
+db build. Both include type checks. The core run passes 311 tests in nine files,
+including 37 guarded-replay protocol/manifest tests. After splitting the cache
+campaign cases, the eight core behavioral owners pass 278 tests. This is four
+more test cases, with the same eight campaigns and history budget. Svelte builds
+successfully. The minified consumer passes 107 error names, index metadata, rows
+and live updates. The production-error bundle check verifies 248 literals, with
+20 shared literals, in ESM and CommonJS development and production builds.
+
+**Final production weight.** Against merged main `65d9ada50`, db grows 378 gzip /
+460 brotli bytes. React grows 103 gzip / 106 brotli bytes. The typical app grows
+322 gzip / 326 brotli bytes. Other scenarios grow 298–322 gzip bytes. These are
+full-branch figures. The row-only, readiness-preserving and omitted-window-binding
+alternatives failed the earlier calibrated comparisons. The global and client-only
+cache alternatives above failed snapshot identity. The separate weak cache retains
+one ordinary builder while preserving both public getter contracts. Remaining
+bytes pay for preparation provenance, provisional snapshots and host selection.
+Tests, oracle metadata and contract documentation are separate from shipped code.
+This SSR follow-up adds 124 production-source lines and removes six. Its test
+source and fixtures add 806 lines and remove 28. Those counts exclude contract
+documentation and build metadata.
+
+The bounded limits and H04/H08/F07 evidence gaps above still apply. The coverage
+map names the cache owner and its limits alongside the SSR receiving owners.
+The following artifact hashes and the containing commit identify the final evidence:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `packages/db/tests/ssr-snapshot-admission-oracle.ts` | `6da03f17b4b8244f0c7b60825f33b42188faa457582eecfadc5a71d3c83d85d3` |
+| `packages/db/tests/live-query-observer-snapshot-oracle.property.test.ts` | `a8674794624052ba2b76aa10b47af19a0e773cc029cf263c9e4c504fe673484a` |
+| `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx` | `ac2b11d9894fbf4df35432f9f4a62ffaeb5081021e55e5f873846477b9411ca3` |
+| `packages/svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts` | `9a8fc2ad26688559887d6b37cd17bf43bfb8dcbfb887abe6e13981900f120789` |
+| `packages/svelte-db/tests/hydration.svelte.test.ts` | `6ef9c10936885165d9ace242e9caf1846b83fa1c439fd124288ba53b6f634379` |
+| `packages/db/tests/oracle-replay-manifest.ts` | `3fd499676ba595cba4220e1d728760df8482ef671bd6e889592b0ed209087e82` |
