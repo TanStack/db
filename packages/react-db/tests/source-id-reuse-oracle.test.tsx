@@ -110,6 +110,12 @@ function checkRerender(
  * The rejected render may defer the shared Collection's sync start, and it
  * must release that deferral: the source stays unstarted until a direct
  * reader asks, and that reader then starts it exactly once and reads its row.
+ *
+ * Declared reach: every enumerated history must enter the state the law is
+ * about, a rejected render that materialized the shared descriptor. Each cell
+ * asserts that the descriptor factory ran once before the reader, so a
+ * history that rejects before binding the shared source fails instead of
+ * passing vacuously.
  */
 type ReleaseStep = { current: ReturnType<typeof source>; reject: boolean }
 
@@ -229,22 +235,29 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
           const client = new DbClient()
           const id = `release-shared-${sequence++}`
           let syncStarts = 0
-          const shared = collectionOptions(id, () => ({
+          let materialized = 0
+          const shared = collectionOptions(
             id,
-            getKey: (row: Row) => row.id,
-            sync: {
-              sync: ({ begin, write, commit, markReady }) => {
-                syncStarts++
-                begin()
-                write({
-                  type: `insert`,
-                  value: { id: `one`, value: `shared`, rank: 1 },
-                })
-                commit()
-                markReady()
-              },
-            },
-          }))
+            () => (
+              materialized++,
+              {
+                id,
+                getKey: (row: Row) => row.id,
+                sync: {
+                  sync: ({ begin, write, commit, markReady }) => {
+                    syncStarts++
+                    begin()
+                    write({
+                      type: `insert`,
+                      value: { id: `one`, value: `shared`, rank: 1 },
+                    })
+                    commit()
+                    markReady()
+                  },
+                },
+              }
+            ),
+          )
           const failing = collectionOptions(`${id}-failing`, () => {
             throw new Error(`descriptor factory failed`)
           })
@@ -280,6 +293,9 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
               </DbProvider>,
             )
             expect(root.getByText(`Rejected`)).toBeDefined()
+            // Declared reach: the rejected render materialized the shared
+            // descriptor, so it held a deferral the law must release.
+            expect(materialized).toBe(1)
             expect(syncStarts).toBe(0)
 
             const value = await read(client.collection(shared) as any)

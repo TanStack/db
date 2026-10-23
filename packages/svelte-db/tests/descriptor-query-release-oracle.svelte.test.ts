@@ -28,6 +28,10 @@
  * error does not rerun that same Svelte effect when its query changes;
  * recovery in place is not promised. Asynchronous source failures remain
  * outside this model.
+ *
+ * Declared reach: each enumerated release history asserts that the rejected
+ * query ran the shared descriptor's factory once before the reader. A history
+ * that rejects before it binds the shared source therefore fails.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -283,21 +287,31 @@ describe(`Svelte descriptor source release`, () => {
         it(`after ${causeName}, a ${policy} source follows its policy and ${readerName} starts it`, async () => {
           const id = `svelte-release-${sequence++}`
           let starts = 0
-          const shared = collectionOptions(id, () => ({
+          let materialized = 0
+          const shared = collectionOptions(
             id,
-            getKey: (row: Row) => row.id,
-            startSync: policy === `eager`,
-            sync: {
-              sync: ({ markReady }) => {
-                starts++
-                markReady()
-              },
-            },
-          }))
+            () => (
+              materialized++,
+              {
+                id,
+                getKey: (row: Row) => row.id,
+                startSync: policy === `eager`,
+                sync: {
+                  sync: ({ markReady }) => {
+                    starts++
+                    markReady()
+                  },
+                },
+              }
+            ),
+          )
           const client = new DbClient()
           let dispose: (() => void) | undefined
           try {
             dispose = makeCause(shared, client).run()
+            // Declared reach: the rejected query materialized the shared
+            // descriptor, so it held a deferral the law must release.
+            expect(materialized).toBe(1)
             expect(starts).toBe(policy === `eager` ? 1 : 0)
             const direct = client.collection(shared)
             await read(direct)
