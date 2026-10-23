@@ -53,6 +53,7 @@ import {
   getRuntimeReferenceIdentity,
 } from '../../src/query/runtime-reference-identity.js'
 import { createValueIdentity } from '../../src/query/equality-value-identity.js'
+import { oracleRuns } from '../oracle-config.js'
 import type { BasicExpression, OrderBy, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -1539,7 +1540,7 @@ describe(`stable QueryIR identity smoke test`, () => {
     `matches output denotation through composed contexts with a fixed seed`,
     (program) => assertOutputProgram(observeOutputProgram(program)),
   )
-  fcTest.prop([outputProgramArbitrary], { numRuns: 200 })(
+  fcTest.prop([outputProgramArbitrary], { numRuns: oracleRuns(200) })(
     `matches output denotation through random composed contexts`,
     (program) => assertOutputProgram(observeOutputProgram(program)),
   )

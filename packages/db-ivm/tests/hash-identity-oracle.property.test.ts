@@ -8,6 +8,7 @@ import {
   hash,
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 import { captureHashSession } from './hash-session'
 
 /**
@@ -816,7 +817,7 @@ function runOptions(seed: number | undefined) {
   )
     throw new Error(`TANSTACK_DB_IVM_HASH_IDENTITY_SEED must be an integer`)
   return {
-    numRuns: 300,
+    numRuns: oracleRuns(300),
     ...(seed === undefined ? {} : { seed }),
     ...(replayPath === undefined ? {} : { path: replayPath }),
   }

@@ -33,7 +33,7 @@ import {
 
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), `..`)
 const repositoryDirectory = resolve(packageDirectory, `../..`)
-const fixture = `tests/oracle-replay.fixture.test.ts`
+const fixture = `tests/replay-guard-calibration.fixture.test.ts`
 
 function runReplay(
   args: Array<string> = [fixture],
@@ -433,6 +433,10 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(
           family?.[1] ?? `includes.matrix.flat-materialization`,
         )
+      } else if (/^(utils|comparison)\.\d+$/.test(entry.property)) {
+        // These oracles number their properties in file order.
+        const [family] = entry.property.split(`.`)
+        expect(source).toContain(`\`${family}.\${id}\``)
       } else if (entry.property.startsWith(`pagination.matrix.`)) {
         const [, , familyCell] = entry.property.split(`.`)
         const [family, cell] = familyCell!.split(`-`)

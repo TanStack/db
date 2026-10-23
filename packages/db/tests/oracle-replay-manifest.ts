@@ -18,7 +18,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `sorted-map`,
     `key ascending descending`,
   ],
-  [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
+  [
+    `db/tests/replay-guard-calibration.fixture.test.ts`,
+    `oracle-replay`,
+    `calibration`,
+  ],
   [
     `db-ivm/tests/structural-identity-oracle.property.test.ts`,
     `structural-identity`,
@@ -209,6 +213,54 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `persistence`,
     `retained-demand`,
   ],
+  // Owners of the replays that moved to the shared variables. The SQLite
+  // core-adapter contract's binding-capacity and baseline-lineage replays run
+  // through a host file that does not name them, so they have no named owner.
+  [
+    `browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts`,
+    `opfs-worker`,
+    `diagnostics`,
+  ],
+  [
+    `db/tests/indexed-db/cross-tab-history-oracle.test.ts`,
+    `indexeddb`,
+    `cross-tab-history`,
+  ],
+  [
+    `electric-db-collection/tests/electric-oracle.property.test.ts`,
+    `electric`,
+    `adapter-failure-policy design-convergence durable-prefix initial-tagged-move-outs invalid-resume-partition metadata-merge-complete-state process-grammar publication-before-persistence queued-presence-order resume-metadata-merge retry-decision subset-request-row-validity synthetic-batch-partition valid-batch-partition`,
+  ],
+  [
+    `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
+    `pg-serializer`,
+    `array-determinism bigint-round-trip bigint-text boolean-array-contents boolean-round-trip boolean-tokens date-iso date-round-trip double-round-trip integer-array-contents integer-array-format integer-round-trip integer-text mixed-array-contents nullish-array-contents nullish-empty scalar-determinism string-array-contents string-escaping string-idempotent string-passthrough`,
+  ],
+  [
+    `db-ivm/tests/index-refinement-oracle.property.test.ts`,
+    `ivm`,
+    `index-refinement`,
+  ],
+  [
+    `offline-transactions/tests/KeyScheduler-oracle.property.test.ts`,
+    `offline`,
+    `key-scheduler-fifo-ledger`,
+  ],
+  [
+    `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
+    `offline`,
+    `interruption-settlement`,
+  ],
+  [
+    `react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`,
+    `op-sqlite`,
+    `columnar-sql-aliases result-carrier-equivalence write-marker-aliases`,
+  ],
+  [
+    `node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
+    `sqlite-persistence`,
+    `expression-index bigint-roundtrip bigint-rejection`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -244,6 +296,12 @@ for (const property of registeredOracleProperties) {
       property,
       `packages/db/tests/query/includes-oracle.property.test.ts`,
     )
+  }
+  if (property.startsWith(`utils.`)) {
+    owners.set(property, `packages/db/tests/utils-oracle.property.test.ts`)
+  }
+  if (property.startsWith(`comparison.`)) {
+    owners.set(property, `packages/db/tests/comparison-oracle.property.test.ts`)
   }
   if (property.startsWith(`pagination.matrix.`)) {
     owners.set(

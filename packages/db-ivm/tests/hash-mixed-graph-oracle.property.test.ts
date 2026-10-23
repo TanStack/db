@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 
 /**
  * Mixed-carrier graphs extend the established structural-hash graph law across
@@ -271,7 +272,7 @@ describe(`mixed-carrier structural graph laws`, () => {
       const hashValue = replayFault === `accept-cycles` ? () => 0 : hash
       const property = mixedGraphProperty(hashValue, () => checked++)
       fc.assert(property, {
-        numRuns: 150,
+        numRuns: oracleRuns(150),
         ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
         ...(campaign.path === undefined ? {} : { path: campaign.path }),
       })

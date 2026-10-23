@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 
 /**
  * A failed structural traversal must publish no reusable hash state.
@@ -136,7 +137,7 @@ describe(`getter failure does not publish partial structural hashes`, () => {
           expectRetryHistory(history),
         ),
         {
-          numRuns: 100,
+          numRuns: oracleRuns(100),
           ...(seed === undefined ? {} : { seed }),
           ...(path === undefined ? {} : { path }),
         },

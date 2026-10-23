@@ -23,6 +23,7 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../../src'
+import { oracleRuns } from '../oracle-config'
 import {
   Channel,
   assertRows,
@@ -322,11 +323,11 @@ describe('settled histories', () => {
       'matches authored data through ' + mode + ' histories',
       async () => {
         console.info('indexeddb.persistence campaign', mode, {
-          numRuns: 30,
+          numRuns: oracleRuns(30),
           ...parameters,
         })
         await fc.assert(fc.asyncProperty(history, runHistory), {
-          numRuns: 30,
+          numRuns: oracleRuns(30),
           verbose: true,
           ...parameters,
           asyncReporter: async (details) => {

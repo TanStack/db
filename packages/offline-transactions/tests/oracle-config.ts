@@ -1,7 +1,7 @@
 type OracleEnvironment = Record<string, string | undefined>
 
 type OfflineOracleConfigOptions = {
-  prefix: `OFFLINE_ORACLE` | `TANSTACK_DB_OFFLINE_ORACLE`
+  prefix: `OFFLINE_ORACLE`
   defaultRuns: number
   defaultSeed?: number
   environment?: OracleEnvironment

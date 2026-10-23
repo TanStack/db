@@ -92,8 +92,9 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import {
   mockSyncCollectionOptions,
@@ -104,7 +105,6 @@ import type { BasicExpression } from '../../src/query/ir.js'
 import type { ChangeMessage } from '../../src/types.js'
 
 const property = `where-predicate.publication`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 // A string whose content equals an internal normalized-key prefix must still
 // compare as an ordinary string.
@@ -863,7 +863,10 @@ function describePredicate(predicate: Predicate): string {
 // ---------------------------------------------------------------------------
 
 describe(`WHERE predicate publication oracle`, () => {
-  if (requestedReplayProperty === undefined) {
+  // The pinned histories and the fixed campaign stand aside during any path
+  // replay. The random campaign below is the one that a replay of this
+  // property selects.
+  if (!oracleReplayRequested()) {
     it(`pinned snapshot histories distinguish Kleene logic from two-valued logic`, () => {
       // A checker that folds UNKNOWN into FALSE before NOT must disagree with
       // the model on each pinned snapshot, or the history does not calibrate.
@@ -1116,17 +1119,10 @@ describe(`WHERE predicate publication oracle`, () => {
       seed: 44_500_301,
       numRuns: oracleRuns(80),
     })(`publishes exactly the TRUE rows (fixed)`, runHistory)
-
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(80, property))(
-      `publishes exactly the TRUE rows (random)`,
-      runHistory,
-    )
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(80, property))(
-      `publishes exactly the TRUE rows (replay)`,
-      runHistory,
-    )
-  } else {
-    it.skip(`runs only when its replay property is selected`, () => {})
   }
+
+  oracleReplayTest(fcTest, property).prop(
+    [historyArbitrary],
+    oraclePropertyOptions(80, property),
+  )(`publishes exactly the TRUE rows (random)`, runHistory)
 })
