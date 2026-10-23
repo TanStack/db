@@ -19,6 +19,9 @@
     "format": "prettier --experimental-cli --ignore-unknown '**/*' --write",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint:check": "pnpm --filter \"./packages/**\" lint --fix=false",
+    "lint:changed": "node scripts/agent-lint-feedback.mjs",
+    "lint:oracles": "node scripts/agent-lint-feedback.mjs --all",
+    "test:lint-rules": "node --test \"scripts/eslint-plugin-oracle/*.test.js\"",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test && pnpm --filter @tanstack/db test:indexed-db:package",
@@ -68,10 +71,5 @@
     "vite": "^7.3.0",
     "vitest": "^3.2.4",
     "zod": "^3.25.76"
-  },
-  "lint-staged": {
-    "*.{ts,tsx}": [
-      "eslint --fix"
-    ]
   }
 }

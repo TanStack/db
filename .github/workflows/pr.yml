@@ -28,6 +28,10 @@ jobs:
         run: pnpm run lint:check
       - name: Typecheck doc and skill examples
         run: pnpm run test:doc-snippets
+      - name: Check oracle lint without inline directives
+        run: pnpm run lint:oracles
+      - name: Test oracle lint rules
+        run: pnpm run test:lint-rules
   minified-db:
     name: Minified DB public API
     runs-on: ubuntu-latest
