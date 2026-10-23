@@ -152,10 +152,12 @@ export class CollectionConfigBuilder<
           all.indexOf(collection) === index &&
           findProblems(collection.health).some((node) => node.error !== null),
       )
+    // Only a query that was not running starts: a cleanup that ends it during
+    // the reload cancels the reload, as the app ended it.
+    const ended = query?.status === `idle` || query?.status === `cleaned-up`
     await Promise.all(failed.map((collection) => collection.reload()))
     // Its preload is what lets a live query start its sources.
-    if (query?.status === `idle` || query?.status === `cleaned-up`)
-      return query.preload()
+    if (ended) return query.preload()
     // The query reloads itself after its sources when its own node shows an
     // error (a failed first load or a request error); a reload of it already
     // in flight settles with that run.

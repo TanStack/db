@@ -1267,6 +1267,8 @@ export interface SubscribeChangesOptions<
     readonly succeed: () => void
     /** The replay could not load every active demand again. */
     readonly fail?: (error: Error) => void
+    /** The live query still holds logical demand. */
+    readonly holdsDemand?: () => boolean
   }
 }
 

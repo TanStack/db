@@ -63,6 +63,15 @@
  * failed first load before the gate, ends it. It builds the expected tree
  * and rows from those facts. It does not read production state.
  *
+ * The model has three layers, and every grammar in this file uses the same
+ * first two. The source layer (`applySourceStep`) is one Collection, as
+ * above. The demand layer (see "Demand on an on-demand Collection") is the
+ * data a live query asked an on-demand Collection to load, with its loads,
+ * replays, and request errors. The projections derive what each grammar
+ * observes: the six shapes of the main grammar over two eager Collections,
+ * the window of an ordered query over an on-demand Collection, and a lazy
+ * join over an eager parent and an on-demand child.
+ *
  * ## The history grammar
  *
  * Steps act on Collection `A` or `B`: `ready` writes row 1 during a first
@@ -140,11 +149,11 @@
  * The main grammar's Collections are eager, so a live query cannot become
  * ready while a Collection is still loading; a focused lane enumerates an
  * on-demand Collection that fails its first load after the query is ready.
- * The demand grammars settle all pending loads at once (the overlapping-load
- * lane owns their order). The lazy demand grammar does not yet check the
- * request error while a source reload's replay is in flight or after one
- * failed: a demand change during the replay can clear the error before its
- * key loads again, which stays open (the maintainer deferred a fix). Per-row child Collections are not
+ * The window grammar settles all pending loads at once, and the lazy grammar
+ * settles all, the oldest, or the newest (the overlapping-load lane owns
+ * other orders). The model does not see a demand parked behind a child whose
+ * first load failed: production makes no request for it, and the laws do not
+ * say whether it decides its keys (open in the coverage map). Per-row child Collections are not
  * in the tree; an include's node shows its source. Pooled histories do not
  * restart or clean up: a pooled view ends for good when its Collection is
  * cleaned up. The ordering check reads the observed query only, not its
@@ -405,6 +414,15 @@ function applyCleanup(
     return
   }
   if (source.cleaning || source.gate === `cleaned-up`) return
+  // A Collection crashed after its cleanup has no sync run since: there is
+  // no adapter cleanup to wait for, so the cleanup settles at once and ends
+  // the crash.
+  if (source.retired) {
+    source.gate = `cleaned-up`
+    source.cause = null
+    deriveQueries(shape, model)
+    return
+  }
   Object.assign(source, {
     cleaning: true,
     retired: true,
@@ -416,9 +434,19 @@ function applyCleanup(
     open: null,
     armed: false,
   })
-  if (!model.queryDetached) model.queryEnded = true
-  model.selfReloads = []
+  // A cascade that ends a query cancels its pending reload: the app ended
+  // it. A query that had already ended keeps its pending start, and a query
+  // the cascade does not reach keeps its reload.
+  if (!model.queryDetached && !model.queryEnded) {
+    model.queryEnded = true
+    model.selfReloads = model.selfReloads.filter(
+      (pending) => pending.target === `inner`,
+    )
+  }
   if (name === `A`) {
+    model.selfReloads = model.selfReloads.filter(
+      (pending) => pending.target !== `inner`,
+    )
     model.innerEnded = true
     if (model.effect.live) model.effect.live = false
   }
@@ -435,7 +463,7 @@ function expectedBaseline(source: SourceModel): Rows {
   return new Map([...source.rows, ...(source.open?.writes ?? [])])
 }
 
-function isReload(kind: Step[`kind`]): boolean {
+function isReload(kind: string): boolean {
   return (
     kind === `reload` ||
     kind === `reload-cleanup-fails` ||
@@ -462,11 +490,11 @@ function crashSource(source: SourceModel, cause: string): void {
 // The adapter writes an update for a key in its baseline, and an insert for
 // any other key.
 function writeRow(
-  model: Model,
+  counter: { serial: number },
   source: SourceModel,
-  step: Extract<Step, { kind: `write` }>,
+  step: Extract<SourceAction, { kind: `write` }>,
 ): void {
-  const tag = ++model.serial
+  const tag = ++counter.serial
   const previous = expectedBaseline(source).get(step.key)
   openTransaction(source).writes.set(
     step.key,
@@ -511,7 +539,16 @@ function commitOpen(source: SourceModel): `ok` | `throws` | `bad-transition` {
     completeReload(source)
     return `ok`
   }
-  if (!truncate || !marksReady || source.gate === `crashed`) return `ok`
+  // A truncate's markReady option makes a Collection that is not ready yet
+  // ready; on a ready one it does nothing, also after fail() (law-silent;
+  // recorded in the coverage map).
+  if (
+    !truncate ||
+    !marksReady ||
+    source.gate === `crashed` ||
+    source.gate === `ready`
+  )
+    return `ok`
   if (source.reloading) completeReload(source)
   else if (source.gate === `error`) return `bad-transition`
   else if (source.stopped) return `throws`
@@ -528,8 +565,8 @@ const shapeSources: Record<Shape, ReadonlyArray<SourceName>> = {
   'pooled-nested': [`A`],
 }
 
-function freshModel(): Model {
-  const source = (): SourceModel => ({
+function freshSource(): SourceModel {
+  return {
     gate: `loading`,
     cause: null,
     reloading: false,
@@ -542,9 +579,12 @@ function freshModel(): Model {
     rows: new Map(),
     open: null,
     armed: false,
-  })
+  }
+}
+
+function freshModel(): Model {
   return {
-    sources: { A: source(), B: source() },
+    sources: { A: freshSource(), B: freshSource() },
     query: { gate: `loading`, cause: null, reloading: false },
     inner: { gate: `loading`, cause: null, reloading: false },
     serial: 0,
@@ -742,7 +782,42 @@ function applyModel(
   }
   // A step on a source this shape does not read has no effect.
   if (!shapeSources[shape].includes(step.source)) return `ok`
-  const source = model.sources[step.source]
+  const { outcome, settles } = applySourceStep(
+    model,
+    model.sources[step.source],
+    step.source,
+    // The cleanup steps returned above; TypeScript does not narrow their
+    // two-valued kind.
+    step as Extract<Step, SourceAction>,
+  )
+  deriveQueries(shape, model)
+  if (settles) settleSelfReloads(shape, model)
+  deriveEffect(model)
+  return outcome
+}
+
+// A source action without the Collection it acts on. `mark-ready` is the
+// adapter's markReady() without a write; the on-demand grammars use it.
+type SourceAction =
+  | { kind: SourceStepKind | `mark-ready` }
+  | { kind: `write`; key: RowKey; untagged?: boolean }
+  | { kind: `commit` }
+  | { kind: `truncate`; markReady?: boolean }
+
+/**
+ * The source layer: one sync adapter call (or crash, or reload) on one
+ * Collection. Every grammar in this file drives its Collections through it,
+ * so a law about a Collection's status, node, reload, or rows is written
+ * once. `label` names the Collection in its problem messages. `settles` is
+ * false when the call changed only a retired or crashed run, so a query's
+ * pending reload has nothing new to settle.
+ */
+function applySourceStep(
+  counter: { serial: number },
+  source: SourceModel,
+  label: string,
+  step: SourceAction,
+): { outcome: `ok` | `throws` | `bad-transition`; settles: boolean } {
   let outcome: `ok` | `throws` | `bad-transition` = `ok`
   // After a crash, status calls do nothing and a reload rejects. After
   // fail(), adapter calls throw until a reload starts a new sync run.
@@ -756,9 +831,9 @@ function applyModel(
   if (source.retired) {
     const crashCause =
       step.kind === `crash`
-        ? `${step.source} crashed`
+        ? `${label} crashed`
         : step.kind === `retired-cleanup-rejects` && source.retiredCleanup
-          ? `${step.source} cleanup failed`
+          ? `${label} cleanup failed`
           : null
     if (step.kind === `retired-cleanup-rejects`) source.retiredCleanup = false
     if (crashCause) {
@@ -768,19 +843,18 @@ function applyModel(
         source.cause = crashCause
       }
     } else if (isReload(step.kind)) {
-      if (source.cleaning || source.gate === `crashed`) return `throws`
+      if (source.cleaning || source.gate === `crashed`)
+        return { outcome: `throws`, settles: false }
       restartSource(source)
     }
-    deriveQueries(shape, model)
-    deriveEffect(model)
-    return `ok`
+    return { outcome: `ok`, settles: false }
   }
   if (step.kind !== `crash` && source.gate === `crashed`) {
     // A crash ends the status calls. Data the run commits still applies:
     // closure keeps accepted sync obligations, such as the confirmation of
     // a write admitted before it (the IndexedDB retirement oracle owns that
     // law).
-    if (step.kind === `write`) writeRow(model, source, step)
+    if (step.kind === `write`) writeRow(counter, source, step)
     if (step.kind === `commit`) commitOpen(source)
     if (step.kind === `cancel`) source.open = null
     if (step.kind === `truncate`) {
@@ -789,28 +863,26 @@ function applyModel(
       open.truncate = true
       open.adapter = true
     }
-    deriveQueries(shape, model)
-    deriveEffect(model)
     if (step.kind === `retired-cleanup-rejects`) source.retiredCleanup = false
-    return isReload(step.kind) ? `throws` : outcome
+    return { outcome: isReload(step.kind) ? `throws` : outcome, settles: false }
   }
   switch (step.kind) {
     case `ready`:
       // During a first load or a reload, the run writes row 1 and commits
       // before markReady(), as a first load does.
       if (source.gate === `loading` || source.reloading) {
-        openTransaction(source).writes.set(1, ++model.serial)
+        openTransaction(source).writes.set(1, ++counter.serial)
         // A commit that throws ends the step before markReady().
         outcome = commitOpen(source)
         if (outcome !== `ok`) break
       }
-      if (source.reloading) completeReload(source)
-      else if (source.gate === `error`) outcome = `bad-transition`
-      else if (stopped) outcome = `throws`
-      else source.gate = `ready`
+      outcome = markSourceReady(source)
+      break
+    case `mark-ready`:
+      outcome = markSourceReady(source)
       break
     case `write`:
-      writeRow(model, source, step)
+      writeRow(counter, source, step)
       break
     case `commit`:
       outcome = commitOpen(source)
@@ -841,7 +913,7 @@ function applyModel(
       // ends with it.
       if (!source.retiredCleanup) break
       source.retiredCleanup = false
-      crashSource(source, `${step.source} cleanup failed`)
+      crashSource(source, `${label} cleanup failed`)
       break
     case `cancel`: {
       // A commit canceled by its signal never happened: its writes are gone,
@@ -859,7 +931,7 @@ function applyModel(
       // already dropped the retired run's open transaction.
       source.open = null
       source.gate = `crashed`
-      source.cause = `${step.source} cleanup failed`
+      source.cause = `${label} cleanup failed`
       source.failure = null
       source.stopped = null
       source.reloading = false
@@ -880,14 +952,14 @@ function applyModel(
       if (outcome === `throws`) break
       if (source.gate !== `ready`) {
         source.gate = `error`
-        source.cause = `${step.source} gave up`
+        source.cause = `${label} gave up`
         source.reloading = false
       } else {
         source.reloading = false
         source.failure = null
         source.stopped = {
-          message: `${step.source} gave up`,
-          serial: ++model.serial,
+          message: `${label} gave up`,
+          serial: ++counter.serial,
         }
       }
       break
@@ -895,8 +967,8 @@ function applyModel(
       if (stopped || source.gate !== `ready`) outcome = `throws`
       else {
         source.failure = {
-          message: `${step.source} problem`,
-          serial: ++model.serial,
+          message: `${label} problem`,
+          serial: ++counter.serial,
         }
         source.failureFromReload = source.reloading
       }
@@ -909,13 +981,45 @@ function applyModel(
       }
       break
     case `crash`:
-      crashSource(source, `${step.source} crashed`)
+      crashSource(source, `${label} crashed`)
       break
   }
-  deriveQueries(shape, model)
-  settleSelfReloads(shape, model)
-  deriveEffect(model)
-  return outcome
+  return { outcome, settles: true }
+}
+
+// markReady() of the current sync run. A reload completes at it when its run
+// has not committed yet, and its replacement then has no rows: the rows from
+// before the reload go. After a failed first load or fail() it breaks the
+// adapter contract.
+function markSourceReady(
+  source: SourceModel,
+): `ok` | `throws` | `bad-transition` {
+  if (source.reloading) {
+    if (source.armed) {
+      source.rows = new Map()
+      source.armed = false
+    }
+    completeReload(source)
+    return `ok`
+  }
+  if (source.gate === `error`) return `bad-transition`
+  if (source.stopped) return `throws`
+  source.gate = `ready`
+  return `ok`
+}
+
+// A load of an on-demand Collection that succeeds is one sync transaction of
+// the rows it loaded, keyed here by the demand key they serve. As every
+// transaction, it is a reload's first commit while the reload's replacement
+// is armed, and then replaces every row.
+function commitLoad(
+  counter: { serial: number },
+  source: SourceModel,
+  keys: Iterable<number>,
+): void {
+  const open = openTransaction(source)
+  for (const key of keys) open.writes.set(key, ++counter.serial)
+  commitOpen(source)
 }
 
 // A reloaded Collection settles when its new run commits (ready) or fails.
@@ -1818,6 +1922,27 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
+  "a cascade cancels a query's reload that waits for its sources": [
+    on(`fail`, `A`),
+    { kind: `reload-query` },
+    { kind: `cleanup-hold`, source: `B` },
+    on(`ready`, `A`),
+  ],
+  "a truncate's markReady after fail() on a ready Collection does nothing": [
+    { kind: `ready`, source: `A` },
+    { kind: `ready`, source: `B` },
+    { kind: `reload`, source: `A` },
+    { kind: `write`, source: `A`, key: 1, untagged: true },
+    { kind: `truncate`, source: `A`, markReady: true },
+    { kind: `fail`, source: `A` },
+    { kind: `commit`, source: `A` },
+  ],
+  'a cleanup after a crash that followed cleanup settles at once': [
+    { kind: `cleanup-hold`, source: `A` },
+    { kind: `cleanup-settle`, source: `A` },
+    { kind: `crash`, source: `A` },
+    { kind: `cleanup-hold`, source: `A` },
+  ],
   "a reload's default truncate after a failed first load makes it ready": [
     on(`fail`, `A`),
     on(`ready`, `B`),
@@ -3702,19 +3827,534 @@ describe(`on-demand first load after query readiness`, () => {
 })
 
 // ---------------------------------------------------------------------------
+// The demand model, shared by the on-demand grammars
+// ---------------------------------------------------------------------------
+
+/**
+ * # Demand on an on-demand Collection
+ *
+ * The window and lazy grammars below read an on-demand Collection, so the
+ * live query holds logical demands: data it asked that Collection to load.
+ * Both grammars use one model of the Collection and its demand, and the
+ * main grammar's laws for the Collection itself:
+ *
+ * - **The Collection** is the main grammar's source model, driven through
+ *   `applySourceStep`: its status, node, reload, and rows follow the same
+ *   rules. Its rows arrive through loads. A load that succeeds is one sync
+ *   transaction of its rows (`commitLoad`), so while a reload's replacement
+ *   is armed, the reload's first load replaces every row, as any reload's
+ *   first commit does. A load of a retired sync run commits nothing. A
+ *   demand key is loaded while the Collection has its rows.
+ * - **The demand** is a set of held keys. The lazy grammar holds one key per
+ *   parent row. The window grammar's query holds one logical demand, its
+ *   window, as key 0 (`windowDemand`); this is an abstraction, since
+ *   production keys that demand by its window, not by a number.
+ *
+ * The demand rules come from `packages/db/src/query/live/ARCHITECTURE.md`
+ * and the glossary's request-error entry:
+ *
+ * - **Law 10.** A key's latest load that the query did not abort decides
+ *   it; an older load that settles later decides nothing. Before
+ *   initial-query readiness, a failed load of a held key fails the query's
+ *   first load. After it, the failure is a request error on the query's own
+ *   node (law 16) until a later load of that key succeeds or the query
+ *   releases the key.
+ * - **Law 9.** A truncate, or a source reload, starts a replay of the held
+ *   demand. New demand joins the open replay, also one whose last attempt
+ *   failed. A demand change is one step: the loads it starts join the replay
+ *   before the loads it retires stop counting. The replay is judged once all
+ *   its loads have settled, against the demand held then. A failure belongs
+ *   to the logical demand that failed: if that demand retired, the replay
+ *   succeeds for the rest. A replay whose demand all retired with nothing
+ *   loaded is aborted, and its error stays. Older overlapping replay work
+ *   holds the replay and decides nothing. Replacing an acquisition does not
+ *   release its owner: a demand parked behind a Collection whose first load
+ *   failed is still held, so the replay waits for it.
+ * - **Law 16.** A failed replay is a request error until a replay succeeds.
+ *   A replay's success clears the errors of the keys it loaded again. A load
+ *   that threw holds no demand, so a replay does not load its key again.
+ *
+ * Which loads the query requests is the loader's choice, so the model does
+ * not predict requests. The driver reports each request as the adapter saw
+ * it: its keys, whether it threw, and whether the query aborted it
+ * (`reportRequests`). The model then judges every outcome. Because it does
+ * not predict requests, `expectHeldDemandCovered` checks the other side:
+ * after each step of a ready query, every held key has a load that the
+ * adapter still serves, its rows, a replay failure awaiting judgment, or a
+ * shown request error. A load that the query aborts without a replacement
+ * leaves its key uncovered.
+ */
+
+// One load the query requested, as the adapter saw it.
+// `replay`: the load belongs to an open replay. `fromReplay`: the replay
+// itself made the request, not a demand change.
+// `superseded`: a newer truncate replaced the replay attempt that made it. It
+// still holds the replay's completion, decides nothing, and its rows apply
+// if it succeeds.
+type DemandLoad = {
+  serial: number
+  keys: Set<number>
+  replay: boolean
+  fromReplay: boolean
+  superseded: boolean
+}
+
+type QueryGate = `loading` | `ready` | `error` | `crashed`
+
+type Demand = {
+  held: Set<number>
+  // Held keys whose latest load failed after readiness, with that load's
+  // serial.
+  failed: Map<number, number>
+  // A replay is open: every load the query starts joins it.
+  replayActive: boolean
+  // A replay failed. The query keeps its last complete publication, and the
+  // error shows until a replay succeeds or the query holds nothing.
+  replayFailed: boolean
+  // The serial of the latest replay load whose failure the replay shows.
+  replayError: number
+  pending: Array<DemandLoad>
+  // Held keys a replay failed for when it was judged, with the serial of the
+  // failed load.
+  replayFailedKeys: Map<number, number>
+  // Replay loads that failed in the current attempt, by serial; the replay
+  // judges them when it settles.
+  replayFailedLoads: Map<number, Set<number>>
+  // A load of the open replay succeeded, in any attempt, and the keys its
+  // loads loaded, with the serial of each key's latest such load.
+  replayLoaded: boolean
+  replayLoadedKeys: Map<number, number>
+  // Loads that a replay retired and the adapter still serves. As for a
+  // truncate, a load started before a replay still holds the query's first
+  // load until it settles, while the query holds one of its keys; it decides
+  // nothing else.
+  retiredInFlight: Map<number, Set<number>>
+  // Every load the query requested and did not abort, by serial.
+  requested: Map<number, Set<number>>
+  // A reload retired the sync run while the query held no acquisition, so
+  // it started no replay; its first commit then replays as a truncate does.
+  replayAtFirstCommit: boolean
+  // Loads that threw: they hold no acquisition.
+  thrown: Set<number>
+  // A replay started since the last report: the requests now reported are
+  // its own.
+  replayIssued: boolean
+}
+
+// `serial` numbers the source's reported problems and written rows.
+type OnDemandModel = {
+  gate: QueryGate
+  demand: Demand
+  source: SourceModel
+  serial: number
+}
+
+// The window grammar's one logical demand.
+const windowDemand = 0
+
+function freshOnDemandModel(held: Iterable<number>): OnDemandModel {
+  return {
+    gate: `loading`,
+    demand: {
+      held: new Set(held),
+      failed: new Map(),
+      replayActive: false,
+      replayFailed: false,
+      replayError: 0,
+      pending: [],
+      replayFailedKeys: new Map(),
+      replayFailedLoads: new Map(),
+      replayLoaded: false,
+      replayLoadedKeys: new Map(),
+      retiredInFlight: new Map(),
+      requested: new Map(),
+      replayAtFirstCommit: false,
+      replayIssued: false,
+      thrown: new Set(),
+    },
+    source: freshSource(),
+    serial: 0,
+  }
+}
+
+function isLoaded(model: OnDemandModel, key: number): boolean {
+  return model.source.rows.has(key)
+}
+
+// After fail() after readiness the adapter's calls throw, until a reload
+// starts a new sync run. The drivers then make no truncate (law-silent: a
+// truncate after fail() is outside the grammars).
+function adapterStopped(source: SourceModel): boolean {
+  return source.gate === `crashed` || (!source.reloading && !!source.stopped)
+}
+
+// The serial of the latest load the query requested for a key and did not
+// abort.
+function latestLoadFor(demand: Demand, key: number): number | undefined {
+  let latest: number | undefined
+  for (const [serial, keys] of demand.requested)
+    if (keys.has(key) && (latest === undefined || serial > latest))
+      latest = serial
+  return latest
+}
+
+// A load the query requested settles. The driver has already committed its
+// rows if its sync run is current; its outcome decides each key it is the
+// latest load of.
+function settleDemandLoad(
+  model: OnDemandModel,
+  load: DemandLoad,
+  succeeded: boolean,
+): void {
+  const { demand } = model
+  demand.pending = demand.pending.filter((entry) => entry !== load)
+  if (model.gate === `crashed`) return
+  if (load.superseded) {
+    settleReplay(model)
+    return
+  }
+  const latestFor = (key: number) => latestLoadFor(demand, key) === load.serial
+  // A demand change's replacement that applies for every held key releases
+  // the older loads it replaces: they no longer hold the first load.
+  if (
+    succeeded &&
+    !load.fromReplay &&
+    [...demand.held].every((key) => load.keys.has(key))
+  )
+    demand.retiredInFlight.clear()
+  if (succeeded && !load.fromReplay)
+    // A demand change's load that covers a superseded load's held keys
+    // replaces that coverage. A newer replay still waits for the older work.
+    demand.pending = demand.pending.filter(
+      (entry) =>
+        !entry.superseded ||
+        ![...entry.keys]
+          .filter((key) => demand.held.has(key))
+          .every((key) => load.keys.has(key)),
+    )
+  if (succeeded) {
+    for (const key of load.keys) {
+      // A replay load counts for the replay's own judgment. One that the
+      // replay itself issued replaces an earlier acquisition, so the replay
+      // decides its key (law 9): its error clears when the replay succeeds.
+      if (load.replay)
+        demand.replayLoadedKeys.set(
+          key,
+          Math.max(demand.replayLoadedKeys.get(key) ?? 0, load.serial),
+        )
+      if (load.fromReplay) continue
+      // A demand's own load: its key's request error clears (the glossary: a
+      // later subset load for that demand fulfills), unless a newer load of
+      // it failed and this load no longer holds the key (the query aborted
+      // it).
+      if (
+        (demand.failed.get(key) ?? 0) < load.serial ||
+        demand.requested.has(load.serial)
+      )
+        demand.failed.delete(key)
+    }
+    if (load.replay) demand.replayLoaded = true
+    settleReplay(model)
+    return
+  }
+  // Only the latest load of a key the query still holds decides it.
+  const held = [...load.keys].filter(
+    (key) => demand.held.has(key) && latestFor(key),
+  )
+  // Before initial-query readiness, that failure fails the query's first
+  // load.
+  if (model.gate === `loading` && !load.replay) {
+    if (held.length > 0) model.gate = `error`
+    return
+  }
+  // Law 9 judges a replay when it settles, against the demand held then.
+  if (load.replay) demand.replayFailedLoads.set(load.serial, load.keys)
+  else for (const key of held) demand.failed.set(key, load.serial)
+  settleReplay(model)
+}
+
+// A replay settles once none of its loads is pending. One that failed for a
+// key the query still holds then fails the query's first load, or shows a
+// request error after it.
+function settleReplay(model: OnDemandModel): void {
+  const { demand } = model
+  // A superseded load holds the replay only while the query holds its data.
+  const holds = (entry: DemandLoad) =>
+    entry.replay &&
+    (!entry.superseded || [...entry.keys].some((key) => demand.held.has(key)))
+  if (demand.pending.some(holds)) return
+  // A demand parked behind a Collection whose first load failed made no
+  // request, but it is still held, and the replay waits for it. It ends when
+  // the Collection restarts and the demand loads, or when the demand
+  // retires. A key that a replay load settled for is judged instead.
+  const settledInReplay = (key: number) =>
+    demand.replayLoadedKeys.has(key) ||
+    demand.replayFailedKeys.has(key) ||
+    [...demand.replayFailedLoads.values()].some((keys) => keys.has(key))
+  if (
+    model.source.gate === `error` &&
+    [...demand.held].some(
+      (key) => !isLoaded(model, key) && !settledInReplay(key),
+    )
+  )
+    return
+  // Law 10: a key's latest load decides it, so a replay load that loaded a
+  // key after its failed load replaces that failure.
+  for (const [key, serial] of demand.replayFailedKeys)
+    if ((demand.replayLoadedKeys.get(key) ?? 0) > serial)
+      demand.replayFailedKeys.delete(key)
+  for (const [serial, keys] of demand.replayFailedLoads)
+    for (const key of keys)
+      if (demand.held.has(key) && latestLoadFor(demand, key) === serial) {
+        demand.replayFailedKeys.set(key, serial)
+        demand.replayError = Math.max(demand.replayError, serial)
+      }
+  demand.replayFailedLoads = new Map()
+  // A failed key stays failed while the query holds it; once the query
+  // retires it, its failure cannot poison a successful replacement for the
+  // remaining demand.
+  for (const key of demand.replayFailedKeys.keys())
+    if (!demand.held.has(key)) demand.replayFailedKeys.delete(key)
+  // A replay stays open until it succeeds: a failed one is judged again
+  // when its demand changes.
+  const open = demand.replayActive || demand.replayFailed
+  demand.replayActive = false
+  if (demand.replayFailedKeys.size === 0) {
+    // The replacement succeeded: its request error clears, and so do the
+    // errors of the keys it loaded again. A replay whose demand all retired
+    // with none loaded is aborted instead, and its error stays.
+    if (open && demand.replayLoaded) {
+      demand.replayFailed = false
+      // A key's failure after its replay load stays: the later load decides.
+      for (const [key, serial] of demand.replayLoadedKeys)
+        if ((demand.failed.get(key) ?? 0) < serial) demand.failed.delete(key)
+      demand.replayLoaded = false
+      demand.replayLoadedKeys = new Map()
+      return
+    }
+    // A replay that loaded nothing, while the query still holds demand whose
+    // loads threw, has not replaced the rows: it stays open, keeps the last
+    // complete publication private, and new demand joins it (law 9).
+    if (open && demand.held.size > 0) demand.replayActive = true
+    return
+  }
+  if (model.gate === `loading`) model.gate = `error`
+  else demand.replayFailed = true
+}
+
+// A truncate or a source reload starts a replay of the held demand.
+// A reload retires the old sync run: its loads no longer apply, and the
+// query's own loads still hold its first load until they settle; the old
+// replay's loads stop. A truncate keeps the run: its replay loads replace
+// the open attempt's, which still hold the replay and decide nothing, and
+// the query's own loads decide nothing either.
+function startReplay(model: OnDemandModel, cause: `reload` | `truncate`): void {
+  const { demand } = model
+  for (const load of demand.pending) {
+    if (cause === `truncate` && load.replay) load.superseded = true
+    else if (cause === `truncate` || !load.fromReplay)
+      demand.retiredInFlight.set(load.serial, load.keys)
+  }
+  // A replay that this one replaces reports nothing, and what it loaded does
+  // not count for this one.
+  demand.replayFailedKeys = new Map()
+  demand.replayFailedLoads = new Map()
+  demand.replayLoaded = false
+  demand.replayLoadedKeys = new Map()
+  demand.pending =
+    cause === `truncate` ? demand.pending.filter((load) => load.superseded) : []
+  if (cause === `truncate`) demand.requested = new Map()
+  demand.replayAtFirstCommit = false
+  // A reload replays the demand when it retires the run only if the query
+  // holds an acquisition: a held key with a load that did not throw.
+  // Otherwise its first commit replays.
+  // Demand parked behind a failed first load is an acquisition too.
+  const holdsAcquisition =
+    (model.source.gate === `error` && demand.held.size > 0) ||
+    [...demand.requested].some(
+      ([serial, keys]) =>
+        !demand.thrown.has(serial) &&
+        [...keys].some((key) => demand.held.has(key)),
+    )
+  if (cause === `reload` && !holdsAcquisition) {
+    demand.replayAtFirstCommit = true
+    return
+  }
+  demand.replayActive = true
+  demand.replayIssued = true
+}
+
+// A source action that may commit: when it is the first commit of a reload
+// that started no replay, that commit replays the demand as a truncate does.
+function commitOnDemand(model: OnDemandModel, commit: () => void): void {
+  const armed = model.source.reloading && model.source.armed
+  commit()
+  if (armed && !model.source.armed && model.demand.replayAtFirstCommit)
+    startReplay(model, `truncate`)
+}
+
+function changeDemand(
+  demand: Demand,
+  kind: `parent` | `unparent`,
+  key: number,
+): void {
+  if (kind === `parent`) {
+    demand.held.add(key)
+    return
+  }
+  demand.held.delete(key)
+  demand.failed.delete(key)
+  // Releasing an owner removes both its current and its older work from
+  // readiness (law 9): older replay work for keys the query no longer holds
+  // holds nothing, even if the query asks for those keys again.
+  demand.pending = demand.pending.filter(
+    (load) =>
+      !load.superseded || [...load.keys].some((held) => demand.held.has(held)),
+  )
+  if (demand.held.size === 0) demand.replayFailed = false
+}
+
+// Requests the adapter saw since the last report. `aborted`: requests the
+// query aborted since then. `stillServed`: the adapter still serves the
+// request. `replayMade`: a truncate or a reload in this step made the
+// requests, so they belong to its replay.
+function reportRequests(
+  model: OnDemandModel,
+  requests: ReadonlyArray<{
+    serial: number
+    keys: Set<number>
+    thrown: boolean
+  }>,
+  aborted: ReadonlySet<number>,
+  stillServed: (serial: number) => boolean,
+  replayMade: boolean,
+): void {
+  const { demand } = model
+  const fromReplay = replayMade || demand.replayIssued
+  demand.replayIssued = false
+  // An aborted request is obsolete: it decides nothing. A superseded replay
+  // load that the adapter still serves stays: it holds its replay until it
+  // settles.
+  const retired = (load: DemandLoad) =>
+    aborted.has(load.serial) && !(load.superseded && stillServed(load.serial))
+  // Law 9: a demand change is one step. The loads it starts join an open
+  // replay before the loads it retires stop counting, so the replay settles
+  // once, after the whole change. A request a new demand makes during a
+  // replay joins the replay, but one that throws fails at once; one the
+  // replay makes fails with the replay. Every request is recorded before a
+  // thrown one settles, so the replay's later requests still belong to it.
+  const reported = requests.map((request) => {
+    const load: DemandLoad = {
+      serial: request.serial,
+      keys: request.keys,
+      replay:
+        (demand.replayActive || demand.replayFailed) &&
+        (fromReplay || !request.thrown),
+      fromReplay,
+      superseded: false,
+    }
+    demand.requested.set(load.serial, load.keys)
+    demand.pending.push(load)
+    if (load.replay) demand.replayActive = true
+    return { load, thrown: request.thrown }
+  })
+  for (const { load, thrown } of reported)
+    if (thrown) {
+      demand.thrown.add(load.serial)
+      settleDemandLoad(model, load, false)
+    }
+  demand.pending = demand.pending.filter((load) => !retired(load))
+  for (const serial of aborted) demand.requested.delete(serial)
+  settleReplay(model)
+}
+
+// The query's status follows its source until it is ready: a crash crashes
+// it at any time, and a failed first load fails the query's first load.
+function projectSourceGate(model: OnDemandModel): void {
+  if (model.source.gate === `crashed`) model.gate = `crashed`
+  else if (model.gate === `loading` && model.source.gate === `error`)
+    model.gate = `error`
+}
+
+// During the first load, the query is ready once no pending load is for a
+// key it still holds: a demand it retired no longer holds readiness back. A
+// replay restores the demand as one unit, so the query also waits until the
+// replay settles.
+function deriveDemandGate(model: OnDemandModel): void {
+  const { demand } = model
+  if (
+    model.gate !== `loading` ||
+    demand.replayActive ||
+    [...demand.retiredInFlight.values()].some((keys) =>
+      [...keys].some((key) => demand.held.has(key)),
+    )
+  )
+    return
+  const blocking = demand.pending.some(({ serial, keys }) =>
+    [...keys].some(
+      (key) => demand.held.has(key) && latestLoadFor(demand, key) === serial,
+    ),
+  )
+  if (!blocking) model.gate = `ready`
+}
+
+// The request error the query's node shows: the latest failure among its
+// held keys' failed loads and a failed replay, or none.
+function expectedRequestError(demand: Demand): number | null {
+  const serials = [
+    ...demand.failed.values(),
+    ...(demand.replayFailed ? [demand.replayError] : []),
+  ]
+  return serials.length === 0 ? null : Math.max(...serials)
+}
+
+// The coverage law (laws 9 and 10): once the query is ready, every key it
+// holds is covered by a load the adapter still serves, by its rows, by a
+// replay failure awaiting judgment, or by the request error the query shows
+// for it. `served` comes from the driver's adapter calls, not from
+// production state. Law-silent, recorded: a Collection whose first load
+// failed parks new demand without a request (law 16 shows that problem on
+// the Collection's node), so a key that never had a request error is covered
+// while the Collection shows that failure.
+function expectHeldDemandCovered(
+  model: OnDemandModel,
+  served: Iterable<Set<number>>,
+  errorShown: boolean,
+  label: string,
+): void {
+  if (model.gate !== `ready`) return
+  const { demand } = model
+  const live = new Set([...served].flatMap((keys) => [...keys]))
+  const judged = new Set(
+    [...demand.replayFailedLoads.values()].flatMap((keys) => [...keys]),
+  )
+  const parked = model.source.gate === `error`
+  const uncovered = [...demand.held].filter(
+    (key) =>
+      !live.has(key) &&
+      !isLoaded(model, key) &&
+      !judged.has(key) &&
+      !(errorShown && (demand.failed.has(key) || demand.replayFailed)) &&
+      !(parked && !demand.failed.has(key)),
+  )
+  expect(uncovered, `${label}: held demand is covered`).toEqual([])
+}
+
+// ---------------------------------------------------------------------------
 // On-demand demand grammar
 // ---------------------------------------------------------------------------
 
 /**
  * A live query over an on-demand Collection loads only the window it shows.
- * The law, from the request-error rules above: a load that fails before the
- * query's initial-query readiness fails the query's first load; one that
- * fails after it is a request error on the query's own node, and the source
- * stays healthy. A request error clears only when a load that started after
- * the failure succeeds; a source's reload loads the window again and clears
- * it when that replay succeeds. The source's own problems after readiness
- * are health tree detail and never change the query's status; its crash
- * crashes the query.
+ * The query holds one logical demand, its window, and the shared demand
+ * model above judges it: a load that fails before the query's initial-query
+ * readiness fails the query's first load; one that fails after it is a
+ * request error on the query's own node, and the source stays healthy. A
+ * request error clears only when a later load of the window succeeds; a
+ * source's reload replays the window and clears it when that replay
+ * succeeds. The source is the shared source model: its own problems after
+ * readiness are health tree detail and never change the query's status, and
+ * its crash crashes the query.
  *
  * The provider has rows 1 to 99. It answers a request without a limit with
  * every row, and a limited request with the rows up to the end of the
@@ -3724,17 +4364,16 @@ describe(`on-demand first load after query readiness`, () => {
  * every pending load at once (the overlapping-load lane owns the order of
  * two loads); `reload` reloads the source; `report`, `healthy`, and `fail`
  * are the source adapter's calls after readiness; `crash` crashes the
- * source.
+ * source. The source marks ready inside sync(), so a reload completes at
+ * once: its first commit has no rows, whatever the adapter writes later.
  *
- * Which loads a window needs is the loader's choice, so the model does not
- * predict requests: the driver reports each load the query requests, as the
- * adapter sees it. The model keeps the query's gate, its request error,
- * whether a load was requested after that error, the pending loads, the
- * window, and the source's node. The comparison checks, after every step,
- * the query's status, its own error, the source's node, and, when no load is
- * pending and no error shows, the rows in the window.
+ * The window projection keeps the window offset, the window the query shows,
+ * and a window move that waits for a replay. The comparison checks, after
+ * every step, the query's status, its own error message, the source's node,
+ * the coverage law, and, when no load is in flight and no error shows, the
+ * rows in the window.
  */
-type DemandStep =
+type WindowStep =
   | `window`
   | `settle-ok`
   | `settle-fail`
@@ -3744,114 +4383,73 @@ type DemandStep =
   | `fail`
   | `crash`
 
-type DemandModel = {
-  gate: `loading` | `ready` | `error` | `crashed`
-  requestError: string | null
-  // A load started after the shown request error.
-  laterLoad: boolean
-  pending: number
+// The window projection over the shared demand model.
+type WindowModel = OnDemandModel & {
   offset: number
   // The window whose load last succeeded; the query shows it.
   shown: number
-  // A source reload's replay is pending; a window move made now waits for
-  // it, and a later reload aborts that move (setWindow() rejects).
-  replayPending: boolean
-  // A replay failed: the query keeps its last complete snapshot until a
-  // later replay succeeds, so a window move waits for that replay too.
-  replayFailed: boolean
+  // A window move made while a replay is open, or after one failed, waits
+  // for the replay; a later reload aborts that move (setWindow() rejects)
+  // and returns to `replayedOffset`. A move with its own load joins the
+  // replay instead, so the replay loads it.
   moveWaitsForReplay: boolean
-  // The window before the move that waits for a replay: a reload that
-  // aborts the move returns to it. A move with its own load joins the
-  // replay, so the replay loads it.
   replayedOffset: number
-  source: { failure: string | null; stopped: string | null; crashed: boolean }
-  serial: number
 }
 
-// The query requested `count` loads at the adapter boundary. A window move
-// that requests none is served from rows the query already loaded, unless it
-// waits for a replay.
-function requestedLoads(
-  model: DemandModel,
-  count: number,
-  step?: DemandStep,
-): void {
-  if (count === 0) {
-    if (step === `window` && model.pending === 0 && !model.moveWaitsForReplay)
-      model.shown = model.offset
-    return
-  }
-  model.pending += count
-  if (model.requestError) model.laterLoad = true
-}
-
-function applyDemandModel(model: DemandModel, step: DemandStep): void {
+function applyWindowStep(model: WindowModel, step: WindowStep): void {
   if (model.gate === `crashed`) return
+  const { source, demand } = model
   switch (step) {
     case `window`:
       if (model.gate !== `ready`) return
-      if (model.replayPending || model.replayFailed) {
+      if (demand.replayActive || demand.replayFailed) {
         if (!model.moveWaitsForReplay) model.replayedOffset = model.offset
         model.moveWaitsForReplay = true
       }
       model.offset += 2
       return
+    // The driver settles loads and reports each outcome.
     case `settle-ok`:
-      if (model.pending === 0) return
-      model.pending = 0
-      model.replayPending = false
-      model.replayFailed = false
-      model.moveWaitsForReplay = false
-      if (model.gate === `loading`) model.gate = `ready`
-      if (model.requestError && model.laterLoad) model.requestError = null
-      model.shown = model.offset
-      return
     case `settle-fail`:
-      if (model.pending === 0) return
-      model.pending = 0
-      if (model.replayPending) model.replayFailed = true
-      model.replayPending = false
-      model.moveWaitsForReplay = false
-      if (model.gate === `loading`) {
-        model.gate = `error`
-        return
-      }
-      model.requestError = `root load ${++model.serial} failed`
-      model.laterLoad = false
-      // A failed window move keeps the last good window; the app retries
-      // with setWindow().
-      model.offset = model.shown
       return
-    case `reload`:
-      // The new run is ready inside sync(), so its first commit at once
-      // clears the node; the replay loads the window again.
-      if (model.source.crashed) return
-      model.source.failure = null
-      model.source.stopped = null
+    case `reload`: {
+      const starts = !source.reloading && source.gate !== `crashed`
+      applySourceStep(model, source, `source`, { kind: `reload` })
+      if (!starts) break
+      // The new run marks ready inside sync(), before any commit: the reload
+      // completes at once, and its replay loads the window again.
+      commitOnDemand(model, () =>
+        applySourceStep(model, source, `source`, { kind: `mark-ready` }),
+      )
       if (model.moveWaitsForReplay) {
         model.offset = model.replayedOffset
         model.moveWaitsForReplay = false
       }
-      model.replayPending = true
-      return
-    case `report`:
-      if (model.source.stopped) return
-      model.source.failure = `source problem`
-      return
-    case `healthy`:
-      if (model.source.stopped) return
-      model.source.failure = null
-      return
-    case `fail`:
-      if (model.source.stopped) return
-      model.source.failure = null
-      model.source.stopped = `source gave up`
-      return
-    case `crash`:
-      model.source.crashed = true
-      model.gate = `crashed`
-      return
+      startReplay(model, `reload`)
+      break
+    }
+    default:
+      applySourceStep(model, source, `source`, { kind: step })
   }
+  projectSourceGate(model)
+}
+
+// The loads of a step settled at the adapter. A settled window move shows
+// its window; a failed one keeps the last good window, and the app retries
+// with setWindow(). A move that requested no load is served from rows the
+// query already loaded, unless it waits for a replay.
+function settleWindow(
+  model: WindowModel,
+  step: WindowStep,
+  settled: number,
+  inFlight: number,
+): void {
+  if ((step === `settle-ok` || step === `settle-fail`) && settled > 0)
+    model.moveWaitsForReplay = false
+  if (step === `settle-ok` && settled > 0) model.shown = model.offset
+  if (step === `settle-fail` && settled > 0) model.offset = model.shown
+  if (step === `window` && inFlight === 0 && !model.moveWaitsForReplay)
+    model.shown = model.offset
 }
 
 // A direct subscriber with the initial state on an on-demand Collection.
@@ -3905,25 +4503,38 @@ type DemandReach = ReturnType<
 >
 
 async function runDemandHistory(
-  steps: ReadonlyArray<DemandStep>,
+  steps: ReadonlyArray<WindowStep>,
   directSubscriber = false,
   reach?: DemandReach,
 ) {
-  const model: DemandModel = {
-    gate: `loading`,
-    requestError: null,
-    laterLoad: false,
-    pending: 0,
+  const model: WindowModel = {
+    ...freshOnDemandModel([windowDemand]),
     offset: 0,
     shown: 0,
-    replayPending: false,
-    replayFailed: false,
     moveWaitsForReplay: false,
     replayedOffset: 0,
-    source: { failure: null, stopped: null, crashed: false },
-    serial: 0,
   }
-  const loads: Array<ReturnType<typeof createDeferred<void>>> = []
+  // The source marks ready inside sync().
+  applySourceStep(model, model.source, `source`, { kind: `mark-ready` })
+  // Loads in flight at the adapter, and what the adapter saw since the last
+  // report: each request, and which of them the query aborted.
+  const loads: Array<{
+    serial: number
+    deferred: ReturnType<typeof createDeferred<void>>
+  }> = []
+  const requests: Array<{
+    serial: number
+    keys: Set<number>
+    thrown: boolean
+  }> = []
+  const aborted = new Set<number>()
+  // The sync run each load belongs to; a retired run's load commits nothing.
+  const loadRuns = new Map<number, number>()
+  // Each failed load's message, by serial.
+  const messages = new Map<number, string>()
+  let serials = 0
+  let run = 0
+  let failures = 0
   let params!: SyncParams
   const boundary = { owns: (_options: LoadSubsetOptions) => false }
   const source = createCollection<Row, number>({
@@ -3934,16 +4545,27 @@ async function runDemandHistory(
     sync: {
       sync: (next) => {
         params = next
+        const thisRun = ++run
         // Rows this sync run has served; a reload's run serves them again.
         const served = new Set<number>()
         next.markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
             if (boundary.owns(options)) return true
-            const load = createDeferred<void>()
-            loads.push(load)
+            const serial = ++serials
+            const deferred = createDeferred<void>()
+            loads.push({ serial, deferred })
+            loadRuns.set(serial, thisRun)
+            requests.push({
+              serial,
+              keys: new Set([windowDemand]),
+              thrown: false,
+            })
+            // An aborted load still finishes: its rows apply if its run
+            // serves it.
+            options.signal?.addEventListener(`abort`, () => aborted.add(serial))
             const end = options.limit === undefined ? 99 : model.offset + 2
-            return load.promise.then(() => {
+            return deferred.promise.then(() => {
               next.begin()
               for (let id = 1; id <= end; id++) {
                 if (served.has(id)) continue
@@ -3957,6 +4579,34 @@ async function runDemandHistory(
       },
     },
   })
+  const report = (replayMade: boolean) => {
+    reportRequests(
+      model,
+      requests.splice(0),
+      aborted,
+      (serial) => loads.some((load) => load.serial === serial),
+      replayMade,
+    )
+    aborted.clear()
+  }
+  // Settle loads at the adapter and report each outcome to the model.
+  const settle = (succeeded: boolean) => {
+    const picked = loads.splice(0)
+    const message = `root load ${++failures} failed`
+    for (const { serial, deferred } of picked) {
+      if (succeeded && loadRuns.get(serial) === run)
+        commitOnDemand(model, () =>
+          commitLoad(model, model.source, [windowDemand]),
+        )
+      const load = model.demand.pending.find((entry) => entry.serial === serial)
+      if (!succeeded) messages.set(serial, message)
+      if (load) settleDemandLoad(model, load, succeeded)
+      model.demand.retiredInFlight.delete(serial)
+      if (succeeded) deferred.resolve()
+      else deferred.reject(new Error(message))
+    }
+    return picked.length
+  }
   const query = createLiveQueryCollection((q) =>
     q
       .from({ row: source })
@@ -3970,16 +4620,16 @@ async function runDemandHistory(
     void query.preload().catch(() => undefined)
     await flushPromises()
     if (directSubscriber) watcher = watchDirectly(source, boundary)
-    requestedLoads(model, loads.length)
+    report(false)
+    deriveDemandGate(model)
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${step}`
-      applyDemandModel(model, step)
+      applyWindowStep(model, step)
       if (model.moveWaitsForReplay)
         reach?.reach(`window move waits for a replay`)
-      if (directSubscriber && model.replayPending)
+      if (directSubscriber && model.demand.replayActive)
         reach?.reach(`direct subscriber during a replay`)
-      let requested = 0
-      const before = loads.length
+      let settled = 0
       if (step === `window`) {
         if (query.status === `ready`)
           void Promise.resolve(
@@ -3989,13 +4639,12 @@ async function runDemandHistory(
         // Ordered loading may follow a load with more requests; settle until
         // the window asks for nothing more.
         for (let round = 0; round < 5 && loads.length > 0; round++) {
-          for (const load of loads.splice(0)) load.resolve()
+          settled += settle(true)
           await flushPromises()
+          report(false)
         }
-        requested = 0
       } else if (step === `settle-fail`) {
-        for (const load of loads.splice(0))
-          load.reject(new Error(`root load ${model.serial} failed`))
+        settled = settle(false)
       } else if (step === `reload`) {
         void source.reload().catch(() => undefined)
       } else if (step === `crash`) {
@@ -4006,41 +4655,43 @@ async function runDemandHistory(
           else if (step === `healthy`) params.reportHealthy()
           else params.fail(new Error(`source gave up`))
         } catch {
-          // After fail(), the adapter's calls throw; the model ignores them.
+          // After fail(), the adapter's calls throw; the model predicts that.
         }
       }
       await flushPromises()
-      requested += Math.max(
-        0,
-        loads.length -
-          (step === `settle-fail` || step === `settle-ok` ? 0 : before),
-      )
-      requestedLoads(model, requested, step)
+      report(step === `reload`)
+      settleWindow(model, step, settled, loads.length)
+      deriveDemandGate(model)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
       watcher?.check(label)
+      const shownError = expectedRequestError(model.demand)
       if (model.gate === `ready`) {
         expect(
           query.health.error?.message ?? null,
           `${label}: request error`,
-        ).toBe(model.requestError)
+        ).toBe(shownError === null ? null : messages.get(shownError))
       }
+      expectHeldDemandCovered(
+        model,
+        loads.map(() => new Set([windowDemand])),
+        query.health.error !== null,
+        label,
+      )
       const sourceNode = query.health.sources[0]!
-      if (!model.source.crashed) {
+      if (model.source.gate !== `crashed`) {
         expect(
           sourceNode.failureReason?.message ?? null,
           `${label}: source failureReason`,
-        ).toBe(model.source.stopped ? null : model.source.failure)
+        ).toBe(
+          model.source.stopped ? null : (model.source.failure?.message ?? null),
+        )
         expect(
           sourceNode.error?.message ?? null,
           `${label}: source error`,
-        ).toBe(model.source.stopped)
+        ).toBe(model.source.stopped?.message ?? null)
       }
-      if (
-        model.gate === `ready` &&
-        model.pending === 0 &&
-        model.requestError === null
-      ) {
+      if (model.gate === `ready` && loads.length === 0 && shownError === null) {
         expect(
           query.toArray.map((row) => row.id),
           `${label}: window rows`,
@@ -4050,7 +4701,7 @@ async function runDemandHistory(
   } finally {
     console.error = consoleError
     watcher?.stop()
-    for (const load of loads.splice(0)) load.resolve()
+    for (const { deferred } of loads.splice(0)) deferred.resolve()
     await query.cleanup()
     await source.cleanup({ dependents: true })
   }
@@ -4058,7 +4709,7 @@ async function runDemandHistory(
 
 describe(`on-demand demand grammar`, () => {
   // Named histories, one per distinction the law draws.
-  const named: Record<string, ReadonlyArray<DemandStep>> = {
+  const named: Record<string, ReadonlyArray<WindowStep>> = {
     'a failed load after readiness is a request error, and a later load clears it':
       [`settle-ok`, `window`, `settle-fail`, `window`, `settle-ok`],
     'a failed first load fails the query': [`settle-fail`],
@@ -4110,7 +4761,7 @@ describe(`on-demand demand grammar`, () => {
   for (const [name, steps] of Object.entries(named))
     it(name, () => runDemandHistory(steps))
 
-  const step = fc.constantFrom<DemandStep>(
+  const step = fc.constantFrom<WindowStep>(
     `window`,
     `settle-ok`,
     `settle-fail`,
@@ -4130,7 +4781,7 @@ describe(`on-demand demand grammar`, () => {
   })
   // A prefix that enters a declared reach state that random steps alone
   // rarely reach at the base run count; random steps follow it.
-  const demandReachPrefixes: ReadonlyArray<ReadonlyArray<DemandStep>> = [
+  const demandReachPrefixes: ReadonlyArray<ReadonlyArray<WindowStep>> = [
     [`settle-ok`, `reload`, `window`],
     [`settle-ok`, `reload`, `settle-fail`, `window`],
   ]
@@ -4141,7 +4792,7 @@ describe(`on-demand demand grammar`, () => {
           fc.option(fc.constantFrom(...demandReachPrefixes), { freq: 2 }),
           fc.array(step, { maxLength: 10 }),
         )
-        .map(([prefix, rest]): Array<DemandStep> => [
+        .map(([prefix, rest]): Array<WindowStep> => [
           ...(prefix ?? []),
           ...rest,
         ]),
@@ -4167,23 +4818,22 @@ describe(`on-demand demand grammar`, () => {
 
 /**
  * A live query that left-joins an eager parent Collection to an on-demand
- * child Collection loads the children of the parents it shows. The law: a
- * load that fails before initial-query readiness fails the query's first
- * load. After it, a failed load is a request error on the query's node while
- * the query still needs a key whose load failed; it clears when a later load
- * of that key succeeds, or when the query no longer needs the key. A source
- * reload replays the query's demand; a failed replay is a request error
- * until a later replay succeeds. Each parent shows its child once a load of
- * the child's key succeeded.
+ * child Collection loads the children of the parents it shows: it holds one
+ * demand key per parent. The shared demand model above judges every load,
+ * and the shared source model keeps the child Collection. Each parent shows
+ * its child while the child Collection has that child's row.
  *
- * Steps: `parent` adds parent 1, 2, or 3, and `unparent` removes it; the
- * other steps are as in the window grammar. The driver reports each load's
- * requested keys from the adapter boundary, and the model judges outcomes.
- * The comparison checks the query's status, whether its node shows an
- * error, and, when no load is pending, each parent row and its child. After a
- * failed replay the query keeps its last complete snapshot private until a
- * replay succeeds; the model does not track that snapshot, so the rows check
- * waits for the replay to succeed.
+ * Steps: `parent` adds parent 1, 2, or 3, and `unparent` removes it;
+ * `truncate` commits the child adapter's truncate; `child-ready` calls a
+ * held markReady(); the other steps are as in the window grammar. The driver
+ * reports each load's requested keys from the adapter boundary, and the
+ * model judges outcomes. The comparison checks the query's status, whether
+ * its node shows an error, the coverage law, the keys a truncate replay
+ * requests, and, when no load is pending and no replay is open or failed,
+ * each parent row and its child and the rows an Effect over the same join
+ * received. While a replay is open or failed the query keeps its last
+ * complete publication private (law 9), which the model does not track, so
+ * the rows check waits for the replay to succeed.
  */
 // `settle-ok` and `settle-fail` settle every pending load; the `first` and
 // `last` forms settle only the oldest or the newest one. `throw-next` makes
@@ -4207,201 +4857,6 @@ type LazyStep =
         | `crash`
     }
 
-// One load the query requested, as the adapter saw it.
-// `fromReplay`: the replay itself made the request, not a demand change.
-// `superseded`: a newer truncate replaced the replay attempt that made it. It
-// still holds the replay's completion, decides nothing, and its rows apply
-// if it succeeds.
-type LazyLoad = {
-  serial: number
-  keys: Set<number>
-  replay: boolean
-  fromReplay: boolean
-  superseded: boolean
-}
-
-type LazyModel = {
-  gate: `loading` | `ready` | `error` | `crashed`
-  parents: Set<number>
-  loaded: Set<number>
-  // Needed keys whose last load failed after readiness, with that load's
-  // serial.
-  failed: Map<number, number>
-  // A source reload's replay is in flight: every load the query starts
-  // joins it, inside its publication barrier.
-  replayActive: boolean
-  // A failed replay keeps the query's publication private for all its
-  // demand, so its error stays until a replay succeeds or the query has no
-  // demand left.
-  replayFailed: boolean
-  pending: Array<LazyLoad>
-  // Keys a replay load failed for; the replay reports the failure once all
-  // its loads settle, if the query still needs one of them then.
-  replayFailedKeys: Set<number>
-  // Replay loads that failed in the current attempt, by serial; the replay
-  // judges them when it settles.
-  replayFailedLoads: Map<number, Set<number>>
-  // A load of the current replay attempt succeeded, and the keys it loaded.
-  replayLoaded: boolean
-  replayLoadedKeys: Set<number>
-  // Aborted loads the current run may still finish: their rows apply.
-  obsolete: Map<number, Set<number>>
-  // Loads a reload retired that are still in flight at the adapter. As for a
-  // truncate, a load started before the replay still holds the query's first
-  // load until it settles, while the query still needs one of its keys; it
-  // decides nothing else.
-  retiredInFlight: Map<number, Set<number>>
-  // Every load the query requested and did not abort, by serial: a key's
-  // latest such load decides it, so an older load that settles later changes
-  // nothing, and an aborted one leaves the decision to the one before it.
-  requested: Map<number, Set<number>>
-  // `ready`: the child Collection's status is `ready`. `firstLoadFailed`:
-  // its sync run failed its first load (status `error`).
-  source: {
-    failure: string | null
-    stopped: string | null
-    crashed: boolean
-    ready: boolean
-    firstLoadFailed: boolean
-    // A reload's new run has not marked ready yet, and the child was not
-    // ready when it started.
-    reloadRun: boolean
-    // A reload is in flight: another reload() returns its promise. Only a
-    // held markReady() keeps it in flight past the step.
-    reloadInFlight: boolean
-    // The `holdChildReady` option.
-    holdsReady: boolean
-    // The reload's first commit, which replaces every child row, has not
-    // happened yet: the rows from before the reload stay until it does.
-    replacementPending: boolean
-  }
-}
-
-// A load the query requested settles. Its rows apply on success either way;
-// its outcome decides each key it was the latest load of.
-function settleLazyLoad(
-  model: LazyModel,
-  load: LazyLoad,
-  succeeded: boolean,
-): void {
-  model.pending = model.pending.filter((entry) => entry !== load)
-  if (model.gate === `crashed`) return
-  if (load.superseded) {
-    if (succeeded) for (const key of load.keys) model.loaded.add(key)
-    settleReplay(model)
-    return
-  }
-  const latestFor = (key: number) => latestLoadFor(model, key) === load.serial
-  // A demand change's replacement that applies for every needed key releases
-  // the older loads it replaces: they no longer hold the first load.
-  if (
-    succeeded &&
-    !load.fromReplay &&
-    [...model.parents].every((key) => load.keys.has(key))
-  )
-    model.retiredInFlight.clear()
-  if (succeeded && !load.fromReplay)
-    // A demand change's load that covers a superseded load's keys replaces
-    // that coverage. A newer replay still waits for the older work.
-    model.pending = model.pending.filter(
-      (entry) =>
-        !entry.superseded ||
-        ![...entry.keys]
-          .filter((key) => model.parents.has(key))
-          .every((key) => load.keys.has(key)),
-    )
-  if (succeeded) {
-    for (const key of load.keys) {
-      model.loaded.add(key)
-      // A replay load's success clears its key's error only when the whole
-      // replay succeeds (law 16: its success clears only the errors of
-      // demands it loaded again).
-      if (load.replay) {
-        model.replayLoadedKeys.add(key)
-        continue
-      }
-      // A key loaded: its failure clears, unless a newer load of it failed
-      // and this load no longer holds the key (the query aborted it).
-      if (
-        (model.failed.get(key) ?? 0) < load.serial ||
-        model.requested.has(load.serial)
-      )
-        model.failed.delete(key)
-    }
-    if (load.replay) model.replayLoaded = true
-    settleReplay(model)
-    return
-  }
-  // Only the latest load of a key the query still needs decides it.
-  const needed = [...load.keys].filter(
-    (key) => model.parents.has(key) && latestFor(key),
-  )
-  // Before initial-query readiness, that failure fails the query's first
-  // load.
-  if (model.gate === `loading` && !load.replay) {
-    if (needed.length > 0) model.gate = `error`
-    return
-  }
-  // Law 9 judges a replay when it settles, against the demand held then: a
-  // failed replay load counts for each key it is then the latest load of.
-  if (load.replay) model.replayFailedLoads.set(load.serial, load.keys)
-  else for (const key of needed) model.failed.set(key, load.serial)
-  settleReplay(model)
-}
-
-// The serial of the latest load the query requested for a key and did not
-// abort.
-function latestLoadFor(model: LazyModel, key: number): number | undefined {
-  let latest: number | undefined
-  for (const [serial, keys] of model.requested)
-    if (keys.has(key) && (latest === undefined || serial > latest))
-      latest = serial
-  return latest
-}
-
-// A replay settles once none of its loads is pending; one that failed for a
-// key the query still needs then fails the query's first load, or shows a
-// request error after it.
-function settleReplay(model: LazyModel): void {
-  // A superseded load holds the replay only while the query needs its data.
-  const holds = (entry: LazyLoad) =>
-    entry.replay &&
-    (!entry.superseded || [...entry.keys].some((key) => model.parents.has(key)))
-  if (model.pending.some(holds)) return
-  const settling = model.replayActive
-  model.replayActive = false
-  for (const [serial, keys] of model.replayFailedLoads)
-    for (const key of keys)
-      if (model.parents.has(key) && latestLoadFor(model, key) === serial)
-        model.replayFailedKeys.add(key)
-  model.replayFailedLoads = new Map()
-  // ARCHITECTURE.md law 9: replay failure is scoped to the logical demand
-  // that failed. A failed key stays failed while the query holds it; once
-  // the query retires it, its failure cannot poison a successful
-  // replacement for the remaining demand.
-  model.replayFailedKeys = new Set(
-    [...model.replayFailedKeys].filter((key) => model.parents.has(key)),
-  )
-  const failed = model.replayFailedKeys.size > 0
-  const loadedSome = model.replayLoaded
-  const loadedKeys = model.replayLoadedKeys
-  model.replayLoaded = false
-  model.replayLoadedKeys = new Set()
-  if (!failed) {
-    // The replacement succeeded: its request error clears, and so do the
-    // errors of the keys it loaded again. A replay whose participants were
-    // all released, with none loaded, is aborted instead (law 9: the last
-    // logical demand retired), and its error stays.
-    if (settling && loadedSome) {
-      model.replayFailed = false
-      for (const key of loadedKeys) model.failed.delete(key)
-    }
-    return
-  }
-  if (model.gate === `loading`) model.gate = `error`
-  else model.replayFailed = true
-}
-
 // Keys a subset request asks for, read from its predicate's literal values.
 function requestedKeys(options: LoadSubsetOptions): Set<number> {
   const keys = new Set<number>()
@@ -4422,37 +4877,22 @@ function requestedKeys(options: LoadSubsetOptions): Set<number> {
   return keys
 }
 
-// During the first load, the query is ready once no pending load is for a
-// key it still needs: a demand it retired no longer holds readiness back. A
-// source reload's replay restores the demand as one unit, so the query also
-// waits until the replay settles.
-function deriveLazyGate(model: LazyModel): void {
-  if (
-    model.gate !== `loading` ||
-    model.replayActive ||
-    [...model.retiredInFlight.values()].some((keys) =>
-      [...keys].some((key) => model.parents.has(key)),
-    )
-  )
-    return
-  const blocking = model.pending.some(({ serial, keys }) =>
-    [...keys].some(
-      (key) => model.parents.has(key) && latestLoadFor(model, key) === serial,
-    ),
-  )
-  if (!blocking) model.gate = `ready`
-}
-
-function applyLazyModel(model: LazyModel, step: LazyStep): void {
+// The lazy projection over the shared demand model: `parent` and
+// `unparent` change the held demand, and the Collection steps go through
+// the source layer. `holdChildReady`: every child sync run holds markReady()
+// until a `child-ready` step; otherwise it marks ready inside sync() or at
+// once after it, within the step.
+function applyLazyStep(
+  model: OnDemandModel,
+  step: LazyStep,
+  holdChildReady: boolean,
+): void {
   if (model.gate === `crashed`) return
+  const { source } = model
   switch (step.kind) {
     case `parent`:
-      model.parents.add(step.key)
-      return
     case `unparent`:
-      model.parents.delete(step.key)
-      model.failed.delete(step.key)
-      if (model.parents.size === 0) model.replayFailed = false
+      changeDemand(model.demand, step.kind, step.key)
       return
     // Settle steps reach the model one load at a time, from the driver.
     case `settle-ok`:
@@ -4463,103 +4903,46 @@ function applyLazyModel(model: LazyModel, step: LazyStep): void {
     case `settle-last-fail`:
     case `throw-next`:
       return
-    case `reload`:
-      if (model.source.crashed) return
-      if (model.source.reloadInFlight) return
-      // The replay loads the demand again; a key it loads is loaded again.
-      model.source.failure = null
-      model.source.stopped = null
-      if (!model.source.ready) model.source.reloadRun = true
-      model.source.reloadInFlight = model.source.holdsReady
-      // The retired run's loads no longer apply, and its truncate drops the
-      // loaded children until the replay loads them again.
-      // Only the query's own loads hold it; a replay's loads stop when a
-      // newer replay replaces them.
-      for (const { serial, keys, fromReplay } of model.pending)
-        if (!fromReplay) model.retiredInFlight.set(serial, keys)
-      // A replay this reload discards reports nothing.
-      model.replayFailedKeys = new Set()
-      model.replayFailedLoads = new Map()
-      model.pending = []
-      model.obsolete = new Map()
-      // The new run's first commit replaces every child row. Without a held
-      // markReady() it commits within this step.
-      if (model.source.holdsReady) model.source.replacementPending = true
-      else model.loaded = new Set()
-      model.replayActive = true
-      return
-    case `truncate`:
+    case `reload`: {
+      // A reload in flight returns its promise; a crashed child rejects.
+      const starts = !source.reloading && source.gate !== `crashed`
+      applySourceStep(model, source, `source`, { kind: `reload` })
+      if (!starts) break
+      startReplay(model, `reload`)
+      if (!holdChildReady)
+        commitOnDemand(model, () =>
+          applySourceStep(model, source, `source`, { kind: `mark-ready` }),
+        )
+      break
+    }
+    case `truncate`: {
+      if (adapterStopped(source)) return
       // The adapter replaces every row in the same sync run, as a
-      // must-refetch does. The truncate replay loads the demand again. A load
-      // started before it decides nothing: it may still hold the first load,
-      // and its rows apply if it succeeds. A failed replay's error stays
-      // until a later replay succeeds.
-      if (model.source.crashed || model.source.stopped) return
-      // Before a reload's first commit, the adapter's truncate commits in
-      // the reload's first transaction: it is the replacement the reload
-      // already replays, and no replay row has applied yet.
-      if (model.source.replacementPending) {
-        model.source.replacementPending = false
-        model.loaded = new Set()
-        return
-      }
-      for (const load of model.pending) {
-        if (load.replay) load.superseded = true
-        else {
-          model.retiredInFlight.set(load.serial, load.keys)
-          model.obsolete.set(load.serial, load.keys)
-        }
-      }
-      model.replayFailedKeys = new Set()
-      model.replayFailedLoads = new Map()
-      model.pending = model.pending.filter((load) => load.superseded)
-      model.requested = new Map()
-      model.loaded = new Set()
-      model.replayActive = true
-      return
-    case `report`:
-      // reportError() before Collection readiness throws.
-      if (!model.source.stopped && model.source.ready)
-        model.source.failure = `source problem`
-      return
-    case `fail`:
-      if (model.source.stopped || model.source.firstLoadFailed) return
-      // A reload that fails before its first commit keeps the rows.
-      model.source.reloadInFlight = false
-      model.source.replacementPending = false
-      if (!model.source.ready) {
-        // The child's first load fails: so does the query's first load.
-        model.source.firstLoadFailed = true
-        if (model.gate === `loading`) model.gate = `error`
-        return
-      }
-      model.source.failure = null
-      model.source.stopped = `source gave up`
-      model.source.reloadInFlight = false
-      return
+      // must-refetch does, and its truncate replay loads the demand again.
+      // Before a reload's first commit, the truncate commits in the reload's
+      // first transaction: it is the replacement that the reload already
+      // replays, and no replay row has applied yet.
+      const reloadCommit = source.armed
+      commitOnDemand(model, () => {
+        applySourceStep(model, source, `source`, {
+          kind: `truncate`,
+          markReady: false,
+        })
+        applySourceStep(model, source, `source`, { kind: `commit` })
+      })
+      if (!reloadCommit) startReplay(model, `truncate`)
+      break
+    }
+    // The held markReady() of the child's current sync run.
     case `child-ready`:
-      // The held markReady() of the child's current sync run. After a
-      // failed first load it throws, unless a reload started a new run. A
-      // reload's markReady() before any commit replaces the rows with none.
-      if (model.source.replacementPending) {
-        model.source.replacementPending = false
-        model.loaded = new Set()
-      }
-      model.source.reloadInFlight = false
-      if (model.source.ready) return
-      if (model.source.firstLoadFailed && !model.source.reloadRun) return
-      model.source.ready = true
-      model.source.firstLoadFailed = false
-      model.source.reloadRun = false
-      // A query in `error` stays there until its own reload().
-      return
-    case `crash`:
-      model.source.crashed = true
-      model.source.reloadInFlight = false
-      model.source.replacementPending = false
-      model.gate = `crashed`
-      return
+      commitOnDemand(model, () =>
+        applySourceStep(model, source, `source`, { kind: `mark-ready` }),
+      )
+      break
+    default:
+      applySourceStep(model, source, `source`, { kind: step.kind })
   }
+  projectSourceGate(model)
 }
 
 // The states the lazy grammar's later laws depend on (ORC-015). Only the
@@ -4572,6 +4955,8 @@ const lazyReachStates = [
   `direct subscriber during a replay`,
   `effect compared at a quiet checkpoint`,
   `request error shown`,
+  `coverage checked during an open replay`,
+  `parked demand during a replay`,
 ] as const
 type LazyReach = ReturnType<
   typeof createOracleReach<(typeof lazyReachStates)[number]>
@@ -4602,33 +4987,10 @@ async function runLazyHistory(
     reach?: LazyReach
   } = {},
 ) {
-  const model: LazyModel = {
-    gate: `loading`,
-    parents: new Set([1]),
-    loaded: new Set(),
-    failed: new Map(),
-    replayActive: false,
-    replayFailed: false,
-    pending: [],
-    replayFailedKeys: new Set(),
-    replayLoaded: false,
-    replayLoadedKeys: new Set(),
-    replayFailedLoads: new Map(),
-    obsolete: new Map(),
-    retiredInFlight: new Map(),
-    requested: new Map(),
-    source: {
-      failure: null,
-      stopped: null,
-      crashed: false,
-      ready: !holdChildReady,
-      firstLoadFailed: false,
-      reloadRun: false,
-      reloadInFlight: false,
-      holdsReady: holdChildReady,
-      replacementPending: false,
-    },
-  }
+  const model = freshOnDemandModel([1])
+  // Without a held markReady(), the child marks ready inside sync().
+  if (!holdChildReady)
+    applySourceStep(model, model.source, `source`, { kind: `mark-ready` })
   // Loads in flight at the adapter, oldest first, and what the adapter saw
   // since the last report: each request, and which of them were aborted or
   // threw.
@@ -4642,6 +5004,13 @@ async function runLazyHistory(
     thrown: boolean
   }> = []
   const aborted = new Set<number>()
+  // Adapter loads not yet settled or aborted: what the adapter still serves.
+  const live = new Map<number, Set<number>>()
+  // The keys and the child sync run of every request; a retired run's load
+  // commits nothing.
+  const loadKeys = new Map<number, Set<number>>()
+  const loadRuns = new Map<number, number>()
+  let run = 0
   let serials = 0
   let throwNext = false
   let failures = 0
@@ -4676,6 +5045,7 @@ async function runLazyHistory(
     sync: {
       sync: (params) => {
         childParams = params
+        const thisRun = ++run
         // Children this sync run has served; a reload's run, or a load
         // after the run's own truncate, serves them again.
         const served = new Set<number>()
@@ -4700,15 +5070,19 @@ async function runLazyHistory(
             const thrown = throwNext
             throwNext = false
             requests.push({ serial, keys, thrown })
+            loadKeys.set(serial, keys)
+            loadRuns.set(serial, thisRun)
             if (thrown) throw new Error(`child load ${++failures} threw`)
             const deferred = createDeferred<void>()
             loads.push({ serial, deferred })
+            live.set(serial, keys)
             // The adapter sees every abort. One that honors aborts also
             // rejects the request; one that does not may still finish it.
             options.signal?.addEventListener(`abort`, () => {
               aborted.add(serial)
+              live.delete(serial)
               if (!honorsAbort) return
-              model.retiredInFlight.delete(serial)
+              model.demand.retiredInFlight.delete(serial)
               const index = loads.findIndex((load) => load.serial === serial)
               if (index !== -1) loads.splice(index, 1)
               deferred.reject(new DOMException(`aborted`, `AbortError`))
@@ -4739,57 +5113,23 @@ async function runLazyHistory(
   )
   const consoleError = console.error
   console.error = () => {}
-  // Requests made since the last report, tagged with whether a source
-  // reload's replay made them.
+  // Requests made since the last report, tagged with whether a truncate or
+  // a source reload in this step made them.
   const report = (replayMade = false) => {
-    // An aborted request is obsolete: it decides nothing, but if its run
-    // still serves it, its rows apply when it succeeds.
-    // A superseded replay load the adapter still serves stays: it holds its
-    // replay until it settles.
-    const retired = (load: LazyLoad) =>
-      aborted.has(load.serial) &&
-      !(load.superseded && loads.some((entry) => entry.serial === load.serial))
-    const retireAborted = () => {
-      for (const load of model.pending)
-        if (retired(load) && !load.superseded)
-          model.obsolete.set(load.serial, load.keys)
-      model.pending = model.pending.filter((load) => !retired(load))
-      for (const serial of aborted) model.requested.delete(serial)
-    }
-    // Law 9: a demand change is one step. The loads it starts join an open
-    // replay before the loads it retires stop counting, so the replay settles
-    // once, after the whole change.
-    // A request a new demand makes during a replay joins the replay, but one
-    // that throws fails at once; one the replay makes fails with the replay.
-    // Every request is recorded before a thrown one settles, so the replay's
-    // later requests still belong to it.
-    const reported = requests.splice(0).map((request) => {
-      const load: LazyLoad = {
-        serial: request.serial,
-        keys: request.keys,
-        // Law 9: new demand joins the private replacement of an open replay,
-        // also one whose current attempt failed.
-        replay:
-          (model.replayActive || model.replayFailed) &&
-          (replayMade || !request.thrown),
-        fromReplay: replayMade,
-        superseded: false,
-      }
-      model.requested.set(load.serial, load.keys)
-      model.pending.push(load)
-      if (load.replay) model.replayActive = true
-      return { load, thrown: request.thrown }
-    })
-    for (const { load, thrown } of reported)
-      if (thrown) {
-        thrownLoads.add(load.serial)
-        settleLazyLoad(model, load, false)
-      }
-    retireAborted()
+    const reported = requests.splice(0)
+    for (const request of reported)
+      if (request.thrown) thrownLoads.add(request.serial)
+    reportRequests(
+      model,
+      reported,
+      aborted,
+      (serial) => loads.some((load) => load.serial === serial),
+      replayMade,
+    )
     aborted.clear()
-    settleReplay(model)
   }
-  // Settle loads at the adapter and report each outcome to the model.
+  // Settle loads at the adapter and report each outcome to the model. A
+  // load of the current sync run that succeeds commits its rows first.
   const settle = (
     picked: Array<(typeof loads)[number]>,
     succeeded: boolean,
@@ -4799,20 +5139,14 @@ async function runLazyHistory(
         loads.findIndex((load) => load.serial === serial),
         1,
       )
-      const load = model.pending.find((entry) => entry.serial === serial)
-      // A reload of a ready child completes at the new run's first commit,
-      // which replaces every child row.
-      if (succeeded && load && model.source.ready)
-        model.source.reloadInFlight = false
-      if (succeeded && load && model.source.replacementPending) {
-        model.source.replacementPending = false
-        model.loaded = new Set()
-      }
-      if (load) settleLazyLoad(model, load, succeeded)
-      else if (succeeded && model.obsolete.has(serial))
-        for (const key of model.obsolete.get(serial)!) model.loaded.add(key)
-      model.obsolete.delete(serial)
-      model.retiredInFlight.delete(serial)
+      live.delete(serial)
+      if (succeeded && loadRuns.get(serial) === run)
+        commitOnDemand(model, () =>
+          commitLoad(model, model.source, loadKeys.get(serial)!),
+        )
+      const load = model.demand.pending.find((entry) => entry.serial === serial)
+      if (load) settleDemandLoad(model, load, succeeded)
+      model.demand.retiredInFlight.delete(serial)
       if (succeeded) deferred.resolve()
       else deferred.reject(new Error(`child load ${++failures} failed`))
     }
@@ -4864,14 +5198,17 @@ async function runLazyHistory(
       const demandOnly = step.kind === `parent` || step.kind === `unparent`
       // Open (see the request error check below): a demand change during a
       // replay can show a request error and clear it at once.
-      const replayBefore = model.replayActive
+      const replayBefore = model.demand.replayActive
       if (step.kind === `reload` && model.gate === `loading`)
         reach?.reach(`reload during the first load`)
-      if (step.kind === `truncate` && model.source.reloadInFlight)
+      if (step.kind === `truncate` && model.source.reloading)
         reach?.reach(`truncate while a reload is in flight`)
-      const truncateIsReloadCommit =
-        step.kind === `truncate` && model.source.replacementPending
-      applyLazyModel(model, step)
+      const truncates =
+        step.kind === `truncate` &&
+        model.gate !== `crashed` &&
+        !adapterStopped(model.source)
+      const truncateIsReloadCommit = truncates && model.source.armed
+      applyLazyStep(model, step, holdChildReady)
       if (step.kind === `parent` || step.kind === `unparent`) {
         parentParams.begin()
         parentParams.write({
@@ -4906,7 +5243,7 @@ async function runLazyHistory(
       } else if (step.kind === `reload`) {
         void children.reload().catch(() => undefined)
       } else if (step.kind === `truncate`) {
-        if (children.status !== `crashed` && !model.source.stopped) {
+        if (truncates) {
           childParams.begin()
           // Readiness stays with markReady(), so a truncate can land while
           // a reload is still in flight.
@@ -4933,33 +5270,30 @@ async function runLazyHistory(
       // A truncate replays the query's demand: the adapter receives a
       // request for every key the query still needs.
       if (
-        step.kind === `truncate` &&
+        truncates &&
         !truncateIsReloadCommit &&
-        (model.gate === `ready` || model.gate === `loading`) &&
-        !model.source.stopped
+        (model.gate === `ready` || model.gate === `loading`)
       )
         expect(
-          [...model.parents].filter(
+          [...model.demand.held].filter(
             (key) =>
-              !thrownLoads.has(model.failed.get(key) ?? 0) &&
+              !thrownLoads.has(model.demand.failed.get(key) ?? 0) &&
               stepRequests.every((request) => !request.keys.has(key)),
           ),
           `${label}: keys the truncate replay did not request`,
         ).toEqual([])
-      deriveLazyGate(model)
+      deriveDemandGate(model)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
       watcher?.check(label)
-      if (watcher && model.replayActive)
+      const { demand } = model
+      if (watcher && demand.replayActive)
         reach?.reach(`direct subscriber during a replay`)
-      if (model.replayFailedKeys.size > 0 || model.replayFailed)
+      if (demand.replayFailedKeys.size > 0 || demand.replayFailed)
         reach?.reach(`replay load fails`)
-      if (model.pending.some((load) => load.superseded))
+      if (demand.pending.some((load) => load.superseded))
         reach?.reach(`superseded replay load`)
-      if (
-        model.gate === `ready` &&
-        (model.failed.size > 0 || model.replayFailed)
-      )
+      if (model.gate === `ready` && expectedRequestError(demand) !== null)
         reach?.reach(`request error shown`)
       expect(query.health, `${label}: stable read`).toBe(query.health)
       if (
@@ -4975,24 +5309,32 @@ async function runLazyHistory(
           `${label}: unchanged tree announces nothing`,
         ).toBe(announcedBefore)
       }
-      // Open: a demand change while a source reload's replay is in flight
-      // can clear a request error before its key loads again (see the
-      // coverage map). Until that is settled, the check waits for the
-      // replay to succeed; it still checks the error a failed replay shows.
-      const replayOpen =
-        (model.replayActive || model.replayFailed) &&
-        step.kind !== `settle-fail`
-      if (model.gate === `ready` && !replayOpen) {
+      if (model.gate === `ready` && demand.replayActive)
+        reach?.reach(`coverage checked during an open replay`)
+      if (model.source.gate === `error` && demand.replayActive)
+        reach?.reach(`parked demand during a replay`)
+      expectHeldDemandCovered(
+        model,
+        live.values(),
+        query.health.error !== null,
+        label,
+      )
+      // Law 16: the query's node shows a request error exactly while the
+      // model holds one, also while a replay is open or after one failed.
+      if (model.gate === `ready`) {
         expect(query.health.error !== null, `${label}: request error`).toBe(
-          model.failed.size > 0 || model.replayFailed,
+          expectedRequestError(demand) !== null,
         )
       }
       // After a failed replay the query keeps its last complete snapshot
       // private, which the model does not track.
+      // Law 9: while a replay is open, its replacement stays private, so the
+      // query keeps the rows of its last complete publication.
       if (
         model.gate === `ready` &&
-        model.pending.length === 0 &&
-        !model.replayFailed
+        demand.pending.length === 0 &&
+        !demand.replayFailed &&
+        !demand.replayActive
       ) {
         const rows = query.toArray.map(
           (row: { parent: Row; child?: Row }) =>
@@ -5002,15 +5344,15 @@ async function runLazyHistory(
           [...rows].sort((a, b) => a[0] - b[0]),
           `${label}: rows`,
         ).toEqual(
-          [...model.parents]
+          [...demand.held]
             .sort((a, b) => a - b)
-            .map((key) => [key, model.loaded.has(key) ? key * 10 : null]),
+            .map((key) => [key, isLoaded(model, key) ? key * 10 : null]),
         )
         // An Effect over the same query that a load failure has not ended
         // has received the same rows by now.
-        if (effect && !effect.disposed && !model.replayActive)
+        if (effect && !effect.disposed)
           reach?.reach(`effect compared at a quiet checkpoint`)
-        if (effect && !effect.disposed && !model.replayActive)
+        if (effect && !effect.disposed)
           expect(
             [...effectRows.values()].sort((a, b) => a[0] - b[0]),
             `${label}: effect rows`,
@@ -5202,6 +5544,52 @@ describe(`lazy join demand grammar`, () => {
       { kind: `parent`, key: 3 },
       { kind: `settle-last-ok` },
     ]))
+  it(`a demand change aborts a replay load and must request its still-held key again`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 1 },
+      ],
+      { honorsAbort: false, holdChildReady: true },
+    ))
+  // Neighbours of the parked-join history: the parked demand is requested
+  // when its source restarts, and the replay then settles as usual; the
+  // parked demand retires instead, which aborts the replay.
+  it(`a parked demand loads when its source restarts, and the replay then settles`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 1 },
+        { kind: `reload` },
+        { kind: `settle-ok` },
+      ],
+      { honorsAbort: false, holdChildReady: true },
+    ))
+  it(`a parked replay ends when its last demand retires`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 1 },
+        { kind: `unparent`, key: 1 },
+        { kind: `unparent`, key: 2 },
+      ],
+      { honorsAbort: false, holdChildReady: true },
+    ))
   it(`a load that fails during a replay keeps its own error`, () =>
     runLazyHistory(
       [
@@ -5311,6 +5699,210 @@ describe(`lazy join demand grammar`, () => {
     runLazyHistory([{ kind: `reload` }, { kind: `settle-ok` }], {
       asyncChildReady: true,
     }))
+  // A failed replay stays open for the demand the query still holds: a
+  // replacement that throws holds no demand, but its key's logical owner
+  // stays, so the replay does not succeed with nothing loaded (law 9).
+  it(`a failed replay keeps its error when a replacement for its failed key throws`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `unparent`, key: 1 },
+      { kind: `throw-next` },
+      { kind: `settle-last-fail` },
+      { kind: `parent`, key: 2 },
+      { kind: `unparent`, key: 2 },
+      { kind: `parent`, key: 1 },
+      { kind: `unparent`, key: 3 },
+    ]))
+  // Law 10: a later load decides its key, also after a replay loaded it.
+  it(`a load that throws after a replay load keeps its error when the replay succeeds`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-ok` },
+      { kind: `throw-next` },
+      { kind: `unparent`, key: 1 },
+    ]))
+  // Law 9: once the failed demand retires, the replay succeeds for the
+  // demand it loaded, without another load.
+  it(`a failed replay succeeds when its failed demand retires after the rest loaded`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-ok` },
+      { kind: `unparent`, key: 1 },
+    ]))
+  // Law 10: a replacement that loads the failed key again decides it.
+  it(`a replacement that loads a failed replay key again lets the replay succeed`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `parent`, key: 2 },
+      { kind: `unparent`, key: 3 },
+      { kind: `settle-ok` },
+    ]))
+  // Law 9: only a demand that made no request waits as parked. A replay
+  // load that a child with a failed first load still serves fails the replay
+  // as any replay load does.
+  it(`a replay load fails the replay while its child shows a failed first load`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `settle-fail` },
+      ],
+      { holdChildReady: true },
+    ))
+  // Law 9: a load that throws fails at once, for its own demand, and the
+  // replay it would have joined loaded nothing for the demand the query
+  // still holds, so the replay stays open and keeps its publication private.
+  it(`a replay stays open when the only replacement for its held demand throws`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `reload` },
+      { kind: `throw-next` },
+      { kind: `unparent`, key: 1 },
+    ]))
+  // Law 9: a replay load that the query aborted settled nothing, so the
+  // parked demand that replaces it is still owed a load.
+  it(`a parked demand that replaces an aborted replay load holds the replay`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `reload` },
+        { kind: `fail` },
+        { kind: `unparent`, key: 1 },
+      ],
+      { holdChildReady: true },
+    ))
+  // Law 9: a truncate aborts the loads before it and replays the demand; an
+  // aborted load that the adapter still finishes decides nothing, so a
+  // request error waits for the replay.
+  it(`a load the truncate aborted does not clear a request error when it finishes`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-first-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  // Law 10: a demand change retries a segment whose load failed, also while
+  // that failure waits for a replay; the retry then decides the key, and the
+  // first load succeeds.
+  it(`a demand change retries a load that failed during a replay in the first load`, () =>
+    runLazyHistory(
+      [
+        { kind: `reload` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-first-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-ok` },
+      ],
+      { holdChildReady: true },
+    ))
+  // Law 10 and law 9: a demand change retries a key whose replay load
+  // failed, and the retry decides it, before the replay is judged.
+  it(`a demand change retries a key whose truncate replay load failed in the first load`, () =>
+    runLazyHistory(
+      [
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  // Law 9: releasing an owner removes its older replay work too, so a later
+  // replay for the same key does not wait for it.
+  it(`older replay work of a released key does not hold a later replay`, () =>
+    runLazyHistory(
+      [
+        { kind: `truncate` },
+        { kind: `truncate` },
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 1 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+      ],
+      { honorsAbort: false },
+    ))
+  // Law 9: a truncate replay whose held demand only threw loaded nothing, so
+  // it stays open and keeps the last complete publication private.
+  it(`a truncate replay stays open while its held demand's loads threw`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `truncate` },
+      { kind: `settle-first-fail` },
+      { kind: `unparent`, key: 1 },
+      { kind: `throw-next` },
+      { kind: `parent`, key: 1 },
+    ]))
+  // Law 9: replacing an acquisition does not release its logical owner, so
+  // the older work of a key whose replay load failed still holds the replay.
+  it(`older replay work of a held key holds the replay after its replay load fails`, () =>
+    runLazyHistory(
+      [
+        { kind: `truncate` },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-last-fail` },
+      ],
+      { honorsAbort: false },
+    ))
+  // Law 10: a replay's success does not clear the error of a key whose
+  // latest load threw after the replay loaded it.
+  it(`a replay's success keeps the error of a key whose later load threw`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-ok` },
+      { kind: `throw-next` },
+      { kind: `unparent`, key: 1 },
+      { kind: `parent`, key: 1 },
+    ]))
+  // A reload replays at retire only for a held acquisition; a key whose only
+  // load threw holds none, so the reload's first commit replays instead and
+  // decides the load that commit came from.
+  it(`a reload without a held acquisition replays at its first commit`, () =>
+    runLazyHistory(
+      [
+        { kind: `throw-next` },
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 2 },
+        { kind: `reload` },
+        { kind: `parent`, key: 1 },
+        { kind: `settle-last-ok` },
+      ],
+      { holdChildReady: true },
+    ))
   const lazyReach = createOracleReach(
     `source-health.lazy-demand`,
     lazyReachStates,
@@ -5338,6 +5930,10 @@ describe(`lazy join demand grammar`, () => {
     {
       steps: [{ kind: `truncate` }, { kind: `truncate` }],
       honorsAbort: false,
+    },
+    {
+      steps: [{ kind: `settle-ok` }, { kind: `fail` }, { kind: `truncate` }],
+      holdChildReady: true,
     },
     {
       steps: [

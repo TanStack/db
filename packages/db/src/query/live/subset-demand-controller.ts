@@ -59,13 +59,24 @@ export class SubsetDemandController {
     const loaded: Array<string> = []
     for (const [planId, state] of this.states) {
       // Every segment the subscription holds was loaded again, also one whose
-      // own retry is still pending. A load that threw holds no demand.
+      // own retry is still pending. A load that threw holds no demand, and
+      // as the latest load of its keys it still decides them (law 10).
+      const thrown = new Set(
+        state.segments.flatMap((segment) =>
+          segment.thrown ? [...segment.keys.keys()] : [],
+        ),
+      )
       for (const segment of state.segments)
-        if (!segment.thrown)
-          for (const key of segment.keys.keys()) state.failedKeys.delete(key)
+        for (const key of segment.keys.keys())
+          if (!thrown.has(key)) state.failedKeys.delete(key)
       if (state.failedKeys.size === 0) loaded.push(planId)
     }
     return loaded
+  }
+
+  /** Whether any plan still holds demand. */
+  holdsDemand(): boolean {
+    return this.states.size > 0
   }
 
   /** Whether the plan still needs a key whose latest load failed. */
@@ -180,6 +191,10 @@ export class SubsetDemandController {
               : codedMessage(159),
           )
         if (replace) {
+          subscription.replaceSnapshots(
+            segment.where,
+            (segment.replaces ?? []).map((replaced) => replaced.where),
+          )
           if (segment.ready instanceof Promise) {
             void segment.ready.then(
               () => this.finishReplacement(subscription, plan.id, segment),
@@ -370,18 +385,21 @@ function startSegment(
 }
 
 // A truncate's or a reload's replay replaces a load that it aborts: the replay
-// decides it, and its own late failure decides nothing. A load that fails
-// while the replay is in flight fails with its own error once the replay
-// settles.
+// decides it, and the load's own late outcome decides nothing. A load that
+// fails while the replay is in flight fails with its own error once the
+// replay settles.
 function followReplay(
   subscription: CollectionSubscription,
   ready: Promise<unknown>,
 ): Promise<void> {
   const replacements = subscription.replacementCount
-  const decide = (error: unknown): Promise<void> | undefined => {
+  const replaced = () => {
     const replay = subscription.pendingTruncateReplacement
-    if (replacements !== subscription.replacementCount)
-      return replay && followReplay(subscription, replay)
+    return replay && followReplay(subscription, replay)
+  }
+  const decide = (error: unknown): Promise<void> | undefined => {
+    if (replacements !== subscription.replacementCount) return replaced()
+    const replay = subscription.pendingTruncateReplacement
     if (!replay) throw error
     // The load joined the replay: its own failure stands once the replay
     // settles, unless a newer replay replaced it meanwhile.
@@ -390,7 +408,11 @@ function followReplay(
       () => decide(error),
     )
   }
-  return ready.then(undefined, decide)
+  return ready.then(
+    () =>
+      replacements === subscription.replacementCount ? undefined : replaced(),
+    decide,
+  )
 }
 
 function releaseSegment(

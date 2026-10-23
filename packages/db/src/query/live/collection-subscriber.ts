@@ -455,6 +455,7 @@ export class CollectionSubscriber<
         )
           this.collectionConfigBuilder.failReplay(this.sourceId, error)
       },
+      holdsDemand: () => this.demand.holdsDemand(),
     }
   }
 
