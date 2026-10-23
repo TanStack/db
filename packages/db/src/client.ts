@@ -33,7 +33,10 @@ import type {
   DeferredLiveQueryCollections,
   LiveQueryOptions,
 } from './live-query-options.js'
-import type { PendingMetadataWrite } from './collection/state.js'
+import type {
+  CollectionStateManager,
+  PendingMetadataWrite,
+} from './collection/state.js'
 
 const collectionConfigFactory: unique symbol = Symbol.for(
   `@tanstack/db.collectionConfig.factory`,
@@ -332,6 +335,49 @@ export function isCollectionOptions(
   value: unknown,
 ): value is CollectionOptions<any, string | number, any, UtilsRecord> {
   return hasCollectionOptionsBrand(value)
+}
+
+/**
+ * A late hydration seed cannot supersede committed adapter work. Row data
+ * and row metadata are separate objects, so each has its own lookup. A
+ * wrapping sync's committed transactions that it has not handed to this
+ * Collection yet count as committed adapter work.
+ */
+function createAdapterAuthorityLookups<TKey extends string | number>(
+  state: CollectionStateManager<any, TKey, any, any>,
+): {
+  rows: (key: TKey) => boolean
+  metadata: (key: TKey) => boolean
+} {
+  const rowKeys = new Set<TKey>()
+  const metadataKeys = new Set<TKey>()
+  let truncated = state.hasAppliedAdapterTruncate
+  for (const transaction of [
+    ...state.pendingSyncedTransactions.filter(
+      (pending) => pending.committed && !pending.preserveHydrationSeedKeys,
+    ),
+    ...state.getStagedSyncTransactions(),
+  ]) {
+    if (transaction.truncate) truncated = true
+    for (const operation of transaction.operations)
+      rowKeys.add(operation.key as TKey)
+    for (const key of transaction.rowMetadataWrites.keys())
+      metadataKeys.add(key)
+  }
+  const deleted = (key: TKey) =>
+    state.appliedAdapterDeletedKeys?.has(key) === true
+  return {
+    rows: (key) =>
+      truncated ||
+      rowKeys.has(key) ||
+      deleted(key) ||
+      (state.syncedData.has(key) && !state.hydrationSeedKeys.has(key)),
+    metadata: (key) =>
+      truncated ||
+      metadataKeys.has(key) ||
+      deleted(key) ||
+      state.appliedAdapterMetadataKeys?.has(key) === true,
+  }
 }
 
 export class DbClient {
@@ -960,7 +1006,7 @@ export class DbClient {
     // A hydration seed supplies only the row data and row metadata that no
     // committed adapter write has written; each object is judged alone.
     const hydrating = seedKind === `hydration`
-    const authority = collection._state.createAdapterAuthorityLookups()
+    const authority = createAdapterAuthorityLookups(collection._state)
     const seeds = chunk.rows.map((row) => {
       const value = collection.validateData(row.value, `insert`)
       return { ...row, key: collection.config.getKey(value), value }

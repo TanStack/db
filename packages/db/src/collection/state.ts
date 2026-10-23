@@ -143,11 +143,11 @@ export class CollectionStateManager<
   // DbClient may receive a stale hydration chunk after an adapter delete.
   // Only DbClient collections retain these absences until cleanup because
   // hydration has no completion boundary.
-  private appliedAdapterDeletedKeys?: Set<TKey>
+  public appliedAdapterDeletedKeys?: Set<TKey>
   // Row metadata is a separate object: an adapter write to it closes the key's
   // metadata to later seeds even when the adapter never wrote the row.
-  private appliedAdapterMetadataKeys?: Set<TKey>
-  private hasAppliedAdapterTruncate = false
+  public appliedAdapterMetadataKeys?: Set<TKey>
+  public hasAppliedAdapterTruncate = false
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -162,7 +162,7 @@ export class CollectionStateManager<
   // Such a transaction holds settled optimistic rows like a queued one.
   private isDeferredSyncKey: (key: TKey) => boolean = () => false
   // Those committed transactions themselves, for hydration seed authority.
-  private getStagedSyncTransactions: () => Array<StagedSyncTransaction<TKey>> =
+  public getStagedSyncTransactions: () => Array<StagedSyncTransaction<TKey>> =
     () => []
   public heldOptimisticRows = new Map<
     TKey,
@@ -871,47 +871,6 @@ export class CollectionStateManager<
     this.appliedAdapterMetadataKeys ??= new Set<TKey>()
   }
 
-  /**
-   * A late hydration seed cannot supersede committed adapter work. Row data
-   * and row metadata are separate objects, so each has its own lookup. A
-   * wrapping sync's committed transactions that it has not handed to this
-   * Collection yet count as committed adapter work.
-   */
-  createAdapterAuthorityLookups(): {
-    rows: (key: TKey) => boolean
-    metadata: (key: TKey) => boolean
-  } {
-    const rowKeys = new Set<TKey>()
-    const metadataKeys = new Set<TKey>()
-    let truncated = this.hasAppliedAdapterTruncate
-    for (const transaction of [
-      ...this.pendingSyncedTransactions.filter(
-        (pending) => pending.committed && !pending.preserveHydrationSeedKeys,
-      ),
-      ...this.getStagedSyncTransactions(),
-    ]) {
-      if (transaction.truncate) truncated = true
-      for (const operation of transaction.operations)
-        rowKeys.add(operation.key as TKey)
-      for (const key of transaction.rowMetadataWrites.keys())
-        metadataKeys.add(key)
-    }
-    const deleted = (key: TKey) =>
-      this.appliedAdapterDeletedKeys?.has(key) === true
-    return {
-      rows: (key) =>
-        truncated ||
-        rowKeys.has(key) ||
-        deleted(key) ||
-        (this.syncedData.has(key) && !this.hydrationSeedKeys.has(key)),
-      metadata: (key) =>
-        truncated ||
-        metadataKeys.has(key) ||
-        deleted(key) ||
-        this.appliedAdapterMetadataKeys?.has(key) === true,
-    }
-  }
-
   private getProjectedSyncedKeyState(
     projection: PendingSyncedProjection<TOutput, TKey>,
     key: TKey,
@@ -1005,6 +964,18 @@ export class CollectionStateManager<
     return `duplicate`
   }
 
+  /**
+   * A partial update merges over the row before it. An insert names the
+   * whole row, even as an equal re-insert, and replaces it.
+   */
+  private mergesOverRow(operation: PendingSyncOperation<TOutput, TKey>) {
+    return (
+      operation.type === `update` &&
+      operation.originalSyncType !== `insert` &&
+      (this.config.sync.rowUpdateMode || `partial`) === `partial`
+    )
+  }
+
   /** Classify an adapter insert against retained and queued source state. */
   classifyPendingSyncedInsert(
     key: TKey,
@@ -1022,14 +993,9 @@ export class CollectionStateManager<
     operation: PendingSyncOperation<TOutput, TKey>,
   ): void {
     const key = operation.key as TKey
-    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
     if (operation.type === `delete`) {
       projection.states.set(key, { exists: false, value: undefined })
-    } else if (
-      operation.type === `update` &&
-      operation.originalSyncType !== `insert` &&
-      rowUpdateMode === `partial`
-    ) {
+    } else if (this.mergesOverRow(operation)) {
       const current = this.getProjectedSyncedKeyState(projection, key)
       projection.states.set(key, {
         exists: true,
@@ -1300,7 +1266,6 @@ export class CollectionStateManager<
           })
         }
       }
-      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
@@ -1365,10 +1330,7 @@ export class CollectionStateManager<
           } else {
             this.syncedData.set(
               key,
-              // An insert names the whole row, even an equal re-insert.
-              operation.type === `update` &&
-                operation.originalSyncType !== `insert` &&
-                rowUpdateMode === `partial`
+              this.mergesOverRow(operation)
                 ? { ...this.syncedData.get(key), ...operation.value }
                 : operation.value,
               deferOrder,

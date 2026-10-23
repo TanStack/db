@@ -399,24 +399,34 @@ The repair keeps the existing structures and changes these rules.
 ### Code weight
 
 `pnpm size:compare` against `65d9ada50` (`origin/main` after the merge):
-`@tanstack/db` grows 258 bytes gzip, and the typical `app` scenario 240;
-`db-sqlite-persistence-core` grows 538; `query-db-collection` shrinks 5.
+the typical `app` scenario grows 111 bytes gzip; `@tanstack/db` as a whole
+package grows 295 (`client.js` +451 minified bytes, `collection/sync.js`
++276, `collection/state.js` +259); `db-sqlite-persistence-core` grows 536;
+`query-db-collection` shrinks 5.
 
-- Core: commit-order acceptance, per-object seed authority (including a
-  wrapping sync's staged transactions), the source-key sets that tell a
-  seed-only row from a source-written one, the readers' loops, and the skip of
-  invalid transactions.
-- Wrapper: the staged-row fold, the re-insert judgment, the record of
-  implicit metadata clears and their re-judgment after an inner commit, the
-  source-written key set, and the insert handoff to core and storage.
+- Core, paid by every app: the readers' loops over every pending
+  transaction and their skip of invalid transactions, commit-order
+  acceptance, the source-key sets that tell a seed-only row from a
+  source-written one, and the insert-replaces-its-row rule.
+- `DbClient` only: per-object seed authority, including a wrapping sync's
+  staged transactions. It lives in `client.ts`, so an app without `DbClient`
+  does not ship it.
+- Persistence only: the staged-row fold, the re-insert judgment, the record
+  of implicit metadata clears and their re-judgment after an inner commit,
+  the source-written key set, and the insert handoff to core and storage.
+  Each has a mutant that fails a persisted lane or witness.
 
-Refactors made to pay for it: the seed acceptance method became the single
-acceptance method for commits and seeds; the two seed authority lookups became
-one loop; the base invariant throw for an accepted duplicate is gone; guards on
-an invalid transaction's metadata writes were removed once a mutant showed them
-unobservable; and decision 8 removed the wrapper's invalidation and
-duplicate-key paths. The closed-nesting attempt was net negative because it
-deleted reclassification and invalidation, but decision 6 keeps both.
+Refactors made to pay for it: the seed authority lookups moved out of the
+state class into `client.ts` (`app` +240 to +111); the seed acceptance method
+became the single acceptance method for commits and seeds; the two seed
+authority lookups became one loop; the base invariant throw for an accepted
+duplicate is gone; guards on an invalid transaction's metadata writes were
+removed once a mutant showed them unobservable; decision 8 removed the
+wrapper's invalidation and duplicate-key paths. Two refactors were tried and
+reverted because they grew gzip: one shared reader for `row.get` and
+`collection.get` (gzip compresses the two loops better than the helper), and
+moving the wrapper's deferred-key predicate into core (it moved bytes from
+persistence into every app).
 
 ## Review ledger
 

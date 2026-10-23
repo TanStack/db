@@ -5649,9 +5649,8 @@ function createWrappedSyncConfig<
           params.collection._state.recomputeOptimisticState(false)
       }
       // Committed source transactions not yet handed to the Collection. Core
-      // holds settled optimistic rows on their keys until they apply.
-      // They are committed adapter work, so a late hydration seed cannot
-      // supersede them either.
+      // holds settled optimistic rows on their keys until they apply, and a
+      // late hydration seed cannot supersede them.
       params.collection._state.setDeferredSyncKeys(
         (key) =>
           pendingPublicationTransactions.some(
@@ -5692,10 +5691,12 @@ function createWrappedSyncConfig<
       const stagedRow = (
         key: TKey,
         until?: { transaction: OpenSyncTransaction<T, TKey>; index: number },
-        transactions = [...pendingPublicationTransactions, ...transactionStack],
       ): { present: boolean; value?: T } | undefined => {
         let row: { present: boolean; value?: T } | undefined
-        for (const transaction of transactions) {
+        for (const transaction of [
+          ...pendingPublicationTransactions,
+          ...transactionStack,
+        ]) {
           if (transaction.truncate) row = { present: false }
           const end =
             transaction === until?.transaction
