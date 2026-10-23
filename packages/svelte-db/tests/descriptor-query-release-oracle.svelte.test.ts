@@ -11,8 +11,9 @@
  * must still become one and the failed effect must release its subscription.
  * The release grammar crosses three rejection causes for a client-backed
  * query (a descriptor factory that throws during preparation, a query without
- * a stable IR identity, and a different source object under a Collection ID
- * the mounted hook already read), two source start policies, and three direct
+ * a stable IR identity, a query the live query rejects when it compiles, and
+ * a different source object under a Collection ID the mounted hook already
+ * read), two source start policies, and three direct
  * readers (`preload()`, `startSyncImmediate()`, and another hook). After the
  * rejection, an eager (`startSync: true`) source has started once and a lazy
  * source has not started; after the reader, each has started exactly once
@@ -39,6 +40,7 @@ import {
   Query,
   SourceCollectionIdReuseError,
   UnhashableQueryIRError,
+  UnsupportedRootScalarSelectError,
   collectionOptions,
   createCollection,
   eq,
@@ -217,6 +219,24 @@ describe(`Svelte descriptor source release`, () => {
             })
           })
         }).toThrow(UnhashableQueryIRError)
+        return () => dispose?.()
+      },
+    }),
+    'a query the live query rejects when it compiles': (shared, client) => ({
+      rejected: `UnsupportedRootScalarSelectError`,
+      run: () => {
+        let dispose: (() => void) | undefined
+        expect(() => {
+          dispose = $effect.root(() => {
+            useLiveQuery({
+              client,
+              // A root scalar select is valid IR that compilation refuses.
+              query: new Query()
+                .from({ shared })
+                .select(({ shared: row }: any) => row.id),
+            })
+          })
+        }).toThrow(UnsupportedRootScalarSelectError)
         return () => dispose?.()
       },
     }),

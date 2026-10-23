@@ -19,7 +19,9 @@
  * shared client descriptor, so a later direct reader can start that Collection.
  * The release history grammar crosses every rejection cause (a source ID
  * collision, a query without a stable IR identity, a descriptor factory that
- * throws while the query binds its sources), every hook path (live and
+ * throws while the query binds its sources, a query the live query rejects
+ * when it compiles, and a single-result query in an infinite hook, which
+ * pages many rows), every hook path (live and
  * infinite, with derived identity or a dependency list), and both direct
  * readers (another hook over the Collection, and `startSyncImmediate()`). The
  * release must also hold when earlier deferred sync starts throw: each pending
@@ -127,6 +129,8 @@ const releaseCauses: Record<
   ) => {
     rejected: (step: ReleaseStep) => ReleaseStep
     query: (q: any, step: ReleaseStep, ordered: boolean) => any
+    /** Whether the cause rejects in an unordered or ordered (infinite) hook. */
+    rejectsIn?: (ordered: boolean) => boolean
   }
 > = {
   'a source ID collision': (shared) => ({
@@ -177,6 +181,39 @@ const releaseCauses: Record<
           : q.from({ settings: step.current }),
         ordered,
       ),
+  }),
+  'a query the live query rejects when it compiles': (shared) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    // A root scalar select is valid IR that compilation refuses.
+    query: (q, step, ordered) =>
+      step.reject
+        ? orderIf(
+            q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              ),
+            ordered,
+          ).select(({ settings }: any) => settings.value)
+        : orderIf(q.from({ settings: step.current }), ordered),
+  }),
+  'a single-result window query': (shared) => ({
+    rejected: (step) => ({ ...step, reject: true }),
+    query: (q, step, ordered) => {
+      const query = orderIf(
+        step.reject
+          ? q
+              .from({ settings: step.current })
+              .join({ shared }, ({ settings, shared: row }: any) =>
+                eq(settings.id, row.id),
+              )
+          : q.from({ settings: step.current }),
+        ordered,
+      )
+      return step.reject ? query.findOne() : query
+    },
+    // A live query may read one row; an infinite query must page many.
+    rejectsIn: (ordered) => ordered,
   }),
 }
 
@@ -230,6 +267,8 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
   let sequence = 0
   for (const [causeName, makeCause] of Object.entries(releaseCauses)) {
     for (const [hookName, hook] of Object.entries(releaseHooks)) {
+      const probe = makeCause(undefined, undefined)
+      if (probe.rejectsIn && !probe.rejectsIn(hook.ordered)) continue
       for (const [readerName, read] of Object.entries(releaseReaders)) {
         it(`after ${causeName} in ${hookName}, ${readerName} starts the shared source`, async () => {
           const client = new DbClient()

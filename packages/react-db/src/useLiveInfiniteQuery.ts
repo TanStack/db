@@ -8,6 +8,7 @@ import {
   identifyLiveQuery,
   isCollection,
   readLiveQueryWindowPageShape,
+  rejectLiveQueryInput,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
@@ -227,20 +228,27 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   }
 
   const rendered = renderedRef.current
-  const binding = bindLiveQueryWindow(
-    committed?.binding ?? null,
-    {
-      ...pageShape,
-      input:
-        typeof queryFnOrCollection === `function`
-          ? compileQuery
-          : queryFnOrCollection,
-      dependencies,
-      scope: dbClient,
-      recompile: usesLegacyDeps ? `dependencies` : `identity`,
-    },
-    rendered?.binding,
-  )
+  let binding: LiveQueryWindowBinding
+  try {
+    binding = bindLiveQueryWindow(
+      committed?.binding ?? null,
+      {
+        ...pageShape,
+        input:
+          typeof queryFnOrCollection === `function`
+            ? compileQuery
+            : queryFnOrCollection,
+        dependencies,
+        scope: dbClient,
+        recompile: usesLegacyDeps ? `dependencies` : `identity`,
+      },
+      rendered?.binding,
+    )
+  } catch (error) {
+    // A window query the binding rejects, such as a single-result or
+    // uncompilable query, keeps no sync-start deferral.
+    rejectLiveQueryInput(deferredCollections, error)
+  }
 
   let currentRenderState = committed
   if (binding !== committed?.binding) {

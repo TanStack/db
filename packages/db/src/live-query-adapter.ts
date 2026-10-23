@@ -30,6 +30,7 @@ export {
   getPreparedLiveQueryIdentity,
   getPreparedLiveQuerySources,
   prepareLiveQueryValue,
+  rejectLiveQueryInput,
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from './live-query-options.js'

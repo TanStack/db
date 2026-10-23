@@ -3,7 +3,6 @@ import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from 'svelte/reactivity'
 import {
-  BaseQueryBuilder,
   UnhashableQueryIRError,
   createLiveQueryObserver,
   createLiveQuerySourceIdClaims,
@@ -14,6 +13,7 @@ import {
   isCollection,
   isSingleResultCollection,
   prepareLiveQueryValue,
+  rejectLiveQueryInput,
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
@@ -453,17 +453,17 @@ export function useLiveQuery(
       collection = null
     } else if (isCollection(preparedValue)) {
       collection = preparedValue
-    } else if (preparedValue instanceof BaseQueryBuilder) {
-      // Hydration keys the live-query Collection by identity.
-      collection = resolveLiveQueryValue(preparedValue, {
-        gcTime: DEFAULT_GC_TIME_MS,
-        pool: !dbClient,
-      })
     } else {
-      collection = resolveLiveQueryValue(preparedValue, {
-        gcTime: DEFAULT_GC_TIME_MS,
-        pool: !dbClient,
-      })
+      try {
+        // Hydration keys the live-query Collection by identity.
+        collection = resolveLiveQueryValue(preparedValue, {
+          gcTime: DEFAULT_GC_TIME_MS,
+          pool: !dbClient,
+        })
+      } catch (error) {
+        // A query the live query rejects keeps no sync-start deferral.
+        rejectLiveQueryInput(deferredCollections, error)
+      }
     }
 
     return {

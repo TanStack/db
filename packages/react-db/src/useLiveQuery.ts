@@ -12,6 +12,7 @@ import {
   identifyLiveQuery,
   isCollection,
   prepareLiveQueryValue,
+  rejectLiveQueryInput,
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
@@ -930,15 +931,20 @@ function useLiveQueryImpl(
         if (!dbClient) {
           getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
         }
-        instance.collection = resolveLiveQueryValue(preparedQueryValue, {
-          gcTime: forSuspense
-            ? DEFAULT_SUSPENSE_GC_TIME_MS
-            : DEFAULT_GC_TIME_MS,
-          // Hydration and Suspense key the live-query Collection by identity.
-          pool: !forSuspense && !dbClient,
-          // Without a DbClient, Suspense starts it through a preload below.
-          startSync: !forSuspense || dbClient !== undefined,
-        }) as SuspenseCollection | null
+        try {
+          instance.collection = resolveLiveQueryValue(preparedQueryValue, {
+            gcTime: forSuspense
+              ? DEFAULT_SUSPENSE_GC_TIME_MS
+              : DEFAULT_GC_TIME_MS,
+            // Hydration and Suspense key the live-query Collection by identity.
+            pool: !forSuspense && !dbClient,
+            // Without a DbClient, Suspense starts it through a preload below.
+            startSync: !forSuspense || dbClient !== undefined,
+          }) as SuspenseCollection | null
+        } catch (error) {
+          // A query the live query rejects keeps no sync-start deferral.
+          rejectLiveQueryInput(instance.deferredCollections, error)
+        }
         if (suspenseCollections && suspenseKey && instance.collection) {
           const collection = instance.collection
           const removeCleanupListener = collection.on(`status:cleaned-up`, () =>
