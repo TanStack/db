@@ -275,6 +275,7 @@ describe(`pooled live query gcTime`, () => {
             })
             source.startSyncImmediate()
             let statusLeases = 0
+            let statusReleases = 0
             const on = source.on.bind(source)
             source.on = (event, listener) => {
               const off = on(event, listener)
@@ -282,6 +283,7 @@ describe(`pooled live query gcTime`, () => {
               statusLeases++
               let active = true
               return () => {
+                statusReleases++
                 if (active) {
                   active = false
                   statusLeases--
@@ -314,6 +316,7 @@ describe(`pooled live query gcTime`, () => {
               expect(source.subscriberCount).toBe(0)
               expect(statusLeases, `partition released before cleanup`).toBe(0)
               const pending = source.cleanup()
+              const releasesBeforeRegistration = statusReleases
               let result: { threw: boolean; error?: unknown } = { threw: false }
               try {
                 subscription = view.subscribeChanges(() => {})
@@ -328,6 +331,10 @@ describe(`pooled live query gcTime`, () => {
                 statusLeases,
                 `failed/terminal registration owns no channel`,
               ).toBe(0)
+              expect(
+                statusReleases - releasesBeforeRegistration,
+                `one late channel needs one release invocation`,
+              ).toBe(1)
               expect(source.subscriberCount).toBe(0)
               expect(view.status).toBe(`error`)
               gate.resolve()

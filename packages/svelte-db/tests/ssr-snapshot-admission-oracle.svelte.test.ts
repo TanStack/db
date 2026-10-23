@@ -18,8 +18,9 @@ import type { SsrSnapshotHistory } from '../../db/tests/ssr-snapshot-admission-o
  * Svelte supplies its own server host for the shared SSR admission judgment.
  * Source actions and legal histories are the same as React's receiving driver;
  * expected rejection, rows and status come only from the shared model. Compare
- * the two server renders before a browser subscription can hide missing state.
- * Actual browser subscription/handoff remains in hydration.svelte.test.ts.
+ * the two server renders to check server-side transport reconstruction only.
+ * The actual browser branch is checked by ssr-snapshot-handoff-oracle.svelte.test.ts;
+ * hydration.svelte.test.ts separately owns normal browser/effect handoff.
  */
 describe(`Svelte SSR snapshot admission`, () => {
   const makeReach = () =>

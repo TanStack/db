@@ -5,9 +5,12 @@ type OracleEnvironment = Record<string, string | undefined>
 const staticOracleProperties = [
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
+  `react.ssr-stream-cut`,
   `svelte.ssr-snapshot`,
+  `svelte.ssr-handoff`,
   `pooled-live-query.late-cleanup`,
   `live-query-observer.partial-attach`,
+  `live-query-observer.release-failure`,
   `subscription-lifecycle.notification-error`,
   `live-query.start-handoff`,
   `react.descriptor-error-surface`,

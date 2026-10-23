@@ -129,8 +129,8 @@ export interface LiveQueryObserver<
 > {
   /** Stable per-revision snapshot for wholesale materialization. */
   getSnapshot: () => LiveQuerySnapshot<T, TKey>
-  /** Stable server snapshot used by useSyncExternalStore-style adapters. */
-  getServerSnapshot: () => LiveQuerySnapshot<T, TKey>
+  /** Server snapshot. preloadRequested marks an explicit streaming Suspense load. */
+  getServerSnapshot: (preloadRequested?: boolean) => LiveQuerySnapshot<T, TKey>
   /**
    * Subscribe to changes. The listener receives the change set (or `undefined`
    * for the synthetic notify a ready collection emits on attach). Granular
@@ -204,8 +204,6 @@ class LiveQueryObserverImpl<
   private cachedEntries: Array<[TKey, T]> | undefined
   private cachedCollectionRevision: number | undefined
   private cachedCollectionLayoutRevision: number | undefined
-  private serverSnapshots:
-    WeakMap<LiveQuerySnapshot<T, TKey>, LiveQuerySnapshot<T, TKey>> | undefined
   private snapshotDirty = true
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
@@ -225,6 +223,7 @@ class LiveQueryObserverImpl<
     | {
         dehydratedAt: number
         entries: Array<[TKey, T]>
+        snapshot: DehydratedLiveQueryResult
       }
     | undefined
   private hydrationError: unknown
@@ -287,7 +286,7 @@ class LiveQueryObserverImpl<
         this.hasHydrationError || liveStatus === `error`
           ? (`error` as const)
           : this.hasHydrationSeed()
-            ? (`ready` as const)
+            ? (this.hydrationSeed!.snapshot.status ?? `ready`)
             : liveStatus
 
       // Bump the layout revision when the ordered key sequence changes
@@ -334,7 +333,7 @@ class LiveQueryObserverImpl<
     return this.cachedSnapshot
   }
 
-  getServerSnapshot(): LiveQuerySnapshot<T, TKey> {
+  getServerSnapshot(preloadRequested = false): LiveQuerySnapshot<T, TKey> {
     const snapshot = this.getSnapshot()
     const collection = this.collection
     if (
@@ -345,39 +344,44 @@ class LiveQueryObserverImpl<
     )
       return snapshot
 
-    // Only completed query results transfer readiness. Source rows remain
-    // provisional, and incidental server state needs explicit preparation.
-    if (snapshot.state?.size || snapshot.isReady) {
-      const { sources } = this.getSourceInfo()
-      if (
+    // React also calls this getter in the browser during hydration. Only
+    // server reads perform admission; transported seeds win over local activity.
+    if (typeof window !== `undefined`) return snapshot
+
+    // A suspended component has not rendered this loading view. Its settled
+    // stream will supply the first rendered result.
+    if (preloadRequested && !snapshot.isReady) return snapshot
+
+    const { sources } = this.getSourceInfo()
+    if (
+      !this.queryHash ||
+      (!preloadRequested &&
+        (this.getVisibleEntries(collection).length > 0 || snapshot.isReady) &&
         !(sources ?? [collection]).every((source) =>
           this.client!._hasSsrCollectionSnapshot(source),
-        )
-      ) {
-        throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration.`
-            : codedMessage(245),
-        )
-      }
+        ))
+    ) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.`
+          : codedMessage(245),
+      )
     }
 
-    // Keep the ordinary cache intact. Weak keys let obsolete revisions retire
-    // even when a browser observer survives its hydration render.
-    let serverSnapshot = this.serverSnapshots?.get(snapshot)
-    if (!serverSnapshot) {
-      serverSnapshot = {
-        ...snapshot,
-        status: `loading`,
-        ...getLiveQueryStatusFlags(`loading`),
-        persistedStatus: snapshot.isPersistedReady
-          ? `loading`
-          : snapshot.persistedStatus,
-        isPersistedReady: false,
-      }
-      ;(this.serverSnapshots ??= new WeakMap()).set(snapshot, serverSnapshot)
-    }
-    return serverSnapshot
+    // Capture at render, rather than sampling mutable source rows at dehydrate.
+    // Loading views transfer rows without answering a later data preload.
+    this.client._captureServerQuery(
+      this.queryHash,
+      {
+        rows: this.getVisibleEntries(collection).map(([key, value]) => ({
+          key,
+          value,
+        })),
+        ...(snapshot.isReady ? {} : { status: `loading` as const }),
+      },
+      sources,
+    )
+    return this.getSnapshot()
   }
 
   getError(): unknown {
@@ -389,9 +393,11 @@ class LiveQueryObserverImpl<
     const collection = this.collection
     if (!collection) return { rows: [] }
 
-    const entries = this.hasHydrationSeed()
-      ? this.hydrationSeed!.entries
-      : this.readEntries(collection).entries
+    const entries =
+      this.hasHydrationSeed() &&
+      this.hydrationSeed!.snapshot.status !== `loading`
+        ? this.hydrationSeed!.entries
+        : this.readEntries(collection).entries
 
     return {
       rows: entries.map(([key, value]) => ({
@@ -461,21 +467,18 @@ class LiveQueryObserverImpl<
       return changed
     }
 
+    const snapshot = query.initialSnapshot ?? query.snapshot
     if (
-      query.status !== `success` ||
-      !query.snapshot ||
-      (this.hydrationSeed &&
-        this.hydrationSeed.dehydratedAt >= query.dehydratedAt)
+      !snapshot ||
+      (this.hydrationSeed && this.hydrationSeed.snapshot === snapshot)
     ) {
       return false
     }
 
     this.hydrationSeed = {
       dehydratedAt: query.dehydratedAt,
-      entries: query.snapshot.rows.map((row) => [
-        row.key as TKey,
-        row.value as T,
-      ]),
+      snapshot,
+      entries: snapshot.rows.map((row) => [row.key as TKey, row.value as T]),
     }
     this.hydrationError = undefined
     this.hasHydrationError = false
@@ -909,13 +912,14 @@ class LiveQueryObserverImpl<
   }
 
   private detach(): void {
-    this.collectionUnsub?.()
+    const release = this.collectionUnsub
+    const unregister = this.unregisterClientResource
     this.collectionUnsub = null
     this.attached = false
     this.blockDelivery = false
     this.publicationQueue.length = 0
-    this.unregisterClientResource?.()
     this.unregisterClientResource = undefined
+    runAllCallbacks([() => release?.(), () => unregister?.()])
   }
 
   private registerClientResource(): void {
@@ -1029,22 +1033,24 @@ class LiveQueryObserverImpl<
     const { sources, pooledSource } = this.getSourceInfo()
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
-      if (query?.status === `pending` || query?.status === `success`) {
-        try {
-          if (sources)
-            this.client._assertLiveQuerySources(this.queryHash, sources)
+      try {
+        if (sources)
+          this.client._assertLiveQuerySources(this.queryHash, sources)
+        if (
+          query?.status === `pending` ||
+          (query?.status === `success` && query.snapshot?.status !== `loading`)
+        ) {
           if (pooledSource && this.collection) {
             return Promise.all([query.promise, this.collection.preload()]).then(
               () => {},
             )
           }
-          // The client stream answers this preload, but it is still a request
-          // for this Collection's data, so its deferred acquisition may resume.
+          // Stream reuse remains explicit demand for the local Collection.
           this.collection?._markPreload()
-        } catch (error) {
-          return Promise.reject(error)
+          return query.status === `pending` ? query.promise : Promise.resolve()
         }
-        return query.status === `pending` ? query.promise : Promise.resolve()
+      } catch (error) {
+        return Promise.reject(error)
       }
     }
 

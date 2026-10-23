@@ -15,3 +15,5 @@ Subscribers that survive cleanup during admission retain demand for an explicit 
 Keep ordinary hook errors readable when deferred sync startup records an error. Explicit preloads still report source startup failures. Release channels acquired before synchronous cleanup registration or observer attachment fails.
 
 Reject SSR reads of incidental server-only rows or readiness with an actionable preparation error. Preserve cold loading and normalized source hydration, consume prepared infinite-query snapshots, and register warm Suspense results for streaming.
+
+Capture prepared SSR query rows and readiness at render time. Keep loading captures separate from completed preloads, preserve pending streams, and allow browser writes before hydration. Support prepared non-streaming Suspense, require portable opaque query identity, and include limit and offset in explicit-key result identity.

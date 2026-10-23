@@ -2477,5 +2477,5 @@ A windowed or findOne result row has no include route
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration.
+SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.
 ```

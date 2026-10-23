@@ -1053,7 +1053,7 @@ function useLiveQueryImpl(
       // Streaming Suspense discovers a query even when a peer warmed its source.
       if (forSuspense && dbClient?._isSsrStreamingEnabled()) {
         observer.preloadForInitialRender().catch(() => {})
-        return observer.getSnapshot()
+        return observer.getServerSnapshot(true)
       }
       return observer.getServerSnapshot()
     },

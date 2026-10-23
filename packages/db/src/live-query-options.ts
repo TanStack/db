@@ -200,11 +200,35 @@ export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,
 ): string {
-  const identity = queryKey?.length
-    ? [`queryKey`, queryKey]
-    : isCollection(preparedValue)
-      ? [`collection`, preparedValue.id]
-      : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
+  if (queryKey?.length) {
+    const query =
+      preparedValue instanceof BaseQueryBuilder
+        ? preparedValue
+        : preparedValue &&
+            typeof preparedValue === `object` &&
+            `query` in preparedValue
+          ? preparedValue.query
+          : undefined
+    const ir = isCollection(preparedValue)
+      ? (
+          preparedValue as {
+            utils: {
+              getWindow?: () => { limit: number; offset: number } | undefined
+            }
+          }
+        ).utils.getWindow?.()
+      : query instanceof BaseQueryBuilder
+        ? query._getQuery()
+        : undefined
+    const window =
+      ir && (ir.limit !== undefined || (ir.offset ?? 0) !== 0)
+        ? [{ limit: ir.limit, offset: ir.offset ?? 0 }]
+        : []
+    return getStableValueHash([`queryKey`, queryKey, ...window], `queryKey`)
+  }
+  const identity = isCollection(preparedValue)
+    ? [`collection`, preparedValue.id]
+    : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
   return getStableValueHash(identity, `queryKey`)
 }

@@ -98,6 +98,7 @@ import {
   Query,
   collectionOptions,
   createCollection,
+  createLiveQueryCollection,
   eq,
   getLiveQueryHash,
   getStableQueryBuilderHash,
@@ -1884,6 +1885,18 @@ describe(`descriptor error handoff at React commit`, () => {
  * Query-only infinite preparation includes its first-page peek-ahead window.
  * This driver supplies host scheduling, not another expected-result model.
  */
+// React's server renderer runs in this jsdom test process. Remove the browser
+// global only for that host call; hydrateRoot retains the real browser globals.
+function renderSsr(node: ReactNode): string {
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    return renderToString(node)
+  } finally {
+    vi.stubGlobal(`window`, browserWindow)
+  }
+}
+
 describe(`SSR snapshot admission`, () => {
   const properties = {
     ordinary: `react.ssr-ordinary`,
@@ -1899,6 +1912,9 @@ describe(`SSR snapshot admission`, () => {
         `normalized-ready`,
         `normalized-partial`,
         `pending-query`,
+        `server-write`,
+        `browser-write`,
+        `same-query-preload`,
       ])
     async function checkHistory(
       history: SsrSnapshotHistory,
@@ -1907,6 +1923,7 @@ describe(`SSR snapshot admission`, () => {
       reach.beginHistory()
       const expected = expectedSsrSnapshot(history)
       const starts = { server: 0, browser: 0 }
+      const writers = new Map<`server` | `browser`, (name: string) => void>()
       const descriptor = collectionOptions(`ssr-admission`, (client) => ({
         id: `ssr-admission`,
         getKey: (row: { id: string; name: string }) => row.id,
@@ -1918,6 +1935,11 @@ describe(`SSR snapshot admission`, () => {
               `runtime`,
             )
             starts[runtime]++
+            writers.set(runtime, (name) => {
+              begin()
+              write({ type: `insert`, value: { id: `late`, name } })
+              commit()
+            })
             begin()
             for (const row of history.rows)
               write({
@@ -1995,7 +2017,7 @@ describe(`SSR snapshot admission`, () => {
         let html: string | undefined
         let failure: unknown
         try {
-          html = renderToString(app(server))
+          html = renderSsr(app(server))
         } catch (error) {
           failure = error
         }
@@ -2025,12 +2047,28 @@ describe(`SSR snapshot admission`, () => {
           )
         } else {
           expect(failure, `prepared and cold SSR remain legal`).toBeUndefined()
+          if (history.serverWrite && history.sourceState !== `idle`) {
+            writers.get(`server`)!(`late server`)
+            reach.reach(`server-write`)
+          }
           browser.hydrate(server.dehydrate())
-          const initialBrowserHtml = renderToString(app(browser))
-          expect(
-            initialBrowserHtml,
-            `initial rows and every rendered status flag match`,
-          ).toBe(html)
+          if (history.browserWrite) {
+            if (history.browserPreload) {
+              await browser.preloadLiveQuery({
+                query: hook === `infinite` ? query.limit(2).offset(0) : query,
+              })
+              reach.reach(`same-query-preload`)
+            }
+            await browser.collection(descriptor).preload()
+            writers.get(`browser`)!(`late browser`)
+            reach.reach(`browser-write`)
+          }
+          let initialBrowserHtml: string | undefined, hydrationError: unknown
+          try {
+            initialBrowserHtml = renderToString(app(browser))
+          } catch (error) {
+            hydrationError = error
+          }
           host.innerHTML = html!
           expect(
             host.querySelector(`output`)?.getAttribute(`data-status`),
@@ -2043,7 +2081,10 @@ describe(`SSR snapshot admission`, () => {
               : expected.rows.slice(0, 1)
             ).map((row) => row.name),
           )
-          expect(starts.browser, `hydration read starts no source`).toBe(0)
+          expect(
+            starts.browser,
+            `hydration read starts no additional source`,
+          ).toBe(history.browserWrite ? 1 : 0)
           document.body.append(host)
           await act(async () => {
             root = hydrateRoot(host, app(browser), {
@@ -2051,6 +2092,14 @@ describe(`SSR snapshot admission`, () => {
             })
             await Promise.resolve()
           })
+          expect(
+            hydrationError,
+            `browser activity cannot become an SSR programming error`,
+          ).toBeUndefined()
+          expect(
+            initialBrowserHtml,
+            `initial rows and every rendered status flag match`,
+          ).toBe(html)
           expect(
             recoveries,
             `React receives the same snapshot without recovery`,
@@ -2065,9 +2114,27 @@ describe(`SSR snapshot admission`, () => {
           expect(
             [...host.querySelectorAll(`span`)].map((span) => span.textContent),
           ).toEqual(
-            (hook === `ordinary` ? history.rows : history.rows.slice(0, 1)).map(
-              (row) => `browser ${row.id}`,
-            ),
+            hook === `ordinary`
+              ? [
+                  ...history.rows.map((row) => `browser ${row.id}`),
+                  ...(history.browserWrite
+                    ? [`late browser`]
+                    : history.preparation === `source` &&
+                        history.serverWrite &&
+                        history.sourceState !== `idle`
+                      ? [`late server`]
+                      : []),
+                ]
+              : [
+                  ...history.rows.map((row) => `browser ${row.id}`),
+                  ...(history.browserWrite
+                    ? [`late browser`]
+                    : history.preparation === `source` &&
+                        history.serverWrite &&
+                        history.sourceState !== `idle`
+                      ? [`late server`]
+                      : []),
+                ].slice(0, 1),
           )
           if (history.preparation === `query`) reach.reach(`query-result`)
           else if (
@@ -2145,7 +2212,7 @@ describe(`SSR Suspense discovery`, () => {
         .select(({ person }) => ({ name: person.name }))
       function Consumer() {
         const result = useLiveSuspenseQuery({ query })
-        return <span>{result.data[0]?.name}</span>
+        return <span>{result.data.map((row) => row.name).join(`,`)}</span>
       }
       try {
         if (warm)
@@ -2201,3 +2268,492 @@ describe(`SSR Suspense discovery`, () => {
     })
   }
 })
+
+/** Prepared Suspense results must render on either React server host. Streaming
+ * is explicit demand; opaque logic still requires a portable identity even
+ * when warm. This bounded grammar crosses source/query preparation, empty/nonempty
+ * results, streaming on/off, and keyed/unkeyed opaque discovery. The observation
+ * is final server markup and server errors, before any browser can repair it.
+ */
+describe(`SSR Suspense receiving matrix`, () => {
+  for (const streaming of [false, true]) {
+    for (const preparation of [`source`, `query`] as const) {
+      for (const count of [0, 2]) {
+        it(`renders prepared ${preparation} count=${count} streaming=${streaming}`, async () => {
+          const descriptor = collectionOptions(`suspense-prepared`, () => ({
+            id: `suspense-prepared`,
+            getKey: (row: { id: string; name: string }) => row.id,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                begin()
+                for (let i = 0; i < count; i++)
+                  write({
+                    type: `insert`,
+                    value: { id: String(i), name: `server ${i}` },
+                  })
+                commit()
+                markReady()
+              },
+            },
+          }))
+          const client = new DbClient()
+          client._setSsrStreamingEnabled(streaming)
+          const query = new Query()
+            .from({ person: descriptor })
+            .select(({ person }) => ({ name: person.name }))
+          function Consumer() {
+            const { data } = useLiveSuspenseQuery({ query })
+            return (
+              <output>
+                {data.map((row) => row.name).join(`,`) || `empty ready`}
+              </output>
+            )
+          }
+          const app = (
+            <DbProvider client={client}>
+              <Suspense fallback={<span>loading</span>}>
+                <Consumer />
+              </Suspense>
+            </DbProvider>
+          )
+          const browserWindow = globalThis.window
+          try {
+            if (preparation === `source`)
+              await client.collection(descriptor).preload()
+            else await client.preloadLiveQuery({ query })
+            vi.stubGlobal(`window`, undefined)
+            let html: string
+            const errors: Array<unknown> = []
+            if (!streaming) html = renderToString(app)
+            else
+              html = await new Promise<string>((resolve, reject) => {
+                let result = ``
+                const sink = new Writable({
+                  write(chunk, _encoding, done) {
+                    result += chunk.toString()
+                    done()
+                  },
+                })
+                sink.on(`finish`, () => resolve(result))
+                sink.on(`error`, reject)
+                const stream = renderToPipeableStream(app, {
+                  onAllReady() {
+                    stream.pipe(sink)
+                  },
+                  onError(error) {
+                    errors.push(error)
+                  },
+                })
+              })
+            expect(errors).toEqual([])
+            expect(
+              html,
+              `prepared results finish rather than suspend forever`,
+            ).toContain(
+              `<output>${count ? `server 0,server 1` : `empty ready`}</output>`,
+            )
+          } finally {
+            vi.stubGlobal(`window`, browserWindow)
+            await client.cleanup()
+          }
+        })
+      }
+    }
+  }
+  for (const warm of [false, true])
+    for (const keyed of [false, true]) {
+      it(`checks opaque streaming identity warm=${warm} keyed=${keyed}`, async () => {
+        const descriptor = collectionOptions(`opaque-ssr`, () => ({
+          id: `opaque-ssr`,
+          getKey: (row: { id: string }) => row.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              write({ type: `insert`, value: { id: `server` } })
+              commit()
+              markReady()
+            },
+          },
+        }))
+        const client = new DbClient()
+        client._setSsrStreamingEnabled(true)
+        const query = new Query()
+          .from({ row: descriptor })
+          .fn.where(({ row }) => row.id.length > 0)
+        function Consumer() {
+          const { data } = useLiveSuspenseQuery({
+            query,
+            ...(keyed ? { queryKey: [`opaque`] } : {}),
+          })
+          return <output>{data.map((row) => row.id).join(`,`)}</output>
+        }
+        const browserWindow = globalThis.window
+        try {
+          if (warm)
+            await client.preloadLiveQuery({
+              query: new Query()
+                .from({ row: descriptor })
+                .select(({ row }) => ({ id: row.id })),
+            })
+          vi.stubGlobal(`window`, undefined)
+          const errors: Array<unknown> = []
+          const html = await new Promise<string>((resolve, reject) => {
+            let result = ``
+            const sink = new Writable({
+              write(chunk, _encoding, done) {
+                result += chunk.toString()
+                done()
+              },
+            })
+            sink.on(`finish`, () => resolve(result))
+            sink.on(`error`, reject)
+            const stream = renderToPipeableStream(
+              <DbProvider client={client}>
+                <Suspense fallback={<span>loading</span>}>
+                  <Consumer />
+                </Suspense>
+              </DbProvider>,
+              {
+                onAllReady() {
+                  stream.pipe(sink)
+                },
+                onError(error) {
+                  errors.push(error)
+                },
+              },
+            )
+          })
+          if (keyed) {
+            expect(errors).toEqual([])
+            expect(html).toContain(`<output>server</output>`)
+            expect(
+              client
+                .dehydrate()
+                .liveQueries?.some(
+                  (q) =>
+                    q.queryHash === getLiveQueryHash({ query }, [`opaque`]),
+                ),
+            ).toBe(true)
+          } else {
+            expect(
+              errors,
+              `warm rows do not waive transport identity`,
+            ).toHaveLength(1)
+            expect(String(errors[0])).toMatch(/explicit serializable queryKey/)
+          }
+        } finally {
+          vi.stubGlobal(`window`, browserWindow)
+          await client.cleanup()
+        }
+      })
+    }
+})
+
+/** Result identity includes the caller's current input and its initial window.
+ * The reference is authored rows sliced by page size, never transport records.
+ * Browser replacement crosses builder -> callback Collection, with a distinct
+ * explicit key or derived identity. Server preload checks both matching and
+ * unbounded windows under one key; their portable result identities must differ.
+ */
+function useRuntimeWindow(
+  input: unknown,
+  config: { pageSize: number; queryKey?: Array<string> },
+) {
+  // Exercise the callback-returned Collection runtime path without extending
+  // TypeScript's current QueryBuilder-only callback overload.
+  return Reflect.apply(useLiveInfiniteQuery, undefined, [input, config]) as {
+    data: Array<{ id: string; name: string }>
+  }
+}
+describe(`infinite hydration identity`, () => {
+  for (const keyed of [false, true])
+    it(`switches to callback Collection keyed=${keyed}`, async () => {
+      const source = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `infinite-identity-source`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `a`, name: `old` },
+            { id: `b`, name: `new` },
+          ],
+        }),
+      )
+      const client = new DbClient()
+      const oldQuery = new Query()
+        .from({ row: source })
+        .where(({ row }) => eq(row.id, `a`))
+        .orderBy(({ row }) => row.id)
+      const supplied = createLiveQueryCollection({
+        query: new Query()
+          .from({ row: source })
+          .where(({ row }) => eq(row.id, `b`))
+          .orderBy(({ row }) => row.id)
+          .limit(2),
+      })
+      let unmount: (() => void) | undefined
+      try {
+        await client.preloadLiveQuery({
+          query: oldQuery.limit(2),
+          ...(keyed ? { queryKey: [`old`] } : {}),
+        })
+        await supplied.preload()
+        const wrapper = ({ children }: { children: ReactNode }) => (
+          <DbProvider client={client}>{children}</DbProvider>
+        )
+        const hook = renderHook(
+          ({ replacement }: { replacement: boolean }) =>
+            useRuntimeWindow(() => (replacement ? supplied : oldQuery), {
+              pageSize: 1,
+              ...(keyed ? { queryKey: [replacement ? `new` : `old`] } : {}),
+            }),
+          { wrapper, initialProps: { replacement: false } },
+        )
+        unmount = hook.unmount
+        expect(hook.result.current.data.map((row) => row.name)).toEqual([`old`])
+        hook.rerender({ replacement: true })
+        expect(
+          hook.result.current.data.map((row) => row.name),
+          `replacement owns its hydration identity`,
+        ).toEqual([`new`])
+      } finally {
+        unmount?.()
+        await client.cleanup()
+        await supplied.cleanup()
+        await source.cleanup()
+      }
+    })
+  for (const matching of [false, true])
+    it(`keeps keyed initial window distinct matching=${matching}`, async () => {
+      const descriptor = collectionOptions(`window-identity`, () => ({
+        id: `window-identity`,
+        getKey: (row: { id: string }) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const id of [`a`, `b`, `c`, `d`])
+              write({ type: `insert`, value: { id } })
+            commit()
+            markReady()
+          },
+        },
+      }))
+      const query = new Query()
+        .from({ row: descriptor })
+        .orderBy(({ row }) => row.id)
+      const client = new DbClient()
+      try {
+        const unbounded = getLiveQueryHash({ query }, [`window`])
+        const windowed = getLiveQueryHash({ query: query.limit(2).offset(0) }, [
+          `window`,
+        ])
+        await client.preloadLiveQuery({
+          query: matching ? query.limit(2).offset(0) : query,
+          queryKey: [`window`],
+        })
+        function Consumer() {
+          const result = useLiveInfiniteQuery(() => query, {
+            pageSize: 1,
+            queryKey: [`window`],
+          })
+          return <output>{result.data.map((row) => row.id).join(`,`)}</output>
+        }
+        const renderWindow = () =>
+          renderSsr(
+            <DbProvider client={client}>
+              <Consumer />
+            </DbProvider>,
+          )
+        if (matching) expect(renderWindow()).toContain(`<output>a</output>`)
+        else expect(renderWindow).toThrow(/SSR.*preload/)
+        expect(
+          unbounded,
+          `unbounded and windowed results cannot alias`,
+        ).not.toBe(windowed)
+        if (matching)
+          expect(
+            client
+              .dehydrate()
+              .liveQueries?.find((q) => q.queryHash === windowed)?.snapshot
+              ?.rows,
+          ).toHaveLength(2)
+      } finally {
+        await client.cleanup()
+      }
+    })
+})
+
+// Streaming must capture the view it actually renders, even when the adapter
+// publishes again in the microtask before its preload promise captures a result.
+// This metamorphic observation compares the final host markup with transport.
+async function checkStreamCut(
+  history: { count: number; writes: number },
+  reach: ReturnType<typeof createStreamReach>,
+) {
+  reach.beginHistory()
+  const authoredRows = Array.from({ length: history.count }, (_, i) => ({
+    id: String(i),
+    name: `first ${i}`,
+  }))
+  const descriptor = collectionOptions(`stream-render-cut`, () => ({
+    id: `stream-render-cut`,
+    getKey: (row: { id: string; name: string }) => row.id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of authoredRows) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+        queueMicrotask(() => {
+          for (let i = 0; i < history.writes; i++) {
+            begin()
+            write({
+              type: history.count || i ? `update` : `insert`,
+              value: { id: `0`, name: `later ${i}` },
+            })
+            commit()
+          }
+        })
+      },
+    },
+  }))
+  const client = new DbClient()
+  client._setSsrStreamingEnabled(true)
+  const query = new Query()
+    .from({ row: descriptor })
+    .select(({ row }) => ({ name: row.name }))
+  function Consumer() {
+    const result = useLiveSuspenseQuery({ query })
+    return <span>{result.data.map((row) => row.name).join(`,`)}</span>
+  }
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    const errors: Array<unknown> = []
+    const html = await new Promise<string>((resolve, reject) => {
+      let text = ``
+      const sink = new Writable({
+        write(chunk, _encoding, done) {
+          text += chunk.toString()
+          done()
+        },
+      })
+      sink.on(`finish`, () => resolve(text))
+      sink.on(`error`, reject)
+      const stream = renderToPipeableStream(
+        <DbProvider client={client}>
+          <Suspense fallback={<span>loading</span>}>
+            <Consumer />
+          </Suspense>
+        </DbProvider>,
+        {
+          onAllReady() {
+            stream.pipe(sink)
+          },
+          onError(error) {
+            errors.push(error)
+          },
+        },
+      )
+    })
+    expect(errors).toEqual([])
+    const rendered = html.match(/<span>([^<]*)<\/span>/)?.[1]
+    expect(rendered).toBe(authoredRows.map((row) => row.name).join(`,`))
+    const transport = client
+      .dehydrate({ shouldDehydrateLiveQuery: () => true })
+      .liveQueries!.find(
+        (result) => result.queryHash === getLiveQueryHash({ query }),
+      )!
+    const snapshot = transport.snapshot ?? (await transport.promise)
+    expect(
+      snapshot?.rows.map((row) => (row.value as { name: string }).name),
+      `stream transport reproduces its rendered view`,
+    ).toEqual(authoredRows.map((row) => row.name))
+    reach.reach(history.count ? `nonempty` : `empty`)
+    reach.reach(history.writes ? `later-publication` : `unchanged`)
+  } finally {
+    vi.stubGlobal(`window`, browserWindow)
+    await client.cleanup()
+  }
+}
+const createStreamReach = () =>
+  createOracleReach(`react-stream-cut`, [
+    `empty`,
+    `nonempty`,
+    `later-publication`,
+    `unchanged`,
+  ])
+describe(`stream render snapshot cut`, () => {
+  for (const history of [
+    { count: 0, writes: 1 },
+    { count: 1, writes: 1 },
+    { count: 1, writes: 0 },
+  ])
+    it(`replays count=${history.count} later-writes=${history.writes}`, () =>
+      checkStreamCut(history, createStreamReach()))
+  for (const campaign of [`fixed`, `random`] as const)
+    it(`transports the rendered view (${campaign})`, async () => {
+      const reach = createStreamReach()
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            count: fc.integer({ min: 0, max: 3 }),
+            writes: fc.integer({ min: 0, max: 3 }),
+          }),
+          (history) => checkStreamCut(history, reach),
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(40), seed: 2229 }
+          : oraclePropertyOptions(40, `react.ssr-stream-cut`),
+      )
+      reach.assertReached()
+      console.info(
+        `react-stream-cut ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+})
+
+// Explicit keys identify the same window across builder preload and supplied
+// Collection input, including a callback that returns that Collection.
+for (const callback of [false, true])
+  it(`hydrates a supplied window with callback=${callback}`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `supplied-window-key`,
+        getKey: (row) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        initialData: [{ id: `a` }, { id: `b` }, { id: `c` }],
+      }),
+    )
+    const query = new Query()
+      .from({ row: source })
+      .orderBy(({ row }) => row.id)
+      .limit(2)
+      .offset(0)
+    const supplied = createLiveQueryCollection({ query })
+    const client = new DbClient()
+    function Consumer() {
+      const result = useRuntimeWindow(callback ? () => supplied : supplied, {
+        pageSize: 1,
+        queryKey: [`supplied`],
+      })
+      return <output>{result.data.map((row) => row.id).join(`,`)}</output>
+    }
+    try {
+      await client.preloadLiveQuery({ query, queryKey: [`supplied`] })
+      expect(
+        renderSsr(
+          <DbProvider client={client}>
+            <Consumer />
+          </DbProvider>,
+        ),
+      ).toContain(`<output>a</output>`)
+    } finally {
+      await client.cleanup()
+      await supplied.cleanup()
+      await source.cleanup()
+    }
+  })

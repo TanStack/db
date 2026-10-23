@@ -417,6 +417,5 @@
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
   "startSyncForSubscriber": "gT",
-  "snapshotFrom": "gV",
-  "serverSnapshots": "gU"
+  "snapshotFrom": "gV"
 }

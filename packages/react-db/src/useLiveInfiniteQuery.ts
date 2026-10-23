@@ -400,7 +400,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       throw new Error(`useLiveInfiniteQuery: Failed to create a collection.`)
     }
 
-    if (inputIsCollection) {
+    if (inputIsCollection || suppliedCollection) {
       queryHash = dbClient
         ? getLiveQueryHash(collection, config.queryKey)
         : undefined

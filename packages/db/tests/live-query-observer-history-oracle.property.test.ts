@@ -228,6 +228,138 @@ describe(`observer subscription setup ownership`, () => {
 })
 
 /**
+ * A release retires its logical owner even when application notification throws.
+ * Reporting that failure cannot leave the observer attached to zero channels.
+ * This is the existing ownership law at teardown rather than construction.
+ * The independent judgment is zero channels after release and one after a new
+ * returned subscription. A controlled channel release supplies the synchronous
+ * collaborator failure after retiring its real Collection handle. First-party
+ * event listeners report errors asynchronously and cannot supply this premise.
+ * The grammar varies both modes, thrown undefined, and repeated release/retry.
+ */
+describe(`observer release failure ownership`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`reattaches after reporting a release failure (${campaign})`, async () => {
+      const reach = createOracleReach(`observer-release`, [
+        `granular`,
+        `wholesale`,
+        `release-error`,
+        `retry`,
+        `undefined-cause`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            mode: fc.constantFrom(`granular` as const, `wholesale` as const),
+            undefinedCause: fc.boolean(),
+            repeats: fc.integer({ min: 1, max: 3 }),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            reach.reach(history.mode)
+            const failure = history.undefinedCause
+              ? undefined
+              : new Error(`release notification`)
+            let failRelease = false,
+              publish = () => {}
+            const source = createCollection<Row>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              sync: {
+                sync: ({ begin, write, commit, markReady }) => {
+                  markReady()
+                  let version = 0
+                  publish = () => {
+                    begin()
+                    write({
+                      type: version ? `update` : `insert`,
+                      value: { id: `a`, version: ++version },
+                    })
+                    commit()
+                  }
+                },
+              },
+            })
+            // A controlled channel release retires its real Collection handle,
+            // then reports a synchronous collaborator failure. Event listeners
+            // use reportUncaught instead and cannot supply this premise.
+            const subscribe = source.subscribeChanges.bind(source)
+            const stopFailure = vi
+              .spyOn(source, `subscribeChanges`)
+              .mockImplementation((...args) => {
+                const subscription = subscribe(...args)
+                const unsubscribe = subscription.unsubscribe.bind(subscription)
+                vi.spyOn(subscription, `unsubscribe`).mockImplementation(() => {
+                  unsubscribe()
+                  if (failRelease) {
+                    failRelease = false
+                    throw failure
+                  }
+                })
+                return subscription
+              })
+            const observer = createLiveQueryObserver(source, {
+              mode: history.mode,
+            })
+            let stop: (() => void) | undefined
+            await withOracleCleanup(() => {
+              for (let i = 0; i < history.repeats; i++) {
+                stop = observer.subscribe(() => {})
+                expect(
+                  source.subscriberCount,
+                  `new ownership has a physical channel`,
+                ).toBe(1)
+                failRelease = true
+                let outcome = { threw: false, error: undefined as unknown }
+                try {
+                  stop()
+                } catch (error) {
+                  outcome = { threw: true, error }
+                }
+                stop = undefined
+                expect(outcome).toEqual({ threw: true, error: failure })
+                reach.reach(`release-error`)
+                if (history.undefinedCause) reach.reach(`undefined-cause`)
+                expect(
+                  source.subscriberCount,
+                  `throwing release still retires its channel`,
+                ).toBe(0)
+              }
+              const listener = vi.fn()
+              stop = observer.subscribe(listener)
+              reach.reach(`retry`)
+              expect(
+                source.subscriberCount,
+                `explicit retry acquires a new channel`,
+              ).toBe(1)
+              publish()
+              expect(observer.getSnapshot().state?.get(`a`)?.version).toBe(1)
+              expect(listener).toHaveBeenCalled()
+            }, [
+              () => {
+                failRelease = false
+                stop?.()
+              },
+              () => stopFailure.mockRestore(),
+              () => observer.dispose(),
+              () => source.cleanup(),
+            ])
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(40), seed: 2229 }
+          : oraclePropertyOptions(40, `live-query-observer.release-failure`),
+      )
+      reach.assertReached()
+      console.info(
+        `observer-release ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+  }
+})
+
+/**
  * The setup law also covers failure before subscribeChanges, and a peer that
  * subscribes reentrantly during setup. A failed attempt transfers no physical
  * channel ownership. An already-returned peer record remains a logical owner;

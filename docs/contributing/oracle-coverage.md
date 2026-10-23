@@ -622,17 +622,38 @@ ordinary and infinite hooks independently. The Svelte server driver is
 `packages/svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`.
 Each compares rejection, projected rows and status before browser commit across
 no preparation, completed or pending query preload, and normalized source
-transport, including ready-empty and partial-loading sources. Normalized rows
-remain provisional. React also runs real `hydrateRoot`, observes recoverable
-errors, and checks the committed browser result. Svelte's
-`hydration.svelte.test.ts` receives normalized transport and normal warm-browser
-initialization through its native effect scheduler. Real React streaming checks
-cold and warm Suspense discovery. The audit records RED on unchanged production,
-GREEN, narrow mutants, and exact receiving replays.
+transport, including ready-empty and partial-loading sources. Render-time query
+captures carry their own readiness; normalized source rows alone remain
+provisional. React also runs real `hydrateRoot`, observes recoverable errors, and
+checks the committed browser result. Svelte's actual server-to-browser driver is
+`packages/svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`: it loads a
+server-compiled fixture and calls browser-compiled `hydrate`, then compares the
+first public hook rows/status before effects with the shared judgment. Both
+hosts cross writes after server render and before browser hydration, including a
+same-query browser preload that completes before hydration. The older
+server-only owner proves server reconstruction only; its second render is not
+browser evidence. `hydration.svelte.test.ts` separately receives normalized
+transport and normal warm-browser initialization through its native scheduler. Real React streaming checks
+cold and warm Suspense discovery, opaque keyed/unkeyed logic, and prepared
+non-streaming Suspense. Infinite identity checks callback-returned Collections
+and explicit keys with matching and unbounded windows across builder, direct
+Collection and callback-returned Collection inputs. The latter callback path is
+JavaScript runtime coverage; it has no TypeScript overload. A separate React
+streaming property crosses zero to three rows and zero to three microtask source
+publications before preload settlement. It compares transported rows with the
+view actually rendered, including empty and unchanged controls. The
+[SSR review audit](oracle-reviews/2026-10-23-ssr-review.md) records RED on unchanged
+production, GREEN, narrow mutants, and exact receiving replays.
 The separate `live-query-observer-snapshot-oracle.property.test.ts` owner checks
 unchanged getter identity with and without a completed DbClient query. It runs
 ordered/single-result and attached/detached histories through ordinary and server
 getters. It does not model provisional hydration replacement or host scheduling.
+Focused snapshot checks protect lazy state, one admission walk for an unchanged
+revision, explicit preload after a loading capture, JSON-compatible non-streaming
+transport, and pending-stream ownership. The observer history
+owner generates throwing releases followed by explicit retries, in both modes
+and with thrown undefined. This last premise is a controlled synchronous channel
+release; first-party event listeners report their failures asynchronously.
 Limits: the generated sources are synchronous and eager with zero to three rows.
 Infinite receiving coverage uses a one-row initial page and its peek-ahead row.
 Arbitrary asynchronous providers, later page-shape changes during a pending

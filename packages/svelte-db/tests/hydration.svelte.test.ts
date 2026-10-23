@@ -112,7 +112,7 @@ describe(`Svelte SSR receiving controls`, () => {
             `valid browser initialization does not throw`,
           ).toBeUndefined()
           expect(query.status).toBe(
-            preparation === `warm-browser` ? `ready` : expected.status,
+            preparation === `warm-browser` ? `ready` : `loading`,
           )
           expect(query.data).toEqual(
             expected.rows.map((row) => expect.objectContaining(row)),

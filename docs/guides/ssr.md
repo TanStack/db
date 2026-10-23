@@ -322,14 +322,18 @@ this query's result for transport. Reading those incidental rows or their
 readiness during SSR throws an error with the required preparation steps.
 Normal browser reads and runtime query errors keep their usual behavior.
 
-Normalized source transport carries rows without query readiness. Queries that
-use only those rows report `loading` for both server markup and the first
-browser snapshot. A matching completed query result reports `ready`. Browser
-commit starts acquisition and publishes the live status normally.
+Normalized source transport carries rows without query readiness. When a server
+hook reads explicitly prepared sources, it captures the query's render-time
+rows and status as a query result. Ready prepared queries can therefore finish
+non-streaming Suspense; loading queries remain loading. Later server writes and
+browser writes before hydration do not change that initial view. Browser commit
+starts acquisition and publishes the live status normally. A loading capture
+does not complete an explicit data preload.
 
 Streaming `useLiveSuspenseQuery` discovers and prepares its result during render,
 including when another query already warmed the source. Ordinary hooks require
-explicit preparation to render that data.
+explicit preparation to render that data. Opaque SSR queries require a serializable
+`queryKey`, including when the source is already warm.
 
 For `useLiveInfiniteQuery`, preload the initial window plus its one-row peek:
 
@@ -346,8 +350,10 @@ await dbClient.preloadLiveQuery({
 const result = useLiveInfiniteQuery(() => orderedTodos, { pageSize })
 ```
 
-Custom dehydration filters must retain the Collection rows or query result that
-the markup requires.
+An explicit `queryKey` also includes the query's limit and offset in its transport
+identity. Use the same initial window in the preload and the infinite hook.
+
+Custom dehydration filters must retain the query result that the markup requires.
 
 ### Indexes before query compilation
 

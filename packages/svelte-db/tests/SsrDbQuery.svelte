@@ -10,7 +10,12 @@
 
   let {
     descriptor,
+    onInitial,
   }: {
+    onInitial?: (
+      rows: Array<{ id: string; name: string }>,
+      status: string,
+    ) => void
     descriptor: CollectionOptions<Person, string>
   } = $props()
 
@@ -21,6 +26,13 @@
         name: people.name,
       })),
   })
+  function reportInitial() {
+    onInitial?.(
+      people.data.map(({ id, name }) => ({ id, name })),
+      people.status,
+    )
+  }
+  reportInitial()
 </script>
 
 <output data-status={people.status}>

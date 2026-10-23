@@ -173,7 +173,6 @@ class Partition {
       })
       // Late registration can terminate before either release handle exists.
       if (this.terminated as boolean) {
-        stopStatus()
         stopCleanupStart()
         return
       }
