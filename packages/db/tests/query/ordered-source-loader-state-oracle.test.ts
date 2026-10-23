@@ -3687,6 +3687,31 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
+      // The first page and its tie settle, then joined work starts. A report
+      // over the moved end stages only that end's tie, and pending joined
+      // work defers it. The pass after the joined work finishes must read it;
+      // a loader that dropped the staged tie read nothing.
+      name: `a staged end tie that waits for joined work`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `joinedBusy` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
       // A truncate after a deferred unproven report hands the window to its
       // replay, so the pass after the joined work owes no repair or tie.
       name: `an unproven report whose deferred pass a truncate replaces`,
