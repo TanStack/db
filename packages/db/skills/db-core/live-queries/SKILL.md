@@ -123,8 +123,11 @@ import { eq, innerJoin } from '@tanstack/db'
 const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join(innerJoin({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId)))
+    .join(
+      innerJoin({ post: postsCollection }, ({ user, post }) =>
+        eq(user.id, post.userId),
+      ),
+    )
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
@@ -136,9 +139,16 @@ Multiple joins:
 
 ```ts
 q.from({ user: usersCollection })
-  .join(leftJoin({ post: postsCollection }, ({ user, post }) => eq(user.id, post.userId)))
-  .join(leftJoin({ comment: commentsCollection }, ({ post, comment }) =>
-    eq(post.id, comment.postId)))
+  .join(
+    leftJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
+    ),
+  )
+  .join(
+    leftJoin({ comment: commentsCollection }, ({ post, comment }) =>
+      eq(post.id, comment.postId),
+    ),
+  )
 ```
 
 ### 3. Aggregation with groupBy + having
@@ -188,8 +198,11 @@ const activeUsers = createLiveQueryCollection((q) =>
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: activeUsers })
-    .join(leftJoin({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId)))
+    .join(
+      leftJoin({ post: postsCollection }, ({ user, post }) =>
+        eq(user.id, post.userId),
+      ),
+    )
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
@@ -243,13 +256,15 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: include(q
-      .from({ i: issuesCollection })
-      .where(({ i }) => eq(i.projectId, p.id))
-      .select(({ i }) => ({
-        id: i.id,
-        title: i.title,
-      }))),
+    issues: include(
+      q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+        })),
+    ),
   })),
 )
 
@@ -529,9 +544,11 @@ q.from({ order: ordersCollection })
 ```ts
 import { and, eq, leftJoin } from '@tanstack/db'
 
-q.from({ product: productsCollection }).join(leftJoin({ stock: stockCollection },
-  ({ product, stock }) =>
-    and(eq(product.sku, stock.sku), eq(product.region, stock.region))))
+q.from({ product: productsCollection }).join(
+  leftJoin({ stock: stockCollection }, ({ product, stock }) =>
+    and(eq(product.sku, stock.sku), eq(product.region, stock.region)),
+  ),
+)
 ```
 
 All equalities must match. A nullish component never matches, and outer joins
@@ -563,12 +580,18 @@ The differential dataflow join operator supports a single equality or nested `an
 
 ```ts
 // WRONG
-q.from({ user: usersCollection }).join(leftJoin({ post: postsCollection },
-  ({ user, post }) => gt(user.id, post.userId)))
+q.from({ user: usersCollection }).join(
+  leftJoin({ post: postsCollection }, ({ user, post }) =>
+    gt(user.id, post.userId),
+  ),
+)
 
 // CORRECT
-q.from({ user: usersCollection }).join(leftJoin({ post: postsCollection },
-  ({ user, post }) => eq(user.id, post.userId)))
+q.from({ user: usersCollection }).join(
+  leftJoin({ post: postsCollection }, ({ user, post }) =>
+    eq(user.id, post.userId),
+  ),
+)
 ```
 
 ### MEDIUM: Passing source directly instead of {alias: collection}
