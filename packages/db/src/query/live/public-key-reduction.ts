@@ -145,7 +145,6 @@ export function routeKey(
   ])
 }
 
-
 /** Reduces a query without includes to one canonical row per public key. */
 export function reducePublicKeys(
   compilation: CompilationResult,

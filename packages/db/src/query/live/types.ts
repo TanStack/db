@@ -86,7 +86,6 @@ export interface LiveQueryCollectionConfig<
    */
   id?: string
 
-
   /**
    * Query builder function that defines the live query
    */

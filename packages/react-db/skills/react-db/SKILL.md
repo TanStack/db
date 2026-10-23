@@ -182,10 +182,12 @@ function ProjectList() {
       q.from({ p: projectsCollection }).select(({ p }) => ({
         id: p.id,
         name: p.name,
-        issues: include(q
-          .from({ i: issuesCollection })
-          .where(({ i }) => eq(i.projectId, p.id))
-          .select(({ i }) => ({ id: i.id, title: i.title }))),
+        issues: include(
+          q
+            .from({ i: issuesCollection })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({ id: i.id, title: i.title })),
+        ),
       })),
   })
 
