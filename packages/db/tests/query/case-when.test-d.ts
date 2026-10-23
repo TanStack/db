@@ -323,3 +323,31 @@ describe(`caseWhen types`, () => {
     >()
   })
 })
+
+describe(`caseWhen include branches`, () => {
+  test(`rejects a bare subquery branch and accepts include()`, () => {
+    const users = createUsers()
+    const posts = createPosts()
+    createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        posts: caseWhen(
+          gt(user.age, 18),
+          // @ts-expect-error A subquery branch needs include().
+          q.from({ post: posts }).where(({ post }) => eq(post.userId, user.id)),
+        ),
+      })),
+    )
+    createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        posts: caseWhen(
+          gt(user.age, 18),
+          include(
+            q
+              .from({ post: posts })
+              .where(({ post }) => eq(post.userId, user.id)),
+          ),
+        ),
+      })),
+    )
+  })
+})

@@ -8042,3 +8042,17 @@ describe(`a subquery in select needs an include operator`, () => {
     await live.cleanup()
   })
 })
+
+describe(`include() argument`, () => {
+  it(`throws a coded error when include() does not wrap a subquery builder`, () => {
+    const projects = createProjectsCollection()
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: include(createIssuesCollection() as any),
+        })),
+      ),
+    ).toThrow(`include() must wrap a subquery builder`)
+  })
+})

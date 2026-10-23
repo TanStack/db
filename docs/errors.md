@@ -2499,3 +2499,23 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 A windowed or findOne result row has no include route
 ```
+
+<a id="error-248"></a>
+
+## Error 248: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+include() must wrap a subquery builder
+```
+
+<a id="error-249"></a>
+
+## Error 249: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+include() must wrap a subquery builder
+```

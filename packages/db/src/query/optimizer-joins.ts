@@ -9,7 +9,7 @@ import {
   getWhereExpression,
   isResidualWhere,
 } from './ir.js'
-import { containsAggregate } from './compiler/group-by.js'
+import { findAggregate } from './compiler/find-aggregate.js'
 import {
   combineWithAnd,
   getFirstFromAlias,
@@ -313,7 +313,7 @@ function isSafeToPushIntoExistingSubquery(
   return !(
     query.distinct ||
     (query.select &&
-      (containsAggregate(query.select) ||
+      (findAggregate(query.select) !== undefined ||
         whereReferencesComputedSelectFields(
           query.select,
           whereClause,

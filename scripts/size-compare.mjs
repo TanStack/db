@@ -387,8 +387,12 @@ if (runScenarios) {
   )
   let appGzip
   for (const scenario of scenarios) {
-    // A scenario written for a new API cannot build against an older base.
-    const base = await measureScenario(baseDir, scenario).catch(() => undefined)
+    // A scenario written for a new API cannot build against an older base:
+    // it imports a name the base does not export. Any other failure is real.
+    const base = await measureScenario(baseDir, scenario).catch((error) => {
+      if (!String(error?.message).includes(`No matching export`)) throw error
+      return undefined
+    })
     const head = await measureScenario(root, scenario)
     const baseGzip = base?.get(`(bundle)`).gzip
     const headGzip = head.get(`(bundle)`).gzip

@@ -1032,6 +1032,13 @@ function buildNestedSelect(
     }
     if (obj instanceof BaseQueryBuilder)
       throw new IncludeOperatorRequiredError(fieldName)
+    if (!(obj.query instanceof BaseQueryBuilder)) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `include() must wrap a subquery builder`
+          : codedMessage(248),
+      )
+    }
     return buildIncludesSubquery(
       obj.query,
       fieldName,
@@ -1103,6 +1110,13 @@ function buildNestedSelect(
     }
     if (v instanceof BaseQueryBuilder) throw new IncludeOperatorRequiredError(k)
     if (v instanceof IncludeWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `include() must wrap a subquery builder`
+            : codedMessage(249),
+        )
+      }
       out[k] = buildIncludesSubquery(
         v.query,
         k,

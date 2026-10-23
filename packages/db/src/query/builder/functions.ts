@@ -42,10 +42,11 @@ type ExpressionLike =
 
 export type CaseWhenValue =
   | ExpressionLike
-  | QueryBuilder<any>
+  | IncludeWrapper<any>
   | ToArrayWrapper<any>
   | ConcatToArrayWrapper<any>
-  | Record<string, any>
+  // A select object. A query builder is not one: wrap it in include().
+  | (Record<string, any> & { _bindCollectionSources?: never })
 
 type ExtractCaseWhenValue<T> =
   T extends CaseWhenWrapper<infer TResult> ? TResult : T

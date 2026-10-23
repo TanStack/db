@@ -928,5 +928,15 @@
     "file": "query/compiler/index.ts",
     "template": "A windowed or findOne result row has no include route",
     "literals": ["A windowed or findOne result row has no include route"]
+  },
+  "248": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
+  },
+  "249": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
   }
 }

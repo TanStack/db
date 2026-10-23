@@ -39,6 +39,7 @@ import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from '../builder/functions.js'
@@ -67,7 +68,6 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import { registerLazyDemandPlan } from './lazy-demand.js'
-import { containsAggregate } from './group-by.js'
 import { findAggregate } from './find-aggregate.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
@@ -120,6 +120,7 @@ function getUnsupportedFnSelectResultDescription(
   value: unknown,
   seen: Set<object> = new Set(),
 ): string | undefined {
+  if (value instanceof IncludeWrapper) return `include()`
   if (value instanceof BaseQueryBuilder) return `a child query builder`
   if (value instanceof ToArrayWrapper) return `toArray()`
   if (value instanceof ConcatToArrayWrapper) return `concat(toArray())`
@@ -725,8 +726,10 @@ function compileQueryInternal(
       })
     }
   }
-  const selectHasAggregates =
-    query.select !== undefined && containsAggregate(query.select)
+  // One walker finds aggregates; the aggregate it finds carries the grouping
+  // compiler.
+  const selectAggregate = findAggregate(query.select)
+  const selectHasAggregates = selectAggregate !== undefined
   // A windowed query's or a findOne's includes compile after its top-K and
   // route only from the rows it shows (law 12); others compile here.
   const hasOrderBy = (query.orderBy?.length ?? 0) > 0
@@ -1136,9 +1139,9 @@ function compileQueryInternal(
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
     )
-  } else if (selectHasAggregates) {
+  } else if (selectAggregate) {
     // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
-    pipeline = grouping!.processGroupBy(
+    pipeline = selectAggregate.grouping.processGroupBy(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
