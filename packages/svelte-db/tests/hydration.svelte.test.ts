@@ -42,10 +42,15 @@ describe(`Svelte hydration`, () => {
   })
 
   // An empty queryKey counts as none, so with a dependency list it must match
-  // the hydrated query exactly as an omitted key does.
+  // the hydrated query exactly as an omitted key does. The server preload has
+  // no dependency list, so a query with one does not match it. The control
+  // case without a dependency list shows this harness does hydrate, so the two
+  // dependency-list cases agree on a real miss, not on a broken harness.
   it(`hydrates an empty queryKey with a dependency list as it hydrates no key`, async () => {
-    const firstRows: Array<unknown> = []
-    for (const queryKey of [undefined, []]) {
+    const firstRows = async (
+      queryKey: Array<unknown> | undefined,
+      deps: Array<() => unknown> | undefined,
+    ) => {
       const { descriptor } = createPeopleDescriptor()
       const serverClient = new DbClient({ runtime: `server` })
       await serverClient.preloadLiveQuery(peopleQuery(descriptor))
@@ -58,19 +63,27 @@ describe(`Svelte hydration`, () => {
       )
       let query!: ReturnType<typeof useLiveQuery>
       const dispose = $effect.root(() => {
-        query = useLiveQuery(
-          {
-            ...peopleQuery(descriptor),
-            client: browserClient,
-            queryKey,
-          } as any,
-          [() => `dependency`],
-        )
+        const config = {
+          ...peopleQuery(descriptor),
+          client: browserClient,
+          queryKey,
+        } as any
+        query = deps ? useLiveQuery(config, deps) : useLiveQuery(config)
       })
       flushSync()
-      firstRows.push(query.data)
+      const rows = query.data
       dispose()
+      return rows
     }
-    expect(firstRows[1]).toEqual(firstRows[0])
+    const serverRows = [
+      expect.objectContaining({ id: `server`, name: `Server snapshot` }),
+    ]
+    // Control: the same query and harness hydrate the server rows.
+    expect(await firstRows(undefined, undefined)).toEqual(serverRows)
+    expect(await firstRows([], undefined)).toEqual(serverRows)
+
+    const dependency = [() => `dependency`]
+    const omittedKey = await firstRows(undefined, dependency)
+    expect(await firstRows([], dependency)).toEqual(omittedKey)
   })
 })
