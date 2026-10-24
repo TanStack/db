@@ -75,6 +75,36 @@ CONVEX_BACKEND_INSERT_ORACLE_SEED/PATH, CONVEX_BACKEND_UPDATE_ORACLE_SEED/PATH, 
 The offline engine's interruption, settlement, storage, and leadership owners
 remain primary for those laws; this is their Convex receiving witness.
 
+`packages/convex-db-collection/e2e/public-pagination-oracle.test.ts` receives the
+finite pagination contract through the actual public `get-convex/convex-demos`
+functions at revision `2fac21e360bfcceae6065096f1b81480bd8c6fd5`. Its independent
+append ledger predicts descending message order, indexed author membership, and
+uppercase/author-initial projections. Both SDK clients exercise all three query
+forms at page size three, live appends, real TCP connection loss, direct writes
+while disconnected, and complete recovery after reconnect. Unique authored
+bodies supply the stable key omitted by the transformed query. It observes
+ordered input to select and public Collection rows after source acceptance.
+This is six authored receiving histories, not a new primary pagination model or
+an arbitrary transformed-key guarantee. Setup fetches the pinned source at run
+time, with no upstream application source redistributed in this repository.
+
+`packages/convex-db-collection/e2e/auth-app-oracle.test.ts` receives the snapshot
+contract through the official role-based Convex Auth app at revision
+`45f08008e1257758560948db4280cc4e7d64e84a`. The app's schema, message functions,
+permission checks, and role updates come from that pinned source. Setup changes
+only the external sign-in providers to the official Anonymous provider, with
+ephemeral signing keys and real issued JWTs. An independent set-valued permission
+policy drives all six read/write/admin operation cells, including demotion and repeated equal-body sends, while a multiset of
+authored message bodies predicts the public rows at each accepted source
+checkpoint. Both SDKs must reject an unauthenticated Collection preload; an
+invalid-token HTTP query is a separate authentication control. The app deliberately
+allows self-service role selection, so this does not establish secure role
+administration. The two authored receiving histories do not cover OAuth redirects,
+email delivery, token refresh, browser auth components, or production hosting.
+Both public-app fixtures deploy with this package's installed Convex 1.47 SDK.
+The pagination app's upstream package declares 1.48, its business functions are
+unchanged here but its original dependency installation is not being tested.
+
 `packages/offline-transactions/tests/transaction-serializer-oracle.property.test.ts`
 remains the primary wire-format owner. Its opt-in codec grammar crosses
 insert/update/delete and arrays of signed 64-bit integers, special floats and

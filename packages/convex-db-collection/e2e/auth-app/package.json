@@ -1,0 +1,11 @@
+{
+  "name": "convex-auth-app-test-backend",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@convex-dev/auth": "0.0.90",
+    "@auth/core": "0.37.4",
+    "convex": "^1.47.0",
+    "jose": "5.10.0"
+  }
+}
