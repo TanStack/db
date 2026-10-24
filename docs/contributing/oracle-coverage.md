@@ -15,6 +15,8 @@ distinguishes canonical laws from their receiving witnesses across packages.
 
 Exact-head follow-up records: [source and backend](oracle-reviews/2026-10-23-convex-source-and-backend.md) and [pagination and codecs](oracle-reviews/2026-10-23-convex-pagination-and-codecs.md), both bound to source revision `6511ee4ed0940cd54ee58ceeba7202ca859344b3`.
 
+The [public app receiving review](oracle-reviews/2026-10-24-convex-public-apps.md) is bound to test-source revision `4223c39a6d5c2b2e2fedb1a7eee3c0052b5e5013`.
+
 The Convex package has these independent judgments:
 
 - `packages/convex-db-collection/tests/snapshot-oracle.property.test.ts` compares
