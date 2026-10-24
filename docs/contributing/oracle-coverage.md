@@ -13,6 +13,8 @@ distinguishes canonical laws from their receiving witnesses across packages.
 
 ## Convex collection integration
 
+Exact-head follow-up records: [source and backend](oracle-reviews/2026-10-23-convex-source-and-backend.md) and [pagination and codecs](oracle-reviews/2026-10-23-convex-pagination-and-codecs.md), both bound to source revision `6511ee4ed0940cd54ee58ceeba7202ca859344b3`.
+
 The Convex package has these independent judgments:
 
 - `packages/convex-db-collection/tests/snapshot-oracle.property.test.ts` compares

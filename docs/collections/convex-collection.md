@@ -261,7 +261,7 @@ convexCollectionOptions({
 })
 ```
 
-An initial subscription error rejects `preload()` with the original error. Later errors preserve existing rows and call `onError`. `collection.utils.getSyncError()` returns the latest error. This getter is not reactive. A valid result clears the error and allows initial sync to recover.
+An initial subscription error rejects `preload()` with the original error. Later errors preserve existing rows and call `onError`. `collection.utils.getSyncError()` returns the latest error. This getter is not reactive. A valid query result clears provider or projection errors and allows initial sync to recover.
 
 Collection cleanup unsubscribes and invalidates callbacks from that sync run. It does not close the shared Convex client. After a restart, the first result replaces retained data, including when the result is empty. Close the client separately when your application no longer needs it.
 
