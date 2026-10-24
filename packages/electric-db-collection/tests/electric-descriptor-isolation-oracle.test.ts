@@ -184,6 +184,7 @@ vi.mock(`@electric-sql/client`, async () => {
           onStreamSubscribed?.()
           return unsubscribe
         },
+        unsubscribeAll: vi.fn(),
         // ShapeStream.requestSnapshot is legal only in changes_only mode.
         // The installed-SDK delivery oracle is the receiving witness.
         requestSnapshot: vi.fn(() => {

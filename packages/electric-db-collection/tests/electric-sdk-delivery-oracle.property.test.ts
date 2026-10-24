@@ -18,6 +18,7 @@ import {
   oraclePropertyOptions,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   managedTagPersistence,
   storageTargetId,
@@ -82,6 +83,8 @@ import type { Message } from '@electric-sql/client'
  * A real node:sqlite cold-launch witness starts with an incompatible partial
  * cache and no reset marker. It must exclude that row before and after the
  * installed SDK returns an empty source snapshot for the demanded predicate.
+ * A source-release lane, documented at its property, checks that cleanup
+ * removes every listener that a run's streams registered on `document`.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
  * the authored snapshot or move frames, nor do they cover multiple row keys,
@@ -306,6 +309,29 @@ function controlledHttp() {
       for (const waiter of waiting.splice(0)) waiter.reject(closedError)
     },
     activeCount: () => active.size,
+  }
+}
+
+// Records the `visibilitychange` listeners that code registers on `document`.
+function recordVisibilityListeners() {
+  const add = vi.spyOn(document, `addEventListener`)
+  const remove = vi.spyOn(document, `removeEventListener`)
+  const visibility = (calls: Array<Array<unknown>>) =>
+    calls
+      .filter(([type]) => type === `visibilitychange`)
+      .map(([, listener]) => listener)
+  return {
+    registered: () => visibility(add.mock.calls).length,
+    live: () => {
+      const removed = new Set(visibility(remove.mock.calls))
+      return visibility(add.mock.calls).filter(
+        (listener) => !removed.has(listener),
+      ).length
+    },
+    restore: () => {
+      add.mockRestore()
+      remove.mockRestore()
+    },
   }
 }
 
@@ -835,10 +861,14 @@ fixedCase(`does not certify an aborted SDK subset snapshot`, async () => {
  * its own snapshots. This receives the controlled provider-restart law through
  * the installed ShapeStream and HTTP path. A Map-backed adapter supplies the
  * generation boundary; real SQLite and native hosts have separate owners.
+ * It also receives the stream-listener release law below for the retired
+ * session: after the rotation only the replacement stream's listener stays
+ * registered, and none stays after cleanup.
  */
 fixedCase(
   `discards an old SDK snapshot after managed cache rotation`,
   async () => {
+    const listeners = recordVisibilityListeners()
     const http = controlledHttp()
     const rows = new Map<string, Map<number, Item>>([
       [`old-generation`, new Map()],
@@ -1031,7 +1061,14 @@ fixedCase(
       expect(collection.get(1)).toBeUndefined()
       expect(collection.get(2)?.name).toBe(`fresh`)
       expect([...rows.get(`new-generation`)!.keys()]).toEqual([2])
-    }, [() => collection.cleanup(), () => http.close()])
+      expect(listeners.registered()).toBe(2)
+      expect(listeners.live(), `live listeners after rotation`).toBe(1)
+    }, [
+      () => collection.cleanup(),
+      () => http.close(),
+      () => expect(listeners.live(), `live listeners after cleanup`).toBe(0),
+      () => listeners.restore(),
+    ])
   },
 )
 
@@ -2163,4 +2200,245 @@ fixedCase.each(clientRetryCells)(
   `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
   (outcome, mode, decision) => runClientRetryCell(outcome, mode, decision),
   60_000,
+)
+
+/**
+ * # Cleanup releases the installed client's stream listeners
+ *
+ * Cleanup ends a sync run and releases its adapter-owned resources
+ * (`CleanupFn` in `packages/db/src/types.ts`, and "Sync Implementation" in the
+ * collection options creator guide). The Electric adapter constructs one
+ * ShapeStream per provider session. The installed client registers a
+ * `visibilitychange` listener on `document` for each stream, so that the
+ * stream pauses while the page is hidden. That listener keeps the stream
+ * reachable until the client releases it. The law: after cleanup, `document`
+ * holds no `visibilitychange` listener from a stream of the cleaned-up run,
+ * whatever state the source reached. While a run is active, it holds at most
+ * the listener of its one stream.
+ *
+ * The model is the number of active sync runs, 0 or 1. It reads no adapter or
+ * client state. A run is active from its start until its cleanup, and each run
+ * constructs one stream, so the expected number of live listeners is at most
+ * the number of active runs, and exactly 0 once no run is active. The model
+ * does not predict when an active stream releases its listener, because the
+ * client may release it early, for example when its signal aborts.
+ *
+ * The history grammar has a sync mode and one to three sync runs. The first
+ * run starts with the Collection; each later run is a restart of the
+ * cleaned-up Collection through `preload()`. In each run the provider answers
+ * zero to three requests, each with a row and an up-to-date, or with a 503
+ * that `onError` retries. The run then stays open, gives up on one more 503
+ * because `onError` returns no retry, or aborts the external signal. Cleanup
+ * ends the run. The signal stays aborted, so a run that starts after an abort
+ * starts with an aborted signal and sends no request. The provider answers
+ * only a request the client sent. The grammar does not answer a request after
+ * a give-up or an abort, because the client sends none.
+ *
+ * The production driver uses a real Collection, the Electric adapter, the
+ * installed ShapeStream, and controlled HTTP. The recorder wraps
+ * `document.addEventListener` and `document.removeEventListener` and counts
+ * the `visibilitychange` listeners still registered. The comparison runs after
+ * each provider answer, give-up, abort, and cleanup, once the client has sent
+ * its next request or decided to send none. A calibration check at the end
+ * shows that the recorder saw one listener for each run.
+ *
+ * Limits: the lane observes the browser listener in jsdom. Client versions
+ * that observe React Native's AppState instead register through a runtime
+ * adapter, which this lane does not install. A live Electric service and
+ * snapshot requests are outside this lane. The managed cache rotation case
+ * above replaces a provider session within one run; it receives the same law
+ * for the retired session.
+ */
+type ReleaseRun = {
+  answers: Array<`up-to-date` | `retry`>
+  end: `open` | `give-up` | `abort`
+}
+type ReleaseHistory = {
+  mode: `eager` | `on-demand` | `progressive`
+  runs: Array<ReleaseRun>
+}
+type ReleaseState =
+  | `cleanup-while-loading`
+  | `cleanup-after-ready`
+  | `cleanup-after-give-up`
+  | `cleanup-after-abort`
+  | `cleanup-of-restarted-run`
+
+const createReleaseReach = () =>
+  createOracleReach<ReleaseState>(`electric.sdk-source-release`, [
+    `cleanup-while-loading`,
+    `cleanup-after-ready`,
+    `cleanup-after-give-up`,
+    `cleanup-after-abort`,
+    `cleanup-of-restarted-run`,
+  ])
+// Each campaign declares its own reach.
+let releaseReach = createReleaseReach()
+
+async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
+  releaseReach.beginHistory()
+  const listeners = recordVisibilityListeners()
+  const http = controlledHttp()
+  const external = new AbortController()
+  let retries = true
+  let onErrorCalls = 0
+  const collection = createCollection(
+    electricCollectionOptions<Item>({
+      id: `sdk-release-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/release-${sequence}`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+        signal: external.signal,
+        backoffOptions: {
+          initialDelay: 0,
+          maxDelay: 0,
+          multiplier: 1,
+          maxRetries: 0,
+        },
+        onError: () => {
+          onErrorCalls++
+          return retries ? {} : undefined
+        },
+      },
+      syncMode: history.mode,
+      startSync: true,
+      getKey: (row) => row.id,
+    }),
+  )
+
+  // The model is `activeRuns`. `sending` and `ready` track the source only to
+  // choose legal provider steps and to classify reach.
+  let activeRuns = 1
+  let runsStarted = 1
+  let sending = true
+  let ready = false
+  let offset = 0
+
+  const check = (label: string) =>
+    expect(listeners.live(), `${label}: live listeners`).toBeLessThanOrEqual(
+      activeRuns,
+    )
+  const next = (label: string) =>
+    atCheckpoint(http.take(), `${label} HTTP request`)
+
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  await withElectricCleanup(async () => {
+    for (const [index, run] of history.runs.entries()) {
+      if (index > 0) {
+        void collection.preload().catch(() => undefined)
+        activeRuns = 1
+        runsStarted++
+        sending = !external.signal.aborted
+        ready = false
+      }
+      let request = sending ? await next(`run ${index} start`) : undefined
+      for (const answer of run.answers) {
+        if (!request) break
+        if (answer === `up-to-date`) {
+          offset++
+          request.respond(
+            new Response(
+              JSON.stringify([
+                {
+                  key: `1`,
+                  value: { id: `1`, name: `row` },
+                  headers: { operation: `insert` },
+                },
+                {
+                  headers: {
+                    control: `up-to-date`,
+                    global_last_seen_lsn: String(offset),
+                  },
+                },
+              ]),
+              { headers: headers(offset) },
+            ),
+          )
+          ready = true
+        } else {
+          request.respond(new Response(`transient`, { status: 503 }))
+        }
+        request = await next(`run ${index} ${answer}`)
+        check(`run ${index} ${answer}`)
+      }
+      if (request && run.end === `give-up`) {
+        const calls = onErrorCalls
+        retries = false
+        request.respond(new Response(`transient`, { status: 503 }))
+        await vi.waitFor(() => expect(onErrorCalls).toBe(calls + 1))
+        retries = true
+        sending = false
+        check(`run ${index} give-up`)
+      } else if (run.end === `abort` && !external.signal.aborted) {
+        external.abort()
+        sending = false
+        check(`run ${index} abort`)
+      }
+
+      releaseReach.reach(
+        external.signal.aborted
+          ? `cleanup-after-abort`
+          : !sending
+            ? `cleanup-after-give-up`
+            : ready
+              ? `cleanup-after-ready`
+              : `cleanup-while-loading`,
+      )
+      if (index > 0) releaseReach.reach(`cleanup-of-restarted-run`)
+      await collection.cleanup()
+      activeRuns = 0
+      check(`run ${index} cleanup`)
+    }
+    // Calibration: the recorder observed the listener of every run's stream.
+    expect(listeners.registered()).toBe(runsStarted)
+  }, [
+    () => collection.cleanup(),
+    () => http.close(),
+    () => listeners.restore(),
+    () => consoleError.mockRestore(),
+    () => consoleWarn.mockRestore(),
+  ])
+}
+
+const releaseViolation = sameViolation()
+const releaseProperty = fc.asyncProperty(
+  fc.record({
+    mode: fc.constantFrom(
+      `eager` as const,
+      `on-demand` as const,
+      `progressive` as const,
+    ),
+    runs: fc.array(
+      fc.record({
+        answers: fc.array(
+          fc.constantFrom(`up-to-date` as const, `retry` as const),
+          { maxLength: 3 },
+        ),
+        end: fc.constantFrom(
+          `open` as const,
+          `give-up` as const,
+          `abort` as const,
+        ),
+      }),
+      { minLength: 1, maxLength: 3 },
+    ),
+  }),
+  (history: ReleaseHistory) =>
+    releaseViolation.check(history, () => checkSourceRelease(history)),
+)
+sdkCampaigns(
+  `electric.sdk-source-release`,
+  `releases every installed-SDK stream listener when a sync run is cleaned up`,
+  20261024,
+  releaseViolation,
+  async (seed) => {
+    releaseReach = createReleaseReach()
+    await fc.assert(releaseProperty, {
+      ...oraclePropertyOptions(40, `electric.sdk-source-release`),
+      ...(seed === undefined ? {} : { seed }),
+    })
+    releaseReach.assertReached()
+  },
 )

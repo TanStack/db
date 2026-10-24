@@ -2756,6 +2756,11 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
         // Unsubscribe from the stream
         unsubscribeStream()
+        // Aborting the stream does not remove the visibility listener it
+        // registered when it was constructed, and that listener keeps the
+        // stream reachable. The stream is private to this session, so
+        // unsubscribeAll affects no other consumer.
+        stream.unsubscribeAll()
         // Abort the abort controller to stop the stream
         abortController.abort()
         if (transactionStarted) {

@@ -40,6 +40,7 @@ const staticOracleProperties = [
   `electric.persistence-interleaving`,
   `electric.sdk-snapshot-delivery`,
   `electric.sdk-dnf-membership`,
+  `electric.sdk-source-release`,
   `electric-recovery.publication-stream-convergence`,
   `sqlite-resume.startup-generation`,
   `sqlite-resume.managed-claim-read`,

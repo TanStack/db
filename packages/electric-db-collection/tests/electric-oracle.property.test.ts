@@ -162,6 +162,7 @@ const mockSubscribe = vi.fn()
 const shapeId = `{"params":{"table":"test_table"},"url":"http://test-url"}`
 const mockStream = {
   subscribe: mockSubscribe,
+  unsubscribeAll: vi.fn(),
   requestSnapshot: vi.fn().mockResolvedValue(undefined),
   fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
   forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
