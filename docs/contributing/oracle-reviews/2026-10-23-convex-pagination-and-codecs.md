@@ -91,3 +91,15 @@ values are bounded acyclic trees; identity sharing, cycles, cross-realm natives,
 custom objects, native Temporal, browser storage atomicity, and power-loss
 atomicity are outside this evidence. These limits remain with the codec and
 backend owners in the coverage map.
+
+## CI type-check follow-up
+
+CI exposed an omitted type-level selector entry in the shared config reader:
+`OFFLINE_CODEC_ORACLE` worked at runtime but was absent from the accepted prefix
+union. The offline package type check reproduced TS2820 before the repair.
+Adding that exact prefix to the union makes the type check pass, and the same
+full-file codec replay at seed 20261022/path 0:0:0:0 still passes all 51 checks.
+This follow-up changes only a test configuration type, no production code,
+model judgment, generated history, runtime selector routing, or comparison.
+The exact-head semantic review above continues to refer to its stated source
+revision rather than claiming a fresh independent audit of this type edit.
