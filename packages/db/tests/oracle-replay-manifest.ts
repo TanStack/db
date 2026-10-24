@@ -77,7 +77,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     `electric`,
-    `sdk-snapshot-delivery sdk-dnf-membership`,
+    `sdk-snapshot-delivery sdk-dnf-membership sdk-source-release`,
   ],
   [
     `db/tests/collection-sync-reentrancy-oracle.test.ts`,
