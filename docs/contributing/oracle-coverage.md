@@ -15,7 +15,7 @@ distinguishes canonical laws from their receiving witnesses across packages.
 
 Exact-head follow-up records: [source and backend](oracle-reviews/2026-10-23-convex-source-and-backend.md) and [pagination and codecs](oracle-reviews/2026-10-23-convex-pagination-and-codecs.md), both bound to source revision `6511ee4ed0940cd54ee58ceeba7202ca859344b3`.
 
-The [public app receiving review](oracle-reviews/2026-10-24-convex-public-apps.md) is bound to test-source revision `4223c39a6d5c2b2e2fedb1a7eee3c0052b5e5013`.
+The [public app receiving review](oracle-reviews/2026-10-24-convex-public-apps.md) is bound to test-source revision `4223c39a6d5c2b2e2fedb1a7eee3c0052b5e5013`. The [auth dependency follow-up](oracle-reviews/2026-10-24-convex-auth-dependency-update.md) records patched Auth.js 0.41.3 and Convex Auth 0.0.96 at revision `bae01f788134aa421a9018278ec6d2867519dae3`, with the full final 17-test backend suite passing.
 
 The Convex package has these independent judgments:
 
