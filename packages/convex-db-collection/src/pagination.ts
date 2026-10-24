@@ -23,11 +23,15 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
   query: TQuery,
   args: Omit<FunctionArgs<TQuery>, `paginationOpts`>,
   pageSize: number,
+  maxRows: number,
   receive: (rows: ReadonlyArray<TRow>) => void,
   fail: (error: unknown) => void,
 ): ConvexSubscription<ReadonlyArray<TRow>> {
   if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
     throw new RangeError(`Convex pageSize must be a positive safe integer.`)
+  }
+  if (!Number.isSafeInteger(maxRows) || maxRows <= 0) {
+    throw new RangeError(`Convex maxRows must be a positive safe integer.`)
   }
   let active = true
   let scheduled = false
@@ -105,6 +109,7 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
     result = undefined
     try {
       const completePages: Array<Array<TRow>> = []
+      let rowCount = 0
       for (let index = 0; index < pages.length; index++) {
         const page = pages[index]!
         const value = page.subscription!.getCurrentValue()
@@ -116,6 +121,12 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
         ) {
           throw new TypeError(
             `Convex paginated queries must return PaginationResult.`,
+          )
+        }
+        rowCount += value.page.length
+        if (rowCount > maxRows) {
+          throw new RangeError(
+            `Convex eager mirror exceeds maxRows (${maxRows}).`,
           )
         }
         const split =

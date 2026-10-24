@@ -30,6 +30,8 @@ export type ConvexPaginatedCollectionConfig<
   query: TQuery
   queryArgs: Omit<FunctionArgs<TQuery>, `paginationOpts`>
   pageSize?: number
+  /** Maximum accepted rows in the complete eager mirror. Defaults to 10,000. */
+  maxRows?: number
   onError?: (error: unknown) => void
 } & ([TSchema] extends [never] ? { schema?: never } : { schema: TSchema }) &
   (FunctionReturnType<TQuery> extends PaginationResult<object>
@@ -54,13 +56,20 @@ export function convexPaginatedCollectionOptions<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1<TItem, TItem> = never,
 >(config: ConvexPaginatedCollectionConfig<TQuery, TItem, TKey, TSchema>) {
-  const { client, query, queryArgs, pageSize = 100, ...options } = config
+  const {
+    client,
+    query,
+    queryArgs,
+    pageSize = 100,
+    maxRows = 10_000,
+    ...options
+  } = config
   return createConvexOptions<
     ReadonlyArray<PaginatedRow<TQuery>>,
     TItem,
     TKey,
     TSchema
   >(options, (receive, fail) =>
-    subscribePages(client, query, queryArgs, pageSize, receive, fail),
+    subscribePages(client, query, queryArgs, pageSize, maxRows, receive, fail),
   )
 }

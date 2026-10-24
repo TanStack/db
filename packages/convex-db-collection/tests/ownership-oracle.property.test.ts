@@ -18,7 +18,7 @@ import { DbClient, collectionOptions, createCollection } from '@tanstack/db'
 import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { convexCollectionOptions } from '../src/index'
-import { controlledClient, query } from './helpers'
+import { controlledClient, query, withTestCleanup } from './helpers'
 
 it(`keeps concrete options ownership across generated lifecycle checkpoints`, async () => {
   const property = fc.asyncProperty(
@@ -45,46 +45,54 @@ it(`keeps concrete options ownership across generated lifecycle checkpoints`, as
           ? new DbClient().collection(descriptor)
           : createCollection(options)
       const collections = [first]
-      try {
-        if (checkpoint !== `idle`) await first.preload()
-        if (checkpoint === `cleaned-up`) await first.cleanup()
-        const reusedOwner = form === `direct` || form === `shallow`
-        const construct = () =>
-          form === `descriptor`
-            ? new DbClient().collection(descriptor)
-            : createCollection(
-                form === `fresh`
-                  ? makeOptions()
-                  : form === `shallow`
-                    ? { ...options }
-                    : options,
-              )
-        if (reusedOwner) {
-          expect(construct).toThrow(`only one Collection`)
-        } else {
-          const second = construct()
-          collections.push(second)
-          await second.preload()
-          transport.cache([{ _id: `a`, text }])
-          const transaction = second.update(`a`, (row) => {
+      await withTestCleanup(
+        async () => {
+          if (checkpoint !== `idle`) await first.preload()
+          if (checkpoint === `cleaned-up`) await first.cleanup()
+          const reusedOwner = form === `direct` || form === `shallow`
+          const construct = () =>
+            form === `descriptor`
+              ? new DbClient().collection(descriptor)
+              : createCollection(
+                  form === `fresh`
+                    ? makeOptions()
+                    : form === `shallow`
+                      ? { ...options }
+                      : options,
+                )
+          if (reusedOwner) {
+            expect(construct).toThrow(`only one Collection`)
+          } else {
+            const second = construct()
+            collections.push(second)
+            await second.preload()
+            transport.cache([{ _id: `a`, text }])
+            const transaction = second.update(`a`, (row) => {
+              row.text = `optimistic`
+            })
+            await transaction.isPersisted.promise
+            expect(second.get(`a`)?.text).toBe(text)
+          }
+          // Failed reuse and sibling cleanup cannot revoke the rightful owner.
+          for (const collection of collections.slice(1))
+            await collection.cleanup()
+          await first.preload()
+          transport.cache([{ _id: `a`, text: `owner:${text}` }])
+          const transaction = first.update(`a`, (row) => {
             row.text = `optimistic`
           })
           await transaction.isPersisted.promise
-          expect(second.get(`a`)?.text).toBe(text)
-        }
-        // Failed reuse and sibling cleanup cannot revoke the rightful owner.
-        for (const collection of collections.slice(1))
-          await collection.cleanup()
-        await first.preload()
-        transport.cache([{ _id: `a`, text: `owner:${text}` }])
-        const transaction = first.update(`a`, (row) => {
-          row.text = `optimistic`
-        })
-        await transaction.isPersisted.promise
-        expect(first.get(`a`)?.text).toBe(`owner:${text}`)
-      } finally {
-        await Promise.all(collections.map((collection) => collection.cleanup()))
-      }
+          expect(first.get(`a`)?.text).toBe(`owner:${text}`)
+        },
+        async () => {
+          // The second owner can be admitted inside the body. Enumerate all
+          // resources at cleanup time, then attempt every release.
+          await withTestCleanup(
+            () => {},
+            ...collections.map((collection) => () => collection.cleanup()),
+          )
+        },
+      )
     },
   )
   const seed = process.env.CONVEX_OWNERSHIP_ORACLE_SEED

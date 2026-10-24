@@ -69,3 +69,36 @@ export function controlledClient() {
     counts: () => ({ subscriptions, unsubscriptions }),
   }
 }
+
+/** Preserve the law failure and still attempt every registered resource release. */
+export async function withTestCleanup(
+  body: () => void | Promise<void>,
+  ...cleanups: Array<() => void | Promise<unknown>>
+): Promise<void> {
+  let primary: { error: unknown } | undefined
+  try {
+    await body()
+  } catch (error) {
+    primary = { error }
+  }
+  const errors: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  if (primary) {
+    if (errors.length)
+      throw new AggregateError(
+        [primary.error, ...errors],
+        `Comparison and cleanup failed`,
+        { cause: primary.error },
+      )
+    throw primary.error
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length)
+    throw new AggregateError(errors, `Cleanup failed`, { cause: errors[0] })
+}

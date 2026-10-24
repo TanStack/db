@@ -7,7 +7,7 @@ title: convexPaginatedCollectionOptions
 function convexPaginatedCollectionOptions<TQuery, TItem, TKey, TSchema>(config): CollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils> & object & [TSchema] extends [never] ? unknown : object;
 ```
 
-Defined in: paginated-options.ts:51
+Defined in: [paginated-options.ts:53](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/paginated-options.ts#L53)
 
 Automatically subscribe to every page, retaining fixed reactive cursor ranges.
 

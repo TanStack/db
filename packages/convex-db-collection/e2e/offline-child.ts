@@ -1,3 +1,4 @@
+import { deepStrictEqual } from 'node:assert'
 import {
   mkdir,
   readFile,
@@ -173,12 +174,17 @@ if (offline) {
     if ((await executor.peekOutbox()).length === 0) {
       clearInterval(poll)
       await collection.utils.awaitSync()
-      if (
-        operation === `delete`
-          ? collection.has(draft.clientId)
-          : collection.get(draft.clientId)?.text !== draft.text
+      // Observe complete public rows, including signed zero and binary bytes,
+      // after replay settles. Text alone cannot detect a stale native payload.
+      deepStrictEqual(
+        [...collection.values()].map(({ clientId, text, rank, payload }) => ({
+          clientId,
+          text,
+          rank,
+          ...(payload === undefined ? {} : { payload }),
+        })),
+        operation === `delete` ? [] : [draft],
       )
-        throw new Error(`Restored row did not reach the collection`)
       checkpoint(`replayed`)
       executor.dispose()
       await collection.cleanup()

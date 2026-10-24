@@ -11,7 +11,7 @@ type ConvexCollectionConfig<TQuery, TItem, TKey, TSchema> = Omit<BaseCollectionC
   | FunctionReturnType<TQuery> extends ReadonlyArray<TItem> ? object : never;
 ```
 
-Defined in: index.ts:21
+Defined in: [index.ts:21](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/index.ts#L21)
 
 ## Type Declaration
 

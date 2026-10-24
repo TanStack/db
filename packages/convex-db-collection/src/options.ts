@@ -1,4 +1,8 @@
-import { whenSyncAccepted, withCollectionConfigFactory } from '@tanstack/db'
+import {
+  whenSyncAccepted,
+  withCollectionConfigFactory,
+  withCollectionSyncConfigFactory,
+} from '@tanstack/db'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   BaseCollectionConfig,
@@ -53,10 +57,20 @@ export function createConvexOptions<
       let previous = new Map<TKey, TItem>()
       let initialized = false
       let visible: true | Promise<void> = true
+      let acceptanceFailure: { error: unknown } | undefined
+      let resolveFirst!: () => void
+      let rejectFirst!: (error: unknown) => void
+      const firstResult = new Promise<void>((resolve, reject) => {
+        resolveFirst = resolve
+        rejectFirst = reject
+      })
+      // A subscription may fail before any caller asks to await its source.
+      void firstResult.catch(() => {})
       const accepting = new Set<Promise<void>>()
       const fail = (error: unknown): void => {
         if (!active) return
         syncError = error
+        rejectFirst(error)
         if (collection.status === `loading` || collection.status === `error`) {
           markError(error)
         }
@@ -64,6 +78,7 @@ export function createConvexOptions<
       }
       const accept = (result: TResult): void => {
         if (!active) return
+        if (acceptanceFailure) throw acceptanceFailure.error
         // Validate the entire result before opening a sync transaction. A bad
         // snapshot must never leave a half-written transaction behind.
         const rows: unknown = select ? select(result) : result
@@ -131,9 +146,16 @@ export function createConvexOptions<
           accepting.add(accepted)
           void accepted.then(
             () => accepting.delete(accepted),
-            () => accepting.delete(accepted),
+            (error) => {
+              accepting.delete(accepted)
+              // Later diffs may depend on this rejected source proposal.
+              // A new sync run must establish an authoritative base again.
+              acceptanceFailure = { error }
+              fail(error)
+            },
           )
         }
+        resolveFirst()
         if (receipt === true) markReady()
         else
           void receipt.then(() => {
@@ -152,18 +174,24 @@ export function createConvexOptions<
       }
       let subscription: ConvexSubscription<TResult> | undefined
       const refresh = async (): Promise<void> => {
-        if (!active || !subscription) return
+        if (acceptanceFailure) throw acceptanceFailure.error
+        if (!active || !subscription) {
+          if (syncError !== undefined) throw syncError
+          throw new Error(`The Convex collection has no active subscription.`)
+        }
         try {
           await subscription.waitForCurrent?.()
           // Cleanup can run while the asynchronous page acquisition waits.
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          if (!active) return
+          if (!active)
+            throw new Error(`Convex sync ended before source acceptance.`)
           const value = subscription.getCurrentValue()
           if (value !== undefined) accept(value)
         } catch (error) {
           fail(error)
           throw error
         }
+        if (!initialized) await firstResult
         if (syncError !== undefined) throw syncError
         await Promise.all([...accepting])
       }
@@ -177,6 +205,7 @@ export function createConvexOptions<
       }
       return () => {
         active = false
+        rejectFirst(new Error(`Convex sync ended before source acceptance.`))
         if (readCurrent === refresh) readCurrent = undefined
         subscription?.unsubscribe()
       }
@@ -191,8 +220,14 @@ export function createConvexOptions<
   ) {
     return async (params: TParams): Promise<void> => {
       await handler(params)
-      await readCurrent?.()
+      await awaitSource()
     }
+  }
+  async function awaitSource(): Promise<void> {
+    if (!readCurrent) {
+      throw new Error(`The Convex collection has no active subscription.`)
+    }
+    await readCurrent()
   }
   const options: CollectionConfig<
     TItem,
@@ -202,15 +237,22 @@ export function createConvexOptions<
   > & { utils: ConvexCollectionUtils } = {
     ...baseConfig,
     syncMode: `eager` as const,
-    sync,
+    sync: withCollectionSyncConfigFactory(
+      sync,
+      (source, utils, startSyncIfIdle) => {
+        ;(utils as ConvexCollectionUtils).awaitSync = async () => {
+          startSyncIfIdle()
+          await awaitSource()
+        }
+        return source
+      },
+    ),
     onInsert: config.onInsert && wrapHandler(config.onInsert),
     onUpdate: config.onUpdate && wrapHandler(config.onUpdate),
     onDelete: config.onDelete && wrapHandler(config.onDelete),
     utils: {
       getSyncError: () => syncError,
-      awaitSync: async () => {
-        await readCurrent?.()
-      },
+      awaitSync: awaitSource,
     },
   }
   let claimed = false

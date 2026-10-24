@@ -81,7 +81,7 @@ const transaction = tasks.update(taskId, (task) => {
 await transaction.isPersisted.promise
 ```
 
-DB applies optimistic writes immediately. Successful Convex mutation promises wait for the client's queries to catch up. Before a handler settles, the adapter reads the latest cached result and waits for DB to accept its sync writes. It does not wait for visibility held by that same optimistic transaction. A rejected handler rolls back its optimistic writes.
+DB applies optimistic writes immediately. Successful Convex mutation promises wait for the client's queries to catch up. Before a handler settles, the adapter reads the latest cached result and waits for DB to accept its sync writes. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.cleanup()`, then `collection.preload()`, before retrying replay. A provider query error can recover when a later valid result arrives. A rejected handler rolls back its optimistic writes.
 
 Awaiting an HTTP mutation, an action, a different client's mutation, or a detached promise does not provide this query synchronization guarantee. Avoid applying Convex optimistic updates to the same query, because the adapter would receive those local results as source data.
 
@@ -139,9 +139,9 @@ convexCollectionOptions({
 
 Keep projections synchronous and treat query results as immutable. A projection can change the row shape. A standard schema can validate local writes through the collection's `schema` option.
 
-## Automatic pagination
+## Complete eager pagination
 
-Use `convexPaginatedCollectionOptions` for a query that returns Convex's `PaginationResult`. The adapter supplies `paginationOpts` and loads every page automatically.
+Use `convexPaginatedCollectionOptions` for a complete eager mirror of a finite query that returns Convex's `PaginationResult`. The adapter supplies `paginationOpts`, loads every page automatically, and keeps the full result and its page subscriptions in memory. `preload()` waits for the whole result. Set a server-side scope such as a project or workspace before using it with a large table.
 
 ```ts
 import { convexPaginatedCollectionOptions } from '@tanstack/convex-db-collection'
@@ -153,6 +153,7 @@ const tasks = createCollection(
     query: api.tasks.paginated,
     queryArgs: { projectId },
     pageSize: 100,
+    maxRows: 5_000,
     getKey: (task) => task._id,
   }),
 )
@@ -165,6 +166,12 @@ Your server query must pass `paginationOpts` through to the same ordered Convex 
 The adapter keeps each loaded cursor range subscribed. Fixed `endCursor` boundaries prevent gaps when rows move or are deleted. Convex split hints replace a range with two subscriptions. The adapter publishes a replacement only after every range is available and the final page reports exhaustion. `preload()` waits for this complete initial result. During later page acquisition, the last complete snapshot stays visible.
 
 `pageSize` defaults to 100 and must be a positive safe integer. It sets the initial request size. Reactive ranges can contain more rows after inserts. Both supported clients use their public query subscription APIs, without experimental pagination methods.
+
+`maxRows` defaults to 10,000 and must be a positive safe integer. It caps the accepted complete result. An oversized result rejects with `RangeError` before the adapter publishes it or continues past a known oversized prefix. Initial `preload()` rejects; later growth preserves the last accepted snapshot and reports the error through `onError` and `getSyncError()`. Raise the finite cap only for a source size your application can hold.
+
+The cap does not limit the bytes in a server response or guarantee peak memory use. A single reactive page can already exceed it. `pageSize` does not bound total memory or initial load time. Initial acquisition can inspect earlier cached pages repeatedly as it extends the cursor chain.
+
+This API uses eager sync and does not translate DB's `loadSubset` requests. Demand-driven loading remains a separate API decision because it needs an application-supplied filter and ordering translation, ownership of overlapping windows, and rejection of unsupported requests. Until that API exists, narrow the server query or use another adapter when fetching only a requested window is required.
 
 For paginated collections, `select` receives the complete row array. DB still applies local filters, joins, ordering, and limits. Pagination loads a finite query completely into memory, it does not push DB predicates to your server.
 
@@ -221,7 +228,7 @@ Use the offline action to create durable writes. Calling `tasks.insert()` direct
 
 The opt-in codec preserves Convex BigInt, binary data, special floats, and undefined fields in mutation changes. Keep the same codec configured across reloads. Missing or incompatible codecs stop replay and retain the stored work. Transaction metadata keeps the outbox’s existing JSON/Date/Temporal behavior.
 
-The outbox records the transaction before sending it. After a reload, the executor restores pending optimistic writes and replays their named mutation functions. The bridge supplies the original `idempotencyKey`, waits for the Convex mutation, then waits for each configured Collection to accept its source snapshot. It does not wait for visibility held by that same optimistic transaction.
+The outbox records the transaction before sending it. After a reload, the executor restores pending optimistic writes and replays their named mutation functions. The bridge supplies the original `idempotencyKey`, waits for the Convex mutation, then waits for each configured Collection to accept its source snapshot. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.cleanup()`, then `collection.preload()`, before retrying replay. A provider query error can recover when a later valid result arrives.
 
 Convex handles WebSocket interruptions without rejecting the mutation promise. Argument-construction errors and rejected mutation calls are terminal failures. The bridge turns them into `NonRetriableError`, so the executor rolls back instead of retrying invalid writes indefinitely. A later source-sync failure can retry with the original key.
 

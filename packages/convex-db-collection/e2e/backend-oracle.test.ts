@@ -7,13 +7,16 @@
  *
  * The durable driver checks the outbox's documented process-restart law with
  * actual disk storage and SIGKILL. Its independent model applies one logical
- * insert, update, or delete, hence the draft row or its absence and one receipt.
+ * insert, update, or delete, hence the draft row or its absence, one receipt
+ * containing the durable key, and one increment of a non-idempotent counter.
  * Histories vary the operation and draft's text/rank, plus whether a second
- * crash loses the server acknowledgement. Native values vary on inserted rows.
+ * crash loses the server acknowledgement. Native values vary on inserted and updated rows.
  * A server-accepted checkpoint occurs before the outbox phase can be recorded,
  * so replay must reuse its key rather than rely on a completed local marker.
  * Checkpoints are observed in child stdout before killing the process. Server
- * rows/receipts and replayed Collection rows are checked only after replay.
+ * rows, receipt keys, application count, and complete replayed Collection rows
+ * are checked after replay. Equal task rows alone cannot distinguish a duplicate
+ * server application, while the independently observed counter can.
  *
  * This is a receiving witness for the offline engine's interruption/settlement
  * owners, not another model of leadership. It covers one pending mutation in one
@@ -29,6 +32,7 @@ import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import { describe, expect, inject, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
+import { withTestCleanup } from '../tests/helpers'
 import type { Value } from 'convex/values'
 import type { ConvexCollectionClient } from '../src/index'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
@@ -61,6 +65,36 @@ const url = inject(`convexUrl`)
 describe.each([`javascript`, `react`] as const)(
   `real backend with %s client`,
   (kind) => {
+    it(`rejects a mirror beyond its row bound without publishing a partial result`, async () => {
+      const client =
+        kind === `javascript`
+          ? new ConvexClient(url, { unsavedChangesWarning: false })
+          : new ConvexReactClient(url, { unsavedChangesWarning: false })
+      const collection = createCollection(
+        convexPaginatedCollectionOptions({
+          client,
+          query: makeFunctionReference<
+            `query`,
+            { paginationOpts: PaginationOptions },
+            PaginationResult<Task>
+          >(`tasks:list`),
+          queryArgs: {},
+          pageSize: 4,
+          maxRows: 5,
+          getKey: (task) => task.clientId,
+          gcTime: 0,
+        }),
+      )
+      await withTestCleanup(
+        async () => {
+          await client.mutation(seed, { count: 23 })
+          await expect(collection.preload()).rejects.toBeInstanceOf(RangeError)
+          expect([...collection.values()]).toEqual([])
+        },
+        () => collection.cleanup(),
+        () => client.close(),
+      )
+    })
     it.each([`list`, `split`] as const)(
       `loads %s pages through inserts, moves, deletions, and server splits`,
       async (functionName) => {
@@ -68,7 +102,6 @@ describe.each([`javascript`, `react`] as const)(
           kind === `javascript`
             ? new ConvexClient(url, { unsavedChangesWarning: false })
             : new ConvexReactClient(url, { unsavedChangesWarning: false })
-        await client.mutation(seed, { count: 23 })
         let splitResponses = 0
         const inspect = (value: unknown): void => {
           if (
@@ -137,37 +170,44 @@ describe.each([`javascript`, `react`] as const)(
             })),
           )
         }
-        try {
-          await collection.preload()
-          expect(collection.size).toBe(23)
-          await check()
-          for (const operation of [
-            {
-              clientId: `new-first`,
-              rank: -10,
-              text: `insert before all pages`,
-            },
-            {
-              clientId: `new-last`,
-              rank: 100,
-              text: `append after exhaustion`,
-            },
-            { clientId: `3`, rank: 3, text: `delete a boundary`, remove: true },
-            { clientId: `12`, rank: -5, text: `move across cursor ranges` },
-            { clientId: `8`, rank: 8, text: `update a middle page` },
-          ]) {
-            await client.mutation(write, {
-              ...operation,
-              idempotencyKey: crypto.randomUUID(),
-            })
+        await withTestCleanup(
+          async () => {
+            await client.mutation(seed, { count: 23 })
+            await collection.preload()
+            expect(collection.size).toBe(23)
             await check()
-          }
-          if (functionName === `split`)
-            expect(splitResponses).toBeGreaterThan(0)
-        } finally {
-          await collection.cleanup()
-          await client.close()
-        }
+            for (const operation of [
+              {
+                clientId: `new-first`,
+                rank: -10,
+                text: `insert before all pages`,
+              },
+              {
+                clientId: `new-last`,
+                rank: 100,
+                text: `append after exhaustion`,
+              },
+              {
+                clientId: `3`,
+                rank: 3,
+                text: `delete a boundary`,
+                remove: true,
+              },
+              { clientId: `12`, rank: -5, text: `move across cursor ranges` },
+              { clientId: `8`, rank: 8, text: `update a middle page` },
+            ]) {
+              await client.mutation(write, {
+                ...operation,
+                idempotencyKey: crypto.randomUUID(),
+              })
+              await check()
+            }
+            if (functionName === `split`)
+              expect(splitResponses).toBeGreaterThan(0)
+          },
+          () => collection.cleanup(),
+          () => client.close(),
+        )
       },
     )
   },
@@ -179,20 +219,12 @@ async function durableHistory(
   operation: `insert` | `update` | `delete`,
 ) {
   const { spawn } = await import('node:child_process')
-  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { mkdtemp, rm, readdir, readFile } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
   const directory = await mkdtemp(join(tmpdir(), `convex-outbox-`))
   const client = new ConvexClient(url, { unsavedChangesWarning: false })
-  await client.mutation(seed, { count: operation === `insert` ? 0 : 1 })
-  const before = (await client.query(all, {})).map(
-    ({ clientId, text, rank, payload }) => ({ clientId, text, rank, payload }),
-  )
-  // The public write contract gives one final draft for insert/update and no
-  // row for delete. These expectations do not inspect restored mutations.
-  const expected =
-    operation === `delete` ? [] : [{ ...draft, payload: draft.payload }]
   async function run(mode: string, target: string): Promise<Array<string>> {
     const child = spawn(
       process.execPath,
@@ -243,46 +275,78 @@ async function durableHistory(
       .filter((line) => line.startsWith(`CHECKPOINT:`))
       .map((line) => line.slice(11))
   }
-  try {
-    const admitted = await run(`admit`, `durable`)
-    expect(admitted).not.toContain(`provider-call`)
-    expect(
-      (await client.query(all, {})).map(
+  await withTestCleanup(
+    async () => {
+      await client.mutation(seed, { count: operation === `insert` ? 0 : 1 })
+      const before = (await client.query(all, {})).map(
         ({ clientId, text, rank, payload }) => ({
           clientId,
           text,
           rank,
           payload,
         }),
-      ),
-    ).toEqual(before)
-    if (uncertain) {
-      expect(await run(`uncertain`, `server-accepted`)).toContain(
-        `provider-call`,
       )
-      expect((await client.query(all, {})).map((row) => row.clientId)).toEqual(
-        expected.map((row) => row.clientId),
+      // The public write contract gives one final draft for insert/update and no
+      // row for delete. These expectations do not inspect restored mutations.
+      const expected =
+        operation === `delete` ? [] : [{ ...draft, payload: draft.payload }]
+      const admitted = await run(`admit`, `durable`)
+      expect(admitted).not.toContain(`provider-call`)
+      // Read the actual admission record after SIGKILL, independently of the
+      // replay child. A fresh key on replay cannot pass a receipt-count check.
+      const records = (await readdir(directory)).filter((name) =>
+        decodeURIComponent(name).startsWith(`tx:`),
       )
-    }
-    expect(await run(`replay`, `replayed`)).toContain(`provider-call`)
-    const receipts = makeFunctionReference<`query`, {}, Array<{ key: string }>>(
-      `tasks:receipts`,
-    )
-    expect(await client.query(receipts, {})).toHaveLength(1)
-    expect(
-      (await client.query(all, {})).map(
-        ({ clientId, text, rank, payload }) => ({
-          clientId,
-          text,
-          rank,
-          payload,
-        }),
-      ),
-    ).toEqual(expected)
-  } finally {
-    await client.close()
-    await rm(directory, { recursive: true, force: true })
-  }
+      expect(records).toHaveLength(1)
+      const durable: { idempotencyKey: unknown } = JSON.parse(
+        await readFile(join(directory, records[0]!), `utf8`),
+      )
+      expect(typeof durable.idempotencyKey).toBe(`string`)
+      expect(
+        (await client.query(all, {})).map(
+          ({ clientId, text, rank, payload }) => ({
+            clientId,
+            text,
+            rank,
+            payload,
+          }),
+        ),
+      ).toEqual(before)
+      if (uncertain) {
+        expect(await run(`uncertain`, `server-accepted`)).toContain(
+          `provider-call`,
+        )
+        expect(
+          (await client.query(all, {})).map((row) => row.clientId),
+        ).toEqual(expected.map((row) => row.clientId))
+      }
+      expect(await run(`replay`, `replayed`)).toContain(`provider-call`)
+      const receipts = makeFunctionReference<
+        `query`,
+        {},
+        Array<{ key: string }>
+      >(`tasks:receipts`)
+      expect((await client.query(receipts, {})).map(({ key }) => key)).toEqual([
+        durable.idempotencyKey,
+      ])
+      const applicationCount = makeFunctionReference<`query`, {}, number>(
+        `tasks:applicationCount`,
+      )
+      expect(await client.query(applicationCount, {})).toBe(1)
+      expect(
+        (await client.query(all, {})).map(
+          ({ clientId, text, rank, payload }) => ({
+            clientId,
+            text,
+            rank,
+            payload,
+          }),
+        ),
+      ).toEqual(expected)
+    },
+    () => client.close(),
+    () => rm(directory, { recursive: true, force: true }),
+  )
 }
 
 it.each([`insert`, `update`, `delete`] as const)(
@@ -300,7 +364,7 @@ it.each([`insert`, `update`, `delete`] as const)(
             : fc.integer({ min: -50, max: 50 }),
         uncertain: fc.boolean(),
         payload:
-          operation === `insert`
+          operation !== `delete`
             ? fc.oneof(
                 fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n }),
                 fc.constantFrom(NaN, Infinity, -Infinity, -0),
@@ -316,18 +380,21 @@ it.each([`insert`, `update`, `delete`] as const)(
             clientId: operation === `insert` ? `offline-created` : `0`,
             text,
             rank,
-            ...(operation === `insert` ? { payload } : {}),
+            ...(operation !== `delete` ? { payload } : {}),
           },
           uncertain,
           operation,
         ),
     )
-    const replaySeed = process.env.CONVEX_BACKEND_ORACLE_SEED
+    // Each grammar owns its seed/path pair. An insert shrink path is not a
+    // delete path, whose text/rank/payload dimensions are intentionally fixed.
+    const replayPrefix = `CONVEX_BACKEND_${operation.toUpperCase()}_ORACLE`
+    const replaySeed = process.env[`${replayPrefix}_SEED`]
     if (replaySeed)
       await fc.assert(property, {
         numRuns: 6,
         seed: Number(replaySeed),
-        path: process.env.CONVEX_BACKEND_ORACLE_PATH,
+        path: process.env[`${replayPrefix}_PATH`],
       })
     else {
       await fc.assert(property, { numRuns: 6, seed: 20261022 })

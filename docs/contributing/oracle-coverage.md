@@ -13,12 +13,12 @@ distinguishes canonical laws from their receiving witnesses across packages.
 
 ## Convex collection integration
 
-The Convex package has five independent owners:
+The Convex package has these independent judgments:
 
 - `packages/convex-db-collection/tests/snapshot-oracle.property.test.ts` compares
   public rows with the latest valid provider array. It covers missing-row
   deletion, full-row replacement, reintroduction, empty results, and atomic
-  duplicate-key rejection.
+  duplicate-key rejection, through both raw results and successful select projections.
 - `packages/convex-db-collection/tests/ownership-oracle.property.test.ts` owns
   concrete options admission separately from snapshot refinement. Its identity
   model crosses direct and shallow-copy reuse with idle, ready, and cleaned-up
@@ -30,13 +30,13 @@ The Convex package has five independent owners:
   row. The claim repair passes both fixed and random 60-history campaigns and
   direct replay. It follows the existing LocalStorage concrete-options policy.
   This owner does not cover arbitrary Collection lifecycle or a real SDK's
-  multi-listener scheduling. SDK tests receive the cached-listener premise.
+  multi-listener scheduling. SDK tests receive the cached-listener premise and exercise both real clients with either sibling cleaned up before the survivor receives another update.
 - `packages/convex-db-collection/tests/pagination-oracle.property.test.ts` owns
   complete finite snapshots across reactive cursor ranges. It varies page sizes
   1-4, forward/reverse callback delivery, row insertion/deletion/movement, and
   required/recommended/no split hints. The reference is the latest input array;
   the provider fixture independently answers numeric rank intervals. Comparison
-  occurs after the finite acquisition exhausts and sync acceptance settles.
+  checks provider row order after exhaustion and preserves the previous public snapshot while replacement ranges are pending. Split cursors stay inside their returned page ranges. The accepted-row bound rejects over-cap results without partial publication.
   Its initial-materialization work law also varies 3-40 pages and 1-8 rows per
   page. The original implementation copied incomplete prefixes and failed at
   seed 20261022/path 0:0:0:0. The repaired fixed/random campaigns copy each
@@ -55,7 +55,7 @@ The Convex package has five independent owners:
 
 Each owner runs matching fixed and random campaigns and accepts explicit
 seed/path replay through their CONVEX_*_ORACLE_SEED/PATH environment variables.
-Snapshot replay uses CONVEX_SNAPSHOT_ORACLE; pagination uses CONVEX_ORACLE;
+Snapshot replay uses CONVEX_SNAPSHOT_ORACLE; pagination has separate CONVEX_PAGINATION_ROWS, CONVEX_PAGINATION_WORK, and CONVEX_PAGINATION_BOUND selectors;
 offline bridge replay uses CONVEX_OFFLINE_ORACLE; native value replay uses
 CONVEX_VALUES_ORACLE; ownership uses CONVEX_OWNERSHIP_ORACLE.
 
@@ -67,9 +67,9 @@ and random insert/update/delete histories through SIGKILL after disk admission a
 a second SIGKILL after server acceptance but before recording outbox completion.
 It requires no offline provider call, restored Collection rows, and one server
 receipt after replay with the original key and the expected final server rows.
-Native payload variation is insert-only. Atomic batches and multi-tab leadership
+Native payload variation covers inserts and updates. A separate non-idempotent application counter must equal one, and the receipt key must match the on-disk durable key. Restored Collections are compared on every application field, including native payloads. Atomic batches and multi-tab leadership
 remain outside this backend witness. Replay uses
-CONVEX_BACKEND_ORACLE_SEED/PATH. The command owns backend startup and shutdown.
+CONVEX_BACKEND_INSERT_ORACLE_SEED/PATH, CONVEX_BACKEND_UPDATE_ORACLE_SEED/PATH, or CONVEX_BACKEND_DELETE_ORACLE_SEED/PATH, with matching operation test selection. The command owns backend startup and shutdown.
 The offline engine's interruption, settlement, storage, and leadership owners
 remain primary for those laws; this is their Convex receiving witness.
 
@@ -98,13 +98,16 @@ availability, or power-loss atomicity during a filesystem write. The test backen
 has no application authorization; production authorization and atomic receipt
 storage are requirements of each application's server mutation.
 
-Validation for this integration: 43 adapter checks, 302 offline-engine tests,
-and seven real-backend tests (36 generated crash histories) pass. The native-value receiving oracle rejects a
+The October 23 review adds real-Collection source-acceptance histories to the offline bridge owner: idle, pending first result, failed startup, provider failure, and cleanup. Successful empty or nonempty snapshots must actually be accepted. Original idle acceptance fails seed 20261023/path 0:0:0, the repaired fixed/random campaigns and direct replay pass. The same file keeps its ordered-stage model separate from the source-settlement and rejected-acceptance judgments. A rejected durable acceptance stays terminal for that sync run, same or changed cached rows cannot falsely certify a retry, and cleanup/restart with a fresh accepted snapshot recovers. The nonterminal mutant fails seed 20261023/path 0:0 under CONVEX_OFFLINE_ACCEPTANCE_ORACLE_SEED/PATH. Ordinary provider errors retain same-run valid-result recovery. Dedicated codec replay uses OFFLINE_CODEC_ORACLE_SEED/PATH/RUNS; legacy serializer properties keep OFFLINE_ORACLE selectors.
+
+The bounded eager API defaults maxRows to 10,000. It is not an on-demand window, a network-byte bound, a strict peak-memory bound, or a lifetime subscription-count bound. Cursor ranges remain subscribed, and cache scans still grow quadratically during acquisition. A separate on-demand API needs application-owned filter/order translation and demand-scoped publication/release witnesses before making those promises.
+
+Validation at the initial review: 43 adapter checks, 302 offline-engine tests, and seven real-backend tests passed. The October 23 strengthened backend suite passes nine tests with 36 generated crash histories. Final local validation passes 62 adapter checks and 302 offline-engine tests. Exact-head review records accompany this follow-up. The native-value receiving oracle rejects a
 scalar-as-JSON decoder at the typed-value comparison (seed 20261022/path 0:0);
 its repaired replay passes. `pnpm size:compare --packages
-convex-db-collection,offline-transactions --files` measures 2,633 gzip / 2,381
+convex-db-collection,offline-transactions --files` measures 2,863 gzip / 2,594
 brotli bytes for the new adapter's combined exports, with dependencies external.
-The shared outbox grows by 192 gzip / 174 brotli bytes. A new adapter has no
+The shared outbox grows by 192 gzip / 174 brotli bytes. Kyle review repairs add 230 gzip / 213 brotli bytes over the published PR head for actual first-source acceptance and the accepted-row bound. Existing tree-shaken app scenarios remain unchanged. Reusing the sync config materialization hook avoids a parallel startup lifecycle, and the existing page loop enforces the bound without a second pager. A new adapter has no
 baseline to subtract; normal and paginated sources share one snapshot writer,
 and the existing outbox supplies durability instead of a second write queue.
 The codec hook is needed to preserve native values without changing default

@@ -3,7 +3,7 @@ id: ConvexCollectionUtils
 title: ConvexCollectionUtils
 ---
 
-Defined in: options.ts:11
+Defined in: [options.ts:15](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/options.ts#L15)
 
 ## Extends
 
@@ -23,7 +23,7 @@ Defined in: options.ts:11
 awaitSync: () => Promise<void>;
 ```
 
-Defined in: options.ts:15
+Defined in: [options.ts:19](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/options.ts#L19)
 
 Refresh the source cache and wait for sync acceptance, safe inside mutation handlers.
 
@@ -39,7 +39,7 @@ Refresh the source cache and wait for sync acceptance, safe inside mutation hand
 getSyncError: () => unknown;
 ```
 
-Defined in: options.ts:13
+Defined in: [options.ts:17](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/options.ts#L17)
 
 Last subscription or conversion error, cleared by the next valid result.
 

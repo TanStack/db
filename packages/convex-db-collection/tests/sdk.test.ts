@@ -6,7 +6,7 @@ import { makeFunctionReference } from 'convex/server'
 import { convexToJson } from 'convex/values'
 import { describe, expect, it, vi } from 'vitest'
 import { convexCollectionOptions } from '../src/index'
-import { mutation, query } from './helpers'
+import { mutation, query, withTestCleanup } from './helpers'
 import type { Value } from 'convex/values'
 
 // Only the transport is controlled. Both clients, their caches, subscriptions,
@@ -127,108 +127,155 @@ describe.each([`javascript`, `react`] as const)(
       return { client, collection, socket, remote: server(socket) }
     }
 
+    // Receiving witness for the ownership oracle: the actual SDK deduplicates
+    // two listeners, and releasing either owner leaves the other live.
+    it.each([`first`, `second`] as const)(
+      `keeps sibling updates after cleaning up %s listener`,
+      async (retired) => {
+        const { client, collection: first, remote } = setup()
+        remote.snapshot([{ _id: `a`, text: `old` }])
+        await first.preload()
+        const second = createCollection(
+          convexCollectionOptions({
+            client,
+            query,
+            queryArgs: { owner: `alice` },
+            getKey: (row) => row._id,
+            select: (rows) =>
+              rows.map((row) => ({ ...row, text: row.text.toUpperCase() })),
+            gcTime: 0,
+          }),
+        )
+        await withTestCleanup(
+          async () => {
+            await second.preload()
+            expect(second.get(`a`)?.text).toBe(`OLD`)
+            const survivor = retired === `first` ? second : first
+            const removed = retired === `first` ? first : second
+            await removed.cleanup()
+            remote.snapshot([{ _id: `a`, text: `updated` }])
+            expect(survivor.get(`a`)?.text).toBe(
+              retired === `first` ? `UPDATED` : `updated`,
+            )
+            expect(removed.status).toBe(`cleaned-up`)
+          },
+          () => first.cleanup(),
+          () => second.cleanup(),
+          () => client.close(),
+        )
+      },
+    )
+
     it(`subscribes with generated function names and typed args`, async () => {
       const { client, collection, socket, remote } = setup()
-      try {
-        const subscription = socket.sent.find(
-          (msg) => msg.type === `ModifyQuerySet`,
-        )!
-        expect(subscription.modifications).toMatchObject([
-          { type: `Add`, udfPath: `tasks:list`, args: [{ owner: `alice` }] },
-        ])
-        remote.snapshot([{ _id: `a`, text: `hello` }])
-        await collection.preload()
-        expect(collection.get(`a`)?.text).toBe(`hello`)
-        remote.snapshot([])
-        expect(collection.size).toBe(0)
-        await collection.cleanup()
-        expect(socket.sent.at(-1)).toMatchObject({
-          type: `ModifyQuerySet`,
-          modifications: [{ type: `Remove` }],
-        })
-      } finally {
-        await collection.cleanup()
-        await client.close()
-      }
+      await withTestCleanup(
+        async () => {
+          const subscription = socket.sent.find(
+            (msg) => msg.type === `ModifyQuerySet`,
+          )!
+          expect(subscription.modifications).toMatchObject([
+            { type: `Add`, udfPath: `tasks:list`, args: [{ owner: `alice` }] },
+          ])
+          remote.snapshot([{ _id: `a`, text: `hello` }])
+          await collection.preload()
+          expect(collection.get(`a`)?.text).toBe(`hello`)
+          remote.snapshot([])
+          expect(collection.size).toBe(0)
+          await collection.cleanup()
+          expect(socket.sent.at(-1)).toMatchObject({
+            type: `ModifyQuerySet`,
+            modifications: [{ type: `Remove` }],
+          })
+        },
+        () => collection.cleanup(),
+        () => client.close(),
+      )
     })
 
     it(`waits for a query transition past the mutation timestamp before settling`, async () => {
       const { client, collection, remote } = setup()
-      try {
-        remote.snapshot([{ _id: `a`, text: `old` }])
-        await collection.preload()
-        const seen: Array<string | undefined> = []
-        const subscription = collection.subscribeChanges(() => {
-          seen.push(collection.get(`a`)?.text)
-        })
-        const transaction = collection.update(`a`, (row) => {
-          row.text = `optimistic`
-        })
-        remote.acknowledge()
-        await Promise.resolve()
-        expect(transaction.state).toBe(`persisting`)
-        expect(collection.get(`a`)?.text).toBe(`optimistic`)
-        remote.snapshot([{ _id: `a`, text: `server` }])
-        await transaction.isPersisted.promise
-        expect(collection.get(`a`)?.text).toBe(`server`)
-        expect(seen).not.toContain(`old`)
-        subscription.unsubscribe()
-      } finally {
-        await collection.cleanup()
-        await client.close()
-      }
+      await withTestCleanup(
+        async () => {
+          remote.snapshot([{ _id: `a`, text: `old` }])
+          await collection.preload()
+          const seen: Array<string | undefined> = []
+          const subscription = collection.subscribeChanges(() => {
+            seen.push(collection.get(`a`)?.text)
+          })
+          const transaction = collection.update(`a`, (row) => {
+            row.text = `optimistic`
+          })
+          remote.acknowledge()
+          await Promise.resolve()
+          expect(transaction.state).toBe(`persisting`)
+          expect(collection.get(`a`)?.text).toBe(`optimistic`)
+          remote.snapshot([{ _id: `a`, text: `server` }])
+          await transaction.isPersisted.promise
+          expect(collection.get(`a`)?.text).toBe(`server`)
+          expect(seen).not.toContain(`old`)
+          subscription.unsubscribe()
+        },
+        () => collection.cleanup(),
+        () => client.close(),
+      )
     })
 
     it(`resubscribes and replays an in-flight mutation after reconnect`, async () => {
       vi.useFakeTimers()
       const { client, collection, socket, remote } = setup()
-      try {
-        remote.snapshot([{ _id: `a`, text: `old` }])
-        await collection.preload()
-        const transaction = collection.update(`a`, (row) => {
-          row.text = `optimistic`
-        })
-        socket.onclose?.({ code: 1006, reason: `network lost` })
-        await vi.advanceTimersByTimeAsync(3000)
-        const replacement = Socket.instances.at(-1)!
-        expect(replacement).not.toBe(socket)
-        replacement.open()
-        expect(
-          replacement.sent.some((message) => message.type === `Mutation`),
-        ).toBe(true)
-        expect(collection.get(`a`)?.text).toBe(`optimistic`)
-        const nextRemote = server(replacement)
-        nextRemote.acknowledge()
-        nextRemote.snapshot([{ _id: `a`, text: `reconnected` }])
-        await transaction.isPersisted.promise
-        expect(collection.get(`a`)?.text).toBe(`reconnected`)
-      } finally {
-        await collection.cleanup()
-        // close() uses a microtask, which fake timers otherwise hold.
-        const closed = client.close()
-        await vi.runAllTimersAsync()
-        await closed
-        vi.useRealTimers()
-      }
+      await withTestCleanup(
+        async () => {
+          remote.snapshot([{ _id: `a`, text: `old` }])
+          await collection.preload()
+          const transaction = collection.update(`a`, (row) => {
+            row.text = `optimistic`
+          })
+          socket.onclose?.({ code: 1006, reason: `network lost` })
+          await vi.advanceTimersByTimeAsync(3000)
+          const replacement = Socket.instances.at(-1)!
+          expect(replacement).not.toBe(socket)
+          replacement.open()
+          expect(
+            replacement.sent.some((message) => message.type === `Mutation`),
+          ).toBe(true)
+          expect(collection.get(`a`)?.text).toBe(`optimistic`)
+          const nextRemote = server(replacement)
+          nextRemote.acknowledge()
+          nextRemote.snapshot([{ _id: `a`, text: `reconnected` }])
+          await transaction.isPersisted.promise
+          expect(collection.get(`a`)?.text).toBe(`reconnected`)
+        },
+        () => collection.cleanup(),
+        async () => {
+          // close() uses a microtask, which fake timers otherwise hold.
+          const closed = client.close()
+          await vi.runAllTimersAsync()
+          await closed
+        },
+        () => {
+          vi.useRealTimers()
+        },
+      )
     })
 
     it(`rolls back on an actual Convex mutation failure`, async () => {
       const { client, collection, remote } = setup()
-      try {
-        remote.snapshot([{ _id: `a`, text: `old` }])
-        await collection.preload()
-        const transaction = collection.update(`a`, (row) => {
-          row.text = `optimistic`
-        })
-        remote.acknowledge(false)
-        await expect(transaction.isPersisted.promise).rejects.toThrow(
-          `permission denied`,
-        )
-        expect(collection.get(`a`)?.text).toBe(`old`)
-      } finally {
-        await collection.cleanup()
-        await client.close()
-      }
+      await withTestCleanup(
+        async () => {
+          remote.snapshot([{ _id: `a`, text: `old` }])
+          await collection.preload()
+          const transaction = collection.update(`a`, (row) => {
+            row.text = `optimistic`
+          })
+          remote.acknowledge(false)
+          await expect(transaction.isPersisted.promise).rejects.toThrow(
+            `permission denied`,
+          )
+          expect(collection.get(`a`)?.text).toBe(`old`)
+        },
+        () => collection.cleanup(),
+        () => client.close(),
+      )
     })
   },
 )
@@ -257,38 +304,39 @@ it(`preserves Convex integers, special floats, nested values, and bytes`, async 
   const socket = Socket.instances.at(-1)!
   socket.open()
   const remote = server(socket)
-  try {
-    const values: Array<Value> = [
-      9223372036854775807n,
-      NaN,
-      Infinity,
-      -Infinity,
-      -0,
-      { nested: [null, true, `hello`, { key: `value` }] },
-      new Uint8Array([1, 2]).buffer,
-    ]
-    for (const payload of values) {
-      remote.snapshot([{ _id: `a`, payload }])
-      await collection.preload()
-      const actual = collection.get(`a`)!.payload
-      if (payload instanceof ArrayBuffer)
-        expect([...new Uint8Array(actual as ArrayBuffer)]).toEqual([
-          ...new Uint8Array(payload),
-        ])
-      else expect(actual).toEqual(payload)
-    }
-    const changed = vi.fn()
-    const listener = collection.subscribeChanges(changed)
-    remote.snapshot([{ _id: `a`, payload: new Uint8Array([3, 4]).buffer }])
-    expect(changed).toHaveBeenCalledOnce()
-    listener.unsubscribe()
-    expect([
-      ...new Uint8Array(collection.get(`a`)!.payload as ArrayBuffer),
-    ]).toEqual([3, 4])
-  } finally {
-    await collection.cleanup()
-    await client.close()
-  }
+  await withTestCleanup(
+    async () => {
+      const values: Array<Value> = [
+        9223372036854775807n,
+        NaN,
+        Infinity,
+        -Infinity,
+        -0,
+        { nested: [null, true, `hello`, { key: `value` }] },
+        new Uint8Array([1, 2]).buffer,
+      ]
+      for (const payload of values) {
+        remote.snapshot([{ _id: `a`, payload }])
+        await collection.preload()
+        const actual = collection.get(`a`)!.payload
+        if (payload instanceof ArrayBuffer)
+          expect([...new Uint8Array(actual as ArrayBuffer)]).toEqual([
+            ...new Uint8Array(payload),
+          ])
+        else expect(actual).toEqual(payload)
+      }
+      const changed = vi.fn()
+      const listener = collection.subscribeChanges(changed)
+      remote.snapshot([{ _id: `a`, payload: new Uint8Array([3, 4]).buffer }])
+      expect(changed).toHaveBeenCalledOnce()
+      listener.unsubscribe()
+      expect([
+        ...new Uint8Array(collection.get(`a`)!.payload as ArrayBuffer),
+      ]).toEqual([3, 4])
+    },
+    () => collection.cleanup(),
+    () => client.close(),
+  )
 })
 
 it(`rejects preload for a disabled JavaScript client`, async () => {
@@ -304,7 +352,13 @@ it(`rejects preload for a disabled JavaScript client`, async () => {
       gcTime: 0,
     }),
   )
-  await expect(collection.preload()).rejects.toThrow(`disabled Convex client`)
-  await collection.cleanup()
-  await client.close()
+  await withTestCleanup(
+    async () => {
+      await expect(collection.preload()).rejects.toThrow(
+        `disabled Convex client`,
+      )
+    },
+    () => collection.cleanup(),
+    () => client.close(),
+  )
 })

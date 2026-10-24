@@ -49,8 +49,8 @@ import type { PendingMutation } from '@tanstack/db'
  * versions. Malformed markers and missing Temporal constructors test failure
  * paths before durable data can be replaced.
  *
- * Limits: undefined, non-finite numbers, arbitrary native objects, and
- * cross-realm boxed values are outside current evidence. Cycles must fail
+ * Limits for default v3: undefined, non-finite numbers, arbitrary native
+ * objects, and cross-realm boxed values are outside that domain's evidence. Cycles must fail
  * visibly while repeated non-cyclic references retain their values. This
  * oracle does not claim byte stability for object key order beyond JSON's
  * established rules. Temporal witnesses install controlled constructors;
@@ -1657,6 +1657,7 @@ it(`preserves opt-in mutation values and rejects unreadable codec records withou
         ],
       }
       const storage = new FakeStorageAdapter()
+      let hasPrimaryFailure = false
       try {
         await new OutboxManager(storage, { rows: writer }, codec).add(
           transaction,
@@ -1727,14 +1728,19 @@ it(`preserves opt-in mutation values and rejects unreadable codec records withou
         expect(
           mixed.find((entry) => entry.id === legacy.id)?.mutations[0]?.modified,
         ).toEqual(plain)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
       } finally {
-        await writer.cleanup()
-        await reader.cleanup()
+        await cleanupOfflineOracle(
+          [() => writer.cleanup(), () => reader.cleanup()],
+          hasPrimaryFailure,
+        )
       }
     },
   )
   const config = readOfflineOracleConfig({
-    prefix: `OFFLINE_ORACLE`,
+    prefix: `OFFLINE_CODEC_ORACLE`,
     defaultRuns: 60,
   })
   if (config.seed !== undefined)

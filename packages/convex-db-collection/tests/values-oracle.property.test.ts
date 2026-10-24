@@ -17,6 +17,7 @@ import { createCollection } from '@tanstack/db'
 import { OutboxManager } from '@tanstack/offline-transactions'
 import { expect, it } from 'vitest'
 import { convexMutationCodec } from '../src/offline'
+import { cleanupOfflineOracle } from '../../offline-transactions/tests/oracle-lifecycle'
 import type { PendingMutation } from '@tanstack/db'
 import type {
   OfflineTransaction,
@@ -124,6 +125,7 @@ const property = fc.asyncProperty(tree(2), async (payload) => {
       } as unknown as PendingMutation,
     ],
   }
+  let hasPrimaryFailure = false
   try {
     await new OutboxManager(storage, { rows: writer }, convexMutationCodec).add(
       transaction,
@@ -138,9 +140,14 @@ const property = fc.asyncProperty(tree(2), async (payload) => {
     expect(observe(restored!.mutations[0]!.changes)).toEqual(
       observe({ payload }),
     )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
   } finally {
-    await writer.cleanup()
-    await reader.cleanup()
+    await cleanupOfflineOracle(
+      [() => writer.cleanup(), () => reader.cleanup()],
+      hasPrimaryFailure,
+    )
   }
 })
 it(`preserves the Convex mutation value domain across durable serialization`, async () => {

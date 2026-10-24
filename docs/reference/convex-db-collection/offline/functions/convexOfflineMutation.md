@@ -7,7 +7,7 @@ title: convexOfflineMutation
 function convexOfflineMutation<TMutation>(config): OfflineMutationFn;
 ```
 
-Defined in: offline.ts:21
+Defined in: [offline.ts:21](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/offline.ts#L21)
 
 Use as a named mutationFn in startOfflineExecutor. The existing outbox owns
 durability, restoration, leadership and retries. The server mutation must
