@@ -789,7 +789,9 @@ export interface BaseCollectionConfig<
    * when it has no active subscribers. Defaults to 5 minutes (300000ms).
    * Sync started without subscribers gets a minimum 50ms grace period.
    * Pending preloads retain the collection until they settle. Preloading ready
-   * data refreshes the retention period. A non-positive or non-finite value
+   * data refreshes the retention period. A persisting transaction that touches
+   * the collection also retains it, and the period starts again when the last
+   * one completes or fails. A non-positive or non-finite value
    * disables automatic garbage collection.
    */
   gcTime?: number

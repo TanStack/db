@@ -288,11 +288,14 @@ export class CollectionLifecycleManager<
     this.startGCTimer(UNSUBSCRIBED_GC_FLOOR_MS)
   }
 
+  // A persisting transaction holds the Collection: collecting it would drop
+  // the rows the transaction shows and end the sync run its handler may wait on.
   private canGarbageCollect(): boolean {
     return (
       !this.cleaningUp &&
       this.changes.activeSubscribersCount === 0 &&
-      !this.sync.hasPendingPreload
+      !this.sync.hasPendingPreload &&
+      !this.state.hasPersistingTransaction()
     )
   }
 
@@ -322,6 +325,15 @@ export class CollectionLifecycleManager<
         }
       },
     )
+  }
+
+  /**
+   * A transaction that touched this Collection settled. When nothing else
+   * holds the Collection, its `gcTime` delay starts now.
+   */
+  public startGCTimerAfterSettlement(): void {
+    if (this.status === `idle` || this.status === `cleaned-up`) return
+    this.startGCTimer()
   }
 
   /**

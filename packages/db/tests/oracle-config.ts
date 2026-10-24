@@ -51,6 +51,7 @@ const staticOracleProperties = [
   `sqlite-ordinary.write-history`,
   `sqlite-ordinary.independent-work`,
   `collection-sync.reentrant-drain`,
+  `collection-lifecycle.gc-persisting-transaction`,
   `collection-state.retention`,
   `collection-state.accepted-snapshot.before-delete`,
   `collection-state.accepted-snapshot.during-delete`,

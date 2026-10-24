@@ -710,12 +710,13 @@ class Transaction<T extends object = Record<string, unknown>> {
   touchCollection(): void {
     const collections = new Set(this.collections)
     for (const mutation of this.mutations) collections.add(mutation.collection)
-    if (this.state === `completed` || this.state === `failed`)
-      this.collections.clear()
+    const settled = this.state === `completed` || this.state === `failed`
+    if (settled) this.collections.clear()
     const errors: Array<unknown> = []
     for (const collection of collections) {
       try {
         collection._state.onTransactionStateChange()
+        if (settled) collection._lifecycle.startGCTimerAfterSettlement()
 
         // Only call commitPendingTransactions if there are pending sync transactions
         if (collection._state.pendingSyncedTransactions.length > 0) {
