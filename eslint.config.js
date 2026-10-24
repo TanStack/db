@@ -6,6 +6,7 @@ export default [
   {
     ignores: [
       `**/dist/**`,
+      `packages/convex-db-collection/e2e/backend/convex/_generated/**`,
       `**/.output/**`,
       `**/.nitro/**`,
       `**/traildepot/**`,

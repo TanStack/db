@@ -13,6 +13,33 @@ await generateReferenceDocs({
       outputDir: resolve(__dirname, `../docs/reference`),
     },
     {
+      name: `convex-db-collection`,
+      entryPoints: [
+        resolve(__dirname, `../packages/convex-db-collection/src/index.ts`),
+      ],
+      tsconfig: resolve(
+        __dirname,
+        `../packages/convex-db-collection/tsconfig.docs.json`,
+      ),
+      outputDir: resolve(__dirname, `../docs/reference/convex-db-collection`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
+      name: `convex-db-collection/offline`,
+      entryPoints: [
+        resolve(__dirname, `../packages/convex-db-collection/src/offline.ts`),
+      ],
+      tsconfig: resolve(
+        __dirname,
+        `../packages/convex-db-collection/tsconfig.docs.json`,
+      ),
+      outputDir: resolve(
+        __dirname,
+        `../docs/reference/convex-db-collection/offline`,
+      ),
+      exclude: [`packages/db/**/*`, `packages/offline-transactions/**/*`],
+    },
+    {
       name: `electric-db-collection`,
       entryPoints: [
         resolve(__dirname, `../packages/electric-db-collection/src/index.ts`),
