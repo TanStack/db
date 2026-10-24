@@ -117,7 +117,7 @@ never closed. All three fixture setups delegate default port selection to the
 supported Convex CLI, an explicit user `CONVEX_TEST_PORT` still requires that
 port. This is a fixed native startup witness, not a concurrent-allocation proof
 or a promise to start when no free ports exist. A CI run reproduced the original
-mandatory-port failure at auth port 43330 before any tests ran.
+mandatory-port failure at auth port 43330 before any tests ran. The [startup follow-up](oracle-reviews/2026-10-24-convex-backend-startup.md) records exact source revision `4b37df090402469cafed0cf9f5e16b9528dae60f`, the rejected fixed-port control, and the final 18-test run with the former auth port occupied.
 
 `packages/offline-transactions/tests/transaction-serializer-oracle.property.test.ts`
 remains the primary wire-format owner. Its opt-in codec grammar crosses
