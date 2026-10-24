@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { withTestCleanup } from '../tests/helpers'
 
 /** Own a dedicated local backend for the test run. Never select a cloud project. */
-export async function startLocalBackend(directory: URL, port: number) {
+export async function startLocalBackend(directory: URL, port?: number) {
   const {
     CONVEX_DEPLOY_KEY: _deployKey,
     CONVEX_SELF_HOSTED_URL: _selfHostedUrl,
@@ -23,10 +23,14 @@ export async function startLocalBackend(directory: URL, port: number) {
       `disable`,
       `--tail-logs`,
       `disable`,
-      `--local-cloud-port`,
-      String(port),
-      `--local-site-port`,
-      String(port + 1),
+      ...(port === undefined
+        ? []
+        : [
+            `--local-cloud-port`,
+            String(port),
+            `--local-site-port`,
+            String(port + 1),
+          ]),
     ],
     {
       cwd: fileURLToPath(directory),
@@ -61,7 +65,11 @@ export async function startLocalBackend(directory: URL, port: number) {
     })
     const env = await readFile(new URL(`.env.local`, directory), `utf8`)
     const url = /^CONVEX_URL=(.+)$/m.exec(env)?.[1]
-    if (url !== `http://127.0.0.1:${port}`)
+    if (
+      !url ||
+      !/^http:\/\/127\.0\.0\.1:\d+$/.test(url) ||
+      (port !== undefined && url !== `http://127.0.0.1:${port}`)
+    )
       throw new Error(`Expected an isolated loopback Convex backend`)
     return { url, stop }
   } catch (cause) {

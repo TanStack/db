@@ -24,7 +24,7 @@ declare module 'vitest' {
  * files cannot alter the deployed messages/schema functions. The app shell is
  * independently supplied test configuration using this package's Convex SDK.
  */
-export default async function setup(project: TestProject) {
+export default async function setup(project: Pick<TestProject, `provide`>) {
   const directory = await mkdtemp(join(tmpdir(), `convex-public-pagination-`))
   let stop: (() => Promise<void>) | undefined
   try {
@@ -76,7 +76,7 @@ export default async function setup(project: TestProject) {
       join(app, `node_modules`),
       `dir`,
     )
-    const backend = await startLocalBackend(pathToFileURL(`${app}/`), 43320)
+    const backend = await startLocalBackend(pathToFileURL(`${app}/`))
     stop = backend.stop
     project.provide(`publicPaginationUrl`, backend.url)
   } catch (error) {

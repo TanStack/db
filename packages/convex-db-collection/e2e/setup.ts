@@ -11,7 +11,9 @@ declare module 'vitest' {
 export default async function setup(project: TestProject) {
   const backend = await startLocalBackend(
     new URL(`./backend/`, import.meta.url),
-    Number(process.env.CONVEX_TEST_PORT ?? `43310`),
+    process.env.CONVEX_TEST_PORT === undefined
+      ? undefined
+      : Number(process.env.CONVEX_TEST_PORT),
   )
   project.provide(`convexUrl`, backend.url)
   return backend.stop

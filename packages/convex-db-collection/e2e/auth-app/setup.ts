@@ -28,7 +28,7 @@ export default async function setup(project: TestProject) {
     if (stdout.trim() !== revision)
       throw new Error(`Wrong upstream auth revision`)
     await prepareAuthApp(checkout)
-    const backend = await startLocalBackend(pathToFileURL(`${runtime}/`), 43330)
+    const backend = await startLocalBackend(pathToFileURL(`${runtime}/`))
     stop = backend.stop
     if (!backend.url.startsWith(`http://127.0.0.1:`))
       throw new Error(`Authentication setup requires an isolated local backend`)

@@ -107,6 +107,18 @@ Both public-app fixtures deploy with this package's installed Convex 1.47 SDK.
 The pagination app's upstream package declares 1.48, its business functions are
 unchanged here but its original dependency installation is not being tested.
 
+`packages/convex-db-collection/e2e/backend-startup-oracle.test.ts` owns the
+receiving fixture's occupied-port startup judgment. It holds the former fixed
+pagination port, invokes the actual pinned public-app setup, and requires a
+different loopback URL serving a fresh empty query. Expected availability comes
+from an independently held listener, not a copy of CLI selection logic. An
+already occupied port is also a valid precondition, and its external owner is
+never closed. All three fixture setups delegate default port selection to the
+supported Convex CLI, an explicit user `CONVEX_TEST_PORT` still requires that
+port. This is a fixed native startup witness, not a concurrent-allocation proof
+or a promise to start when no free ports exist. A CI run reproduced the original
+mandatory-port failure at auth port 43330 before any tests ran.
+
 `packages/offline-transactions/tests/transaction-serializer-oracle.property.test.ts`
 remains the primary wire-format owner. Its opt-in codec grammar crosses
 insert/update/delete and arrays of signed 64-bit integers, special floats and
