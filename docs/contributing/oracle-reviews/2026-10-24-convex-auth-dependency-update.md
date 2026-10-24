@@ -22,7 +22,7 @@ metadata for `@convex-dev/auth` 0.0.96. Its declared peers are:
 | --- | --- | --- |
 | `@auth/core` | `^0.41.1` | `0.41.3` |
 | `convex` | `^1.17.0` | `1.47.0` |
-| `react` | `^18.2.0 || ^19.0.0-0` | `19.2.4` |
+| `react` | `^18.2.0 \|\| ^19.0.0-0` | `19.2.4` |
 
 All three resolutions satisfy the published peer ranges. The old Auth.js and
 Convex Auth resolutions are absent from the lockfile. Auth.js now resolves its
