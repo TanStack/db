@@ -80,6 +80,6 @@
     "eslint": "^9.39.2",
     "react-native": "0.79.6",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.0"
   }
 }

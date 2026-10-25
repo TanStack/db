@@ -55,6 +55,6 @@
     "jsdom": "^27.4.0",
     "solid-js": "^1.9.11",
     "vite-plugin-solid": "^2.11.10",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.0"
   }
 }
