@@ -312,12 +312,9 @@ async function runHistory(history: History): Promise<void> {
       const outcome = history.end === `drain-complete` ? `complete` : `fail`
       const drain: Array<Step> = [
         ...sides.flatMap((side) =>
-          subscriptions[side].map(() => ({
-            kind: `unsubscribe` as const,
-            side,
-          })),
+          subscriptions[side].map((): Step => ({ kind: `unsubscribe`, side })),
         ),
-        ...model.pending.map(() => ({ kind: `settle` as const, outcome })),
+        ...model.pending.map((): Step => ({ kind: `settle`, outcome })),
         { kind: `advance`, elapsedMs: 120 },
       ]
       for (const step of drain) await apply(step, `drain ${step.kind}`)
