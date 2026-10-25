@@ -3702,10 +3702,7 @@ describe(`Ordered source request authority`, () => {
         }),
         campaign === `fixed`
           ? { seed: 20261016, numRuns: oracleRuns(10000) }
-          : {
-              ...oraclePropertyOptions(10000, authorityProperty),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(10000, authorityProperty),
       )
       // Reach witnesses: superseded requests fail, stale requests settle
       // after a repair succeeded, the strand law is checkable, a superseded

@@ -1,4 +1,5 @@
 import { tanstackConfig } from '@tanstack/eslint-config'
+import oraclePlugin from './scripts/eslint-plugin-oracle/index.js'
 
 export default [
   ...tanstackConfig,
@@ -46,4 +47,5 @@ export default [
       'import/no-cycle': `error`,
     },
   },
+  oraclePlugin.configs.recommended,
 ]
