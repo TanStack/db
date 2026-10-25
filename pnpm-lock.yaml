@@ -1509,8 +1509,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
       seroval:
-        specifier: 1.5.3
-        version: 1.5.3
+        specifier: 1.6.3
+        version: 1.6.3
 
   packages/react-db:
     dependencies:
@@ -11125,6 +11125,10 @@ packages:
 
   seroval@1.5.3:
     resolution: {integrity: sha512-BXe0x4buEeYiIKaRUnth1WqCILQ3k4O67KP/B4pC3pVz0Mv2c96ngA9QDREUYxWY1sb2RZVRqwI9RcpVMyHCVw==}
+    engines: {node: '>=10'}
+
+  seroval@1.6.3:
+    resolution: {integrity: sha512-5PwLbVPpT4DEki1hYVSSsoxWY6xCNMVucAVLK/CH0mXSDfp/I4KaAex72q80GNt5hpn7CCMGdSpIg4YGqH/wXQ==}
     engines: {node: '>=10'}
 
   seroval@1.6.8:
@@ -23557,6 +23561,8 @@ snapshots:
       seroval: 1.6.8
 
   seroval@1.5.3: {}
+
+  seroval@1.6.3: {}
 
   seroval@1.6.8: {}
 
