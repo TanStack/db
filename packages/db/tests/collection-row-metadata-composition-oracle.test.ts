@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
+import { declareOracle } from './oracle-config.js'
 import type { SyncConfig } from '../src/types.js'
 
 /**
@@ -298,6 +299,44 @@ const describeWrite = (write: Write) =>
  *   open, so the Collection rebuilds this transaction's automatic metadata
  *   writes before it commits.
  */
+// The model predicts a lane's row metadata. A write before the history (the
+// earlier write) applies first when it names the same key, and the history
+// then folds over that result.
+function expectedLaneMetadata(
+  start: Start,
+  sequence: ReadonlyArray<Write>,
+  earlier: EarlierWrite | undefined,
+): unknown {
+  return earlier?.key === 1
+    ? foldMetadata(expectedMetadata(start, [asWrite(earlier)]), sequence)
+    : expectedMetadata(start, sequence)
+}
+
+// The observed metadata must equal the model's value, compared as JSON. A
+// mismatch is recorded with its history label instead of failing at once.
+function compareObservedMetadata(
+  mismatches: Array<string>,
+  label: string,
+  actual: unknown,
+  expected: unknown,
+): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected))
+    mismatches.push(
+      `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+    )
+}
+
+declareOracle({
+  check: [compareObservedMetadata],
+  model: [
+    expectedMetadata,
+    foldMetadata,
+    expectedLaneMetadata,
+    expectedNestedMetadata,
+  ],
+  grammar: [histories, rebuiltHistories, nestedHistories],
+})
+
 async function observeMetadata(
   lane: Lane,
   start: Start,
@@ -621,11 +660,12 @@ describe(`row metadata composition oracle`, () => {
           mismatches.push(`${label} threw ${String(error)}`)
           continue
         }
-        const expected = expectedNestedMetadata(history)
-        if (JSON.stringify(actual) !== JSON.stringify(expected))
-          mismatches.push(
-            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
-          )
+        compareObservedMetadata(
+          mismatches,
+          label,
+          actual,
+          expectedNestedMetadata(history),
+        )
       }
       expect(mismatches).toEqual([])
     },
@@ -655,17 +695,12 @@ describe(`row metadata composition oracle`, () => {
           mismatches.push(`${label} threw ${String(error)}`)
           continue
         }
-        const expected =
-          earlier?.key === 1
-            ? foldMetadata(
-                expectedMetadata(start, [asWrite(earlier)]),
-                sequence,
-              )
-            : expectedMetadata(start, sequence)
-        if (JSON.stringify(actual) !== JSON.stringify(expected))
-          mismatches.push(
-            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
-          )
+        compareObservedMetadata(
+          mismatches,
+          label,
+          actual,
+          expectedLaneMetadata(start, sequence, earlier),
+        )
       }
       expect(mismatches).toEqual([])
     },
