@@ -2682,7 +2682,14 @@ The Electric witness adds on-demand must-refetch and checks that Electric
 writes nothing from a snapshot that answers after release. React
 (`useLiveSuspenseQuery-persisted-on-demand.test.tsx`) and Solid
 (`useLiveQuery-persisted-on-demand.test.tsx`) Suspense render a covered demand
-from a real persisted on-demand Collection on `node:sqlite`. Mutants that drop
+from a real persisted on-demand Collection on `node:sqlite`. Vue
+(`useLiveQuery-persisted-on-demand.test.ts`), Svelte
+(`useLiveQuery-persisted-on-demand.svelte.test.ts`), and Angular
+(`injectLiveQuery-persisted-on-demand.test.ts`) witnesses check the same two
+histories through `isReady`, `isLoading`, and rows after a 100 ms settle. They
+do not witness a framework initial-render gate: only `react-db` and `solid-db`
+call `preloadForInitialRender` or `isInitialRenderReady`, so those three check
+the wrapper's settlement, not a render gate. Mutants that drop
 the early rejection handler, keep collection metadata across a schema reset,
 key coverage without cursor and offset, ignore coverage, or let a coverage
 read under an expired claim fail the load each fail these cases.
@@ -2703,9 +2710,52 @@ Remaining limits: coverage relies on the source committing a load's rows
 before it settles that load (law 7); an unordered demand that loses one row
 and gains another keeps its row count and stays covered, so a row that
 retention removed can be missing from a covered restore (maintainer
-decision, 2026-10-26; a fixed history pins the rule); ordered windows with duplicate ranks and offset-based pages
-without an index; and multi-tab coordinators, outside the law by maintainer
-decision (2026-10-26).
+decision, 2026-10-26; a fixed history pins the rule); and multi-tab
+coordinators, outside the law by maintainer decision (2026-10-26). Part 4
+now covers a tie at the window boundary, modelled as a limited demand plus
+an unordered tie-boundary demand, and page moves with and without an index.
+
+The generated campaign in
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`
+shares the fixed oracle's driver (`tests/helpers/demand-coverage-driver.ts`).
+Its model replays the source's own log of row writes, deletes, truncates,
+and settled loads, so it does not predict when the wrapper reacquires a
+demand. A fixed and a random campaign of 40 histories each interleave two
+unordered demands with load starts, answers, failures, releases, live
+writes and deletes, truncates, and a source that may ignore abort; declared
+reach covers an obsolete load that settles, coverage recorded twice, a row
+moved between demands, and a covered demand short of rows. Part 2 fails each
+adapter call of a covered history once, before or after its effect, in
+either session: safety holds for every call, a failed coverage read keeps
+the load ready, and a failed coverage check waits. Part 3 releases the
+demand after each step of a load: the source Collection stops loading, and
+every load left behind was aborted. Mutants that ignore the row count, let
+an obsolete load record coverage, keep coverage across a truncate, let a
+failed coverage read fail the load, or keep a released load's wait each fail
+it. Its limits: unordered demands only, real timers in session 1, one
+process, and `node:sqlite`.
+
+Native SQLite receiving witnesses run five of the primary oracle's histories
+(covered settles, never-loaded stays loading, covered then a source delete
+stays loading, covered ordered window settles, and a window with a row
+replaced below the boundary stays loading) over two sessions on one file,
+with session 2's upstream never answering. The Node witness
+(`packages/node-db-sqlite-persistence/tests/node-persisted-on-demand-coverage.test.ts`)
+runs better-sqlite3 through `createNodeSQLitePersistence` and passes all five.
+With session 2's wait at 60 000 ms, its two covered settlements stay loading
+and fail. The Chromium OPFS witness
+(`packages/browser-db-sqlite-persistence/e2e/persisted-on-demand-coverage.opfs.spec.ts`,
+part of `playwright.opfs.config.ts`, which the browser E2E job runs) runs wa-sqlite over
+OPFS in two page loads with the default single-process coordinator. It passes
+all five law histories, and its 60 000 ms mutant fails the two covered
+settlements. A sixth history passes `BrowserCollectionCoordinator` and pins the
+guide's out-of-scope statement (`docs/guides/sqlite-persistence.md`): a covered
+demand stays loading and waits for the network. That history pins the guide,
+not the law; it changes if the guide does.
+The Electron app, which runs fixed scenario inputs through a main-process
+runner, and the Capacitor, Expo, React Native, Tauri, and Cloudflare hosts have
+no witness here. The Electron e2e suite runs locally, but a new history needs
+a new runner scenario. The other hosts were not run in this pass.
 
 ## Deferred contracts and evidence
 

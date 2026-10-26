@@ -380,3 +380,44 @@ Hostile mutants, beyond the starting head:
   killed by both covered source-failure histories.
 
 GREEN: the oracle passes 262 of 262 with the unordered history (vitest counts its type checks too).
+
+## 2026-10-26: strengthening the oracle beyond the review findings
+
+Starting head: `4293b0021`. The maintainer asked for seven strengthening steps.
+None changed production; each was checked with mutants against the current
+code.
+
+- **Window limits** (`34642864a`): Part 4 adds four histories with a tie at
+  the window boundary and runs both page-move histories without an index.
+  The model treats the window as a limited demand (same rows) plus an
+  unordered tie-boundary demand (row count). A mutant that ignores the
+  tie-boundary row count fails `tie-row-outside-deleted`; one that records
+  keys for every demand fails `tie-row-added`.
+- **Generated campaign** (`b9a5e481d`): a fixed and a random campaign of 40
+  histories each. The first model predicted when the wrapper reacquires a
+  demand after a truncate, and three counterexamples showed that this
+  scheduling differs from the guess (the wrapper reacquires a demand only
+  after its obsolete load settles, and then reacquires every active
+  demand). The law leaves that timing open, so the model now replays the
+  source's own event log and judges each settled load as current or
+  obsolete by whether a truncate came between its arrival and its
+  settlement. No counterexample indicted production. Mutants that ignore
+  the row count, let an obsolete load record coverage, or keep coverage
+  across a truncate each fail both campaigns.
+- **Storage failures** (Part 2 of the campaign): every adapter call of a
+  covered history fails once, before or after its effect, in either session.
+  Safety held at every call. A mutant that lets a failed coverage read fail
+  the load fails the sweep. Losing the acknowledgement of the coverage write
+  fails session 1 terminally, while session 2 still settles on the durable
+  rows, which is consistent with the law.
+- **Releases** (Part 3): the demand is released after each step of a load,
+  including while a coverage read is in flight. A mutant that keeps a
+  released load's wait fails the sweep.
+- **Framework witnesses** (`eff968951`): Vue, Svelte, and Angular. These
+  adapters have no network-first render gate, so the witnesses check
+  readiness and rows.
+- **Native drivers**: a better-sqlite3 witness in `node-db-sqlite-persistence`
+  and a Chromium OPFS witness in `browser-db-sqlite-persistence`, in the
+  OPFS Playwright matrix that CI runs. The OPFS witness also pins the
+  guide's statement that a multi-tab coordinator waits for the network.
+- **Mutation sweep**: reported separately below.

@@ -15,6 +15,7 @@ export default defineConfig({
     `leader-close-oracle.opfs.spec.ts`,
     `opfs-request-order-oracle.opfs.spec.ts`,
     `reload-class-oracle.opfs.spec.ts`,
+    `persisted-on-demand-coverage.opfs.spec.ts`,
   ],
   timeout: 60_000,
   fullyParallel: false,
