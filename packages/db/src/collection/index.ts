@@ -1367,10 +1367,18 @@ export class CollectionImpl<
       return this._lifecycle.cleanup()
     }
     // Each dependent's cleanup starts synchronously, before this Collection's
-    // own cleanup start, so none of them sees the source end under it.
-    const ended = dependents.map((dependent) => dependent.end())
-    const cleanup = this._lifecycle.cleanup()
-    return Promise.all([...ended, cleanup]).then(() => undefined)
+    // own cleanup start, so none of them sees the source end under it. A
+    // dependent's throw becomes its rejection, so this cleanup still starts,
+    // and the promise settles only after everything has, with the first
+    // failure, this Collection's own first.
+    const ended = dependents.map(async (dependent) => dependent.end())
+    return Promise.allSettled([this._lifecycle.cleanup(), ...ended]).then(
+      (results) => {
+        for (const result of results) {
+          if (result.status === `rejected`) throw result.reason
+        }
+      },
+    )
   }
 }
 

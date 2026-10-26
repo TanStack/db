@@ -950,10 +950,17 @@ export class CollectionStateManager<
     return open?.committed === false && open.truncate === true
   }
 
+  /**
+   * The rows a sync run's snapshot builds on: none while a reload's next
+   * transaction replaces every synced row, so a diffing adapter writes every
+   * row it has as an insert. Otherwise the accepted synced rows.
+   */
+  *replacementBaseline(): IterableIterator<[TKey, TOutput]> {
+    if (!this.reloadTruncatePending) yield* this.acceptedSyncedEntries()
+  }
+
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
-    // A reload's next commit replaces every synced row, so it builds on none.
-    if (this.reloadTruncatePending) return
     const { states, truncated } = this.pendingSyncedProjection
     if (!truncated) {
       for (const entry of this.syncedData.entries()) {

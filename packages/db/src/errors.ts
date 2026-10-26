@@ -173,7 +173,7 @@ export class CollectionReloadDuringSyncEntryError extends CollectionStateError {
   constructor(collectionId: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Cannot reload collection "${collectionId}" from inside its sync function. Reload after the sync function returns.`
+        ? `Cannot reload collection "${collectionId}" from inside its sync function or a loadSubset call. Reload after it returns.`
         : codedMessage(251, { collectionId }),
     )
   }

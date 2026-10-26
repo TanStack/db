@@ -5790,26 +5790,31 @@ function createWrappedSyncConfig<
         if (persistedReadiness.getSnapshot().status !== `ready`) return
         if (params.collection.status !== `loading`) return
         if (params.collection.size === 0) return
-        params.markReady()
+        markCoreReady()
       }
-      const reportUpstreamError = (error: unknown) => {
-        if (persistedReadiness?.getSnapshot().status !== `loading`) {
-          openFromDisk()
-          runtime.reportSyncError(error, `sync adapter`)
-          return
+      // The wrapper marks core ready outside the sync function. The status
+      // reads `ready` before ready callbacks and ready-event subscribers run,
+      // so one that throws surfaces as uncaught and the Collection stays
+      // ready, as core reports other subscriber errors. A throw from
+      // markReady itself is a contract violation and reaches the caller.
+      const markCoreReady = () => {
+        const readyFailures = params.collection._lifecycle.deferReadyFailures()
+        try {
+          params.markReady()
+        } finally {
+          const failure = readyFailures()
+          if (failure)
+            queueMicrotask(() => {
+              throw failure.error
+            })
         }
-        // A remote that fails before the restore finishes waits for it: the
-        // restored rows open the Collection and the failure shows as its
-        // error; without rows, the first load fails.
-        void (fullStartPromise ?? runtime.ensureStarted()).then(
-          () => {
-            if (!isCleanedUp() && !getTerminalFailure()) {
-              openFromDisk()
-              runtime.reportSyncError(error, `sync adapter`)
-            }
-          },
-          () => undefined,
-        )
+      }
+      // A remote that fails before the restore finishes waits for it: the
+      // restored rows open the Collection and the failure shows as its
+      // error; without rows, the first load fails.
+      const failUpstream = (error: unknown) => {
+        openFromDisk()
+        runtime.reportSyncError(error, `sync adapter`)
       }
       const createHandledRejection = (error: unknown): Promise<never> => {
         const rejected = Promise.reject(error)
@@ -5941,9 +5946,10 @@ function createWrappedSyncConfig<
       }
 
       let sourceSession = 0
-      // Upstream reports wait for persisted startup, as markReady does.
-      // Readiness and reports reach core in the order the adapter made them,
-      // after startup and after the sync function returned its result.
+      // Upstream reports and failures wait for persisted startup, as
+      // markReady does. Readiness, reports, and failures reach core in the
+      // order the adapter made them, after startup and after the sync
+      // function returned its result.
       let adapterCalls = Promise.resolve()
       const afterStartup = (call: () => void | Promise<void>) => {
         if (startupState.cleanedUp || getTerminalFailure()) return
@@ -5965,6 +5971,8 @@ function createWrappedSyncConfig<
             () => undefined,
           )
       }
+      const reportUpstreamError = (error: unknown) =>
+        afterStartup(() => failUpstream(error))
       const wrappedParams = {
         ...params,
         fail: reportUpstreamError,
@@ -5977,11 +5985,11 @@ function createWrappedSyncConfig<
             try {
               await sourceResultPromise
             } catch (error) {
-              reportUpstreamError(error)
+              failUpstream(error)
               return
             }
             if (isCleanedUp() || getTerminalFailure()) return
-            params.markReady()
+            markCoreReady()
           }),
         begin: () => {
           if (startupState.cleanedUp) return undefined

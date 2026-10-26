@@ -12,6 +12,10 @@ import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
 
 const noop = () => {}
 
+/** `error` and `crashed` end a sync run before it can serve its result. */
+const isFailure = (status: CollectionStatus): boolean =>
+  status === `error` || status === `crashed`
+
 /**
  * The canonical, adapter-agnostic view of a live query at a point in time.
  *
@@ -224,12 +228,13 @@ class LiveQueryObserverImpl<
       const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
-      const status =
-        this.hasHydrationError || liveStatus === `error`
-          ? (`error` as const)
-          : this.hasHydrationSeed()
-            ? (`ready` as const)
-            : liveStatus
+      // The seed stands in only for a result that is still coming; a failure
+      // is never hidden behind it.
+      const status = this.hasHydrationError
+        ? (`error` as const)
+        : this.hasHydrationSeed() && !isFailure(liveStatus)
+          ? (`ready` as const)
+          : liveStatus
 
       // Bump the layout revision when the ordered key sequence changes
       // (membership, ordering, or an order-only move). Compare the key sequence
@@ -438,17 +443,21 @@ class LiveQueryObserverImpl<
         return
       }
 
-      const handoff = this.handoffHydrationSeed(collection)
-      this.emit(
-        this.wholesale ? undefined : handoff.changes,
-        undefined,
-        handoff.entries,
-        collection.status,
-        handoff.revision,
-        this.getCollectionLayoutRevision(collection),
-        true,
-      )
+      this.publishHydrationHandoff(collection)
     })
+  }
+
+  private publishHydrationHandoff(collection: Collection<T, TKey, any>): void {
+    const handoff = this.handoffHydrationSeed(collection)
+    this.emit(
+      this.wholesale ? undefined : handoff.changes,
+      undefined,
+      handoff.entries,
+      collection.status,
+      handoff.revision,
+      this.getCollectionLayoutRevision(collection),
+      true,
+    )
   }
 
   private getCollectionRevision(
@@ -589,6 +598,9 @@ class LiveQueryObserverImpl<
     this.registerClientResource()
     this.syncHydrationState()
     this.refreshDetachedState(collection)
+    if (this.hasHydrationSeed() && isFailure(collection.status)) {
+      this.handoffHydrationSeed(collection)
+    }
     this.attached = true
     this.visibleStatus ??= collection.status
     this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection)
@@ -617,7 +629,9 @@ class LiveQueryObserverImpl<
 
       if (this.hasHydrationSeed()) {
         if (status === `ready`) this.scheduleHydrationHandoff()
-        if (status !== `error`) return
+        // A failure ends the sync run whose result the seed stood in for.
+        if (isFailure(status)) this.publishHydrationHandoff(collection)
+        return
       }
 
       if (

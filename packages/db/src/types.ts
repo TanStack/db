@@ -448,8 +448,13 @@ export interface SyncConfig<
 > {
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
-    /** Begin a new sync transaction. */
-    begin: () => void
+    /**
+     * Begin a new sync transaction. `direct: true` marks a direct write: an
+     * edit of the rows on screen, not part of the sync run's snapshot. During
+     * a reload it applies to the kept rows, and the reload's replacement of
+     * every row waits for the run's next transaction.
+     */
+    begin: (options?: { direct?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
      * Commit the active sync transaction in FIFO order. Core accepts it at
@@ -474,7 +479,7 @@ export interface SyncConfig<
      * The sync adapter stopped. Before the first ready the status becomes
      * `error` and `preload()` rejects with `error`. After it, the rows stay, the
      * status stays `ready`, and the node's `error` holds the cause until a
-     * reload. Throws after an earlier `fail()`.
+     * reload. A second `fail()` in the same sync run does nothing.
      * While the sync adapter retries, call nothing or `reportError()`.
      */
     fail: (error: unknown) => void

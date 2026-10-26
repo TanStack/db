@@ -1138,13 +1138,13 @@ export function queryCollectionOptions(
       markReady()
     }
     // A failure before this run's first ready fails its load; after it, a
-    // failureReason, since TanStack Query fetches again.
+    // failureReason, since TanStack Query fetches again. Core ignores a later
+    // fail() in the same run; `runFailed` keeps a failed run from becoming
+    // ready.
     const failBeforeReady = (error: unknown): boolean => {
       if (runReady) return false
-      if (!runFailed) {
-        runFailed = true
-        fail(error)
-      }
+      runFailed = true
+      fail(error)
       return true
     }
 
@@ -2507,9 +2507,11 @@ export function queryCollectionOptions(
 
       // Diff against accepted rows: an earlier result or direct write can be
       // accepted while it waits behind a persisting optimistic transaction.
+      // A reload's result replaces every row, so it diffs against none.
       const currentSyncedItems: Map<string | number, any> = new Map(
-        collection._state.acceptedSyncedEntries(),
+        collection._state.replacementBaseline(),
       )
+      const keptRows = new Map(collection._state.acceptedSyncedEntries())
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
@@ -2750,6 +2752,21 @@ export function queryCollectionOptions(
         })
 
         resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
+        // A reload's result replaces every row. The kept rows it leaves
+        // alone, as a refetch would, carry into the replacement with their
+        // owners, such as a direct write newer than this fetch.
+        if (collection._state.openTransactionReplaces()) {
+          const written = new Set(
+            collection._state.pendingSyncedTransactions
+              .at(-1)!
+              .operations.map((operation) => operation.key),
+          )
+          keptRows.forEach((row, key) => {
+            if (written.has(key)) return
+            write({ type: `insert`, value: row })
+            setPersistedOwners(key, getPersistedOwners(key))
+          })
+        }
         // No asynchronous work occurs between this check and commit. If a
         // mutation started during fetch or baseline loading, explicit refetch
         // callers stop at the Query fetch boundary while the application stays
@@ -4345,7 +4362,7 @@ export function queryCollectionOptions(
     queryClient: QueryClient
     queryKey: Array<unknown>
     getKey: (item: any) => string | number
-    begin: () => void
+    begin: (options?: { direct?: boolean }) => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
     updateCacheData?: UpdateCacheData<any>

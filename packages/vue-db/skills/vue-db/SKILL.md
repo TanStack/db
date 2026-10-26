@@ -3,8 +3,10 @@ name: vue-db
 description: >
   Vue 3 bindings for TanStack DB. useLiveQuery composable with
   MaybeRefOrGetter query functions, ComputedRef return values for all fields
-  (data, state, collection, status, isLoading, isReady, isError, health).
-  isError means the query must restart; health.hasErrors means stale data.
+  (data, state, collection, status, isLoading, isReady, isLoadingError,
+  isCrashed, isSyncError, health). isLoadingError means the first load
+  failed; isCrashed means status 'crashed'; isSyncError means the data is
+  shown but a sync problem is in the health tree.
   Dependency arrays with Vue refs. Conditional queries via returning
   undefined/null. Pre-created collection support via ref or getter.
   Import from @tanstack/vue-db (re-exports all of @tanstack/db).

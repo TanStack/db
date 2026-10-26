@@ -26,7 +26,7 @@
     "Cannot reload collection \"collection-1\" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again."
   ],
   "CollectionReloadDuringSyncEntryError": [
-    "Cannot reload collection \"collection-1\" from inside its sync function. Reload after the sync function returns."
+    "Cannot reload collection \"collection-1\" from inside its sync function or a loadSubset call. Reload after it returns."
   ],
   "InvalidCollectionStatusTransitionError": [
     "Invalid collection status transition from \"pending\" to \"ready\" for collection \"collection-1\""

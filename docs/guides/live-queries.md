@@ -424,25 +424,25 @@ function UserList() {
 }
 ```
 
-### Stale Data and the Error Tree
+### Stale Data and the Health Tree
 
 Every live query hook also returns `health`, a health tree with one node for
 the query and one for each source alias. After the query is ready, a source
 that loses its sync connection keeps its rows, and `status` stays `ready`. The
-problem appears only in `health`:
+problem appears only in `health`, and `isSyncError` becomes `true`:
 
 ```tsx
 function UserList() {
-  const { data, isLoading, isError, health } = useLiveQuery((q) =>
-    q.from({ user: usersCollection }),
-  )
+  const { data, isLoading, isLoadingError, isCrashed, isSyncError } =
+    useLiveQuery((q) => q.from({ user: usersCollection }))
 
   if (isLoading) return <div>Loading...</div>
-  if (isError) return <div>Error loading users</div>
+  if (isLoadingError) return <div>Error loading users</div>
+  if (isCrashed) return <div>Local storage failed</div>
 
   return (
     <>
-      {health?.hasErrors && <div>Users may be out of date</div>}
+      {isSyncError && <div>Users may be out of date</div>}
       <ul>
         {data.map((user) => (
           <li key={user.id}>{user.name}</li>
@@ -453,13 +453,15 @@ function UserList() {
 }
 ```
 
-> **Important:** `isError` means the query must restart: its initial load
-> failed, or a source crashed. To show a "data may be out of date" banner,
-> check `health.hasErrors`. `useLiveSuspenseQuery` also returns `health`, and
-> after its first render it never throws for these problems.
+> **Important:** `isLoadingError` means the first load failed and there is
+> nothing to show; offer `collection.reload()`. `isCrashed` means local storage
+> broke: only cleanup with its dependents and a fresh start recover. To show a
+> "data may be out of date" banner, check `isSyncError` or `health`.
+> `useLiveSuspenseQuery` also returns `health`, and after its first render it
+> throws only for a crash.
 
-See [Collection Status and Error States](./error-handling.md#collection-status-and-error-states)
-for the shape of the tree, its phases, and how to restart.
+See [Loading and Sync Errors](./error-handling.md#loading-and-sync-errors)
+for the shape of the tree, `failureReason` and `error`, and how to reload.
 
 ### Conditional Queries
 
@@ -511,7 +513,7 @@ The top-level callback form supports the same behavior. When the query is disabl
 - `data`, `state`, `collection`, and `health` are `undefined`
 - `isEnabled` is `false`
 - `isReady` is `true`
-- `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
+- `isLoading`, `isIdle`, `isLoadingError`, `isCrashed`, `isSyncError`, and `isCleanedUp` are all `false`
 
 ### Alternative Input Forms
 

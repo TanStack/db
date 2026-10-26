@@ -1771,10 +1771,11 @@ function createElectricSync<T extends Row<unknown>>(
       params.markReady()
     }
     // The stream can give up from several places; the first one stops this
-    // sync run, and fail() may be called once.
+    // sync run. Core ignores a later fail() in the same run, so the first
+    // error stays. `stopped` keeps a late first-snapshot acceptance from
+    // marking a stopped run ready.
     let stopped = false
     const giveUp = (error: unknown) => {
-      if (stopped) return
       stopped = true
       fail(error)
     }

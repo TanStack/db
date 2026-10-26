@@ -284,12 +284,11 @@ export class CollectionLifecycleManager<
   /**
    * The sync adapter stopped. Before the first ready this fails the sync
    * run's first load; after it, the rows stay and the error shows until a
-   * reload. An earlier fail() already ended the adapter's work, so a second
-   * one is a contract violation.
+   * reload. A second fail() in the same sync run changes nothing: the adapter
+   * already stopped, and the first error stays.
    */
   public fail(error: unknown): void {
-    if (this.status === `crashed`) return
-    this.assertAdapterActive(`fail`)
+    if (this.status === `crashed` || this.adapterStopped) return
     this.adapterStopped = true
     const reload = this.reloadRun
     this.reloadRun = undefined
@@ -838,17 +837,24 @@ export class LoadOrder {
 
 /** @internal Health tree detail for a problem value. */
 export function describeProblem(error: unknown): CollectionErrorInfo {
+  // Any value can be a problem. One that cannot describe itself, such as an
+  // object without a prototype or a throwing getter, keeps what was read.
+  let name = `Error`
+  let message = `Collection is in an error state`
+  let code: unknown
+  try {
+    if (error instanceof Error) {
+      name = error.name
+      message = error.message
+    } else if (error !== undefined) message = String(error)
+    code = (error as { code?: unknown } | null)?.code
+  } catch {
+    // The problem still shows, with the generic parts.
+  }
   const info = {
-    name: error instanceof Error ? error.name : `Error`,
-    message:
-      error instanceof Error
-        ? error.message
-        : error === undefined
-          ? `Collection is in an error state`
-          : String(error),
-    ...(typeof (error as { code?: unknown } | null)?.code === `string`
-      ? { code: (error as { code: string }).code }
-      : {}),
+    name,
+    message,
+    ...(typeof code === `string` ? { code } : {}),
     at: Date.now(),
   } as CollectionErrorInfo
   // The original value stays available but out of JSON.

@@ -325,21 +325,21 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const { begin, write, collection, commit, reportError, reportHealthy } =
-        params
+      const {
+        begin,
+        write,
+        collection,
+        commit,
+        fail,
+        reportError,
+        reportHealthy,
+      } = params
       // Readiness of this sync run: a reload runs `sync` again while the
       // Collection still shows the previous run's status.
       let ready = false
-      let failed = false
       const markReady = () => {
         ready = true
         params.markReady()
-      }
-      // A failure before this run's first ready fails its load, once.
-      const fail = (error: unknown) => {
-        if (failed) return
-        failed = true
-        params.fail(error)
       }
       const abortController = new AbortController()
 

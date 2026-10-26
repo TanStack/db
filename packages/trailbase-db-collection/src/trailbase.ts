@@ -398,17 +398,17 @@ export function trailBaseCollectionOptions<
       }
 
       // The adapter does not resubscribe, so it stops when its stream ends;
-      // the first end reports why, and fail() may be called once. These flags
-      // belong to this sync run: a reload runs `sync` again while the
-      // Collection still shows the previous run's status.
+      // the first end reports why, and core ignores a later fail() in the same
+      // run. A later stream failure is only logged. These flags belong to this
+      // sync run: a reload runs `sync` again while the Collection still shows
+      // the previous run's status.
       let streamEnded = false
       function reportStreamEnd(error: unknown, closed = false) {
         if (cancelled) return
-        if (!streamEnded) {
-          streamEnded = true
-          fail(error)
-        } else if (!closed)
+        if (streamEnded && !closed)
           console.error(`TrailBase subscription failed`, error)
+        streamEnded = true
+        fail(error)
       }
 
       async function start() {

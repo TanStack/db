@@ -282,11 +282,11 @@ export function rxdbCollectionOptions(
       }
 
       // Whether this sync run stopped: a reload runs `sync` again while the
-      // Collection still shows the previous run's status.
+      // Collection still shows the previous run's status. Core ignores a
+      // later fail() in the same run.
       let stopped = false
       function stop(error: unknown) {
         stopOngoingFetch()
-        if (stopped) return
         stopped = true
         fail(error)
       }

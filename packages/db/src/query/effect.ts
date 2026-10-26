@@ -1110,8 +1110,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Latch the Effect's initial gate and report whether it has been reached. */
   private latchReady(): boolean {
-    if (!this.reachedReady && this.canCompleteInitialLoad())
+    if (!this.reachedReady && this.canCompleteInitialLoad()) {
       this.reachedReady = true
+      // A problem the sources already show when the gate opens is the first
+      // change the app hears of.
+      if (this.healthTree().hasErrors) this.reportHealth()
+    }
     return this.reachedReady
   }
 

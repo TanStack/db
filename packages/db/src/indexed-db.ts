@@ -694,11 +694,10 @@ export function indexedDBCollectionOptions(
     activeSync = params
     collection = params.collection
     let channel: BroadcastChannel | undefined
-    let stopped = false
     // fail() ends this sync run's reporting, so stop listening for changes.
+    // Core ignores a later fail() in the same run.
     const fail = (error: unknown) => {
-      if (stopped || activeSync !== params) return
-      stopped = true
+      if (activeSync !== params) return
       channel?.close()
       params.fail(error)
     }

@@ -28,6 +28,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
+  LiveQueryStatusFlags,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -41,15 +42,7 @@ type InferConditionalResultType<TContext extends Context> =
     : InferResultType<TContext>
 
 /** Status and error fields every `useLiveQuery` result has. */
-type UseLiveQueryFlags = {
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: boolean
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: boolean
-  isCleanedUp: boolean
+type UseLiveQueryFlags = LiveQueryStatusFlags & {
   /** The data is shown, and a sync problem or failed request is in `health`. */
   isSyncError: boolean
   health: HealthNode | undefined

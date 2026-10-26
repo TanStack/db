@@ -134,7 +134,7 @@ Cannot reload collection "collection-1" because it crashed. A crash is not recov
 Development builds show the full message. For example:
 
 ```text
-Cannot reload collection "collection-1" from inside its sync function. Reload after the sync function returns.
+Cannot reload collection "collection-1" from inside its sync function or a loadSubset call. Reload after it returns.
 ```
 
 <a id="error-9"></a>

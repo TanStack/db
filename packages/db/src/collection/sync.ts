@@ -98,6 +98,9 @@ export class CollectionSyncManager<
   private syncCallbackEpoch = 0
   private syncRunGeneration = 0
   private syncEntryActive = false
+  // A loadSubset call of the adapter is running; a reload from it would
+  // retire the run under the call.
+  private loadSubsetDepth = 0
   // A reload's new sync run has not begun its first transaction yet.
   private pendingSyncEntryCleanup:
     | {
@@ -222,7 +225,7 @@ export class CollectionSyncManager<
     }
     if (this.lifecycle.reloading) return this.lifecycle.beginReload()
     if (status === `idle` || status === `cleaned-up`) return this.preload()
-    if (this.syncEntryActive) {
+    if (this.syncEntryActive || this.loadSubsetDepth > 0) {
       return Promise.reject(new CollectionReloadDuringSyncEntryError(this.id))
     }
     const reload = this.lifecycle.beginReload()
@@ -253,7 +256,7 @@ export class CollectionSyncManager<
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
-          begin: () => {
+          begin: (options) => {
             if (!isCurrentSync()) return
             const applied = createDeferred<void>()
             // A source may ignore a stream receipt. Keep cancellation from
@@ -271,7 +274,13 @@ export class CollectionSyncManager<
               applied,
               duplicateKeyError: (key) => this.createDuplicateKeyError(key),
             })
-            if (this.state.reloadTruncatePending && this.lifecycle.reloading)
+            // A direct write edits the rows on screen; the reload's
+            // replacement waits for the run's own next transaction.
+            if (
+              !options?.direct &&
+              this.state.reloadTruncatePending &&
+              this.lifecycle.reloading
+            )
               this.markReloadTruncate(applied)
           },
           write: (
@@ -589,15 +598,10 @@ export class CollectionSyncManager<
         )
           this.lifecycle.completeReload()
       },
-      (error: unknown) => {
-        // A canceled commit moved the truncate to the run's next commit; a
-        // reload ends only with its run.
-        if (
-          syncRunGeneration !== this.syncRunGeneration ||
-          !this.lifecycle.reloading
-        )
-          this.lifecycle.abandonReload(error)
-      },
+      // A canceled commit moved the truncate to the run's next commit, and
+      // cleanup already ended the reload with its run: a rejected commit
+      // ends no reload itself.
+      () => {},
     )
   }
 
@@ -1058,7 +1062,13 @@ export class CollectionSyncManager<
     }
 
     if (this.syncLoadSubsetFn) {
-      const result = this.syncLoadSubsetFn(options)
+      let result: LoadSubsetRequestResult
+      this.loadSubsetDepth++
+      try {
+        result = this.syncLoadSubsetFn(options)
+      } finally {
+        this.loadSubsetDepth--
+      }
       // If the result is a promise, track it
       if (result instanceof Promise) {
         this.trackLoadPromise(result)

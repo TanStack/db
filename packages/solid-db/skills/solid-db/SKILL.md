@@ -61,8 +61,11 @@ const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query()        → Array<T> (data)  — or T | undefined when using findOne()
 // query.data     → DEPRECATED — use query() instead. Migrate any existing code.
 // query.status   → CollectionStatus
-// query.isLoading, query.isReady, query.isError (query must restart)
-// query.health   → health tree; query.health?.hasErrors means data may be stale
+// query.isLoading, query.isReady
+// query.isLoadingError → the first load failed: nothing to show
+// query.isCrashed      → status 'crashed': local storage broke
+// query.isSyncError    → data is shown, but a sync problem is in health
+// query.health   → health tree: one node for the query and one per source
 // query.state    → ReactiveMap<TKey, T>
 // query.collection → Collection
 
@@ -142,7 +145,9 @@ return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 
 `useLiveQuery` integrates with Solid's `createResource`. Use `<Suspense>` for
 loading and `<ErrorBoundary>` for errors. Reading an errored query throws
-through the resource, so do not rely on reading `isError` after failure.
+through the resource, so do not rely on reading `isLoadingError` after failure.
+After the first data, sync problems do not throw: read `isSyncError` or
+`health`. `isError` and node `phase` were removed.
 
 ## Includes (Hierarchical Data)
 

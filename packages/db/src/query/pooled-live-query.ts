@@ -7,6 +7,7 @@ import {
 } from '../collection/lifecycle.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { makeComparator } from '../utils/comparison.js'
+import { reportUncaught } from '../utils/callbacks.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getWhereExpression } from './ir.js'
 import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
@@ -213,7 +214,12 @@ class Partition {
     CleanupQueue.getInstance().cancel(this)
     this.release()
     if (status === `cleaned-up`) {
-      for (const group of this.groups.values()) group.rows.clear()
+      // Emptying is a state change, as a live-query Collection's cleanup
+      // advances its revision, so a detached reader re-reads the rows.
+      for (const group of this.groups.values()) {
+        group.rows.clear()
+        group.revision = group.layoutRevision = ++this.clock
+      }
     }
     this.deliverStatus({
       type: `status:change`,
@@ -227,7 +233,14 @@ class Partition {
     const delivered = this.terminated
       ? { ...event, status: this.terminated }
       : event
-    for (const listener of [...this.statusListeners]) listener(delivered)
+    // As a Collection's emitter does, each listener gets its own call, and a
+    // throw is reported uncaught.
+    for (const listener of [...this.statusListeners])
+      try {
+        listener(delivered)
+      } catch (error) {
+        reportUncaught(error)
+      }
     if (this.terminated) {
       this.stopStatusEvents?.()
       this.stopStatusEvents = undefined

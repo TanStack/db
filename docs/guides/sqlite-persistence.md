@@ -350,7 +350,7 @@ The Node package prunes its applied transaction log by default. Its [README](htt
 
 ## Errors and limits
 
-An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and crashes the Collection: it moves to its error state even after it was ready, and every live query and Effect over it fails too. Restart it with `cleanup()` and `preload()`.
+An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and crashes the Collection: it moves to `crashed` even after it was ready, and so does every live query and Effect over it. `reload()` rejects; recover with `cleanup({ dependents: true })` and `preload()` (see [When a Collection crashes](./error-handling.md#when-a-collection-crashes)).
 
 Failures from the wrapped sync adapter keep their usual meaning. Before the Collection is ready, the adapter's `fail` fails the first load (see [Render after SQLite restore](#render-after-sqlite-restore) for `initialRender`). After it, the adapter's `reportError`, `reportHealthy`, and `fail` appear in `collection.health` and in each live query's `health` tree, and the persisted rows stay. A failure of persistence itself crashes the Collection. In a follower tab, a failed request routed to the leader appears as a request error on the query that asked for the data.
 

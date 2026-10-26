@@ -16,7 +16,8 @@
  *   clears it, and `fail()` sets its `error`: the sync adapter stopped. The
  *   status and the rows do not change. A node shows at most one problem, and
  *   nothing clears an `error` within a sync run. Once the adapter called
- *   `fail()`, every later report from it is a contract violation that throws.
+ *   `fail()`, every later report from it is a contract violation that throws,
+ *   and a second `fail()` does nothing.
  *   After a crash, the adapter's status calls do nothing: core ended the
  *   run. Sync data the run commits still applies, as closure keeps accepted
  *   sync obligations.
@@ -166,7 +167,10 @@ import { createEffect } from '../src/query/effect.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { Query } from '../src/query/builder/index.js'
 import { eq, isUndefined, not } from '../src/query/builder/functions.js'
-import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
+import {
+  CollectionReloadDuringSyncEntryError,
+  InvalidCollectionStatusTransitionError,
+} from '../src/errors.js'
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -207,6 +211,10 @@ type Step =
   // open). The transaction stays open across other steps.
   | { kind: `write`; source: SourceName; key: RowKey; untagged?: boolean }
   | { kind: `commit`; source: SourceName }
+  // `direct-write` commits row 1, 2, or 3 in its own transaction begun with
+  // `begin({ direct: true })`, as query-db's direct writes do. It is not
+  // part of the run's snapshot. It is made only when no transaction is open.
+  | { kind: `direct-write`; source: SourceName; key: RowKey }
   // `truncate` calls the adapter's truncate() in the open transaction, which
   // then replaces every row; it stays the adapter's even if a reload ends.
   | { kind: `truncate`; source: SourceName; markReady?: boolean }
@@ -217,6 +225,10 @@ type Step =
   // `cleanup-hold` starts `cleanup({ dependents: true })` while the adapter's
   // cleanup stays pending; `cleanup-settle` lets it finish.
   | { kind: `cleanup-hold` | `cleanup-settle`; source: SourceName }
+  // `cleanup-reload`, in one tick: `cleanup({ dependents: true })` whose
+  // adapter cleanup settles at once, then `reload()`, which starts a fresh
+  // sync run, then `reload()` again, which reloads that run.
+  | { kind: `cleanup-reload`; source: SourceName }
 
 // ---------------------------------------------------------------------------
 // Independent model
@@ -676,6 +688,22 @@ function applyModel(
     applyCleanup(shape, model, step.kind, step.source)
     return `ok`
   }
+  if (step.kind === `cleanup-reload`) {
+    // A cleanup still pending, or a source the shape does not read, takes
+    // no part. Otherwise the cleanup settles, the first reload starts a
+    // fresh run, and the second reloads it. Work of the cleaned-up run,
+    // such as its reload's open transaction, decides nothing for them.
+    const source = model.sources[step.source]
+    if (!shapeSources[shape].includes(step.source) || source.cleaning)
+      return `ok`
+    applyCleanup(shape, model, `cleanup-hold`, step.source)
+    applyCleanup(shape, model, `cleanup-settle`, step.source)
+    for (let reloads = 0; reloads < 2; reloads++)
+      applySourceStep(model, source, step.source, { kind: `reload` })
+    deriveQueries(shape, model)
+    deriveEffect(model)
+    return `ok`
+  }
   if (step.kind === `reload-query`) {
     // A pooled view has no reload of its own.
     if (shape === `pooled-nested`) return `ok`
@@ -801,6 +829,7 @@ type SourceAction =
   | { kind: SourceStepKind | `mark-ready` }
   | { kind: `write`; key: RowKey; untagged?: boolean }
   | { kind: `commit` }
+  | { kind: `direct-write`; key: RowKey }
   | { kind: `truncate`; markReady?: boolean }
 
 /**
@@ -854,6 +883,8 @@ function applySourceStep(
     // a write admitted before it (the IndexedDB retirement oracle owns that
     // law).
     if (step.kind === `write`) writeRow(counter, source, step)
+    if (step.kind === `direct-write` && !source.open)
+      source.rows.set(step.key, ++counter.serial)
     if (step.kind === `commit`) commitOpen(source)
     if (step.kind === `cancel`) source.open = null
     if (step.kind === `truncate`) {
@@ -882,6 +913,12 @@ function applySourceStep(
       break
     case `write`:
       writeRow(counter, source, step)
+      break
+    case `direct-write`:
+      // A direct write edits the rows on screen. It is not the run's
+      // snapshot, so a reload's replacement stays armed for the run's next
+      // transaction and the reload stays in flight.
+      if (!source.open) source.rows.set(step.key, ++counter.serial)
       break
     case `commit`:
       outcome = commitOpen(source)
@@ -937,18 +974,16 @@ function applySourceStep(
       break
     case `fail`:
       // Before Collection readiness the first load fails; after it, the
-      // rows stay and the node shows the error.
-      if (stopped) outcome = `throws`
-      else {
-        // A reload that fails before its first commit keeps the rows: they
-        // stay the baseline, and a transaction it began no longer replaces
-        // them.
-        if (source.reloading) {
-          source.armed = false
-          if (source.open && !source.open.adapter) source.open.truncate = false
-        }
+      // rows stay and the node shows the error. A second fail() in the run
+      // changes nothing.
+      if (stopped) break
+      // A reload that fails before its first commit keeps the rows: they
+      // stay the baseline, and a transaction it began no longer replaces
+      // them.
+      if (source.reloading) {
+        source.armed = false
+        if (source.open && !source.open.adapter) source.open.truncate = false
       }
-      if (outcome === `throws`) break
       if (source.gate !== `ready`) {
         source.gate = `error`
         source.cause = `${label} gave up`
@@ -1407,7 +1442,7 @@ function writeDiffing(
   tag: number,
   untagged = false,
 ): void {
-  const known = new Map(params.collection._state.acceptedSyncedEntries())
+  const known = new Map(params.collection._state.replacementBaseline())
   params.write({
     type: known.has(key) ? `update` : `insert`,
     value: untagged
@@ -1467,6 +1502,9 @@ const historyReachStates = [
   `reload ends before its first commit`,
   `untagged insert of a kept row`,
   `retired cleanup rejects after a fresh start`,
+  `cleanup and reload during a reload's open transaction`,
+  `direct write while a reload is armed`,
+  `fail on a stopped source`,
 ] as const
 type HistoryReach = ReturnType<
   typeof createOracleReach<(typeof historyReachStates)[number]>
@@ -1492,7 +1530,8 @@ async function runHistory(
       (step) =>
         step.kind !== `restart` &&
         step.kind !== `cleanup-hold` &&
-        step.kind !== `cleanup-settle`,
+        step.kind !== `cleanup-settle` &&
+        step.kind !== `cleanup-reload`,
     )
   }
   // Each event, with the status announced so far and the tree read then.
@@ -1649,6 +1688,21 @@ async function runHistory(
           freshSinceRetire[step.source]
         )
           reach.reach(`retired cleanup rejects after a fresh start`)
+        if (
+          step.kind === `cleanup-reload` &&
+          source.reloading &&
+          source.open &&
+          !source.cleaning
+        )
+          reach.reach(`cleanup and reload during a reload's open transaction`)
+        if (step.kind === `direct-write` && source.armed && !source.open)
+          reach.reach(`direct write while a reload is armed`)
+        if (
+          step.kind === `fail` &&
+          !source.reloading &&
+          (source.gate === `error` || source.stopped !== null)
+        )
+          reach.reach(`fail on a stopped source`)
       }
       if (step.kind === `restart`)
         for (const name of [`A`, `B`] as const)
@@ -1674,6 +1728,20 @@ async function runHistory(
         } else if (step.kind === `cleanup-settle`) {
           sources[step.source].settleCleanup()
           await pendingCleanups[step.source]
+        } else if (step.kind === `cleanup-reload`) {
+          if (
+            shapeSources[shape].includes(step.source) &&
+            !pendingCleanups[step.source]
+          ) {
+            const { collection } = sources[step.source]
+            // The cleanup ends the direct subscriber; the fresh run gets a
+            // new one at the checkpoint.
+            mirrored[step.source] = false
+            void collection.cleanup({ dependents: true }).catch(() => undefined)
+            void collection.reload().catch(() => undefined)
+            void collection.reload().catch(() => undefined)
+            await flushPromises()
+          }
         } else if (step.kind === `reload-query` && queryEndedBefore) {
           // The query starts again; a source still cleaning up crashes it,
           // which its status shows. Its cleanup dropped its listeners.
@@ -1735,6 +1803,18 @@ async function runHistory(
               params.commit()
             }
             params.markReady()
+          } else if (step.kind === `direct-write`) {
+            if (!pre!.open) {
+              params.begin({ direct: true })
+              const kept =
+                params.collection._state.getAcceptedSyncedRow(step.key) !==
+                undefined
+              params.write({
+                type: kept ? `update` : `insert`,
+                value: { id: step.key, parentId: step.key, tag: model.serial },
+              })
+              params.commit()
+            }
           } else if (step.kind === `write`) {
             if (!pre!.open) params.begin()
             writeDiffing(params, step.key, tag, step.untagged)
@@ -1811,9 +1891,10 @@ async function runHistory(
         expect(
           sortedTags(
             new Map(
-              [...collection._state.acceptedSyncedEntries()].map(
-                ([key, row]) => [key, row.tag ?? 0],
-              ),
+              [...collection._state.replacementBaseline()].map(([key, row]) => [
+                key,
+                row.tag ?? 0,
+              ]),
             ),
           ),
           `${label}: ${name} baseline`,
@@ -1921,6 +2002,35 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
+  // A direct write during a reload applies to the kept rows; the reload's
+  // first snapshot commit still replaces every row.
+  'a direct write during a reload keeps the other rows and the reload': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `commit`, source: `A` },
+    on(`reload`, `A`),
+    { kind: `direct-write`, source: `A`, key: 2 },
+    on(`ready`, `A`),
+  ],
+  // The cleaned-up run's reload decides nothing for a later reload.
+  "a cleanup's late end of a reload does not end a newer reload": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`reload`, `A`),
+    { kind: `write`, source: `A`, key: 1, untagged: true },
+    { kind: `cleanup-reload`, source: `A` },
+  ],
+  'a second fail() in the sync run does nothing': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`fail`, `A`),
+    on(`fail`, `A`),
+  ],
+  'a second fail() after a failed first load does nothing': [
+    on(`fail`, `A`),
+    on(`fail`, `A`),
+  ],
   "a cascade cancels a query's reload that waits for its sources": [
     on(`fail`, `A`),
     { kind: `reload-query` },
@@ -2300,6 +2410,15 @@ describe(`source failure and health oracle`, () => {
           kind === `truncate` ? { kind, source, markReady } : { kind, source },
         ),
     },
+    {
+      weight: 1,
+      arbitrary: fc
+        .tuple(
+          fc.constantFrom(`A` as const, `B` as const),
+          fc.constantFrom(1 as const, 2 as const, 3 as const),
+        )
+        .map(([source, key]): Step => ({ kind: `direct-write`, source, key })),
+    },
     { weight: 1, arbitrary: fc.constant(restart) },
     { weight: 1, arbitrary: fc.constant({ kind: `reload-query` } as const) },
     { weight: 1, arbitrary: fc.constant({ kind: `effect` } as const) },
@@ -2307,7 +2426,11 @@ describe(`source failure and health oracle`, () => {
       weight: 1,
       arbitrary: fc
         .tuple(
-          fc.constantFrom(`cleanup-hold` as const, `cleanup-settle` as const),
+          fc.constantFrom(
+            `cleanup-hold` as const,
+            `cleanup-settle` as const,
+            `cleanup-reload` as const,
+          ),
           fc.constantFrom(`A` as const, `B` as const),
         )
         .map(([kind, source]): Step => ({ kind, source })),
@@ -2352,6 +2475,24 @@ describe(`source failure and health oracle`, () => {
       on(`ready`, `A`),
       on(`retired-cleanup-rejects`, `A`),
     ],
+    // Cleanup, a fresh start, and a reload while a reload's transaction is
+    // open.
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`reload`, `A`),
+      { kind: `write`, source: `A`, key: 1 },
+      { kind: `cleanup-reload`, source: `A` },
+    ],
+    // A direct write while a reload's replacement is armed.
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`reload`, `A`),
+      { kind: `direct-write`, source: `A`, key: 2 },
+    ],
+    // fail() on a source whose adapter already stopped.
+    [on(`ready`, `A`), on(`ready`, `B`), on(`fail`, `A`), on(`fail`, `A`)],
   ]
   const historyReach = createOracleReach(
     `source-health.history`,
@@ -2408,6 +2549,90 @@ describe(`source failure and health oracle`, () => {
 // observation (its writes never apply), so this witness checks the
 // invariant directly: after the reload no transaction stays open, and the
 // new run's own commit decides the row.
+// ---------------------------------------------------------------------------
+// Problem values
+// ---------------------------------------------------------------------------
+
+/**
+ * `fail()`, `reportError()`, and a crash accept any value as the problem. The
+ * law: the value never changes what the call does. Status, node, and a
+ * reload's promise follow the same rules as for an `Error`, and the node's
+ * problem keeps the value as its `cause`. A value that cannot describe
+ * itself (no prototype, a throwing getter) shows the generic message. The
+ * lane crosses each call site with each kind of value.
+ */
+describe(`problem values`, () => {
+  const values: Record<string, () => unknown> = {
+    error: () => new Error(`gave up`),
+    string: () => `gave up`,
+    'no prototype': () => Object.create(null),
+    'throwing getter': () => ({
+      get code() {
+        throw new Error(`getter`)
+      },
+      toString() {
+        throw new Error(`toString`)
+      },
+    }),
+  }
+  const sites = [
+    `fail before ready`,
+    `fail after ready`,
+    `fail during a reload`,
+    `reportError`,
+    `crash`,
+  ] as const
+  const cases = sites.flatMap((site) =>
+    Object.keys(values).map((value) => ({ site, value })),
+  )
+  it.each(cases)(`%j`, async ({ site, value }) => {
+    let params!: SyncParams
+    const collection = createCollection<Row, number>({
+      id: `health-problem-value-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (next) => {
+          params = next
+        },
+      },
+    })
+    const problem = values[value]!()
+    void collection.preload().catch(() => undefined)
+    await flushPromises()
+    let reload: Promise<void> | undefined
+    if (site !== `fail before ready`) {
+      params.markReady()
+      if (site === `fail during a reload`) {
+        reload = collection.reload()
+        void reload.catch(() => undefined)
+      }
+    }
+    if (site === `reportError`) params.reportError(problem)
+    else if (site === `crash`) collection._lifecycle.crash(problem)
+    else params.fail(problem)
+    await flushPromises()
+    const shown =
+      site === `fail before ready` || site === `crash`
+        ? collection.health.error
+        : site === `reportError`
+          ? collection.health.failureReason
+          : collection.health.error
+    expect(collection.status).toBe(
+      site === `fail before ready`
+        ? `error`
+        : site === `crash`
+          ? `crashed`
+          : `ready`,
+    )
+    expect(shown?.cause, `the node keeps the value`).toBe(problem)
+    expect(typeof shown?.message).toBe(`string`)
+    if (reload)
+      await expect(reload, `a failed reload settles`).rejects.toBe(problem)
+    await collection.cleanup()
+  })
+})
+
 describe(`reload invariant`, () => {
   // A query's reload() settles with the query: after its failed source
   // recovers, the query reloads itself, and the reload waits for that run to
@@ -2525,7 +2750,7 @@ describe(`reload invariant`, () => {
     source.collection.startSyncImmediate()
     const writeMissing = (rows: Array<Row>) => {
       const params = source.params
-      const baseline = new Map(params.collection._state.acceptedSyncedEntries())
+      const baseline = new Map(params.collection._state.replacementBaseline())
       params.begin()
       for (const row of rows)
         if (!baseline.has(row.id)) params.write({ type: `insert`, value: row })
@@ -2732,7 +2957,7 @@ describe(`reload invariant`, () => {
       source.params.fail(new Error(`reload failed`))
       await reload
       const baseline = [
-        ...source.params.collection._state.acceptedSyncedEntries(),
+        ...source.params.collection._state.replacementBaseline(),
       ]
       expect(baseline.map(([key]) => key)).toEqual(
         open === `an open transaction` ? [1, 2] : [1],
@@ -4919,6 +5144,7 @@ type LazyStep =
         | `settle-last-ok`
         | `settle-last-fail`
         | `throw-next`
+        | `reload-in-load`
         | `reload`
         | `truncate`
         | `child-ready`
@@ -4977,6 +5203,9 @@ function applyLazyStep(
     case `settle-last-ok`:
     case `settle-last-fail`:
     case `throw-next`:
+    case `reload-in-load`:
+      // A reload from inside the adapter's loadSubset call rejects and
+      // changes nothing, as one from inside sync() does.
       return
     case `reload`: {
       // A reload in flight returns its promise; a crashed child rejects.
@@ -5035,6 +5264,7 @@ const lazyReachStates = [
   `request error shown`,
   `coverage checked during an open replay`,
   `parked demand during a replay`,
+  `reload from inside loadSubset`,
 ] as const
 type LazyReach = ReturnType<
   typeof createOracleReach<(typeof lazyReachStates)[number]>
@@ -5091,6 +5321,13 @@ async function runLazyHistory(
   let run = 0
   let serials = 0
   let throwNext = false
+  // The next load the query requests calls children.reload() from inside
+  // the adapter's loadSubset, and the driver keeps what it returned.
+  let reloadInLoad = false
+  // Each with whether a reload was already in flight: then reload() returns
+  // that reload's promise, as any second call does, and retires nothing.
+  const reentrantReloads: Array<{ promise: Promise<void>; inFlight: boolean }> =
+    []
   let failures = 0
   let childRuns = 0
   let parentParams!: SyncParams
@@ -5147,6 +5384,13 @@ async function runLazyHistory(
             const serial = ++serials
             const thrown = throwNext
             throwNext = false
+            if (reloadInLoad) {
+              reloadInLoad = false
+              // Read at the call, from the public node: the call's own
+              // condition.
+              const inFlight = children.health.reloading
+              reentrantReloads.push({ promise: children.reload(), inFlight })
+            }
             requests.push({ serial, keys, thrown })
             loadKeys.set(serial, keys)
             loadRuns.set(serial, thisRun)
@@ -5279,6 +5523,8 @@ async function runLazyHistory(
       const replayBefore = model.demand.replayActive
       if (step.kind === `reload` && model.gate === `loading`)
         reach?.reach(`reload during the first load`)
+      if (reloadInLoad && step.kind === `parent`)
+        reach?.reach(`reload from inside loadSubset`)
       if (step.kind === `truncate` && model.source.reloading)
         reach?.reach(`truncate while a reload is in flight`)
       const truncates =
@@ -5318,6 +5564,8 @@ async function runLazyHistory(
         }
       } else if (step.kind === `throw-next`) {
         throwNext = true
+      } else if (step.kind === `reload-in-load`) {
+        reloadInLoad = true
       } else if (step.kind === `reload`) {
         void children.reload().catch(() => undefined)
       } else if (step.kind === `truncate`) {
@@ -5361,6 +5609,13 @@ async function runLazyHistory(
           `${label}: keys the truncate replay did not request`,
         ).toEqual([])
       deriveDemandGate(model)
+      for (const reentrant of reentrantReloads.splice(0))
+        if (reentrant.inFlight) void reentrant.promise.catch(() => undefined)
+        else
+          await expect(
+            reentrant.promise,
+            `${label}: a reload from inside loadSubset rejects`,
+          ).rejects.toBeInstanceOf(CollectionReloadDuringSyncEntryError)
 
       expect(query.status, `${label}: query status`).toBe(model.gate)
       watcher?.check(label)
@@ -5462,6 +5717,7 @@ describe(`lazy join demand grammar`, () => {
         `settle-last-ok` as const,
         `settle-last-fail` as const,
         `throw-next` as const,
+        `reload-in-load` as const,
         `reload` as const,
         `truncate` as const,
         `child-ready` as const,
@@ -6057,6 +6313,15 @@ describe(`lazy join demand grammar`, () => {
       ],
       { honorsAbort: false },
     ))
+  // A reload from inside the adapter's loadSubset rejects and changes
+  // nothing; the query keeps its demand and does not crash.
+  it(`a reload from inside loadSubset rejects and leaves the query running`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `reload-in-load` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-ok` },
+    ]))
   const lazyReach = createOracleReach(
     `source-health.lazy-demand`,
     lazyReachStates,
@@ -6177,6 +6442,7 @@ describe(`effect errors`, () => {
       | `fail after gate`
       | `crash after gate`
       | `report after gate`
+      | `problem before the Effect`
   }
   const histories: Array<EffectHistory> = [true, false].flatMap((skipInitial) =>
     ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
@@ -6186,6 +6452,7 @@ describe(`effect errors`, () => {
           `fail after gate`,
           `crash after gate`,
           `report after gate`,
+          `problem before the Effect`,
         ] as const
       ).map((failure) => ({ skipInitial, syncMode, failure })),
     ),
@@ -6223,19 +6490,46 @@ describe(`effect errors`, () => {
     const sourceErrors: Array<Error> = []
     const trees: Array<HealthNode> = []
     const delivered: Array<unknown> = []
-    const effect = createEffect({
-      query: (q) => q.from({ row: source }),
-      skipInitial,
-      onBatch: (events) => {
-        delivered.push(...events.map((event) => event.key))
-      },
-      onSourceError: (error) => sourceErrors.push(error),
-      onHealthChange: (health) => trees.push(health),
-    })
+    const startEffect = () =>
+      createEffect({
+        query: (q) => q.from({ row: source }),
+        skipInitial,
+        onBatch: (events) => {
+          delivered.push(...events.map((event) => event.key))
+        },
+        onSourceError: (error) => sourceErrors.push(error),
+        onHealthChange: (health) => trees.push(health),
+      })
     const consoleError = console.error
     console.error = () => {}
+    // A source can already be ready and report a problem when the Effect is
+    // created. Law 16: after the Effect's initial-query readiness, a sync
+    // problem reaches onHealthChange, so the gate reports the tree it opens
+    // on once (law 17: every change is announced).
+    if (failure === `problem before the Effect`) {
+      void source.preload()
+      await flushPromises()
+      if (syncMode === `eager`) {
+        writeRow()
+        params.markReady()
+      } else params.markReady()
+      await flushPromises()
+      params.reportError(new Error(`stalled`))
+    }
+    const effect = startEffect()
     try {
       await flushPromises()
+      if (failure === `problem before the Effect`) {
+        if (syncMode === `on-demand`) settleLoad()
+        await flushPromises()
+        expect(effect.disposed).toBe(false)
+        expect(trees, `the gate reports the problem once`).toHaveLength(1)
+        expect(trees[0]).toMatchObject({
+          hasErrors: true,
+          sources: [{ alias: `row`, failureReason: { message: `stalled` } }],
+        })
+        return
+      }
       if (failure === `before gate`) {
         params.fail(new Error(`gave up`))
         await flushPromises()

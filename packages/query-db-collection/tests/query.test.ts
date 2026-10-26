@@ -11780,6 +11780,97 @@ describe(`reload settles on the new run's first result`, () => {
     },
   )
 
+  // A direct write during a reload edits the rows on screen; it is not the
+  // new run's snapshot. Model: the other rows stay, the write applies, and
+  // the reload stays in flight. When the new run's result lands, it settles
+  // the write as a refetch in flight during a direct write does (the
+  // ownership oracle owns that rule), so the two end with the same rows.
+  it.each([`insert`, `update`, `delete`] as const)(
+    `a direct %s during a reload applies to the kept rows`,
+    async (kind) => {
+      const run = async (via: `reload` | `refetch`) => {
+        let release!: () => void
+        const fetches: Array<Promise<Array<{ id: number; v: string }>>> = [
+          Promise.resolve([
+            { id: 1, v: `a` },
+            { id: 2, v: `b` },
+            { id: 3, v: `c` },
+          ]),
+          new Promise((resolve) => {
+            release = () =>
+              resolve([
+                { id: 1, v: `a2` },
+                { id: 2, v: `b2` },
+                { id: 3, v: `c2` },
+              ])
+          }),
+        ]
+        const client = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })
+        const collection = createCollection(
+          queryCollectionOptions({
+            id: `reload-direct-${kind}-${via}`,
+            queryKey: [`reload-direct`, kind, via],
+            queryClient: client,
+            getKey: (row: { id: number; v: string }) => row.id,
+            queryFn: () => fetches.shift()!,
+          }),
+        )
+        const rows = () =>
+          new Map(collection.toArray.map((row) => [row.id, row.v]))
+        try {
+          await collection.preload()
+          const pending =
+            via === `reload`
+              ? collection.reload()
+              : collection.utils.refetch().then(() => undefined)
+          let settled = false
+          void pending.then(() => (settled = true))
+          await flushPromises()
+          if (kind === `insert`) collection.utils.writeInsert({ id: 4, v: `d` })
+          else if (kind === `update`)
+            collection.utils.writeUpdate({ id: 2, v: `direct` })
+          else collection.utils.writeDelete(2)
+          await flushPromises()
+          const during = {
+            rows: rows(),
+            reloading: collection.health.reloading,
+            settled,
+          }
+          release()
+          await pending
+          return {
+            during,
+            final: rows(),
+            reloading: collection.health.reloading,
+          }
+        } finally {
+          await collection.cleanup()
+          client.clear()
+        }
+      }
+      const expected = new Map([
+        [1, `a`],
+        [2, `b`],
+        [3, `c`],
+      ])
+      if (kind === `insert`) expected.set(4, `d`)
+      else if (kind === `update`) expected.set(2, `direct`)
+      else expected.delete(2)
+      const reload = await run(`reload`)
+      expect(reload.during.rows, `the other rows stay`).toEqual(expected)
+      expect(reload.during.reloading, `the reload stays in flight`).toBe(true)
+      expect(reload.during.settled).toBe(false)
+      expect(reload.reloading).toBe(false)
+      const refetch = await run(`refetch`)
+      expect(
+        reload.final,
+        `the result settles the write as a refetch does`,
+      ).toEqual(refetch.final)
+    },
+  )
+
   // A failed reload keeps the rows. A direct write after it writes the
   // Query cache from the rows the Collection holds, so the cache keeps row 1.
   it(`a direct write after a failed reload keeps the kept rows in the Query cache`, async () => {
