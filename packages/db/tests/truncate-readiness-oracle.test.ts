@@ -14,6 +14,7 @@
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { declareOracle } from './oracle-config.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }
@@ -27,6 +28,46 @@ const cells = (['loading', 'ready', 'error'] as const).flatMap((status) =>
     ),
   ),
 )
+// The model: an authored replacement with `markReady: false` keeps the
+// current status; every other final intent makes the collection ready.
+function expectedReplacementStatus(
+  status: (typeof cells)[number][`status`],
+  last: Intent,
+): string {
+  return last === false ? status : 'ready'
+}
+
+// The check: every publication, and the committed status, follow the model.
+function expectReplacementStatus(
+  committed: string,
+  observed: ReadonlyArray<string>,
+  expectedStatus: string,
+): void {
+  expect.soft(committed).toBe(expectedStatus)
+  expect
+    .soft(
+      observed.every((value) => value === expectedStatus),
+      'status at publication',
+    )
+    .toBe(true)
+}
+
+// The model for reentrant batches: the final intent alone decides the status.
+// A `false` intent leaves the source-closed error; any other ends ready.
+function expectReentrantStatuses(
+  committed: string,
+  statuses: ReadonlyArray<string>,
+  last: Intent,
+): void {
+  expect(committed).toBe(last === false ? 'error' : 'ready')
+  expect(statuses).toEqual(last === false ? ['error'] : ['error', 'ready'])
+}
+
+declareOracle({
+  check: [expectReplacementStatus, expectReentrantStatuses],
+  model: [expectedReplacementStatus],
+})
+
 it.each(cells)(
   'replacement readiness follows the final authored intent: %j',
   async ({ status, held, first, last }) => {
@@ -72,14 +113,8 @@ it.each(cells)(
       truncate(last === undefined ? undefined : { markReady: last })
       sync.write({ type: 'insert', value: { id: 3, value: 'replacement' } })
       const receipt = sync.commit()
-      const expectedStatus = last === false ? status : 'ready'
-      expect.soft(c.status).toBe(expectedStatus)
-      expect
-        .soft(
-          observed.every((value) => value === expectedStatus),
-          'status at publication',
-        )
-        .toBe(true)
+      const expectedStatus = expectedReplacementStatus(status, last)
+      expectReplacementStatus(c.status, observed, expectedStatus)
       expect(
         [...c.base.values()].map((row) => ({ id: row.id, value: row.value })),
       ).toEqual([{ id: 3, value: 'replacement' }])
@@ -146,8 +181,7 @@ it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
       sync.commit()
       await Promise.all(receipts)
       expect(entered).toBe(true)
-      expect(c.status).toBe(last === false ? 'error' : 'ready')
-      expect(statuses).toEqual(last === false ? ['error'] : ['error', 'ready'])
+      expectReentrantStatuses(c.status, statuses, last)
       expect([...c.keys()]).toEqual([3])
     } finally {
       subscription.unsubscribe()
