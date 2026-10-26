@@ -4225,6 +4225,12 @@ Needed witness: whether this unindexed window may use full-source recovery,
 which this map allows for unindexed underfilled continuations; if so the
 check is too strict for it, and if not production is wrong.
 
+The same comparison fails on main `6c1ca8f8f` and PR #2229 at `7fff3a7e0`
+with seed `1902868771`, path `19:2:2:4:4:4:5:9:18:15`. This joined-filter
+history changes eligibility through `link`, then touches another row. Both
+exact replays report two full-source requests where the check expects zero;
+neither reports type errors. The existing contract question remains open.
+
 Open observation without a trace: in one CI run of this change, the random
 campaign of `packages/query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`
 timed out at 120 seconds before it printed a seed. The previous CI run took

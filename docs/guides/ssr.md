@@ -369,7 +369,9 @@ Create manual indexes when initializing each request or browser client, before
 preloading or rendering queries that use them:
 
 ```tsx
-function createDbClient() {
+import { BasicIndex, DbClient, type CollectionOptions } from '@tanstack/db'
+
+function createDbClient(todoCollection: CollectionOptions<{ id: string }>) {
   const client = new DbClient()
   client.collection(todoCollection).createIndex((todo) => todo.id, {
     indexType: BasicIndex,

@@ -598,3 +598,29 @@ without DbClient; the controls retain it. This integration measurement uses the
 earlier SSR extraction and refactoring, without claiming a new size reduction
 from the mechanical merge repairs. Full measurements are in the task scratch
 file `second-main-size.log`.
+
+### Documentation CI integration
+
+At `7fff3a7e0`, CI's new documentation typecheck failed on the manual-index
+example. Its isolated fragment left `todoCollection` undeclared, so the checker
+supplied a Collection where `DbClient.collection()` requires a descriptor.
+The focused check reproduced that error. The example now accepts an explicitly
+typed descriptor and imports its API names. One obsolete known-failure baseline
+entry for a persistence example was removed; no failure was added to the
+baseline. No runtime source or oracle assertion changed.
+
+The complete `pnpm test:doc-snippets` check passed: 760 examples across 255
+files, zero new failures, 279 existing known failures (61 do not parse).
+`git diff --check` passed.
+
+The previous manual CI run also exposed an ordered-work mismatch. Its exact
+replay fails on both `7fff3a7e0` and main `6c1ca8f8f`: property
+`ordered-work.eager-indexed-window`, seed `1902868771`, path
+`19:2:2:4:4:4:5:9:18:15`, two full-source requests where the comparison expects
+zero after the final signalling refetch. Each replay executes one history and
+reports no type errors. This is the existing unindexed-continuation contract
+question recorded in the coverage map, with another distinguishing joined-filter
+history. Main's matching failure establishes that this PR did not introduce
+this counterexample; it does not establish whether production or the work
+comparison is correct. The owner and needed contract witness remain recorded
+there, and the comparison remains unchanged.
