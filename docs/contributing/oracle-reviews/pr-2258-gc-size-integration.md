@@ -1,0 +1,92 @@
+# GC retention: size after main integration
+
+This record supplements [the earlier size refactor](pr-2258-gc-size-refactor.md).
+Its measurements remain historical. This record evaluates the complete PR
+against `origin/main` at merge-base
+`6c1ca8f8f9efe437d3cea61b5b9d0a086e2a5e34`, after a normal merge at
+`80159c9ec`. The evaluated revision is the commit that first adds this record.
+`sizeIntegration.sha256` in [the source record](pr-2258-gc-retention.sources.json)
+binds its production sources and unchanged oracle drivers.
+
+## Preserved behavior and simpler state reads
+
+The final integration adds no product law, oracle rule, history, assertion or
+run budget. The original GC defect, authority, RED/GREEN evidence and limits
+remain in the retention reviews. This is an internal refactor, so the initial
+GREEN implementation is not evidence of another product defect.
+
+Current and prior optimistic layers now share one keyed-row lookup. Current
+and prior virtual-property snapshots share one computation, replacing separate
+sync-status and attribution helpers and an override wrapper. Every supplied
+prior state contains its three required maps, while current snapshots default
+to the state manager. Local-only rows remain local and synced. Existing virtual
+fields on upstream rows still take precedence during enrichment. Prior rows
+are enriched before current rows so the cache retains the published value.
+Collection identity compares directly, and mutation application reads each
+incoming global key once. Removed private members leave the mangle cache.
+
+The preceding refactor also shares transaction completion, mutation merging,
+GC renewal, idle cleanup and queue dispatch, and prunes settled transactions
+with deferred sorted-map deletion. These reductions pay for persisting holds
+without changing cleanup error identity, settlement order, handoff deadlines,
+last-unsubscribe delay or pending-rollback deadlines.
+
+## Executed evidence
+
+The final source passes **636 tests across 18 files**, with no type errors.
+This retains the earlier 608-test selection and adds the row-metadata
+composition, metadata publication and virtual-row-field owners. It covers
+GC, mutation admission, ownership, queue behavior, cleanup/restart, optimistic
+payloads, composition, outcomes, publication and settlement boundaries.
+The fixed and random GC campaigns retain all declared reach requirements.
+
+A hostile mutant discards supplied prior maps by assigning `state = this` at
+snapshot creation. The existing publication oracle rejects it at the raw
+subscriber's prior-row semantics, and the metadata publication owner rejects
+its callback event batches. The four-file run reports 41 failures and 35
+passes. Six of the failures are checker-calibration prerequisites and are not
+independent mutant kills. The metadata property shrinks to seed `1805001`,
+path `1:2:2:2:3:3`: two same-key committed edits with metadata set then delete.
+These are assertion failures, not setup errors or timeouts. Row-metadata
+composition and virtual-row-field owners pass under this mutant and receive
+no kill credit. The exact source bytes are restored, then all **76 tests in
+these four files pass**. The preceding ordinary-deletion mutant remains in
+the earlier record.
+
+Native Chromium passes **3/3 histories**. Real Electric/Postgres passes
+**12/12 paths** using the freshly built DB package, including both sibling
+settlement orders and a SQL-open survivor beyond the first-release deadline.
+These remain separate host and provider witnesses. They do not establish a
+combined browser/provider schedule or expand the earlier bounded claims.
+DB source/test TypeScript, focused ESLint, Prettier, private-member cache and
+whitespace checks pass. Logs remain under `/private/tmp/pr-2258-size`, with
+`final18-` prefixes, `candidate18-size.log`, `prior-state-mutant-red.log` and
+`prior-state-restored-green.log`.
+
+## Whole-PR shipped bytes
+
+`pnpm size:compare --packages db --files` uses the normal production minifier,
+app scenarios and compression settings against merge-base `6c1ca8f8f`.
+Every measured output decreases in both formats:
+
+| Production output | gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| DB bundle | -180 B | -165 B |
+| Typical app | -173 B | -59 B |
+| App with Effect | -156 B | -121 B |
+| App with groupBy | -137 B | -246 B |
+| App with includes | -172 B | -178 B |
+| App with join | -171 B | -98 B |
+| App with LocalStorage | -169 B | -186 B |
+| App with optimistic action | -155 B | -64 B |
+| App with paced mutations | -174 B | -164 B |
+
+No names, comments, formatting, compression settings, scenario definitions or
+minifier options change to obtain this result. Tests and contract documentation
+are separate from these shipped-byte measurements. This integration changes
+no test expectations and adds only this evidence and source binding.
+
+The local-only install workaround remains uncommitted:
+`baseline-browser-mapping@2.11.32` returns HTTP 403, `2.11.31` is unavailable,
+and `2.11.30` installs. Both comparison trees use that override. Existing
+overrides remain intact; neither workspace nor lockfile changes enter the PR.

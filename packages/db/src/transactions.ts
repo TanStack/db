@@ -574,17 +574,18 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     for (const newMutation of mutations) {
-      const existingMutation = merged.get(newMutation.globalKey)
+      const globalKey = newMutation.globalKey
+      const existingMutation = merged.get(globalKey)
 
       const mergeResult = existingMutation
         ? mergePendingMutations(existingMutation, newMutation)
         : newMutation
       if (mergeResult === null) {
         // Remove the mutation (e.g., delete after insert cancels both).
-        merged.delete(newMutation.globalKey)
+        merged.delete(globalKey)
       } else {
         // Insert the new mutation or replace it with the merged result.
-        merged.set(newMutation.globalKey, mergeResult)
+        merged.set(globalKey, mergeResult)
       }
     }
 
