@@ -528,3 +528,23 @@ The receiver's updated SHA-256 is
 All production bindings above remain unchanged. CodeRabbit review IDs and
 inline comments were unchanged on this CI poll; its summary remains paused at
 `da37bc9b`. GitHub reports a conflict with main, separately from CI status.
+
+### Main integration after CI registration repair
+
+The maintainer authorized merging main after the conflict blocked CI.
+The merge combines branch `07d43c750025b07e8c77e4c475a70841a233d093`
+with main `45c33292b2c4f09a63f856a829c1e15ca2b470aa`.
+Its only conflict was the replay property registry. The resolution retains all
+branch IDs and all four persisted-options IDs from main, without changing any
+model, grammar, budget or comparison. The local dependency override and
+lockfile patch are byte-for-byte unchanged and remain uncommitted.
+
+The combined tree passed **38/38 replay tests**. Core and browser each passed
+all four persisted-options campaign tests, including their generated consumer
+type comparisons and declared reach. The initial commands also invoked global
+TypeScript 7.0.2 for the separate harness typecheck and exited nonzero with
+source diagnostics; those exits are not GREEN evidence. With the workspace
+compiler, TypeScript 5.9.3, both harness typechecks passed with no errors, as did
+all nine existing core persistence type assertions. ESLint for the resolved
+registry and both staged and working-tree whitespace checks passed.
+No subscription or SSR production source changed during this merge.
