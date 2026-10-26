@@ -2,7 +2,12 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleRuns,
+} from './oracle-config.js'
+import { finishHistory } from './observer-history-cleanup.js'
 import type { ChangeMessage } from '../src/types.js'
 
 type Row = { id: string; version: number }
@@ -388,28 +393,6 @@ function applyDeliveryMutant(
   return corrupted
 }
 
-async function finishHistory(
-  cleanup: ReadonlyArray<() => void | Promise<void>>,
-  failure: { error: unknown } | undefined,
-): Promise<void> {
-  const cleanupFailures: Array<unknown> = []
-  for (const release of cleanup) {
-    try {
-      await release()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-  }
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(
-      failure ? [failure.error, ...cleanupFailures] : cleanupFailures,
-      `Observer history cleanup failed`,
-      failure ? { cause: failure.error } : undefined,
-    )
-  }
-  if (failure) throw failure.error
-}
-
 async function runHistory(
   mode: Mode,
   history: Array<Command>,
@@ -609,45 +592,11 @@ function reactionHistory(reaction: Reaction): Array<Command> {
   ]
 }
 
-async function runStaleReadyHistory(
-  mode: Mode,
-  injectStaleReady: boolean,
-): Promise<void> {
-  let markReady!: () => void
-  const source = createCollection<Row, string>({
-    id: `observer-stale-ready-${collectionId++}`,
-    getKey: ({ id }) => id,
-    startSync: false,
-    sync: {
-      sync: (operations) => {
-        markReady = operations.markReady
-      },
-    },
-  })
-  source.startSyncImmediate()
-  const observer = createLiveQueryObserver(source, { mode })
-  let readyNotifications = 0
-  const readyListener = (
-    changes: Array<ChangeMessage<Row, string>> | undefined,
-  ): void => {
-    if (changes === undefined) readyNotifications++
-  }
-
-  let failure: { error: unknown } | undefined
-  try {
-    observer.subscribe(readyListener)
-    observer.dispose()
-    markReady()
-    if (injectStaleReady) readyListener(undefined)
-    expect(readyNotifications).toBe(0)
-  } catch (error) {
-    failure = { error }
-  }
-  await finishHistory(
-    [() => observer.dispose(), () => source.cleanup()],
-    failure,
-  )
-}
+declareOracle({
+  check: [runHistory, assertHistory],
+  model: [subscribeModel, unsubscribeModel, publishModel, disposeModel],
+  grammar: [command, listener],
+})
 
 describe(`LiveQueryObserver generated histories`, () => {
   for (const mode of [`granular`, `wholesale`] as const) {
@@ -806,16 +755,6 @@ describe(`LiveQueryObserver generated histories`, () => {
         runHistory(mode, history, { mutant: `reentrantOutOfOrder`, reach }),
       ).rejects.toMatchObject({ name: `AssertionError` })
       expect(reach.reactions.nested).toBe(1)
-    },
-  )
-
-  it.each([`granular`, `wholesale`] as const)(
-    `rejects a stale ready notification after disposal through the %s status path`,
-    async (mode) => {
-      await runStaleReadyHistory(mode, false)
-      await expect(runStaleReadyHistory(mode, true)).rejects.toMatchObject({
-        name: `AssertionError`,
-      })
     },
   )
 })
