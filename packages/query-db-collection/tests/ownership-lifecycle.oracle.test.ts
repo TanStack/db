@@ -6425,6 +6425,8 @@ describe(`query collection ownership lifecycle`, () => {
   // scan and a sync transaction. A loaded CI runner can take longer than the
   // default 1 s wait, so these witnesses wait up to 5 s for it.
   const retentionWait = { timeout: 5_000 }
+  // Longer than a wait, so a stuck wait reports its own observation.
+  const retentionTestTimeout = 20_000
 
   /**
    * ## A claim made during a held retention cleanup does not publish the cleaned owner
@@ -6471,66 +6473,71 @@ describe(`query collection ownership lifecycle`, () => {
    * not model the hydrated client or a row that a claimant removes while the
    * cleanup is held.
    */
-  it(`does not publish a retention-cleaned owner through a claim made during the cleanup hold`, async () => {
-    const id = `retention-cleanup-hold-claim`
-    const detail = categorySubset(`detail`)
-    const list = categorySubset(`list`)
-    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-    const persistence = createDeferred<void>()
-    const { collection } = createOwnershipFixture({
-      id,
-      results: [[shared], [shared]],
-      persistedGcTime: 10,
-      scanPersistedRows: () => Promise.resolve([]),
-    })
-    const mutation = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    cleanups.push(async () => {
+  it(
+    `does not publish a retention-cleaned owner through a claim made during the cleanup hold`,
+    async () => {
+      const id = `retention-cleanup-hold-claim`
+      const detail = categorySubset(`detail`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await vi.waitFor(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      // The expiry's owner release is accepted but held behind the blocker.
+      await vi.waitFor(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
       persistence.resolve()
-      await mutation.isPersisted.promise.catch(() => undefined)
-    })
-    const settleTurn = async () => {
-      for (let turn = 0; turn < 3; turn++)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
 
-    await collection._sync.loadSubset(detail)
-    // Earlier result transactions apply first, so the count below grows only
-    // with the expiry's held transaction.
-    await vi.waitFor(
-      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
-      retentionWait,
-    )
-    mutation.mutate(() => collection.insert(blocker))
-    collection._sync.unloadSubset(detail)
-    const pendingBeforeExpiry =
-      collection._state.pendingSyncedTransactions.length
-    // The expiry's owner release is accepted but held behind the blocker.
-    await vi.waitFor(
-      () =>
-        expect(
-          collection._state.pendingSyncedTransactions.length,
-        ).toBeGreaterThan(pendingBeforeExpiry),
-      retentionWait,
-    )
-    const claimed = Promise.resolve(collection._sync.loadSubset(list))
-    void claimed.catch(() => undefined)
-    await settleTurn()
-    persistence.resolve()
-    await mutation.isPersisted.promise
-    await settleTurn()
-    await claimed
-
-    expect({
-      rows: rows(collection),
-      owners: persistedOwners(collection._state.syncedMetadata, shared.id)
-        .length,
-    }).toEqual({
-      rows: [shared.id],
-      owners: 1,
-    })
-  })
+      expect({
+        rows: rows(collection),
+        owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+          .length,
+      }).toEqual({
+        rows: [shared.id],
+        owners: 1,
+      })
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A retention-cleaned owner does not keep its row after the claimant releases
@@ -6560,59 +6567,67 @@ describe(`query collection ownership lifecycle`, () => {
    * observed through the public collection rows, and the owner set is not
    * read.
    */
-  it(`removes a retention-cleaned row once its claimant releases it`, async () => {
-    const id = `retention-cleanup-hold-release`
-    const detail = categorySubset(`detail`)
-    const list = categorySubset(`list`)
-    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-    const persistence = createDeferred<void>()
-    const { collection } = createOwnershipFixture({
-      id,
-      results: [[shared], [shared]],
-      persistedGcTime: 10,
-      scanPersistedRows: () => Promise.resolve([]),
-    })
-    const mutation = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    cleanups.push(async () => {
+  it(
+    `removes a retention-cleaned row once its claimant releases it`,
+    async () => {
+      const id = `retention-cleanup-hold-release`
+      const detail = categorySubset(`detail`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await vi.waitFor(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      await vi.waitFor(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
       persistence.resolve()
-      await mutation.isPersisted.promise.catch(() => undefined)
-    })
-    const settleTurn = async () => {
-      for (let turn = 0; turn < 3; turn++)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
 
-    await collection._sync.loadSubset(detail)
-    // Earlier result transactions apply first, so the count below grows only
-    // with the expiry's held transaction.
-    await vi.waitFor(
-      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
-      retentionWait,
-    )
-    mutation.mutate(() => collection.insert(blocker))
-    collection._sync.unloadSubset(detail)
-    const pendingBeforeExpiry =
-      collection._state.pendingSyncedTransactions.length
-    await vi.waitFor(
-      () =>
-        expect(
-          collection._state.pendingSyncedTransactions.length,
-        ).toBeGreaterThan(pendingBeforeExpiry),
-      retentionWait,
-    )
-    const claimed = Promise.resolve(collection._sync.loadSubset(list))
-    void claimed.catch(() => undefined)
-    await settleTurn()
-    persistence.resolve()
-    await mutation.isPersisted.promise
-    await settleTurn()
-    await claimed
-
-    collection._sync.unloadSubset(list)
-    await vi.waitFor(() => expect(rows(collection)).toEqual([]), retentionWait)
-  })
+      collection._sync.unloadSubset(list)
+      await vi.waitFor(
+        () => expect(rows(collection)).toEqual([]),
+        retentionWait,
+      )
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A claimed row with no retention history is collected on release
@@ -6633,22 +6648,29 @@ describe(`query collection ownership lifecycle`, () => {
    * Limits: one row, one demand, a 10 ms time-to-live on real timers, and an
    * in-memory baseline.
    */
-  it(`collects a claimed row with no retention history once its claimant releases it`, async () => {
-    const id = `retention-release-control`
-    const list = categorySubset(`list`)
-    const { collection } = createOwnershipFixture({
-      id,
-      results: [[shared]],
-      persistedGcTime: 10,
-      scanPersistedRows: () => Promise.resolve([]),
-    })
+  it(
+    `collects a claimed row with no retention history once its claimant releases it`,
+    async () => {
+      const id = `retention-release-control`
+      const list = categorySubset(`list`)
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
 
-    await collection._sync.loadSubset(list)
-    expect(rows(collection)).toEqual([shared.id])
+      await collection._sync.loadSubset(list)
+      expect(rows(collection)).toEqual([shared.id])
 
-    collection._sync.unloadSubset(list)
-    await vi.waitFor(() => expect(rows(collection)).toEqual([]), retentionWait)
-  })
+      collection._sync.unloadSubset(list)
+      await vi.waitFor(
+        () => expect(rows(collection)).toEqual([]),
+        retentionWait,
+      )
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A held cleanup does not publish a released owner beside a surviving peer
@@ -6689,68 +6711,73 @@ describe(`query collection ownership lifecycle`, () => {
    * in-memory baseline. It does not model a row that a claimant removes while
    * the cleanup is held.
    */
-  it(`does not publish a released owner beside a surviving peer through a held cleanup`, async () => {
-    const id = `retention-cleanup-peer-claim`
-    const detail = categorySubset(`detail`)
-    const peer = categorySubset(`peer`)
-    const list = categorySubset(`list`)
-    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-    const persistence = createDeferred<void>()
-    const { collection } = createOwnershipFixture({
-      id,
-      results: [[shared], [shared], [shared]],
-      persistedGcTime: 10,
-      scanPersistedRows: () => Promise.resolve([]),
-    })
-    const mutation = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    cleanups.push(async () => {
+  it(
+    `does not publish a released owner beside a surviving peer through a held cleanup`,
+    async () => {
+      const id = `retention-cleanup-peer-claim`
+      const detail = categorySubset(`detail`)
+      const peer = categorySubset(`peer`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      await collection._sync.loadSubset(peer)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await vi.waitFor(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      // The expiry's owner release is accepted but held behind the blocker.
+      await vi.waitFor(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
       persistence.resolve()
-      await mutation.isPersisted.promise.catch(() => undefined)
-    })
-    const settleTurn = async () => {
-      for (let turn = 0; turn < 3; turn++)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
 
-    await collection._sync.loadSubset(detail)
-    await collection._sync.loadSubset(peer)
-    // Earlier result transactions apply first, so the count below grows only
-    // with the expiry's held transaction.
-    await vi.waitFor(
-      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
-      retentionWait,
-    )
-    mutation.mutate(() => collection.insert(blocker))
-    collection._sync.unloadSubset(detail)
-    const pendingBeforeExpiry =
-      collection._state.pendingSyncedTransactions.length
-    // The expiry's owner release is accepted but held behind the blocker.
-    await vi.waitFor(
-      () =>
-        expect(
-          collection._state.pendingSyncedTransactions.length,
-        ).toBeGreaterThan(pendingBeforeExpiry),
-      retentionWait,
-    )
-    const claimed = Promise.resolve(collection._sync.loadSubset(list))
-    void claimed.catch(() => undefined)
-    await settleTurn()
-    persistence.resolve()
-    await mutation.isPersisted.promise
-    await settleTurn()
-    await claimed
-
-    expect({
-      rows: rows(collection),
-      owners: persistedOwners(collection._state.syncedMetadata, shared.id)
-        .length,
-    }).toEqual({
-      rows: [shared.id],
-      owners: 2,
-    })
-  })
+      expect({
+        rows: rows(collection),
+        owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+          .length,
+      }).toEqual({
+        rows: [shared.id],
+        owners: 2,
+      })
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A hydrated release of a held-cleanup row needs a recorded owner to keep it
@@ -6785,87 +6812,92 @@ describe(`query collection ownership lifecycle`, () => {
    * Limits: one row, three demands, a 10 ms server time-to-live, and a browser
    * with no retention. It does not model a browser that holds the release.
    */
-  it(`hydrated clients drop a held-cleanup row once its peer and claimant release it`, async () => {
-    const id = `retention-cleanup-peer-hydrated`
-    const detail = categorySubset(`detail`)
-    const peer = categorySubset(`peer`)
-    const list = categorySubset(`list`)
-    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-    const persistence = createDeferred<void>()
-    // The fixture supplies the persisted scan that makes retention expire.
-    const { collection } = createOwnershipFixture({
-      id,
-      results: [[shared], [shared], [shared]],
-      persistedGcTime: 10,
-      scanPersistedRows: () => Promise.resolve([]),
-    })
-    const mutation = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    cleanups.push(async () => {
+  it(
+    `hydrated clients drop a held-cleanup row once its peer and claimant release it`,
+    async () => {
+      const id = `retention-cleanup-peer-hydrated`
+      const detail = categorySubset(`detail`)
+      const peer = categorySubset(`peer`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      // The fixture supplies the persisted scan that makes retention expire.
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      await collection._sync.loadSubset(peer)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await vi.waitFor(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      await vi.waitFor(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
       persistence.resolve()
-      await mutation.isPersisted.promise.catch(() => undefined)
-    })
-    const settleTurn = async () => {
-      for (let turn = 0; turn < 3; turn++)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
 
-    await collection._sync.loadSubset(detail)
-    await collection._sync.loadSubset(peer)
-    // Earlier result transactions apply first, so the count below grows only
-    // with the expiry's held transaction.
-    await vi.waitFor(
-      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
-      retentionWait,
-    )
-    mutation.mutate(() => collection.insert(blocker))
-    collection._sync.unloadSubset(detail)
-    const pendingBeforeExpiry =
-      collection._state.pendingSyncedTransactions.length
-    await vi.waitFor(
-      () =>
-        expect(
-          collection._state.pendingSyncedTransactions.length,
-        ).toBeGreaterThan(pendingBeforeExpiry),
-      retentionWait,
-    )
-    const claimed = Promise.resolve(collection._sync.loadSubset(list))
-    void claimed.catch(() => undefined)
-    await settleTurn()
-    persistence.resolve()
-    await mutation.isPersisted.promise
-    await settleTurn()
-    await claimed
-
-    // The stored metadata of the row is the state that a dehydrate publishes.
-    const state = {
-      collections: [
-        {
-          collectionId: id,
-          rows: [
-            {
-              key: shared.id,
-              value: shared,
-              metadata: collection._state.syncedMetadata.get(shared.id),
-            },
-          ],
-        },
-      ],
-    }
-    const browser = createSharedRowClient(id)
-    cleanups.push(async () => {
-      await browser.client.cleanup()
-      browser.queryClient.clear()
-    })
-    browser.client.hydrate(state)
-    const hydrated = browser.client.collection(browser.descriptor)
-    await hydrated._sync.loadSubset(peer)
-    await hydrated._sync.loadSubset(list)
-    hydrated._sync.unloadSubset(peer)
-    hydrated._sync.unloadSubset(list)
-    await vi.waitFor(() => expect(rows(hydrated)).toEqual([]), retentionWait)
-  })
+      // The stored metadata of the row is the state that a dehydrate publishes.
+      const state = {
+        collections: [
+          {
+            collectionId: id,
+            rows: [
+              {
+                key: shared.id,
+                value: shared,
+                metadata: collection._state.syncedMetadata.get(shared.id),
+              },
+            ],
+          },
+        ],
+      }
+      const browser = createSharedRowClient(id)
+      cleanups.push(async () => {
+        await browser.client.cleanup()
+        browser.queryClient.clear()
+      })
+      browser.client.hydrate(state)
+      const hydrated = browser.client.collection(browser.descriptor)
+      await hydrated._sync.loadSubset(peer)
+      await hydrated._sync.loadSubset(list)
+      hydrated._sync.unloadSubset(peer)
+      hydrated._sync.unloadSubset(list)
+      await vi.waitFor(() => expect(rows(hydrated)).toEqual([]), retentionWait)
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A held owner stays published beside a later claim of its row
@@ -7603,67 +7635,72 @@ describe(`query collection ownership lifecycle`, () => {
    * distinguish the skip: the upsert keeps the row either way. The Query
    * cache, read through `QueryClient.getQueriesData`, does.
    */
-  it(`patches a reacquired lease's cached rows while its result waits`, async () => {
-    const id = `reacquired-lease-direct-patch`
-    const detail = categorySubset(`detail`)
-    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-    const persistence = createDeferred<void>()
-    const barrier = createDeferred<void>()
-    const { collection, queryClient, queryFn } = createOwnershipFixture({
-      id,
-      results: [[shared]],
-    })
-    const mutation = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    const settleTurn = async () => {
-      for (let turn = 0; turn < 3; turn++)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
-    cleanups.push(async () => {
+  it(
+    `patches a reacquired lease's cached rows while its result waits`,
+    async () => {
+      const id = `reacquired-lease-direct-patch`
+      const detail = categorySubset(`detail`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const barrier = createDeferred<void>()
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        results: [[shared]],
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      cleanups.push(async () => {
+        collection.deferDataRefresh = null
+        barrier.resolve()
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+
+      await collection._sync.loadSubset(detail)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await vi.waitFor(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      await settleTurn()
+      collection.deferDataRefresh = barrier.promise
+      const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+      void reacquired.catch(() => undefined)
+      await settleTurn()
+      const write = Promise.resolve(
+        collection.utils.writeUpsert({ ...shared, name: `Manual` }),
+      )
+      void write.catch(() => undefined)
+      await settleTurn()
+
+      persistence.resolve()
+      await mutation.isPersisted.promise
       collection.deferDataRefresh = null
       barrier.resolve()
-      persistence.resolve()
-      await mutation.isPersisted.promise.catch(() => undefined)
-    })
+      await reacquired.catch(() => undefined)
+      await write
+      await settleTurn()
 
-    await collection._sync.loadSubset(detail)
-    // Earlier result transactions apply first, so the count below grows only
-    // with the expiry's held transaction.
-    await vi.waitFor(
-      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
-      retentionWait,
-    )
-    mutation.mutate(() => collection.insert(blocker))
-    collection._sync.unloadSubset(detail)
-    await settleTurn()
-    collection.deferDataRefresh = barrier.promise
-    const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
-    void reacquired.catch(() => undefined)
-    await settleTurn()
-    const write = Promise.resolve(
-      collection.utils.writeUpsert({ ...shared, name: `Manual` }),
-    )
-    void write.catch(() => undefined)
-    await settleTurn()
-
-    persistence.resolve()
-    await mutation.isPersisted.promise
-    collection.deferDataRefresh = null
-    barrier.resolve()
-    await reacquired.catch(() => undefined)
-    await write
-    await settleTurn()
-
-    expect({
-      row: collection.get(shared.id)?.name,
-      cache: queryClient
-        .getQueriesData<Array<Item>>({ queryKey: [id] })
-        .flatMap(([, data]) => data ?? [])
-        .map((item) => item.name),
-      queryCalls: queryFn.mock.calls.length,
-    }).toEqual({ row: `Manual`, cache: [`Manual`], queryCalls: 2 })
-  })
+      expect({
+        row: collection.get(shared.id)?.name,
+        cache: queryClient
+          .getQueriesData<Array<Item>>({ queryKey: [id] })
+          .flatMap(([, data]) => data ?? [])
+          .map((item) => item.name),
+        queryCalls: queryFn.mock.calls.length,
+      }).toEqual({ row: `Manual`, cache: [`Manual`], queryCalls: 2 })
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A release whose durable commit fails is terminal for its sync run
