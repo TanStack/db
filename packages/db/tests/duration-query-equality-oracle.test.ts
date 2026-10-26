@@ -24,6 +24,7 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils.js'
+import { declareOracle } from './oracle-config.js'
 
 const fields = [
   `years`,
@@ -92,6 +93,21 @@ function modelKeys({ stored, probe }: Case): Set<string> {
   return new Set(modelEqual(stored, probe) ? [`row`] : [])
 }
 
+// The check: a public or direct read returns exactly the model's key set,
+// in the same representation, at the read that was made.
+function expectExactKeys(
+  actual: unknown,
+  expected: ReadonlySet<string> | ReadonlyArray<string>,
+  label: string,
+): void {
+  expect(actual, label).toEqual(expected)
+}
+
+declareOracle({
+  check: [expectExactKeys],
+  model: [modelEqual, modelKeys],
+})
+
 const indexTypes = [
   [`BasicIndex`, BasicIndex],
   [`BTreeIndex`, BTreeIndex],
@@ -136,8 +152,10 @@ it.each(indexTypes)(
     for (const { name, stored, probe } of cases) {
       const index = new IndexType(1, new PropRef([`value`]))
       index.add(`row`, { value: stored })
-      expect(index.lookup(`eq`, probe), name).toEqual(
+      expectExactKeys(
+        index.lookup(`eq`, probe),
         modelKeys({ name, stored, probe }),
+        name,
       )
     }
   },
@@ -162,10 +180,10 @@ it.each(indexTypes)(
         const expected = [...modelKeys({ name, stored, probe })]
         const readKeys = () =>
           source.currentStateAsChanges({ where })!.map((change) => change.key)
-        expect(readKeys(), `${name}: scan`).toEqual(expected)
+        expectExactKeys(readKeys(), expected, `${name}: scan`)
         const index = source.createIndex((row) => row.value)
         const lookup = vi.spyOn(index, `lookup`)
-        expect(readKeys(), `${name}: indexed`).toEqual(expected)
+        expectExactKeys(readKeys(), expected, `${name}: indexed`)
         expect(lookup, `${name}: index path`).toHaveBeenCalled()
       } finally {
         await source.cleanup()
