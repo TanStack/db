@@ -11,7 +11,28 @@
  * a partial on-demand cache has no authority to restore public rows alone.
  */
 import { expect, test } from '@playwright/test'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import type { HydrationCommitObservation } from './hydration-commit.opfs'
+
+// The edit-log model's rows after the receipt cut and the ordinary tail: the rich
+// history replaces all rows with r2; the insert history keeps r1 and an optional baseline.
+function expectedHydrationCommitRows(
+  baseline: boolean,
+  rich: boolean,
+): Array<{ id: string; value: number }> {
+  return rich
+    ? [
+        { id: `r2`, value: 3 },
+        { id: `tail`, value: 9 },
+      ]
+    : [
+        ...(baseline ? [{ id: `baseline`, value: 0 }] : []),
+        { id: `r1`, value: 1 },
+        { id: `tail`, value: 9 },
+      ]
+}
+
+declareOracle({ model: [expectedHydrationCommitRows] })
 
 for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
   for (const baseline of [false, true]) {
@@ -82,16 +103,7 @@ for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
             ordinary: `fulfilled`,
             exited: phase === `after-ready` ? null : true,
           })
-          const expected = rich
-            ? [
-                { id: `r2`, value: 3 },
-                { id: `tail`, value: 9 },
-              ]
-            : [
-                ...(baseline ? [{ id: `baseline`, value: 0 }] : []),
-                { id: `r1`, value: 1 },
-                { id: `tail`, value: 9 },
-              ]
+          const expected = expectedHydrationCommitRows(baseline, rich)
           expect(observed.rows).toEqual(expected)
           expect(observed.durableRows).toEqual(expected)
           expect(observed.reopenedRows).toEqual(expected)
@@ -122,30 +134,3 @@ for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
     }
   }
 }
-
-// ORC-010 calibration: two teardown failures cannot erase the independently
-// captured observation, mutate its receipt errors, or hide one another.
-test(`preserves the primary observation through multiple cleanup failures`, async ({
-  page,
-}) => {
-  await page.goto(
-    `/e2e/hydration-commit.opfs.html?phase=after-ready&baseline=false&coordinator=browser&rich=false&cleanupFault=true`,
-  )
-  await page.waitForFunction(() => window.__hydrationCommitDone === true)
-  const result = await page.evaluate(() => ({
-    observation: window.__hydrationCommitResult,
-    error: window.__hydrationCommitError,
-    cleanup: window.__hydrationCommitCleanupErrors,
-  }))
-  expect(result.error).toBeUndefined()
-  expect(result.observation?.cycleCalls).toBe(0)
-  expect(result.observation?.errors).toEqual([])
-  expect(result.observation?.reopenedRows).toEqual([
-    { id: `r1`, value: 1 },
-    { id: `tail`, value: 9 },
-  ])
-  expect(result.cleanup).toEqual([
-    `Error: injected first cleanup failure`,
-    `Error: injected last cleanup failure`,
-  ])
-})

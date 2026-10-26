@@ -6,7 +6,24 @@
  * stays distinct from a law violation.
  */
 import { expect, test } from '@playwright/test'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import type { ReloadClassResult } from './reload-class.opfs'
+
+// The page's comparison of each fixed reload history with the oracle: every
+// expected history reports, and none reports a violation.
+function expectReloadClassLawsHold(
+  result: Extract<ReloadClassResult, { status: `complete` }>,
+): void {
+  expect(result.expected.length).toBeGreaterThan(0)
+  expect(result.results.map(({ name }) => name)).toEqual(result.expected)
+  expect(
+    result.results
+      .filter(({ violations }) => violations.length > 0)
+      .map(({ name, violations }) => ({ name, violations })),
+  ).toEqual([])
+}
+
+declareOracle({ check: [expectReloadClassLawsHold] })
 
 test(`real Chromium OPFS reload is free of avoidable work ahead of its reads`, async ({
   page,
@@ -26,11 +43,5 @@ test(`real Chromium OPFS reload is free of avoidable work ahead of its reads`, a
   expect(pageErrors).toEqual([])
   expect(result).toMatchObject({ status: `complete` })
   if (result.status !== `complete`) return
-  expect(result.expected.length).toBeGreaterThan(0)
-  expect(result.results.map(({ name }) => name)).toEqual(result.expected)
-  expect(
-    result.results
-      .filter(({ violations }) => violations.length > 0)
-      .map(({ name, violations }) => ({ name, violations })),
-  ).toEqual([])
+  expectReloadClassLawsHold(result)
 })

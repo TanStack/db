@@ -6,7 +6,22 @@
  */
 import { expect, test } from '@playwright/test'
 import { requestOrderExamples } from '../tests/opfs-request-order-oracle'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import type { OPFSRequestOrderResult } from './opfs-request-order.opfs'
+
+// The page's comparison of each fixed history's settlements with the model: no history may report a violation.
+function expectRequestOrderLawsHold(result: {
+  results: ReadonlyArray<{ history: unknown; violation?: unknown }>
+}): void {
+  expect(result.results).toHaveLength(requestOrderExamples.length)
+  expect(
+    result.results
+      .filter(({ violation }) => violation !== undefined)
+      .map(({ history, violation }) => ({ history, violation })),
+  ).toEqual([])
+}
+
+declareOracle({ check: [expectRequestOrderLawsHold] })
 
 test(`real Chromium OPFS connection answers requests in order and closes after them`, async ({
   page,
@@ -26,10 +41,5 @@ test(`real Chromium OPFS connection answers requests in order and closes after t
   expect(pageErrors).toEqual([])
   expect(result.status).toBe(`complete`)
   if (result.status !== `complete`) return
-  expect(result.results).toHaveLength(requestOrderExamples.length)
-  expect(
-    result.results
-      .filter(({ violation }) => violation !== undefined)
-      .map(({ history, violation }) => ({ history, violation })),
-  ).toEqual([])
+  expectRequestOrderLawsHold(result)
 })
