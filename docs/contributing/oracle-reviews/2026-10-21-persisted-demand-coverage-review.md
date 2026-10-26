@@ -284,3 +284,24 @@ behind, while the unfixed code keeps one.
 | X14 | Confirmed | Partly fixed: the eager deadline is read once per source; the demand key is still computed more than once per load (cost only) |
 | X15 | Confirmed | The clause is dropped from the law record and the glossary |
 
+## 2026-10-26: second CodeRabbit review
+
+Reviewed head: `f62f9dc19`. CodeRabbit review `5656501808` gave two findings.
+
+| ID | Verdict | Evidence | Action |
+| --- | --- | --- | --- |
+| CR6 | Confirmed | A real-timer probe with a driver that answers reads on a later macrotask: a load that rejects as soon as it is forwarded raised one `unhandledRejection` during the coverage read, and none after the fix | Fixed: `settleCoveredDemand` observes the upstream rejection before the read |
+| CR7 | Confirmed (RED) | The new Part 2b history "keeps a synchronous answer for an already hydrated demand synchronous" failed by assertion: the second request reported a promise | Fixed: a literal `true` returns unchanged, and its coverage record follows without holding the load |
+
+The oracle adds the session-2 schedule `fails-at-once`. Its driver answers
+SQLite reads within the same microtask turn, so it reaches the failure path but
+cannot hold the rejection across the coverage read. Under the fake clock, a
+driver that delays reads with a timer stopped session 2 before its first
+checkpoint, so CR6 keeps the probe as its witness. GREEN: the oracle passes
+215 of 215, persistence 1,442, Electric 719, and Query DB 929.
+
+The CI failure on `f62f9dc19` in `ordered-work-oracle.property.test.ts` is
+issue #2221. Its seed `1535602160` fails the same way on `main` at
+`5649a07d4`, in the core ordered loader. The fixed-seed case of that run timed
+out under CI load and passes locally in about one second.
+

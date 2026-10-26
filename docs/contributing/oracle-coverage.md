@@ -2670,7 +2670,9 @@ opt-in permit fallback alone fails both. Ordered windows, cursor
 pages, and later demand in session 2 (including a demand key that ignores
 offset or cursor but honors limit, which no history distinguishes),
 optimistic writes on a covered demand, a failure before the restore
-publishes, cache-claim expiry rotation, must-refetch, schema reset, a
+publishes, an upstream failure held across the coverage read by a slow driver
+(a real-timer probe in the review record; the oracle's fake clock cannot drive
+timer-delayed reads), cache-claim expiry rotation, must-refetch, schema reset, a
 covered window whose order changes without a delete, a pending coverage
 record that a truncate lists and a later abort turns into a terminal failure
 (code reading only),

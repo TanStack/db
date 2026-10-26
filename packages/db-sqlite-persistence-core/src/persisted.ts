@@ -2919,6 +2919,8 @@ class PersistedCollectionRuntime<
     upstream: Promise<void>,
     startedAt: number,
   ): Promise<void> {
+    // The coverage read below can outlast a fast upstream failure.
+    void upstream.catch(() => undefined)
     if (
       !this.persistedReadiness?.onDemand ||
       options.refetch === true ||
@@ -6710,9 +6712,13 @@ function createWrappedSyncConfig<
               const loaded = currentSource.loadSubset(loadOptions)
               if (!persistedReadiness?.onDemand) return loaded
               const isCurrent = runtime.captureResetEpoch()
-              return Promise.resolve(loaded).then(() =>
-                recordCoverage(options, isCurrent),
-              )
+              // A synchronous answer stays synchronous. Its coverage record
+              // follows its rows in commit order without holding the load.
+              if (loaded === true) {
+                void recordCoverage(options, isCurrent).catch(() => undefined)
+                return true
+              }
+              return loaded.then(() => recordCoverage(options, isCurrent))
             } catch (error) {
               acquisition.forwarded = false
               acquisition.source = undefined
