@@ -460,10 +460,13 @@ createEffect({
 
 ### Using Suspense and Error Boundaries (React)
 
-`useLiveSuspenseQuery` suspends while `loading` and throws the first load's
-cause to the nearest error boundary for `error`. It throws for `crashed` at any
-time. Sync problems after the first data never reach the boundary; read
-`health` from the hook, as in TanStack Query.
+`useLiveSuspenseQuery` suspends while `loading` and throws an Error to the
+nearest error boundary for `error`. The Error is the first load's cause when
+that cause is an Error. Otherwise it is an Error with the problem's message
+(`health.error.message`) whose `cause` holds the value the sync adapter
+reported. It throws for `crashed` at any time, by the same rule. Sync problems
+after the first data never reach the boundary; read `health` from the hook, as
+in TanStack Query.
 
 ```tsx
 import { useLiveSuspenseQuery } from "@tanstack/react-db"
@@ -471,14 +474,14 @@ import { Suspense } from "react"
 import { ErrorBoundary } from "react-error-boundary"
 
 const TodoList = () => {
-  const { data, isSyncError } = useLiveSuspenseQuery((query) =>
+  const { data, health } = useLiveSuspenseQuery((query) =>
     query.from({ todos: todoCollection })
   )
 
-  // data is always defined here
+  // data is always defined here, so any problem in the tree is a sync problem
   return (
     <>
-      {isSyncError && <div>Todos may be out of date.</div>}
+      {health?.hasErrors && <div>Todos may be out of date.</div>}
       {data.map((todo) => (
         <div key={todo.id}>{todo.text}</div>
       ))}

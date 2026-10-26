@@ -233,10 +233,12 @@ export class CollectionSyncManager<
     // A retired run whose cleanup fails broke the adapter contract.
     const retired = this.retireSyncRun()
     void retired.catch((error: unknown) => this.lifecycle.crash(error))
-    // Subscriptions detach demand from the retired run; the reload's
-    // truncate replays it through the new run's loader.
-    this.lifecycle.retireSubscriptionDemand()
     this.state.reloadTruncatePending = true
+    // Subscriptions detach demand from the retired run; the reload's
+    // truncate replays it through the new run's loader. A cleanup their
+    // listeners run meanwhile ends the reload with its run.
+    this.lifecycle.retireSubscriptionDemand()
+    if (syncCallbackEpoch !== this.syncCallbackEpoch) return reload
     try {
       this.enterSync(syncCallbackEpoch)
     } catch (error) {
@@ -535,7 +537,9 @@ export class CollectionSyncManager<
         ) {
           throw new LoadSubsetOperationAbortedError()
         }
-        const result = loadSubset?.(options) ?? true
+        const result = loadSubset
+          ? this.callLoadSubset(loadSubset, options)
+          : true
         if (result instanceof Promise) {
           void result.then(
             (sourceResult) => deferred.resolve(sourceResult),
@@ -1062,13 +1066,7 @@ export class CollectionSyncManager<
     }
 
     if (this.syncLoadSubsetFn) {
-      let result: LoadSubsetRequestResult
-      this.loadSubsetDepth++
-      try {
-        result = this.syncLoadSubsetFn(options)
-      } finally {
-        this.loadSubsetDepth--
-      }
+      const result = this.callLoadSubset(this.syncLoadSubsetFn, options)
       // If the result is a promise, track it
       if (result instanceof Promise) {
         this.trackLoadPromise(result)
@@ -1077,6 +1075,19 @@ export class CollectionSyncManager<
     }
 
     return true
+  }
+
+  /** Run the adapter's loadSubset; a reload from inside it rejects. */
+  private callLoadSubset(
+    loadSubset: NonNullable<typeof this.syncLoadSubsetFn>,
+    options: LoadSubsetOptions,
+  ): LoadSubsetRequestResult {
+    this.loadSubsetDepth++
+    try {
+      return loadSubset(options)
+    } finally {
+      this.loadSubsetDepth--
+    }
   }
 
   /**

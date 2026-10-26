@@ -48,7 +48,12 @@ import {
   expectUnorderedRows,
   selectedRow,
 } from './result-laws'
-import type { LiveQueryDriver, LiveQueryHandle, Row } from './contract'
+import type {
+  ConformanceStatusSurface,
+  LiveQueryDriver,
+  LiveQueryHandle,
+  Row,
+} from './contract'
 
 const ADAPTER_OWNED_GC_TIME_MS = 1
 type ConformanceCollection = NonNullable<
@@ -1090,10 +1095,37 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     // data, and they need different handling: a failed first load is
     // `status: 'error'` (`isLoadingError`), recovered by a new sync run; a
     // crash is `status: 'crashed'` (`isCrashed`), permanent for the Collection
-    // instance. Both explain themselves on the mounted Collection's node with
-    // the exact error the source produced.
+    // instance (docs/guides/error-handling.md "Status" and "When a Collection
+    // crashes"; glossary "loading error" and "crash"). Both explain
+    // themselves on the mounted Collection's node with the exact error the
+    // source produced.
+    //
+    // A driver whose `errorSurface` is `throw` reads `data` through an error
+    // boundary, so reading the failed result throws. Its flags stay readable
+    // through `statusSurface` and are judged by the same law: a boundary
+    // that receives the failure does not license a wrong `isCrashed` or
+    // `isLoadingError`.
+    const failureSurface = (h: LiveQueryHandle) => {
+      if (driver.errorSurface !== `throw`) return h.current()
+      expect(() => h.current(), `reading a failed result throws`).toThrow()
+      expect(
+        h.statusSurface,
+        `a throw-surface driver reads its flags without data`,
+      ).toBeDefined()
+      return h.statusSurface!()
+    }
+    const expectFailureFlags = (
+      result: ConformanceStatusSurface,
+      kind: `fail` | `crash`,
+    ) => {
+      expect(result.status).toBe(kind === `fail` ? `error` : `crashed`)
+      expect(result.isLoadingError, `isLoadingError`).toBe(kind === `fail`)
+      expect(result.isCrashed, `isCrashed`).toBe(kind === `crash`)
+      expect(result.isReady).toBe(false)
+      expect(result.isSyncError).toBe(false)
+      expect(result.health?.hasErrors).toBe(true)
+    }
     for (const kind of [`fail`, `crash`] as const) {
-      const status = kind === `fail` ? `error` : `crashed`
       scenario(
         kind === `fail` ? `error-status` : `crashed-status`,
         kind === `fail`
@@ -1113,27 +1145,70 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           const h = driver.mountCollection(source.collection)
           await h.flush()
 
-          if (driver.errorSurface === `throw`) {
-            // Boundary model: reading the failed result throws (for an error
-            // boundary to catch), rather than exposing a readable flag.
-            expect(() => h.current()).toThrow()
-          } else {
-            const result = h.current()
-            expect(result.status).toBe(status)
-            expect(result.isLoadingError).toBe(kind === `fail`)
-            expect(result.isCrashed).toBe(kind === `crash`)
-            expect(result.isSyncError).toBe(false)
-            expect(result.health?.hasErrors).toBe(true)
-            expect(result.health?.failureReason).toBeNull()
-            expect(result.health?.error).toMatchObject({
-              message: source.expectedError.message,
-            })
-            // The binding exposes the exact value the source failed with.
-            expect(result.health?.error?.cause).toBe(source.expectedError)
-          }
+          const result = failureSurface(h)
+          expectFailureFlags(result, kind)
+          expect(result.health?.failureReason).toBeNull()
+          expect(result.health?.error).toMatchObject({
+            message: source.expectedError.message,
+          })
+          // The binding exposes the exact value the source failed with.
+          expect(result.health?.error?.cause).toBe(source.expectedError)
           h.unmount()
         },
       )
+    }
+
+    // The same law when the failure arrives while the binding waits for the
+    // first load, the window a Suspense resource or a pending preload spans:
+    // the mounted query shows `loading`, then its source fails its first
+    // load or crashes. The source is a loading Collection, failed through
+    // the Collection side of the adapter's `fail()` or crashed the way core
+    // crashes it after an IndexedDB closure or a failed restore. A query
+    // takes its source's worst status before its initial-query readiness
+    // (ARCHITECTURE.md law 16), so mounting the source directly and mounting
+    // a live query over it must both end in that status, and the source's
+    // node carries the exact cause (law 17: a node mirrors its Collection).
+    for (const kind of [`fail`, `crash`] as const) {
+      for (const shape of [`collection`, `query`] as const) {
+        scenario(
+          `${kind === `fail` ? `error` : `crashed`}-status-during-first-load-${shape}`,
+          `a ${kind === `fail` ? `failed first load` : `crash`} while the ${shape} waits for its first load surfaces ${kind === `fail` ? `a loading error` : `a crash`}`,
+          async () => {
+            const source = driver.makeDeferredSource<Row>()
+            const expectedError = new Error(
+              `conformance: ${kind} in first load`,
+            )
+            const h =
+              shape === `collection`
+                ? driver.mountCollection(source.collection)
+                : driver.mount((q) => q.from({ items: source.collection }))
+            await h.flush()
+            const waiting = h.statusSurface?.() ?? h.current()
+            expect(waiting.status, `before the failure`).toBe(`loading`)
+
+            const lifecycle = (
+              source.collection as unknown as {
+                _lifecycle: {
+                  fail: (error: unknown) => void
+                  crash: (error: unknown) => void
+                }
+              }
+            )._lifecycle
+            if (kind === `fail`) lifecycle.fail(expectedError)
+            else lifecycle.crash(expectedError)
+            await h.flush()
+
+            const result = failureSurface(h)
+            expectFailureFlags(result, kind)
+            const sourceNode =
+              shape === `collection` ? result.health : result.health?.sources[0]
+            expect(sourceNode?.error?.cause, `source node cause`).toBe(
+              expectedError,
+            )
+            h.unmount()
+          },
+        )
+      }
     }
 
     // ---- sync problems after readiness -------------------------------
@@ -1338,7 +1413,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(36)
+      expect(registry.size).toBe(40)
     })
   })
 }

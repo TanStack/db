@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import {
   QueryClient,
   QueryObserver,
@@ -26,6 +34,7 @@ import {
   stripVirtualProps,
 } from '../../db/tests/utils'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { SyncNotInitializedError } from '../src/errors'
@@ -11871,6 +11880,174 @@ describe(`reload settles on the new run's first result`, () => {
     },
   )
 
+  /**
+   * A housekeeping transaction is not the new run's snapshot either. Query
+   * Collection's retention maintenance commits one: it removes an expired
+   * persisted retention entry (`queryCollection:gc:<hash>`) that a released
+   * subset left. During a reload of an eager persisted Collection it commits
+   * while the new run's Query fetch is held, in two ways:
+   *
+   * - `expiry-timer`: the entry is still live when the new run starts, so the
+   *   new run schedules its expiry, and it expires while the fetch is held.
+   * - `expiry-at-startup`: the entry appears in the shared persisted metadata
+   *   between the runs, as another tab's release writes it, already expired,
+   *   so the new run's startup maintenance removes it.
+   *
+   * Model, from ARCHITECTURE law 16 and docs/guides/error-handling.md
+   * ("Reloading": nothing visible changes until the new run's first commit)
+   * and the maintainer decision that a reload ends as a refetch does: while
+   * the fetch is held, the rows stay (the expired entry owns no row) and the
+   * reload stays in flight. After the fetch lands, the rows equal those of
+   * the same history with `utils.refetch()` in place of `reload()`.
+   *
+   * Reach: a history checks the law only if the new run begins a transaction
+   * while the reload waits for its Query result. Every such transaction is
+   * housekeeping, since the fetch is held. The driver counts those begins
+   * through the current run's sync parameters, whether or not they pass
+   * `direct`, so the reach does not depend on the repair; a retired run's
+   * begin does nothing in core, so it does not count. Each kind must reach
+   * that state.
+   *
+   * Limits: an on-demand reload is outside this lane. Its new run calls
+   * `markReady()` once startup maintenance settles, and core then replaces
+   * the rows with none, so a housekeeping commit there changes only when the
+   * reload ends, not its rows. A subset release during a reload commits
+   * nothing while startup maintenance holds the replayed loads.
+   */
+  describe(`housekeeping during a reload`, () => {
+    type Row = { id: number; v: string }
+    type Kind = `expiry-timer` | `expiry-at-startup`
+    const kinds: ReadonlyArray<Kind> = [`expiry-timer`, `expiry-at-startup`]
+    const reach = createOracleReach(`query-db.reload-housekeeping`, kinds)
+    afterAll(() => reach.assertReached())
+    const expiryMs = 100
+    const entryKey = `queryCollection:gc:released-subset`
+
+    const run = async (kind: Kind, via: `reload` | `refetch`) => {
+      const harness = createInMemorySyncMetadataApi<string | number, Row>()
+      let release!: () => void
+      const fetches: Array<Promise<Array<Row>>> = [
+        Promise.resolve([
+          { id: 1, v: `a` },
+          { id: 2, v: `b` },
+          { id: 3, v: `c` },
+        ]),
+        new Promise((resolve) => {
+          release = () =>
+            resolve([
+              { id: 1, v: `a2` },
+              { id: 2, v: `b2` },
+              { id: 3, v: `c2` },
+            ])
+        }),
+      ]
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const base = queryCollectionOptions<Row>({
+        id: `reload-housekeeping-${kind}-${via}`,
+        queryKey: [`reload-housekeeping`, kind, via],
+        queryClient: client,
+        getKey: (row) => row.id,
+        queryFn: () => fetches.shift()!,
+      })
+      let waiting = false
+      let runs = 0
+      let housekeepingBegins = 0
+      const collection = createCollection({
+        ...base,
+        sync: {
+          sync: (params: Parameters<typeof base.sync.sync>[0]) => {
+            const run = ++runs
+            return base.sync.sync({
+              ...params,
+              begin: (options?: Parameters<typeof params.begin>[0]) => {
+                if (waiting && run === runs) housekeepingBegins++
+                params.begin(options)
+              },
+              metadata: harness.api,
+            })
+          },
+        },
+      })
+      const rows = () =>
+        new Map(collection.toArray.map((row) => [row.id, row.v]))
+      try {
+        if (kind === `expiry-timer`)
+          harness.collectionMetadata.set(entryKey, {
+            queryHash: `released-subset`,
+            mode: `ttl`,
+            expiresAt: Date.now() + expiryMs,
+          })
+        await collection.preload()
+        const before = rows()
+        if (kind === `expiry-at-startup`)
+          harness.collectionMetadata.set(entryKey, {
+            queryHash: `released-subset`,
+            mode: `ttl`,
+            expiresAt: 0,
+          })
+        waiting = true
+        const pending =
+          via === `reload`
+            ? collection.reload()
+            : collection.utils.refetch().then(() => undefined)
+        let settled = false
+        void pending.then(
+          () => (settled = true),
+          () => (settled = true),
+        )
+        await new Promise((resolve) => setTimeout(resolve, expiryMs * 1.5))
+        await flushPromises()
+        const during = {
+          before,
+          rows: rows(),
+          reloading: collection.health.reloading,
+          settled,
+          housekeepingBegins,
+          entryRemoved: !harness.collectionMetadata.has(entryKey),
+        }
+        waiting = false
+        release()
+        await pending
+        await flushPromises()
+        return {
+          during,
+          final: rows(),
+          reloading: collection.health.reloading,
+        }
+      } finally {
+        release()
+        await collection.cleanup()
+        client.clear()
+      }
+    }
+
+    it.each(kinds)(
+      `%s during a reload keeps the rows and ends as a refetch does`,
+      async (kind) => {
+        reach.beginHistory()
+        const reload = await run(kind, `reload`)
+        expect(
+          reload.during.housekeepingBegins,
+          `reach: housekeeping begins while the reload waits`,
+        ).toBeGreaterThan(0)
+        expect(reload.during.entryRemoved, `maintenance ran`).toBe(true)
+        reach.reach(kind)
+        expect(reload.during.rows, `the rows stay`).toEqual(
+          reload.during.before,
+        )
+        expect(reload.during.reloading, `the reload stays in flight`).toBe(true)
+        expect(reload.during.settled, `the reload has not settled`).toBe(false)
+        expect(reload.reloading).toBe(false)
+        const refetch = await run(kind, `refetch`)
+        expect(reload.final, `the reload ends as a refetch does`).toEqual(
+          refetch.final,
+        )
+      },
+    )
+  })
+
   // A failed reload keeps the rows. A direct write after it writes the
   // Query cache from the rows the Collection holds, so the cache keeps row 1.
   it(`a direct write after a failed reload keeps the kept rows in the Query cache`, async () => {
@@ -11918,6 +12095,16 @@ describe(`reload settles on the new run's first result`, () => {
  * is still failing, the latest such failure. It clears once none fails. The
  * lane fails two subsets' Queries in turn and recovers the one the node shows
  * or the other one first.
+ *
+ * The glossary's health tree entry adds identity: the tree keeps stable
+ * object identity while its content is unchanged, and `health:change`
+ * announces a change (ARCHITECTURE law 17 makes the tree an observation).
+ * So the model below is a list of failing Queries in failure order; the node
+ * shows the last one. After each step, the shown problem either changed, and
+ * one `health:change` announces it, or it did not, and the node, its
+ * `failureReason` object, and that object's `at` stay the same with no
+ * `health:change`. Recovering the Query the node does not show leaves the
+ * shown problem unchanged.
  */
 describe(`failureReason follows the still-failing Queries`, () => {
   it.each([`shown`, `other`] as const)(
@@ -11961,24 +12148,73 @@ describe(`failureReason follows the still-failing Queries`, () => {
         await flushPromises()
       }
       const shown = () => collection.health.failureReason?.message ?? null
+      // Model: failing Queries in failure order; the node shows the last.
+      const modelFailing: Array<number> = []
+      const modelShown = () =>
+        modelFailing.length === 0
+          ? null
+          : `subset ${modelFailing[modelFailing.length - 1]} failed`
+      let healthChanges = 0
+      // Reach: steps that leave the shown problem unchanged.
+      let unchangedSteps = 0
+      const stopHealth = collection.on(`health:change`, () => {
+        healthChanges++
+      })
+      // One step: fail or recover a subset's Query, then compare the node
+      // with the model. An unchanged shown problem keeps its identity.
+      const step = async (limit: number, fails: boolean, label: string) => {
+        const before = {
+          node: collection.health,
+          failureReason: collection.health.failureReason,
+          at: collection.health.failureReason?.at,
+          shown: modelShown(),
+          changes: healthChanges,
+        }
+        const index = modelFailing.indexOf(limit)
+        if (index >= 0) modelFailing.splice(index, 1)
+        if (fails) {
+          modelFailing.push(limit)
+          failing.add(limit)
+        } else failing.delete(limit)
+        await refetch(limit)
+        expect(shown(), label).toBe(modelShown())
+        if (modelShown() === before.shown) {
+          unchangedSteps++
+          expect(collection.health, `${label}: same node`).toBe(before.node)
+          expect(
+            collection.health.failureReason,
+            `${label}: same failureReason`,
+          ).toBe(before.failureReason)
+          expect(collection.health.failureReason?.at, `${label}: same at`).toBe(
+            before.at,
+          )
+          expect(healthChanges, `${label}: no health:change`).toBe(
+            before.changes,
+          )
+        } else {
+          expect(healthChanges, `${label}: health:change`).toBeGreaterThan(
+            before.changes,
+          )
+        }
+      }
       try {
         await collection._sync.loadSubset({ limit: 1 })
         await collection._sync.loadSubset({ limit: 2 })
         await flushPromises()
-        failing.add(1)
-        await refetch(1)
-        failing.add(2)
-        await refetch(2)
+        await step(1, true, `subset 1 fails`)
+        await step(2, true, `subset 2 fails`)
         expect(shown()).toBe(`subset 2 failed`)
         const recovered = first === `shown` ? 2 : 1
         const remaining = first === `shown` ? 1 : 2
-        failing.delete(recovered)
-        await refetch(recovered)
+        await step(recovered, false, `after one recovers`)
         expect(shown(), `after one recovers`).toBe(`subset ${remaining} failed`)
-        failing.delete(remaining)
-        await refetch(remaining)
+        await step(remaining, false, `after both recover`)
         expect(shown(), `after both recover`).toBeNull()
+        expect(unchangedSteps, `reach: an unchanged shown problem`).toBe(
+          first === `other` ? 1 : 0,
+        )
       } finally {
+        stopHealth()
         consoleError.mockRestore()
         await collection.cleanup()
         client.clear()

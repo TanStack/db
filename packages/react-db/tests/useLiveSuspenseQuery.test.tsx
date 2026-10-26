@@ -1257,4 +1257,106 @@ describe(`useLiveSuspenseQuery`, () => {
     // Data should still be available
     expect(result.current.data).toHaveLength(3)
   })
+
+  // What reaches the error boundary when a sync adapter fails its first load?
+  //
+  // Authority: maintainer decision for this branch, recorded in
+  // docs/guides/error-handling.md ("Using Suspense and Error Boundaries") and
+  // the hook's JSDoc. The hook throws an Error. When the first load's cause is
+  // an Error, the boundary receives that exact object. When it is not, such as
+  // an HTTP response body, the boundary receives an Error whose message is the
+  // problem's message (`health.error.message`) and whose `cause` is the exact
+  // value the adapter reported. The failure can happen while sync starts or
+  // after the hook has already suspended.
+  it.each([
+    { kind: `an Error`, timing: `inside sync`, deferred: false, isError: true },
+    { kind: `an Error`, timing: `after mount`, deferred: true, isError: true },
+    {
+      kind: `not an Error`,
+      timing: `inside sync`,
+      deferred: false,
+      isError: false,
+    },
+    {
+      kind: `not an Error`,
+      timing: `after mount`,
+      deferred: true,
+      isError: false,
+    },
+  ])(
+    `sends a first-load cause that is $kind to the boundary as an Error ($timing)`,
+    async ({ deferred, isError }) => {
+      const cause: unknown = isError
+        ? new Error(`first load failed`)
+        : { status: 500 }
+      let fail: ((error: unknown) => void) | undefined
+      const source = createCollection<Person>({
+        id: `suspense-first-load-cause-${isError}-${deferred}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            if (deferred) fail = params.fail
+            else params.fail(cause)
+          },
+        },
+      })
+      const caught: Array<unknown> = []
+      class RecordingBoundary extends Component<
+        { children: ReactNode },
+        { failed: boolean }
+      > {
+        state = { failed: false }
+        static getDerivedStateFromError() {
+          return { failed: true }
+        }
+        componentDidCatch(error: unknown) {
+          caught.push(error)
+        }
+        render() {
+          return this.state.failed ? (
+            <div>Boundary caught</div>
+          ) : (
+            this.props.children
+          )
+        }
+      }
+      function View() {
+        useLiveSuspenseQuery((q) => q.from({ person: source }))
+        return <div>Query ready</div>
+      }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const view = renderComponent(
+        <RecordingBoundary>
+          <Suspense fallback={<div>Loading query</div>}>
+            <View />
+          </Suspense>
+        </RecordingBoundary>,
+      )
+      try {
+        if (deferred) {
+          await waitFor(() => expect(fail).toBeDefined())
+          act(() => fail!(cause))
+        }
+        await waitFor(() =>
+          expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+        )
+        expect(source.status).toBe(`error`)
+        expect(source.health.error?.cause).toBe(cause)
+        const thrown = caught[0]
+        if (isError) {
+          expect(thrown, `an Error cause is thrown as is`).toBe(cause)
+        } else {
+          expect(thrown, `a non-Error cause is wrapped`).toBeInstanceOf(Error)
+          expect((thrown as Error).message).toBe(source.health.error?.message)
+          expect((thrown as Error).cause).toBe(cause)
+        }
+      } finally {
+        view.unmount()
+        consoleError.mockRestore()
+        await source.cleanup()
+      }
+    },
+  )
 })

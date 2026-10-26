@@ -3449,6 +3449,131 @@ describe(`a query's own failed first load`, () => {
 // wait for it for good. A later move loads, moves the window, and clears the
 // error. Every marker row exists from the start, so only the load fails.
 describe(`a failed join load under an ordered filtered window`, () => {
+  // Q1 (review 2): while the join load is pending, the query holds its
+  // output. When the load fails, the failure settles that demand (law 16),
+  // so the held output publishes at once: a change made meanwhile, which
+  // needs no other join load, shows without waiting for some later change.
+  it.each([`left`, `inner`] as const)(
+    `publishes a change held behind a failed join load (%s join)`,
+    async (join) => {
+      let rootParams!: SyncParams
+      const pendingLoads: Array<ReturnType<typeof createDeferred<void>>> = []
+      let holdLoads = false
+      const roots = createCollection<
+        { id: number; rank: number; label?: string },
+        number
+      >({
+        id: `health-held-roots-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            rootParams = params as unknown as SyncParams
+            params.begin()
+            for (let id = 1; id <= 10; id++)
+              params.write({ type: `insert`, value: { id, rank: id } })
+            params.commit()
+            params.markReady()
+          },
+        },
+      })
+      const markers = createCollection<{ id: number; rootId: number }, number>({
+        id: `health-held-markers-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        gcTime: 0,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            for (let id = 1; id <= 10; id++)
+              params.write({
+                type: `insert`,
+                value: { id: 100 + id, rootId: id },
+              })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: () => {
+                if (!holdLoads) return Promise.resolve()
+                const load = createDeferred<void>()
+                pendingLoads.push(load)
+                return load.promise
+              },
+            }
+          },
+        },
+      })
+      const query = createLiveQueryCollection((q) => {
+        const from = q.from({ root: roots })
+        const joined =
+          join === `left`
+            ? from.leftJoin({ marker: markers }, ({ root, marker }) =>
+                eq(root.id, marker.rootId),
+              )
+            : from.join({ marker: markers }, ({ root, marker }) =>
+                eq(root.id, marker.rootId),
+              )
+        return joined
+          .where(({ marker }) => not(isUndefined(marker.id)))
+          .orderBy(({ root }) => root.rank)
+          .limit(2)
+      })
+      const subscription = query.subscribeChanges(() => {})
+      const consoleError = console.error
+      console.error = () => {}
+      const ids = () => query.toArray.map((row: any) => row.root.id as number)
+      try {
+        await query.preload()
+        expect(ids()).toEqual([1, 2])
+        holdLoads = true
+        // A new root asks the lazy join for its marker; the load is held.
+        rootParams.begin()
+        rootParams.write({
+          type: `insert`,
+          value: { id: 11, rank: 0 },
+        } as never)
+        rootParams.commit()
+        await flushPromises()
+        expect(
+          pendingLoads.length,
+          `the new root waits for a join load`,
+        ).toBeGreaterThan(0)
+        // Root 2 is visible and its marker is loaded: its update needs no
+        // join load.
+        rootParams.begin()
+        rootParams.write({
+          type: `update`,
+          value: { id: 2, rank: 2, label: `edited` },
+        } as never)
+        rootParams.commit()
+        await flushPromises()
+        for (const load of pendingLoads.splice(0))
+          load.reject(new Error(`marker load failed`))
+        await flushPromises()
+        expect(pendingLoads, `no join load is pending`).toEqual([])
+        expect(query.status).toBe(`ready`)
+        expect(query.health.error).toMatchObject({
+          message: `marker load failed`,
+        })
+        expect(ids(), `the window keeps its rows`).toEqual([1, 2])
+        expect(
+          (query.toArray[1] as any).root.label,
+          `the held change publishes after the failure`,
+        ).toBe(`edited`)
+      } finally {
+        console.error = consoleError
+        subscription.unsubscribe()
+        await query.cleanup()
+        await roots.cleanup()
+        await markers.cleanup()
+      }
+    },
+  )
+
   it.each([`left`, `inner`] as const)(
     `lets a later window move (%s join)`,
     async (join) => {
@@ -4462,7 +4587,10 @@ function changeDemand(
 // growth requests only the held keys that no live load covers (a failed or
 // thrown load covers nothing); churn, a change that retires a key while it
 // still has keys to request or more than one live load, requests one
-// replacement for every held key.
+// replacement for every held key. Law 16: a key whose replay request threw
+// waits for the open replay's verdict, so a demand change does not request
+// it by itself. Only a churn replacement for a live load that still covers
+// held demand requests it again, as part of the whole held union.
 function parkDemandChange(
   model: OnDemandModel,
   kind: `parent` | `unparent`,
@@ -4480,8 +4608,18 @@ function parkDemandChange(
   const uncovered = [...demand.held].filter(
     (key) => !covered.has(key) || demand.failed.has(key),
   )
-  const churn = kind === `unparent` && (uncovered.length > 0 || live.length > 1)
-  const keys = new Set(churn ? demand.held : uncovered)
+  // A failed replay request that did not throw is live, so only thrown
+  // replay requests are judged here.
+  const judged = new Set(
+    [...demand.replayFailedLoads.values()].flatMap((keys) => [...keys]),
+  )
+  const toRequest = uncovered.filter((key) => !judged.has(key))
+  const churn =
+    kind === `unparent` &&
+    (toRequest.length > 0 ||
+      live.length > 1 ||
+      (live.length > 0 && uncovered.length > 0))
+  const keys = new Set(churn ? demand.held : toRequest)
   if (keys.size === 0) return
   const load: DemandLoad = {
     serial: demand.lastSerial + ++demand.parks / 1000,
@@ -5189,7 +5327,9 @@ function applyLazyStep(
   switch (step.kind) {
     case `parent`:
     case `unparent`: {
-      // Adding a held key or removing one not held changes no demand.
+      // Adding a held key or removing one not held changes no demand. Every
+      // parent flows into the join, also under an ordered window, which
+      // limits the join's output: the query holds every parent's child.
       if (model.demand.held.has(step.key) === (step.kind === `parent`)) return
       changeDemand(model.demand, step.kind, step.key)
       parkDemandChange(model, step.kind)
@@ -5285,8 +5425,11 @@ async function runLazyHistory(
     holdChildReady = false,
     directSubscriber = false,
     withEffect = false,
+    window,
     reach,
   }: {
+    // The query orders parents by id and shows the first `window`.
+    window?: number
     asyncChildReady?: boolean
     honorsAbort?: boolean
     holdChildReady?: boolean
@@ -5426,13 +5569,16 @@ async function runLazyHistory(
       },
     },
   })
-  const query = createLiveQueryCollection((q) =>
-    q
+  const query = createLiveQueryCollection((q) => {
+    const joined = q
       .from({ parent: parents })
       .leftJoin({ child: children }, ({ parent, child }) =>
         eq(parent.id, child.parentId),
-      ),
-  )
+      )
+    return window === undefined
+      ? joined
+      : joined.orderBy(({ parent }) => parent.id).limit(window)
+  })
   const consoleError = console.error
   console.error = () => {}
   // Requests made since the last report, tagged with whether a truncate or
@@ -5487,12 +5633,16 @@ async function runLazyHistory(
     if (directSubscriber) watcher = watchDirectly(children, boundary)
     if (withEffect) {
       effect = createEffect({
-        query: (q) =>
-          q
+        query: (q) => {
+          const joined = q
             .from({ parent: parents })
             .leftJoin({ child: children }, ({ parent, child }) =>
               eq(parent.id, child.parentId),
-            ),
+            )
+          return window === undefined
+            ? joined
+            : joined.orderBy(({ parent }) => parent.id).limit(window)
+        },
         onBatch: (events) => {
           for (const event of events) {
             const row = event.value as { parent: Row; child?: Row }
@@ -5679,6 +5829,7 @@ async function runLazyHistory(
         ).toEqual(
           [...demand.held]
             .sort((a, b) => a - b)
+            .slice(0, window)
             .map((key) => [key, isLoaded(model, key) ? key * 10 : null]),
         )
         // An Effect over the same query that a load failure has not ended
@@ -6313,6 +6464,42 @@ describe(`lazy join demand grammar`, () => {
       ],
       { honorsAbort: false },
     ))
+  // Law 16: a key whose replay request threw waits for the replay's
+  // verdict. When the demand change retires the replay's only other load,
+  // nothing covers held demand, so nothing parks and the replay fails for
+  // the thrown key.
+  it(`a parked contraction leaves a thrown replay key to the replay`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `throw-next` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `truncate` },
+        { kind: `unparent`, key: 2 },
+      ],
+      { honorsAbort: false, holdChildReady: true },
+    ))
+  // The same healthy-source histories, where the driver sees production's
+  // requests: a contraction during the replay requests the whole held
+  // union only while another live load covers held demand.
+  it(`a contraction during a replay requests a thrown replay key only in a union`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+        { kind: `throw-next` },
+        { kind: `truncate` },
+        { kind: `unparent`, key: 2 },
+        { kind: `settle-ok` },
+      ],
+      { honorsAbort: false },
+    ))
   // A reload from inside the adapter's loadSubset rejects and changes
   // nothing; the query keeps its demand and does not crash.
   it(`a reload from inside loadSubset rejects and leaves the query running`, () =>
@@ -6322,6 +6509,177 @@ describe(`lazy join demand grammar`, () => {
       { kind: `parent`, key: 2 },
       { kind: `settle-ok` },
     ]))
+  // Q3 (review 2): a replay replaces a load it aborts. When the replay
+  // fails first and the aborted load then rejects late, the replay decided
+  // the key: its error stays (law 9: the replay decides the load it
+  // replaced; a replaced load's own outcome decides nothing).
+  it(`an aborted load that rejects after its replay failed decides nothing`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`an aborted load that succeeds after its replay failed decides nothing`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  // Q1 (review 2): an ordered window over the join. A lazy load that fails
+  // after readiness is a request error, and the query still publishes the
+  // window's rows (law 16: a failed request does not hold publication).
+  it(`a failed lazy load under an ordered window still publishes the window`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+      ],
+      { window: 2 },
+    ))
+  // Q4 (review 2): a load that waited for a deferred start (DbClient
+  // hydration defers a start through this seam) runs the adapter's
+  // loadSubset when the start resumes. A reload from inside that call
+  // rejects, as from any loadSubset call.
+  it(`a reload from inside a deferred loadSubset rejects`, async () => {
+    let reentrant: Promise<void> | undefined
+    const children = createCollection<Row, number>({
+      id: `health-deferred-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      gcTime: 0,
+      startSync: false,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () => {
+              reentrant ??= children.reload()
+              return true
+            },
+          }
+        },
+      },
+    })
+    expect(children._deferSyncStart()).toBe(true)
+    const query = createLiveQueryCollection((q) => q.from({ row: children }))
+    void query.preload().catch(() => undefined)
+    await flushPromises()
+    children._resumeSyncStart()
+    await flushPromises()
+    expect(reentrant, `the deferred load ran`).toBeDefined()
+    await expect(reentrant).rejects.toBeInstanceOf(
+      CollectionReloadDuringSyncEntryError,
+    )
+    await query.cleanup()
+    await children.cleanup()
+  })
+  // Q6 (review 2): cleanup run from a subscription's status listener while
+  // a reload retires the run ends that reload with its run. A later fresh
+  // start then has the rows it loads as its diff baseline: no reload's
+  // replacement is armed (law 14: cleanup discards the run's state).
+  it(`a cleanup run while a reload retires the run leaves no replacement armed`, async () => {
+    let params!: SyncParams
+    let syncCalls = 0
+    const source = createCollection<Row, number>({
+      id: `health-reentrant-cleanup-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      gcTime: 0,
+      sync: {
+        sync: (next) => {
+          syncCalls++
+          params = next
+          next.markReady()
+          return { loadSubset: () => new Promise<void>(() => {}) }
+        },
+      },
+    })
+    await source.preload()
+    const subscription = source.subscribeChanges(() => {}, {
+      includeInitialState: true,
+    })
+    subscription.requestSnapshot({
+      where: undefined as never,
+      optimizedOnly: false,
+    } as never)
+    let cleanup: Promise<void> | undefined
+    subscription.on(`status:change`, () => {
+      cleanup ??= source.cleanup().catch(() => undefined)
+    })
+    void source.reload().catch(() => undefined)
+    await cleanup
+    await flushPromises()
+    expect(syncCalls, `the ended reload starts no sync run`).toBe(1)
+    subscription.unsubscribe()
+    await source.preload()
+    params.begin()
+    params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+    params.commit()
+    await flushPromises()
+    expect(cleanup, `the listener ran during the reload`).toBeDefined()
+    expect(
+      [...source._state.replacementBaseline()].map(([key]) => key),
+      `the fresh run's diff baseline`,
+    ).toEqual([1])
+    await source.cleanup()
+  })
+  // Q7 (review 2): a reload's new run that calls markReady() while a direct
+  // transaction is open replaces the rows with none at that markReady(),
+  // and the direct transaction still commits on top of the replacement.
+  it(`markReady() during a reload with an open direct write keeps the write committable`, async () => {
+    let params!: SyncParams
+    const source = createCollection<Row, number>({
+      id: `health-direct-ready-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      gcTime: 0,
+      sync: {
+        sync: (next) => {
+          params = next
+          if (source.status === `loading`) {
+            next.begin()
+            next.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+            next.commit()
+            next.markReady()
+          }
+        },
+      },
+    })
+    await source.preload()
+    const reload = source.reload()
+    params.begin({ direct: true })
+    params.write({ type: `insert`, value: { id: 2, parentId: 2 } })
+    params.markReady()
+    expect(
+      () => params.write({ type: `insert`, value: { id: 3, parentId: 3 } }),
+      `the direct transaction still takes writes`,
+    ).not.toThrow()
+    expect(
+      () => params.commit(),
+      `the direct write still commits`,
+    ).not.toThrow()
+    await reload
+    expect(source.toArray.map((row) => row.id)).toEqual([2, 3])
+    await source.cleanup()
+  })
   const lazyReach = createOracleReach(
     `source-health.lazy-demand`,
     lazyReachStates,
@@ -6375,6 +6733,7 @@ describe(`lazy join demand grammar`, () => {
       fc.boolean(),
       fc.boolean(),
       fc.boolean(),
+      fc.boolean(),
     ],
     oraclePropertyOptions(60, `source-health.lazy-demand`),
   )(
@@ -6386,6 +6745,7 @@ describe(`lazy join demand grammar`, () => {
       generatedHoldChildReady,
       directSubscriber,
       withEffect,
+      windowed,
     ) => {
       const steps = [...(prefix?.steps ?? []), ...rest]
       const honorsAbort = prefix?.honorsAbort ?? generatedHonorsAbort
@@ -6399,6 +6759,7 @@ describe(`lazy join demand grammar`, () => {
           holdChildReady,
           directSubscriber,
           withEffect,
+          window: windowed ? 2 : undefined,
           reach: lazyReach,
         }),
       )

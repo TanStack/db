@@ -139,9 +139,27 @@ export interface ConformanceResult {
 /** A query-builder callback, e.g. `(q) => q.from({ items: source.collection })`. */
 export type QueryBuild = (q: any) => any
 
+/** The status flags and health tree of a result, without its rows. */
+export type ConformanceStatusSurface = Pick<
+  ConformanceResult,
+  | `status`
+  | `isReady`
+  | `isLoadingError`
+  | `isCrashed`
+  | `isSyncError`
+  | `health`
+>
+
 /** A mounted live query under test. */
 export interface LiveQueryHandle {
   current: () => ConformanceResult
+  /**
+   * Read the status flags and health tree without reading `data`. Required
+   * when the driver's `errorSurface` is `throw`: reading `data` then throws
+   * for an error boundary, but the hook's flags stay readable, and they must
+   * still tell a loading error (`isLoadingError`) from a crash (`isCrashed`).
+   */
+  statusSurface?: () => ConformanceStatusSurface
   /** The live-query Collection currently backing this result. */
   collection: () => Collection<any, any, any> | null
   /** Let the framework scheduler + core sync settle, then resolve. */

@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
+import { toBoundaryError } from '@tanstack/db'
 import { useLiveQueryForSuspense } from './useLiveQuery'
 import { getLiveQueryResultInfo } from './live-query-internals'
 import type { UseLiveQueryConfig } from './useLiveQuery'
@@ -64,7 +65,10 @@ function rememberInitialRenderError(
  * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data and state - data is guaranteed to be defined
  * @throws Promise when data is loading (caught by Suspense boundary)
- * @throws Error when collection fails (caught by Error boundary)
+ * @throws Error when the first load fails or the Collection crashes (caught by
+ * an Error boundary): the cause itself when it is an Error, otherwise an Error
+ * with the problem's message (`health.error.message`) whose `cause` is the
+ * value the sync adapter reported
  * @example
  * // Basic usage with Suspense
  * function TodoList() {
@@ -281,7 +285,7 @@ export function useLiveSuspenseQuery(
     clearInitialRenderError(result.collection, queryInfo.client)
   } else if (initialRenderError && !hasBeenReadyRef.current) {
     promiseRef.current = null
-    throw initialRenderError.error
+    throw toBoundaryError(initialRenderError.error)
   }
 
   // A failed first load throws only before the first ready; later sync
@@ -292,10 +296,7 @@ export function useLiveSuspenseQuery(
     (collectionStatus === `error` && !hasBeenReadyRef.current)
   ) {
     promiseRef.current = null
-    throw (
-      result.collection.health.error?.cause ??
-      new Error(`Collection "${result.collection.id}" failed to load`)
-    )
+    throw toBoundaryError(result.collection.health.error?.cause)
   }
 
   if (

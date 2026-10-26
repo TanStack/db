@@ -1295,11 +1295,13 @@ export function queryCollectionOptions(
       if (runReady) reportError(error)
     }
     const reportRecovered = (hashedQueryKey: string) => {
+      const [shownQuery] = [...failingQueries.keys()].slice(-1)
       if (!failingQueries.delete(hashedQueryKey) || !runReady) return
-      // The node shows a Query that is still failing, or nothing.
-      const [stillFailing] = [...failingQueries.values()].slice(-1)
-      if (failingQueries.size > 0) reportError(stillFailing)
-      else reportHealthy()
+      // The node shows the latest Query still failing, or nothing. Recovering
+      // another Query leaves the shown problem, and its identity, unchanged.
+      if (failingQueries.size === 0) reportHealthy()
+      else if (hashedQueryKey === shownQuery)
+        reportError([...failingQueries.values()].slice(-1)[0])
     }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,
@@ -1755,7 +1757,9 @@ export function queryCollectionOptions(
       }
       const rowsToDelete: Array<any> = []
 
-      begin()
+      // Retention housekeeping is not a Query result. During a reload it
+      // edits the kept rows; the reload's replacement waits for a result.
+      begin({ direct: true })
 
       baseline.forEach(({ value: oldItem, owners }, rowKey) => {
         owners.delete(hashedQueryKey)
@@ -3484,7 +3488,8 @@ export function queryCollectionOptions(
       const needsTransaction =
         shouldWriteMetadata || rowsToDelete.length > 0 || hasRetentionMarker
       if (needsTransaction) {
-        begin()
+        // Releasing a Query's rows is housekeeping, not a Query result.
+        begin({ direct: true })
       }
 
       nextOwnersByRow.forEach((owners, rowKey) => {
@@ -3564,7 +3569,8 @@ export function queryCollectionOptions(
         persistence?.scanPersistedRows
       ) {
         invalidatePendingResultApplication(hashedQueryKey)
-        begin()
+        // Writing a retention entry is housekeeping, not a Query result.
+        begin({ direct: true })
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
           {
@@ -3918,7 +3924,8 @@ export function queryCollectionOptions(
    *
    * Uses queryObserver.refetch() because:
    * - Bypasses `enabled: false` to support manual/imperative refetch patterns (e.g., button-triggered fetch)
-   * - Ensures clearError() works even when enabled: false
+   * - Lets a manual refetch recover a failing Query, and so clear its
+   *   `failureReason`, even when enabled: false
    * - Always refetches THIS specific collection (exact targeting via observer)
    * - Respects retry, retryDelay, and other observer options
    *

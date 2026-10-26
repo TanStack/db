@@ -1135,7 +1135,9 @@ type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
   | { type: `move`; id: number; rank: number }
   | { type: `hold` }
-  | { type: `settle`; ok: boolean }
+  // `keepHolding`: loads that start during the step, such as a retry the
+  // failure starts, stay held.
+  | { type: `settle`; ok: boolean; keepHolding?: boolean }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
@@ -1741,7 +1743,7 @@ async function checkOrderedReplay(
             holding = true
             break
           case `settle`: {
-            holding = false
+            holding = command.keepHolding === true
             held.shift()?.(command.ok)
             break
           }
@@ -2030,7 +2032,10 @@ describe(`Ordered windows across truncate replays`, () => {
         { type: `hold` },
         { type: `move`, id: 1, rank: 1 },
         { type: `move`, id: 5, rank: 1 },
-        { type: `settle`, ok: false },
+        // A failure settles the demand and the query retries the data at
+        // once; the held retry keeps the request error visible until it
+        // settles.
+        { type: `settle`, ok: false, keepHolding: true },
       ],
       scenario: {
         ...ordinaryOrderedScenario,

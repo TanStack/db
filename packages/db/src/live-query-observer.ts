@@ -4,6 +4,7 @@ import {
   getPublicCollection,
   isSingleResultCollection,
 } from './live-query-adapter.js'
+import { describeProblem } from './collection/lifecycle.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import type { Collection } from './collection/index.js'
@@ -544,7 +545,13 @@ class LiveQueryObserverImpl<
       this.updateCachedEntries(entries, undefined)
     }
 
-    if (this.visibleStatus !== status) {
+    // A health-only change moves no row or status. Trees keep their identity
+    // until their content changes, so identity tells whether it went stale.
+    if (
+      this.visibleStatus !== status ||
+      this.cachedSnapshot.health !==
+        (collection as { health?: HealthNode }).health
+    ) {
       this.visibleStatus = status
       this.snapshotDirty = true
     }
@@ -981,6 +988,19 @@ export interface CreateLiveQueryObserverOptions {
   /** Resume framework-deferred query sources before a server preload. */
   onPreload?: () => void
 }
+
+/**
+ * The Error an adapter sends to an error boundary for a failed first load or
+ * a crash: the cause itself when it is an Error, otherwise an Error with the
+ * problem's message (as in `health.error.message`) whose `cause` is the value
+ * the sync adapter reported.
+ *
+ * @internal Shared by TanStack DB's official framework adapters.
+ */
+export const toBoundaryError = (cause: unknown): Error =>
+  cause instanceof Error
+    ? cause
+    : new Error(describeProblem(cause).message, { cause })
 
 /**
  * Create a {@link LiveQueryObserver} for a resolved live-query collection, or a

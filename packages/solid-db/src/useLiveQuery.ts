@@ -14,6 +14,7 @@ import {
   isCollection,
   isSingleResultCollection,
   resolveLiveQueryValue,
+  toBoundaryError,
 } from '@tanstack/db'
 import { createStore, reconcile } from 'solid-js/store'
 import type { Accessor } from 'solid-js'
@@ -436,8 +437,9 @@ export function useLiveQuery(
         }, 0)
       } catch (error) {
         if (generation !== resourceGeneration) return data
-        setStatus(`error`)
-        throw error
+        // A crashed Collection also rejects preload; keep its crash visible.
+        setStatus(currentCollection.status === `crashed` ? `crashed` : `error`)
+        throw toBoundaryError(error)
       }
       if (generation !== resourceGeneration) {
         return data

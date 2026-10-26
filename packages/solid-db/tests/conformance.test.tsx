@@ -141,6 +141,19 @@ function makeHandle(
         health: result?.health,
       })
     },
+    // The hook's flags are getters that do not read the resource, so they
+    // stay readable when reading `data` throws for an <ErrorBoundary>.
+    statusSurface() {
+      const result = getResult()
+      return {
+        status: result?.status,
+        isReady: result?.isReady,
+        isLoadingError: result?.isLoadingError,
+        isCrashed: result?.isCrashed,
+        isSyncError: result?.isSyncError,
+        health: result?.health,
+      }
+    },
     flush: settle,
     async apply(fn: () => void) {
       fn()

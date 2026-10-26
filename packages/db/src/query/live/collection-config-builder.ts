@@ -565,8 +565,10 @@ export class CollectionConfigBuilder<
     demand.participant?.reject(normalized)
     if (this.reportFailedRequest(planId, normalized)) {
       // The failure settles the demand: the request error shows it, and
-      // ordered work must not wait for a load that already ended.
+      // ordered work must not wait for a load that already ended. Output
+      // held for this demand publishes now.
       demand.settled = true
+      this.maybeRunGraphFn?.()
       return
     }
     this.failQuery(
