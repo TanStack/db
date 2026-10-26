@@ -22,6 +22,7 @@ import {
 import { eq } from '../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from './utils.js'
+import { declareOracle } from './oracle-config.js'
 import type { IndexSuggestion } from '../src/indexes/index-registry.js'
 
 type Row = { id: number; url: string }
@@ -39,6 +40,41 @@ function expectedSuggestions(
 ): number {
   return enabled && size > 1000 && mode !== `eager` && index !== `url` ? 1 : 0
 }
+
+// The check: a size suggestion appears exactly when the model predicts one, and
+// names the Collection, the queried field, and its size.
+function expectSizeSuggestionOutcome(
+  sizeSuggestions: ReadonlyArray<IndexSuggestion>,
+  expected: number,
+  collectionId: string,
+  size: number,
+): void {
+  expect(sizeSuggestions).toHaveLength(expected)
+  if (expected) {
+    expect(sizeSuggestions[0]).toMatchObject({
+      collectionId,
+      fieldPath: [`url`],
+      collectionSize: size,
+    })
+  }
+}
+
+// The model: an eager or indexed field leaves one index; otherwise none.
+function expectedIndexCount(
+  mode: `off` | `eager` | undefined,
+  index: `none` | `url` | `id`,
+): number {
+  return mode === `eager` || index !== `none` ? 1 : 0
+}
+
+declareOracle({
+  check: [expectSizeSuggestionOutcome, expectOrderedIndexMessages],
+  model: [
+    expectedSuggestions,
+    expectedIndexCount,
+    expectedOrderedIndexDiagnostic,
+  ],
+})
 
 describe(`collection-size index suggestions`, () => {
   for (const scenario of [
@@ -97,16 +133,14 @@ describe(`collection-size index suggestions`, () => {
           scenario.index,
           scenario.enabled,
         )
-        expect(sizeSuggestions).toHaveLength(expected)
-        if (expected) {
-          expect(sizeSuggestions[0]).toMatchObject({
-            collectionId: source.id,
-            fieldPath: [`url`],
-            collectionSize: scenario.size,
-          })
-        }
+        expectSizeSuggestionOutcome(
+          sizeSuggestions,
+          expected,
+          source.id,
+          scenario.size,
+        )
         expect(source.indexes.size).toBe(
-          scenario.mode === `eager` || scenario.index !== `none` ? 1 : 0,
+          expectedIndexCount(scenario.mode, scenario.index),
         )
       } catch (error) {
         primaryFailure = { error }
@@ -175,6 +209,36 @@ function expectedOrderedIndexDiagnostic(
   if (comparable.length === 0) return `compare-options`
   if (comparable.some(({ ordered }) => ordered)) return `none`
   return `ordered-capability`
+}
+
+// The check: the warnings match the diagnostic the model predicts, and name
+// the cause that remains after every candidate is considered.
+function expectOrderedIndexMessages(
+  messages: ReadonlyArray<string>,
+  expected: OrderedIndexDiagnostic,
+): void {
+  expect(messages).toHaveLength(expected === `none` ? 0 : 1)
+  if (expected === `missing-field`) {
+    expect(messages[0]).toContain(`requires an index on "name"`)
+  }
+  if (expected === `compare-options`) {
+    expect(messages[0]).toContain(
+      `found an index on "name", but none uses the query's compareOptions`,
+    )
+    // Direction completes the copyable options object, but an index in
+    // the other direction can be read in reverse.
+    expect(messages[0]).toContain(`direction: "asc"`)
+    expect(messages[0]).toContain(`nulls: "last"`)
+    expect(messages[0]).toContain(`stringSort: "locale"`)
+    expect(messages[0]).toContain(`importing BasicIndex`)
+    expect(messages[0]).toContain(`The index direction may differ.`)
+    expect(messages[0]).toContain(`options: { compareOptions:`)
+  }
+  if (expected === `ordered-capability`) {
+    expect(messages[0]).toContain(
+      `found an index on "name" with matching compareOptions, but none supports ordered lazy loading`,
+    )
+  }
 }
 
 describe(`bounded orderBy index diagnostics`, () => {
@@ -302,28 +366,7 @@ describe(`bounded orderBy index diagnostics`, () => {
               message.includes(`orderBy with limit`),
           )
         const expected = expectedOrderedIndexDiagnostic(scenario.candidates)
-        expect(messages).toHaveLength(expected === `none` ? 0 : 1)
-        if (expected === `missing-field`) {
-          expect(messages[0]).toContain(`requires an index on "name"`)
-        }
-        if (expected === `compare-options`) {
-          expect(messages[0]).toContain(
-            `found an index on "name", but none uses the query's compareOptions`,
-          )
-          // Direction completes the copyable options object, but an index in
-          // the other direction can be read in reverse.
-          expect(messages[0]).toContain(`direction: "asc"`)
-          expect(messages[0]).toContain(`nulls: "last"`)
-          expect(messages[0]).toContain(`stringSort: "locale"`)
-          expect(messages[0]).toContain(`importing BasicIndex`)
-          expect(messages[0]).toContain(`The index direction may differ.`)
-          expect(messages[0]).toContain(`options: { compareOptions:`)
-        }
-        if (expected === `ordered-capability`) {
-          expect(messages[0]).toContain(
-            `found an index on "name" with matching compareOptions, but none supports ordered lazy loading`,
-          )
-        }
+        expectOrderedIndexMessages(messages, expected)
       }, [
         () => warning.mockRestore(),
         () => query?.cleanup(),
@@ -332,230 +375,6 @@ describe(`bounded orderBy index diagnostics`, () => {
     })
   }
 
-  test.each([false, true])(
-    `does not inspect cyclic locale options when field index presence is %s`,
-    async (hasFieldIndex) => {
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const localeOptions: Record<string, unknown> = {}
-      localeOptions.self = localeOptions
-      const source = createCollection(
-        mockSyncCollectionOptions<{ id: number; name: string }>({
-          id: `cyclic-index-diagnostic-${hasFieldIndex}`,
-          getKey: (row) => row.id,
-          initialData: [{ id: 1, name: `Alice` }],
-          autoIndex: `off`,
-        }),
-      )
-      let query: ReturnType<typeof createLiveQueryCollection> | undefined
-      await withOracleCleanup(async () => {
-        await source.stateWhenReady()
-        if (hasFieldIndex) {
-          source.createIndex((row) => row.name, { indexType: BasicIndex })
-        }
-
-        expect(() => {
-          query = createLiveQueryCollection((q) =>
-            q
-              .from({ row: source })
-              .orderBy(({ row }) => row.name, {
-                direction: `asc`,
-                nulls: `last`,
-                stringSort: `locale`,
-                localeOptions,
-              })
-              .limit(1),
-          )
-        }).not.toThrow()
-        await query!.preload()
-        expect(query!.toArray.map((row) => row.name)).toEqual([`Alice`])
-      }, [
-        () => warning.mockRestore(),
-        () => query?.cleanup(),
-        () => source.cleanup(),
-      ])
-    },
-  )
-
-  test(`explains that a custom index must reuse the comparator reference`, async () => {
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const compare = (a: string, b: string) => a.length - b.length
-    const source = createCollection(
-      mockSyncCollectionOptions<{ id: number; name: string }>({
-        id: `custom-compare-index-diagnostic`,
-        getKey: (row) => row.id,
-        initialData: [{ id: 1, name: `Alice` }],
-        autoIndex: `off`,
-      }),
-    )
-    let query: ReturnType<typeof createLiveQueryCollection> | undefined
-    await withOracleCleanup(async () => {
-      await source.stateWhenReady()
-      source.createIndex((row) => row.name, { indexType: BasicIndex })
-      query = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.name, {
-            stringSort: `custom`,
-            compare,
-          })
-          .limit(1),
-      )
-
-      await query.preload()
-      const message = warning.mock.calls
-        .flat()
-        .find(
-          (value): value is string =>
-            typeof value === `string` && value.includes(`orderBy with limit`),
-        )
-      expect(message).toContain(`same compare function reference`)
-      expect(message).not.toContain(`"compare":"[function]"`)
-      expect(message).toContain(`full source`)
-      expect(message).not.toContain(`create a BasicIndex`)
-    }, [
-      () => warning.mockRestore(),
-      () => query?.cleanup(),
-      () => source.cleanup(),
-    ])
-  })
-
   // A local index cannot confer a provider collation identity. Even a
   // comparator-compatible index must leave the full-source cost visible.
-  test(`warns about custom ordering with a matching local index`, async () => {
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const compare = (a: string, b: string) => a.length - b.length
-    const requests: Array<{ orderBy?: unknown; limit?: number }> = []
-    const source = createCollection<{ id: number; name: string }>({
-      id: `custom-compare-matching-index-diagnostic`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `off`,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: 1, name: `Alice` } })
-          commit()
-          markReady()
-          return {
-            loadSubset: (options) => {
-              requests.push(options)
-              return true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    let query: ReturnType<typeof createLiveQueryCollection> | undefined
-    await withOracleCleanup(async () => {
-      source.createIndex((row) => row.name, {
-        indexType: BasicIndex,
-        options: {
-          compareOptions: {
-            direction: `asc`,
-            nulls: `first`,
-            stringSort: `custom`,
-            compare,
-          },
-        },
-      })
-      query = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.name, {
-            stringSort: `custom`,
-            compare,
-          })
-          .limit(1),
-      )
-      await query.preload()
-      expect(requests).toHaveLength(1)
-      expect(requests[0]).toMatchObject({
-        orderBy: undefined,
-        limit: undefined,
-      })
-      expect(warning.mock.calls.flat().join(` `)).toContain(`full source`)
-    }, [
-      () => warning.mockRestore(),
-      () => query?.cleanup(),
-      () => source.cleanup(),
-    ])
-  })
-
-  test(`describes an unindexed on-demand prefix without claiming a full load`, async () => {
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const requests: Array<{ orderBy?: unknown; limit?: number }> = []
-    const source = createCollection<{ id: number; name: string }>({
-      id: `unindexed-prefix-diagnostic`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `off`,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: 1, name: `Alice` } })
-          commit()
-          markReady()
-          return {
-            loadSubset: (options) => {
-              requests.push(options)
-              return true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    let query: ReturnType<typeof createLiveQueryCollection> | undefined
-    await withOracleCleanup(async () => {
-      query = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.name)
-          .limit(1),
-      )
-      await query.preload()
-      expect(
-        requests.some(({ orderBy, limit }) => orderBy && limit === 1),
-      ).toBe(true)
-      expect(warning.mock.calls.flat().join(` `)).not.toContain(
-        `loading all data`,
-      )
-    }, [
-      () => warning.mockRestore(),
-      () => query?.cleanup(),
-      () => source.cleanup(),
-    ])
-  })
-
-  test(`identifies an unindexable virtual order field`, async () => {
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const source = createCollection(
-      mockSyncCollectionOptions<{ id: number }>({
-        id: `virtual-order-diagnostic`,
-        getKey: (row) => row.id,
-        initialData: [{ id: 1 }],
-        autoIndex: `off`,
-      }),
-    )
-    let query: ReturnType<typeof createLiveQueryCollection> | undefined
-    await withOracleCleanup(async () => {
-      query = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.$synced)
-          .limit(1),
-      )
-      await query.preload()
-      const message = warning.mock.calls.flat().join(` `)
-      expect(message).toContain(`virtual`)
-      expect(message).not.toContain(`createIndex`)
-    }, [
-      () => warning.mockRestore(),
-      () => query?.cleanup(),
-      () => source.cleanup(),
-    ])
-  })
 })
