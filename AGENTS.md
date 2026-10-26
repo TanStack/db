@@ -707,10 +707,10 @@ Modules that define the model, checker, or its history grammar also qualify.
 Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
 
-An oracle file holds only oracle tests. It declares its check, and its model
-if it has one, with `declareOracle` from `packages/db/tests/oracle-config.ts`.
-Every test in the file must use a declared part, directly or through a
-driver. A test that compares production with a hand-written value is a unit
+An oracle file holds only oracle tests. It declares its check, model, and history
+grammar with `declareOracle` from `packages/db/tests/oracle-config.ts`. Each
+part is optional. Every test in the file must use a declared part, directly
+or through a driver. A test that compares production with a hand-written value is a unit
 test: put it in an ordinary test file. The `oracle/no-unit-test` lint rule
 reports a test that reaches no declared part.
 

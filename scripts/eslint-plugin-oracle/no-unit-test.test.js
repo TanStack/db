@@ -148,6 +148,15 @@ serializerProp('round-trips a value', (v) => checkHistory(v))
 serializerProp('round-trips an array', (v) => checkHistory([v]))`,
       filename,
     },
+    // A grammar calibration reaches the declared grammar.
+    {
+      code: `import { declareOracle } from './oracle-config.js'
+const historyGrammar = fc.array(action)
+function checkHistory(h) { return h }
+declareOracle({ check: [checkHistory], grammar: [historyGrammar] })
+it('reaches every action kind', () => { expect(kinds(fc.sample(historyGrammar, 200))).toEqual(allKinds) })`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,

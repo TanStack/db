@@ -372,17 +372,20 @@ A separate module that defines that model, checker, or its history grammar also
 qualifies. Identify the mechanism in the code before applying the name.
 
 An oracle file holds only oracle tests. It names its parts with
-`declareOracle({ check: [...], model: [...] })` from
+`declareOracle({ check: [...], model: [...], grammar: [...] })` from
 [`oracle-config.ts`](../../packages/db/tests/oracle-config.ts): the check
 compares production observations with the model or with a second
-formulation, and the model is optional. Every test in the file uses a
-declared part, directly or through a driver:
+formulation, and the grammar is the generators that produce legal histories.
+Each part is optional. Every test in the file uses a declared part, directly
+or through a driver:
 
 - A generated property or a fixed history runs through the check.
 - A model pin steps the model and checks one rule against its authority.
 - A calibration shows that the check rejects a wrong answer (ORC-006).
+- A grammar calibration shows that the generators reach the states that the
+  laws need (ORC-004, ORC-015).
 
-A test that uses neither compares production with a hand-written value. It
+A test that uses none of them compares production with a hand-written value. It
 is a unit test, even when it asserts a contract, and it belongs in an
 ordinary test file beside the oracle. The `oracle/no-unit-test` lint rule
 reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are

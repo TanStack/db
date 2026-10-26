@@ -20,15 +20,18 @@ import {
  *   declareOracle({ check: [checkHistory], model: [modelHistory] })
  *
  * The check compares production observations with the model, or with a
- * second formulation. Each is optional: a differential or metamorphic oracle
- * has no model, and a companion module can declare only the model that its
- * importers compare with. Every test in the file must reach a declared part:
+ * second formulation. The grammar is the generators that produce legal
+ * histories. Each is optional: a differential or metamorphic oracle has no
+ * model, and a companion module can declare only the part that its importers
+ * use. Every test in the file must reach a declared part:
  *
  * - A generated property or a fixed history reaches the check.
  * - A model pin reaches the model. It checks one model rule against its
  *   authority.
  * - A calibration reaches the check. It shows that the check rejects a
  *   wrong answer.
+ * - A grammar calibration reaches the grammar. It shows that the generators
+ *   reach the states that the laws need.
  *
  * A test reaches a part when its body uses the part, or uses a function or
  * value that reaches it. The rule follows bindings through the file and
@@ -46,6 +49,7 @@ import {
  * Files whose names start with `oracle-`, such as `oracle-replay.test.ts`,
  * test the shared oracle machinery, and the rule skips them.
  *
+ * A unit test that happens to use a declared grammar passes the rule.
  * The rule cannot see whether a test that reaches a part also compares
  * production with hand-written values, or whether a declared part is really
  * a check or a model. Reviewers still check those.
@@ -362,8 +366,8 @@ export default {
     },
     schema: [],
     messages: {
-      unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, and a model pin uses the declared model.`,
-      undeclared: `This oracle file registers tests and declares no oracle part. Name its check, and its model if it has one, with \`declareOracle({ check: [...], model: [...] })\` from oracle-config. Then move each test that reaches neither to an ordinary test file.`,
+      unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model pin uses the declared model, and a grammar calibration uses the declared grammar.`,
+      undeclared: `This oracle file registers tests and declares no oracle part. Name its check, model, and grammar with \`declareOracle({ check: [...], model: [...], grammar: [...] })\` from oracle-config. Then move each test that reaches none of them to an ordinary test file.`,
     },
   },
   create(context) {
