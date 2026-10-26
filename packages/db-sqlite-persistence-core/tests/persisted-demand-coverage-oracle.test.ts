@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  BTreeIndex,
   IR,
   createCollection,
   createLiveQueryCollection,
@@ -121,9 +122,9 @@ type Row = { id: string; group: string; rank: number; value: string }
 // - `pending`: the network never answers (offline).
 // - `fails-at-once`: the load rejects as soon as the wrapper forwards it, as
 //   a fetch does when the device is offline, so it lands before the
-//   `restored` checkpoint. This driver answers SQLite reads within the same
-//   microtask turn, so it cannot hold the rejection unobserved across a
-//   coverage read; the review record keeps a real-timer probe for that.
+//   `restored` checkpoint. Session 2's reads answer on a later macrotask, so
+//   the rejection arrives while the wrapper still reads coverage. The wrapper
+//   must observe it there: an unhandled rejection fails the run.
 // - `fails-early`: the load rejects before the wait passes.
 // - `answers-early`: the load answers before the wait passes.
 // - `answers-late`: the load answers after the wait passes.
@@ -151,8 +152,11 @@ type Row = { id: string; group: string; rank: number; value: string }
 // failure undoes a settlement"; `answers-empty-late` checks that an empty
 // answer settles an uncovered demand and leaves a covered one unchanged;
 // `answers-early` checks that the network wins before the deadline.
-// Excluded: a session-2 event before the restore checkpoint, which this
-// driver cannot schedule (see Limits). Also excluded, because it is not a
+// Excluded: a session-2 event before the persisted subset restore publishes.
+// The wrapper forwards a load upstream only after that restore is visible, so
+// no upstream answer or failure can precede it. The driver checks this: the
+// first session-2 load must see every restored row when it is forwarded.
+// Also excluded, because it is not a
 // legal history: a source truncate transaction kept open while a later load
 // of D hydrates and records coverage. A truncate clears hydrated demand, so
 // that load must hydrate, and the wrapper rejects a source transaction that
@@ -515,6 +519,25 @@ function createDriver(database: DatabaseSync): SQLiteDriver {
   }
 }
 
+// Session 2 reads through this wrapper, which answers each read on a later
+// macrotask, as a worker-backed or OPFS driver does. A driver that answers
+// within one microtask turn hides any work that happens between the
+// wrapper's own awaits, such as an upstream failure during a coverage read.
+// `setImmediate` stays real under the fake clock, so the drains below yield
+// to it.
+function withMacrotaskReads(driver: SQLiteDriver): SQLiteDriver {
+  return {
+    ...driver,
+    query: (sql, params) =>
+      new Promise<void>((resolve) => setImmediate(resolve)).then(() =>
+        driver.query(sql, params),
+      ),
+  }
+}
+
+const realMacrotask = () =>
+  new Promise<void>((resolve) => setImmediate(resolve))
+
 // ORC-010: run a check, then every cleanup. A cleanup failure never replaces
 // the primary failure; both survive in one AggregateError.
 async function withCleanup<T>(
@@ -564,11 +587,16 @@ function useFakeClock(): void {
 }
 
 async function drain(): Promise<void> {
-  for (let i = 0; i < 25; i++) await vi.advanceTimersByTimeAsync(0)
+  for (let i = 0; i < 25; i++) {
+    await vi.advanceTimersByTimeAsync(0)
+    await realMacrotask()
+  }
 }
 
 type Upstream = {
   calls: Array<LoadSubsetOptions>
+  // The row IDs the Collection showed when each load was forwarded.
+  visibleAtCall: Array<Array<string>>
   pendingCount: () => number
   answer: (rows: ReadonlyArray<Row>) => Promise<void>
   fail: (error: unknown) => void
@@ -582,6 +610,8 @@ type Upstream = {
   startScopedRecovery: () => Promise<void>
   // Deletes rows in one sync transaction.
   remove: (rows: ReadonlyArray<Row>) => Promise<void>
+  // Updates rows in one sync transaction.
+  update: (rows: ReadonlyArray<Row>) => Promise<void>
 }
 
 // A generic on-demand source. Each load waits until the test answers or
@@ -590,6 +620,7 @@ type Upstream = {
 function onDemandSource(
   adapter: SQLiteCorePersistenceAdapter,
   waitMs: number,
+  extra: { onInsert?: () => Promise<void> } = {},
 ): { collection: Collection<Row, string, any>; upstream: Upstream } {
   const pending: Array<{
     resolve: () => void
@@ -599,8 +630,10 @@ function onDemandSource(
   let truncate: (() => unknown) | undefined
   let startScopedRecovery: (() => Promise<void>) | undefined
   let remove: ((rows: ReadonlyArray<Row>) => unknown) | undefined
+  let update: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   const upstream: Upstream = {
     calls: [],
+    visibleAtCall: [],
     rejectAtOnce: false,
     pendingCount: () => pending.length,
     answer: async (rows) => {
@@ -621,6 +654,9 @@ function onDemandSource(
     remove: async (rows) => {
       await remove?.(rows)
     },
+    update: async (rows) => {
+      await update?.(rows)
+    },
   }
   const collection = createCollection(
     persistedCollectionOptions<Row, string>({
@@ -629,6 +665,7 @@ function onDemandSource(
       syncMode: `on-demand`,
       initialRender: { strategy: `network-first`, networkTimeoutMs: waitMs },
       persistence: { adapter },
+      ...(extra.onInsert ? { onInsert: extra.onInsert } : {}),
       sync: {
         sync: (params) => {
           write = (rows) => {
@@ -649,9 +686,17 @@ function onDemandSource(
             for (const value of rows) params.write({ type: `delete`, value })
             return params.commit()
           }
+          update = (rows) => {
+            params.begin()
+            for (const value of rows) params.write({ type: `update`, value })
+            return params.commit()
+          }
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               upstream.calls.push(options)
+              upstream.visibleAtCall.push(
+                collection.toArray.map((row) => row.id).sort(),
+              )
               if (upstream.rejectAtOnce) {
                 return Promise.reject(new Error(`offline at once`))
               }
@@ -862,6 +907,7 @@ function trackPreload(query: Collection<any, any, any>) {
 async function untilUpstreamCalled(upstream: Upstream, count = 1) {
   for (let i = 0; i < 200 && upstream.calls.length < count; i++) {
     await vi.advanceTimersByTimeAsync(0)
+    await realMacrotask()
   }
   if (upstream.calls.length < count) {
     throw new Error(
@@ -879,7 +925,7 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
   // checkpoint mismatch.
   useFakeClock()
   const { collection, upstream } = onDemandSource(
-    new SQLiteCorePersistenceAdapter({ driver }),
+    new SQLiteCorePersistenceAdapter({ driver: withMacrotaskReads(driver) }),
     cell.waitMs,
   )
   if (cell.upstream === `fails-at-once`) upstream.rejectAtOnce = true
@@ -902,6 +948,10 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
         cell.history === `settled-then-row-deleted` ||
         cell.history === `failed` ||
         cell.history === `durable-write-failed`,
+    )
+    // The wrapper forwarded the load only after its restore was visible.
+    expect(upstream.visibleAtCall[0]).toEqual(
+      expect.arrayContaining(SESSION_1_ROWS[cell.history].map((row) => row.id)),
     )
     await drain()
     // Checkpoint witness: the persisted subset restore has published every
@@ -1116,7 +1166,18 @@ async function runLifecycle(): Promise<{
 // The wrong designs "coverage outlives a rotation in the same sync run" and
 // "a refetch settles on coverage" make each history settle instead.
 //
-// A third history checks that opting in keeps a synchronous answer
+// Two more histories cover a schema reset and an optimistic write:
+//
+// - Schema reset: session 2 opens the same database with an adapter whose
+//   `schemaVersion` differs. The reset deletes the rows and their collection
+//   metadata, so D has no coverage and waits for the network.
+// - Optimistic write: offline, D settles from SQLite, then the app inserts a
+//   row of D whose mutation handler rejects. The row shows while the handler
+//   runs and leaves when it rejects (optimistic overlay rules), and the query
+//   stays ready throughout. Coverage never undoes or replaces optimistic
+//   state.
+//
+// A further history checks that opting in keeps a synchronous answer
 // synchronous. The source writes its rows and returns `true`. A second request
 // for D, while D is already hydrated in this sync run, must report `true` to
 // core, as it did before the opt-in existed, rather than a promise that waits
@@ -1135,6 +1196,7 @@ const SESSION_RESET_LAW: SessionResetObservation = {
 
 async function coverD(
   driver: SQLiteDriver,
+  rows: ReadonlyArray<Row> = [A1, A2],
 ): Promise<ReturnType<typeof getLoadSubsetDemandKey>> {
   const { collection, upstream } = onDemandSource(
     new SQLiteCorePersistenceAdapter({ driver }),
@@ -1144,7 +1206,7 @@ async function coverD(
   return withCleanup(async () => {
     const preload = query.preload()
     await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
-    await upstream.answer([A1, A2])
+    await upstream.answer(rows)
     await preload
     return getLoadSubsetDemandKey(upstream.calls[0]!)
   }, [() => query.cleanup(), () => collection.cleanup()])
@@ -1224,6 +1286,90 @@ async function runSessionReset(
     () => subscription?.unsubscribe(),
     () => first.cleanup(),
     () => second?.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
+async function runSchemaReset(): Promise<{ settledAfterWait: boolean }> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  // An empty covered demand: no row count can end its coverage, so only the
+  // reset's removal of collection metadata does.
+  await coverD(driver, [])
+  useFakeClock()
+  // The SQLite adapter owns the schema version; a new one resets the rows.
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver, schemaVersion: 99 }),
+    0,
+  )
+  const query = filterQuery(collection, `a`)
+  const state = trackPreload(query)
+  return withCleanup(async () => {
+    await untilUpstreamCalled(upstream, 1)
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    return { settledAfterWait: state() !== `pending` }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
+type OptimisticObservation = {
+  settledBeforeWrite: Array<string>
+  duringWrite: Array<string>
+  afterRollback: Array<string>
+  readyThroughout: boolean
+}
+
+async function runOptimisticWrite(): Promise<OptimisticObservation> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverD(driver)
+  useFakeClock()
+  let rejectWrite!: (error: unknown) => void
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+    {
+      onInsert: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectWrite = reject
+        }),
+    },
+  )
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, 1)
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    const ids = () => query.toArray.map((row) => row.id).sort()
+    let readyThroughout = query.status === `ready`
+    const settledBeforeWrite = ids()
+    const transaction = collection.insert({
+      id: `a9`,
+      group: `a`,
+      rank: 9,
+      value: `local`,
+    })
+    void transaction.isPersisted.promise.catch(() => undefined)
+    await drain()
+    readyThroughout &&= query.status === `ready`
+    const duringWrite = ids()
+    rejectWrite(new Error(`offline write`))
+    await drain()
+    readyThroughout &&= query.status === `ready`
+    return {
+      settledBeforeWrite,
+      duringWrite,
+      afterRollback: ids(),
+      readyThroughout,
+    }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
     () => collection.cleanup(),
   ])
 }
@@ -1552,6 +1698,225 @@ async function runJoined(
   ])
 }
 
+// ===========================================================================
+// Part 4: ordered windows
+//
+// W is the window `group = 'a' orderBy rank limit 2`. An ordered window
+// reaches the source as a limited load plus a tie-boundary load whose key is
+// built from the restored boundary row, so both must be covered for W to
+// settle from SQLite. Session 1 loads W online over `a1` (rank 1), `a2`
+// (rank 2), and `a3` (rank 3), so W holds `a1` and `a2`. Then one tail event
+// happens:
+//
+// - `unchanged`: nothing.
+// - `row-deleted`: the source deletes `a1`.
+// - `row-moved-out`: the source moves `a2` to rank 10.
+// - `row-moved-in`: the source adds `a0` at rank 0.
+// - `rows-swapped`: the source swaps the ranks of `a1` and `a2`.
+//
+// Law: W settles from SQLite only when its restore holds the same rows that
+// it held when it settled. Coverage proves that window complete; a window
+// that lost, gained, or replaced a row is not the proven one. A swap keeps
+// the same rows in a new order, so W stays covered and shows the new order.
+// The wrong designs "a window counts only rows" and "a window ignores its
+// tie-boundary" accept a row moved out or in.
+//
+// Two more histories move the window to its next page offline. Page 2 is
+// covered only when session 1 loaded it too. These histories index `rank`, so
+// core continues the window with a cursor from the restored boundary instead
+// of reloading a longer prefix. The wrong design "a demand key ignores offset
+// and cursor" would then settle a page that session 1 never loaded. A
+// positive witness checks that the move sent a cursor.
+// ===========================================================================
+
+type WindowHistory =
+  | `unchanged`
+  | `row-deleted`
+  | `row-moved-out`
+  | `row-moved-in`
+  | `rows-swapped`
+const WINDOW_HISTORIES: ReadonlyArray<WindowHistory> = [
+  `unchanged`,
+  `row-deleted`,
+  `row-moved-out`,
+  `row-moved-in`,
+  `rows-swapped`,
+]
+
+const A3: Row = { id: `a3`, group: `a`, rank: 3, value: `v1` }
+
+// Each history's restored rows, in rank order. The window is covered exactly
+// when these are the rows it held when it settled, in any order.
+const WINDOW_RESTORED: Record<WindowHistory, ReadonlyArray<string>> = {
+  unchanged: [`a1`, `a2`],
+  'row-deleted': [`a2`, `a3`],
+  'row-moved-out': [`a1`, `a3`],
+  'row-moved-in': [`a0`, `a1`],
+  'rows-swapped': [`a2`, `a1`],
+}
+
+function expectedWindow(history: WindowHistory): {
+  ready: boolean
+  rows?: ReadonlyArray<string>
+} {
+  const restored = WINDOW_RESTORED[history]
+  const sameRows =
+    restored.length === 2 && [`a1`, `a2`].every((id) => restored.includes(id))
+  return sameRows ? { ready: true, rows: restored } : { ready: false }
+}
+
+function windowQuery(source: Collection<Row, string, any>) {
+  return createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .where(({ row }) => eq(row.group, `a`))
+      .orderBy(({ row }) => row.rank)
+      .limit(2),
+  )
+}
+
+// Session 1 answers each load with every row of group a until `done`
+// settles; a source may return more rows than requested.
+async function answerUntil(
+  upstream: Upstream,
+  rows: ReadonlyArray<Row>,
+  done: Promise<unknown>,
+) {
+  const state = { settled: false }
+  void Promise.resolve(done).then(
+    () => (state.settled = true),
+    () => (state.settled = true),
+  )
+  for (let i = 0; i < 100 && !state.settled; i++) {
+    if (upstream.pendingCount() > 0) await upstream.answer(rows)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  await done
+}
+
+async function runWindow(
+  history: WindowHistory,
+): Promise<{ ready: boolean; rows?: ReadonlyArray<string> }> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  {
+    const { collection, upstream } = onDemandSource(
+      new SQLiteCorePersistenceAdapter({ driver }),
+      0,
+    )
+    const query = windowQuery(collection)
+    await withCleanup(async () => {
+      await answerUntil(upstream, [A1, A2, A3], query.preload())
+      // Positive witness: W holds a1 and a2 online.
+      expect(query.toArray.map((row) => row.id)).toEqual([`a1`, `a2`])
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      if (history === `row-deleted`) await upstream.remove([A1])
+      if (history === `row-moved-out`) {
+        await upstream.update([{ ...A2, rank: 10 }])
+      }
+      if (history === `row-moved-in`) {
+        await upstream.write([{ id: `a0`, group: `a`, rank: 0, value: `v1` }])
+      }
+      if (history === `rows-swapped`) {
+        await upstream.update([
+          { ...A1, rank: 2 },
+          { ...A2, rank: 1 },
+        ])
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  useFakeClock()
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const query = windowQuery(collection)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, 1)
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    return query.status === `ready`
+      ? { ready: true, rows: query.toArray.map((row) => row.id) }
+      : { ready: false }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
+async function runNextPage(
+  session1LoadsPageTwo: boolean,
+): Promise<{ pageTwoSettled: boolean; rows?: ReadonlyArray<string> }> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const A4: Row = { id: `a4`, group: `a`, rank: 4, value: `v1` }
+  const all = [A1, A2, A3, A4]
+  {
+    const { collection, upstream } = onDemandSource(
+      new SQLiteCorePersistenceAdapter({ driver }),
+      0,
+    )
+    collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    const query = windowQuery(collection)
+    await withCleanup(async () => {
+      await answerUntil(upstream, all, query.preload())
+      if (session1LoadsPageTwo) {
+        await answerUntil(
+          upstream,
+          all,
+          Promise.resolve(query.utils.setWindow({ offset: 2, limit: 2 })),
+        )
+        // Positive witness: session 1 reached page 2.
+        expect(query.toArray.map((row) => row.id)).toEqual([`a3`, `a4`])
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  useFakeClock()
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
+  const query = windowQuery(collection)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, 1)
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    // Positive witness: page 1 settled from SQLite.
+    expect(query.status).toBe(`ready`)
+    const callsBefore = upstream.calls.length
+    const moved = { settled: false }
+    void Promise.resolve(query.utils.setWindow({ offset: 2, limit: 2 })).then(
+      () => (moved.settled = true),
+      () => (moved.settled = true),
+    )
+    await drain()
+    // Positive witness: the move asked the source for page 2 with a cursor.
+    expect(
+      upstream.calls
+        .slice(callsBefore)
+        .some((call) => call.cursor !== undefined),
+    ).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    return moved.settled
+      ? {
+          pageTwoSettled: true,
+          rows: query.toArray.map((row) => row.id),
+        }
+      : { pageTwoSettled: false }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
@@ -1841,6 +2206,21 @@ describe(`persisted demand coverage oracle`, () => {
     )
   })
 
+  it(`does not settle D from SQLite after a schema reset`, async () => {
+    quietConsole()
+    expect(await runSchemaReset()).toEqual({ settledAfterWait: false })
+  })
+
+  it(`keeps an optimistic write's overlay rules on a demand settled from SQLite`, async () => {
+    quietConsole()
+    expect(await runOptimisticWrite()).toEqual({
+      settledBeforeWrite: [`a1`, `a2`],
+      duringWrite: [`a1`, `a2`, `a9`],
+      afterRollback: [`a1`, `a2`],
+      readyThroughout: true,
+    })
+  })
+
   it(`keeps a synchronous answer for an already hydrated demand synchronous`, async () => {
     quietConsole()
     // Positive witness: the second request reached the source.
@@ -1855,6 +2235,35 @@ describe(`persisted demand coverage oracle`, () => {
     async (kind) => {
       quietConsole()
       expect(await runSessionReset(kind)).toEqual(SESSION_RESET_LAW)
+    },
+  )
+  it(`distinguishes the window law from "a window counts only rows"`, () => {
+    // Counting rows accepts every history that keeps two rows.
+    const countOnly = (history: WindowHistory) =>
+      WINDOW_RESTORED[history].length === 2
+    expect(
+      WINDOW_HISTORIES.filter(
+        (history) => countOnly(history) !== expectedWindow(history).ready,
+      ),
+    ).toEqual([`row-deleted`, `row-moved-out`, `row-moved-in`])
+  })
+
+  it.each(WINDOW_HISTORIES)(
+    `settles an ordered window from SQLite only while it holds its covered rows: %s`,
+    async (history) => {
+      quietConsole()
+      expect(await runWindow(history)).toEqual(expectedWindow(history))
+    },
+  )
+
+  it.each([
+    [true, { pageTwoSettled: true, rows: [`a3`, `a4`] }],
+    [false, { pageTwoSettled: false }],
+  ] as const)(
+    `moves a window offline to a page only when that page is covered (session 1 loaded page 2: %s)`,
+    async (session1LoadsPageTwo, expected) => {
+      quietConsole()
+      expect(await runNextPage(session1LoadsPageTwo)).toEqual(expected)
     },
   )
 })

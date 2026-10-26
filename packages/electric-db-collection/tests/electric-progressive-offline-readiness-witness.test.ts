@@ -35,6 +35,7 @@ type Subscriber = (messages: Array<Message<Item>>) => void
 
 let subscribers: Array<Subscriber> = []
 let fetchSnapshot: () => Promise<unknown> = () => new Promise(() => {})
+let requestSnapshot: () => Promise<unknown> = () => new Promise(() => {})
 
 vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
@@ -43,7 +44,7 @@ vi.mock(`@electric-sql/client`, async () => ({
       subscribers.push(subscriber)
       return () => {}
     },
-    requestSnapshot: () => new Promise(() => {}),
+    requestSnapshot: () => requestSnapshot(),
     fetchSnapshot: () => fetchSnapshot(),
     forceDisconnectAndRefresh: () => Promise.resolve(),
     isUpToDate: false,
@@ -128,7 +129,11 @@ function insert(value: Item): Message<Item> {
   }
 }
 
-function progressive(driver: SQLiteDriver, networkFirst: boolean) {
+function progressive(
+  driver: SQLiteDriver,
+  networkFirst: boolean,
+  syncMode: `progressive` | `on-demand` = `progressive`,
+) {
   return createCollection(
     persistedCollectionOptions<
       Item,
@@ -137,9 +142,9 @@ function progressive(driver: SQLiteDriver, networkFirst: boolean) {
       ElectricCollectionUtils<Item>
     >({
       ...electricCollectionOptions({
-        id: `progressive-offline-witness`,
+        id: `${syncMode}-offline-witness`,
         shapeOptions: { url: `http://test-url`, params: { table: `items` } },
-        syncMode: `progressive`,
+        syncMode,
         getKey: (item: Item) => item.id,
       }),
       ...(networkFirst
@@ -219,6 +224,8 @@ async function runHistory(session1: Session1, networkFirst: boolean) {
 
 afterEach(() => {
   subscribers = []
+  fetchSnapshot = () => new Promise(() => {})
+  requestSnapshot = () => new Promise(() => {})
 })
 
 describe(`persisted progressive Electric query while offline (current behavior)`, () => {
@@ -257,5 +264,118 @@ describe(`persisted progressive Electric query while offline with network-first`
       rows: observation.queryRows,
     }).toEqual(expected)
     expect(observation.preloaded).toBe(expected.ready)
+  })
+})
+
+// Electric's own load after a settlement from SQLite. A progressive load
+// fetches its snapshot without a cancel signal, so after the wrapper settles
+// the demand from SQLite the Electric load can still be waiting. Releasing
+// the demand aborts it. A snapshot that answers after that must not write its
+// rows (law 6 in `ARCHITECTURE.md`: a conforming source publishes no
+// request-scoped rows after cancellation).
+describe(`Electric's own load after a settlement from SQLite`, () => {
+  it(`writes no rows from a snapshot that answers after release`, async () => {
+    const driver = createDriver(new DatabaseSync(`:memory:`))
+    subscribers = []
+    fetchSnapshot = () =>
+      Promise.resolve({
+        metadata: {},
+        data: rows.filter((row) => row.group === `a`).map(insert),
+      })
+    const first = progressive(driver, true)
+    const firstQuery = groupA(first)
+    await firstQuery.preload()
+    await settle()
+    await firstQuery.cleanup()
+    await first.cleanup()
+
+    subscribers = []
+    let answerLate!: (value: unknown) => void
+    fetchSnapshot = () =>
+      new Promise((resolve) => {
+        answerLate = resolve
+      })
+    const second = progressive(driver, true)
+    const query = groupA(second)
+    await query.preload()
+    // Positive witness: the demand settled from SQLite while Electric's own
+    // snapshot is still pending.
+    expect(query.isReady()).toBe(true)
+    expect(typeof answerLate).toBe(`function`)
+    await query.cleanup()
+    await settle()
+    answerLate({ metadata: {}, data: [insert({ id: 9, group: `a` })] })
+    await settle()
+    expect(second.toArray.map((item) => item.id).sort()).toEqual([1, 2])
+    await second.cleanup()
+  })
+})
+
+// Must-refetch in on-demand mode. An Electric must-refetch truncates the
+// source, which ends persisted demand coverage for every demand. Session 1
+// loads group a through `requestSnapshot`, whose rows arrive as stream
+// messages. In the second history a must-refetch and an up-to-date follow, and
+// the reacquired snapshot never answers. Session 2 is offline: the covered
+// subset settles on its restored rows, and the refetched one keeps loading.
+describe(`on-demand Electric must-refetch with network-first`, () => {
+  it.each([
+    [`loaded group a`, { ready: true, rows: [1, 2] }],
+    [`loaded group a, then must-refetch`, { ready: false, rows: [] }],
+  ] as const)(`session 1: %s`, async (session1, expected) => {
+    const driver = createDriver(new DatabaseSync(`:memory:`))
+    subscribers = []
+    requestSnapshot = () => {
+      for (const subscriber of subscribers) {
+        subscriber([
+          ...rows.filter((row) => row.group === `a`).map(insert),
+          // The SDK ends an injected subset with `subset-end`, the point at
+          // which Electric commits its rows.
+          { headers: { control: `subset-end` } } as never,
+        ])
+      }
+      return Promise.resolve(undefined)
+    }
+    const first = progressive(driver, true, `on-demand`)
+    const firstQuery = groupA(first)
+    const preload = firstQuery.preload()
+    await settle(20)
+    for (const subscriber of subscribers) {
+      subscriber([{ headers: { control: `up-to-date` } }])
+    }
+    await preload
+    // Positive witness: session 1 loaded group a.
+    expect(firstQuery.toArray.map((item) => item.id).sort()).toEqual([1, 2])
+    if (session1 === `loaded group a, then must-refetch`) {
+      requestSnapshot = () => new Promise(() => {})
+      for (const subscriber of subscribers) {
+        subscriber([{ headers: { control: `must-refetch` } } as never])
+      }
+      await settle()
+      for (const subscriber of subscribers) {
+        subscriber([{ headers: { control: `up-to-date` } }])
+      }
+      await settle(200)
+      // Positive witness: the must-refetch truncated the rows.
+      expect(first.toArray).toEqual([])
+    }
+    await firstQuery.cleanup()
+    await first.cleanup()
+
+    subscribers = []
+    requestSnapshot = () => new Promise(() => {})
+    const second = progressive(driver, true, `on-demand`)
+    const query = groupA(second)
+    let preloaded = false
+    void query.preload().then(
+      () => (preloaded = true),
+      () => undefined,
+    )
+    await settle(300)
+    expect({
+      ready: preloaded,
+      rows: query.toArray.map((item) => item.id).sort(),
+    }).toEqual(expected)
+    await query.cleanup()
+    await second.cleanup()
   })
 })
