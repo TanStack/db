@@ -50,12 +50,14 @@ import type { SQLiteDriver } from '../src/index.js'
  * through real loads; nothing seeds coverage metadata. Session 2 controls
  * the upstream load and the clock.
  *
- * Limits: no Electric or Query DB source (they need receiving witnesses), no
- * cache-claim rotation, must-refetch, or schema reset, no ordered
- * window or cursor page in session 2, no failure that arrives before the
- * persisted subset restore publishes, no framework rendering, and no native
- * host. Every block is a bounded enumeration or fixed history, not a
- * generated campaign, so ORC-007 does not apply.
+ * Limits: no Electric or Query DB source (they need receiving witnesses).
+ * Resets are a source truncate and scoped recovery, which rotates the cache
+ * generation; there is no cache-claim expiry, must-refetch, or schema reset.
+ * There is no coordinator other than the default single-process one, no
+ * ordered window or cursor page in session 2, no failure that arrives before
+ * the persisted subset restore publishes, no framework rendering, and no
+ * native host. Every block is a bounded enumeration or fixed history, not a
+ * generated campaign, so ORC-007 and ORC-015 do not apply.
  */
 
 type Row = { id: string; group: string; rank: number; value: string }
@@ -90,6 +92,20 @@ type Row = { id: string; group: string; rank: number; value: string }
 // - `truncated`: D settles with `a1` and `a2`, then the source truncates.
 //   Coverage ends with the rows it described, so D has no coverage and
 //   SQLite holds no rows. The truncate replays D; that load never answers.
+// - `truncated-in-flight`: D's load writes `a1` and `a2`, the source
+//   truncates, and only then does that load settle. The truncate made the
+//   load obsolete (law 6 in `ARCHITECTURE.md`: an obsolete acquisition cannot
+//   satisfy current demand), so its settlement records no coverage. SQLite
+//   holds no rows, and the replayed load never answers.
+// - `recovered-in-flight`: D's load writes `a1` and `a2`, the source starts
+//   scoped recovery, which rotates the persisted cache generation, and only
+//   then does that load settle. The obsolete load records no coverage in the
+//   new generation, which holds no rows; the reacquired load never answers.
+// - `recovering-in-flight`: as `recovered-in-flight`, but the load settles
+//   while scoped recovery is still pending. Recording coverage must not
+//   change the outcome of a load whose rows applied: without the coverage
+//   record, this history leaves the session-1 query ready, and the driver
+//   checks that it does not enter `error`.
 //
 // Session 2 asks for D again with a configured wait of 0 ms or 1000 ms. Its
 // upstream load follows one schedule:
@@ -111,7 +127,10 @@ type Row = { id: string; group: string; rank: number; value: string }
 // `other-order` rejects "coverage ignores order";
 // `durable-write-failed` rejects "coverage written before the rows commit";
 // `settled-empty` rejects "nonempty rows count"; `truncated` rejects
-// "coverage survives truncate"; `settled` carries every positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
+// "coverage survives truncate"; `truncated-in-flight` and
+// `recovered-in-flight` reject "any settled load records coverage", including
+// a load that a reset made obsolete; `recovering-in-flight` rejects "a failed
+// coverage record fails the load"; `settled` carries every positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
 // `fails-early` rejects "failure errors a covered demand"; `answers-late`
 // rejects "upstream aborted after SQLite"; `fails-late` rejects "late
 // failure undoes a settlement"; `answers-empty-late` checks that an empty
@@ -131,6 +150,9 @@ const COVERAGE_HISTORIES = [
   `settled-empty`,
   `settled`,
   `truncated`,
+  `truncated-in-flight`,
+  `recovered-in-flight`,
+  `recovering-in-flight`,
 ] as const
 type CoverageHistory = (typeof COVERAGE_HISTORIES)[number]
 
@@ -167,6 +189,9 @@ const SESSION_1_ROWS: Record<CoverageHistory, ReadonlyArray<Row>> = {
   'settled-empty': [],
   settled: [A1, A2],
   truncated: [],
+  'truncated-in-flight': [],
+  'recovered-in-flight': [],
+  'recovering-in-flight': [],
 }
 
 // Session 2's upstream answer updates a1 and adds a3. It omits a2; an
@@ -525,6 +550,11 @@ type Upstream = {
   answer: (rows: ReadonlyArray<Row>) => Promise<void>
   fail: (error: unknown) => void
   truncate: () => Promise<void>
+  // Writes rows without settling any load.
+  write: (rows: ReadonlyArray<Row>) => Promise<void>
+  // Settles only the oldest pending load, without writing rows.
+  settleOldest: () => void
+  startScopedRecovery: () => Promise<void>
 }
 
 // A generic on-demand source. Each load waits until the test answers or
@@ -540,6 +570,7 @@ function onDemandSource(
   }> = []
   let write: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   let truncate: (() => unknown) | undefined
+  let startScopedRecovery: (() => Promise<void>) | undefined
   const upstream: Upstream = {
     calls: [],
     pendingCount: () => pending.length,
@@ -553,6 +584,11 @@ function onDemandSource(
     truncate: async () => {
       await truncate?.()
     },
+    write: async (rows) => {
+      await write?.(rows)
+    },
+    settleOldest: () => pending.shift()?.resolve(),
+    startScopedRecovery: () => startScopedRecovery?.() ?? Promise.resolve(),
   }
   const collection = createCollection(
     persistedCollectionOptions<Row, string>({
@@ -573,6 +609,9 @@ function onDemandSource(
             params.truncate()
             return params.commit()
           }
+          startScopedRecovery = () =>
+            params.metadata?.persistence?.startScopedRecovery?.() ??
+            Promise.resolve()
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               upstream.calls.push(options)
@@ -674,6 +713,30 @@ async function settleSession1(
       if (isSettled()) break
       if (history === `failed`) {
         upstream.fail(new Error(`session 1 upstream failed`))
+      } else if (
+        history === `truncated-in-flight` ||
+        history === `recovered-in-flight`
+      ) {
+        const loadsBefore = upstream.calls.length
+        await upstream.write([A1, A2])
+        if (history === `truncated-in-flight`) await upstream.truncate()
+        else await upstream.startScopedRecovery()
+        // Positive witness: the reset reacquired D while its first load was
+        // still pending.
+        await vi.waitFor(() =>
+          expect(upstream.calls.length).toBeGreaterThan(loadsBefore),
+        )
+        upstream.settleOldest()
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        break
+      } else if (history === `recovering-in-flight`) {
+        await upstream.write([A1, A2])
+        const recovery = upstream.startScopedRecovery()
+        upstream.settleOldest()
+        await recovery
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        expect(query.status).not.toBe(`error`)
+        break
       } else if (history === `durable-write-failed`) {
         await upstream.answer([A1, A2]).catch(() => undefined)
         // The load may reject or stay pending after a durable failure; the
@@ -696,7 +759,13 @@ async function settleSession1(
       history === `truncated`
     ) {
       await preload
-    } else {
+    } else if (
+      history !== `truncated-in-flight` &&
+      history !== `recovered-in-flight` &&
+      history !== `recovering-in-flight`
+    ) {
+      // The in-flight histories leave the reacquired load pending, so their
+      // preload never settles.
       await preload.catch(() => undefined)
     }
     if (history === `truncated`) {
@@ -772,6 +841,9 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
       cell.history === `settled` ||
         cell.history === `settled-empty` ||
         cell.history === `truncated` ||
+        cell.history === `truncated-in-flight` ||
+        cell.history === `recovered-in-flight` ||
+        cell.history === `recovering-in-flight` ||
         cell.history === `failed` ||
         cell.history === `durable-write-failed`,
     )
@@ -985,13 +1057,24 @@ async function runLifecycle(): Promise<{
 //
 // The rows are read when the wait releases, because that is the snapshot a
 // Suspense render shows. Session 2 also reads the joined query through an
-// outer live query (`nested`). The gate then reads demand settlement from the
-// inner query, which owns the demand on C, while the outer query must already
-// show the joined row at release.
+// outer live query (`nested`), which must already show the joined row at
+// release.
+//
+// A query can reach C through more than one live query. In `two-readers` the
+// outer query reads the joined query and also joins C itself on another key,
+// so it has two demands on C. Persisted readiness requires every demand the
+// query reaches on C to have settled (`docs/contributing/glossary.md`,
+// "persisted readiness"). The history `covered by the inner query only`
+// covers just the joined query's demand, so the wait must not release. It
+// rejects the wrong design "the first live query reached on C stands for
+// all of them".
 // ===========================================================================
 
-type ChildHistory = `covered by the same joined query` | `never requested`
-type JoinedShape = `flat` | `nested`
+type ChildHistory =
+  | `covered by the same joined query`
+  | `covered by the inner query only`
+  | `never requested`
+type JoinedShape = `flat` | `nested` | `two-readers`
 
 // `initialRenderReleased` is the network-first wait; `collectionReady` is the
 // live query's own readiness, which needs P's Collection to be ready.
@@ -1073,6 +1156,38 @@ function onDemandChildren(
   return { collection, calls }
 }
 
+function shapedQuery(
+  shape: JoinedShape,
+  parents: Collection<Parent, string, any>,
+  children: Collection<Child, string, any>,
+) {
+  const inner = joined(parents, children)
+  if (shape === `flat`) return { inner, query: inner }
+  const query =
+    shape === `nested`
+      ? createLiveQueryCollection((q) =>
+          q.from({ row: inner }).select(({ row }) => ({
+            id: row.id,
+            parentValue: row.parentValue,
+            childValue: row.childValue,
+          })),
+        )
+      : // A second demand on C, keyed by value instead of parentId.
+        createLiveQueryCollection((q) =>
+          q
+            .from({ row: inner })
+            .join({ again: children }, ({ row, again }) =>
+              eq(again.value, row.childValue),
+            )
+            .select(({ row }) => ({
+              id: row.id,
+              parentValue: row.parentValue,
+              childValue: row.childValue,
+            })),
+        )
+  return { inner, query }
+}
+
 function joined(
   parents: Collection<Parent, string, any>,
   children: Collection<Child, string, any>,
@@ -1095,23 +1210,37 @@ async function runJoined(
   history: ChildHistory,
   shape: JoinedShape,
 ): Promise<JoinedObservation> {
-  const covered = history === `covered by the same joined query`
   const driver = createDriver(new DatabaseSync(`:memory:`))
 
   // Session 1 is online. Both Collections share one adapter, as an
-  // application does. The children load only through the joined query.
+  // application does. The children load only through the session-1 query.
   {
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
     const parents = eagerParents(adapter, true)
     const children = onDemandChildren(adapter, true)
-    const query = covered ? joined(parents, children.collection) : undefined
+    const session1 =
+      history === `never requested`
+        ? undefined
+        : history === `covered by the inner query only`
+          ? shapedQuery(`flat`, parents, children.collection)
+          : shapedQuery(shape, parents, children.collection)
     await withCleanup(async () => {
-      if (query) await query.preload()
+      if (session1) await session1.query.preload()
       else await parents.preload()
-      // Positive witness: session 1 loaded the children only when covered.
-      expect(children.calls.length > 0).toBe(covered)
+      // Positive witness: session 1 sent each demand that the history
+      // covers, and only those.
+      const keys = new Set(children.calls.map(getLoadSubsetDemandKey))
+      expect(keys.size).toBe(
+        history === `never requested`
+          ? 0
+          : shape === `two-readers` &&
+              history === `covered by the same joined query`
+            ? 2
+            : 1,
+      )
     }, [
-      () => query?.cleanup(),
+      () => session1?.query.cleanup(),
+      () => session1?.inner.cleanup(),
       () => children.collection.cleanup(),
       () => parents.cleanup(),
     ])
@@ -1121,17 +1250,7 @@ async function runJoined(
   const adapter = new SQLiteCorePersistenceAdapter({ driver })
   const parents = eagerParents(adapter, false)
   const children = onDemandChildren(adapter, false)
-  const inner = joined(parents, children.collection)
-  const query =
-    shape === `flat`
-      ? inner
-      : createLiveQueryCollection((q) =>
-          q.from({ row: inner }).select(({ row }) => ({
-            id: row.id,
-            parentValue: row.parentValue,
-            childValue: row.childValue,
-          })),
-        )
+  const { inner, query } = shapedQuery(shape, parents, children.collection)
   const observer = createLiveQueryObserver(query)
   const unsubscribe = observer.subscribe(() => {})
   // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
@@ -1309,6 +1428,21 @@ describe(`persisted demand coverage oracle`, () => {
       witness: { history: `truncated`, waitMs: 0, upstream: `pending` },
     },
     {
+      design: {
+        ...LAW,
+        name: `any settled load records coverage`,
+        isCovered: (history) =>
+          LAW.isCovered(history) ||
+          history === `truncated-in-flight` ||
+          history === `recovered-in-flight`,
+      },
+      witness: {
+        history: `truncated-in-flight`,
+        waitMs: 0,
+        upstream: `pending`,
+      },
+    },
+    {
       design: { ...LAW, name: `wait ignored`, honorsWait: false },
       witness: { history: `settled`, waitMs: 1000, upstream: `pending` },
     },
@@ -1412,14 +1546,17 @@ describe(`persisted demand coverage oracle`, () => {
     expect(actual.observations).toEqual(expectedLifecycle())
   })
 
-  it.each(
-    ([`covered by the same joined query`, `never requested`] as const).flatMap(
-      (history: ChildHistory) =>
-        ([`flat`, `nested`] as const).map(
-          (shape: JoinedShape) => [history, shape] as const,
+  it.each([
+    ...([`flat`, `nested`, `two-readers`] as const).flatMap(
+      (shape: JoinedShape) =>
+        ([`covered by the same joined query`, `never requested`] as const).map(
+          (history: ChildHistory) => [history, shape] as const,
         ),
     ),
-  )(
+    // The inner-only history differs from full coverage only when the query
+    // reaches C through two live queries.
+    [`covered by the inner query only`, `two-readers`] as const,
+  ])(
     `releases the joined network-first wait only when the on-demand side is covered: %s, %s`,
     async (history, shape) => {
       quietConsole()
