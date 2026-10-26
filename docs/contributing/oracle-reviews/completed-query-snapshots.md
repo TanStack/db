@@ -1,6 +1,10 @@
 # Completed query snapshot publication: bounded review
 
-Reviewed implementation: `401a91ad904643c9eb6c174f2d783b2c21703469`.
+Reviewed implementation: `ebc048a1c4db1d10518d32d47d24708325f7acba`.
+The feature first landed locally at `401a91ad904643c9eb6c174f2d783b2c21703469`.
+The reviewed head merges upstream `7538afd2f`; the only conflict was the private
+minifier name map, regenerated with the existing checker. Feature source and
+test logic are unchanged by that merge, and the receiving suites were rerun.
 The following evidence-only commit changes this record and its coverage link;
 it does not change the reviewed runtime or tests. This is a self-review using
 oracle-authoring and oracle-review, not an independent reviewer verdict.
@@ -69,9 +73,10 @@ dependency graphs. Unrelated mobile examples were not installed.
   controls already rejected. The race guard makes all six agree with the law.
 - **GREEN:** the full persisted-readiness owner passes **186 tests**, comprising
   its existing 36 tests and the new 150 histories.
-- **GREEN, neighboring contracts:** eight DB files pass **915 tests**: live-query
+- **GREEN, neighboring contracts:** eleven DB files pass **930 tests**: live-query
   Collections, ordered-source state, ordered lifecycle, pagination, options,
-  observer snapshots, observer histories, and stable identity. The existing
+  observer snapshots, observer histories, stable identity and the newly merged
+GC retention/transaction/mutation oracles. The existing
   fixed and random campaigns execute unchanged. The React hook suite passes
   **60 tests**. This is regression evidence, not a new framework scheduling law.
 - **GREEN, tooling:** DB IVM, DB, persistence-core and React builds; DB and
@@ -86,7 +91,7 @@ pnpm --filter @tanstack/db build
 pnpm --filter @tanstack/db-sqlite-persistence-core build
 pnpm --filter @tanstack/react-db build
 pnpm --dir packages/db-sqlite-persistence-core exec vitest run tests/persisted-readiness-oracle.test.ts --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2
-pnpm --dir packages/db exec vitest run tests/query/live-query-collection.test.ts tests/query/ordered-source-loader-state-oracle.test.ts tests/query/ordered-lifecycle-oracle.property.test.ts tests/query/pagination-oracle.property.test.ts tests/live-query-options.test.ts tests/live-query-observer-snapshot-oracle.property.test.ts tests/live-query-observer-history-oracle.property.test.ts tests/query/ir-stable-identity-oracle.test.ts --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2
+pnpm --dir packages/db exec vitest run tests/query/live-query-collection.test.ts tests/query/ordered-source-loader-state-oracle.test.ts tests/query/ordered-lifecycle-oracle.property.test.ts tests/query/pagination-oracle.property.test.ts tests/live-query-options.test.ts tests/live-query-observer-snapshot-oracle.property.test.ts tests/live-query-observer-history-oracle.property.test.ts tests/query/ir-stable-identity-oracle.test.ts tests/collection-gc-retention-oracle.property.test.ts tests/collection-gc-transaction-oracle.property.test.ts tests/collection-gc-mutation-oracle.property.test.ts --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2
 pnpm --dir packages/react-db exec vitest run tests/useLiveQuery.test.tsx --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2
 pnpm exec tsc --noEmit -p packages/db/tsconfig.json
 pnpm exec tsc --noEmit -p packages/db-sqlite-persistence-core/tsconfig.json
@@ -138,8 +143,8 @@ closure, provider isolation or “no flashing” claim.
 ## Production cost
 
 `pnpm size:compare --base upstream/main --packages db,react-db,db-sqlite-persistence-core --files`
-compares against upstream `1640de834`. The typical app grows by **422 gzip bytes
-(0.5%)**; the DB export bundle grows by **440 gzip bytes (0.4%)**. React and
+compares against upstream `7538afd2f`. The typical app grows by **423 gzip bytes
+(0.5%)**; the DB export bundle grows by **442 gzip bytes (0.4%)**. React and
 persistence-core package bundles are unchanged.
 
 The implementation extends existing demand/publication gates and metadata,
