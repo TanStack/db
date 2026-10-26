@@ -29,9 +29,9 @@ import {
   or,
   subtract,
   sum,
-  toArray,
   upper,
 } from '../../../src/query/builder/functions.js'
+import { toArray } from '../../../src/query/builder/include-functions.js'
 import { compileSingleRowExpression } from '../../../src/query/compiler/evaluators.js'
 import type { BasicExpression } from '../../../src/query/ir.js'
 

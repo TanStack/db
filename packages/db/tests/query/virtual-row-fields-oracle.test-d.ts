@@ -34,13 +34,13 @@
  * projected-value cells.
  */
 import { describe, expectTypeOf, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { SingleRowRefProxy } from '../../src/query/builder/ref-proxy.js'

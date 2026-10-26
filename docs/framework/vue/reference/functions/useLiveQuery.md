@@ -195,7 +195,7 @@ Create a live query using configuration object
 
 #### config
 
-`LiveQueryCollectionConfig`\<`TContext`\>
+`LiveQueryHookConfig`\<`TContext`\>
 
 Configuration object with query and options
 

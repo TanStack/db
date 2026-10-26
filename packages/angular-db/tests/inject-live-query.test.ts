@@ -6,6 +6,7 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  pooledLiveQueries,
 } from '@tanstack/db'
 import { injectLiveQuery } from '../src/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -610,6 +611,48 @@ describe(`injectLiveQuery`, () => {
       await waitForAngularUpdate()
 
       expect(res.collection()).toBe(col)
+    })
+  })
+
+  it(`pools a reactive params query only when it passes pooledLiveQueries`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const source = (id: string) =>
+        createCollection(
+          mockSyncCollectionOptions<Person>({
+            id,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          }),
+        )
+      const query =
+        (collection: Collection<Person>) =>
+        ({ params, q }: { params: { team: number }; q: any }) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }: any) => eq(persons.team, `team${params.team}`))
+      const pooledSource = source(`reactive-params-pooled-angular`)
+      const compiledSource = source(`reactive-params-compiled-angular`)
+      const results = [1, 2].flatMap((team) => [
+        injectLiveQuery({
+          params: () => ({ team }),
+          query: query(pooledSource),
+          pool: pooledLiveQueries,
+        }),
+        injectLiveQuery({
+          params: () => ({ team }),
+          query: query(compiledSource),
+        }),
+      ])
+
+      await waitForAngularUpdate()
+      for (const result of results) result.data()
+
+      // Pooled queries of one shape share the partition's one subscription.
+      expect(pooledSource.subscriberCount).toBe(1)
+      expect(compiledSource.subscriberCount).toBe(2)
+      const ids = (index: number) =>
+        (results[index]!.data() as Array<Person>).map((row) => row.id)
+      expect(ids(0)).toEqual(ids(1))
     })
   })
 

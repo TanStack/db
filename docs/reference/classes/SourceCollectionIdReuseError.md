@@ -3,7 +3,7 @@ id: SourceCollectionIdReuseError
 title: SourceCollectionIdReuseError
 ---
 
-Defined in: [packages/db/src/errors.ts:1184](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1184)
+Defined in: [packages/db/src/errors.ts:1204](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1204)
 
 Error thrown when a mounted framework binding that compares query identity
 reads a different source Collection under a Collection ID it has already
@@ -23,7 +23,7 @@ source.
 new SourceCollectionIdReuseError(bindingName, collectionId): SourceCollectionIdReuseError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1185](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1185)
+Defined in: [packages/db/src/errors.ts:1205](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1205)
 
 #### Parameters
 
@@ -51,7 +51,7 @@ Defined in: [packages/db/src/errors.ts:1185](https://github.com/TanStack/db/blob
 readonly bindingName: string;
 ```
 
-Defined in: [packages/db/src/errors.ts:1186](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1186)
+Defined in: [packages/db/src/errors.ts:1206](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1206)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 readonly collectionId: string;
 ```
 
-Defined in: [packages/db/src/errors.ts:1187](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1187)
+Defined in: [packages/db/src/errors.ts:1207](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1207)
 
 ***
 

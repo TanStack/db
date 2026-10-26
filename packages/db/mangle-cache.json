@@ -414,6 +414,7 @@
   "coverSource": "fN",
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
-  "getWritableSyncTransaction": "b_",
-  "mergesOverRow": "gT"
+  "includesRuntimeCache": "gT",
+  "getWritableSyncTransaction": "ar",
+  "mergesOverRow": "b_"
 }
