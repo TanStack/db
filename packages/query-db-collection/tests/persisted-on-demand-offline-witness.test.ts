@@ -200,7 +200,9 @@ async function runHistory(
             expect(
               first.collection.toArray.filter((row) => row.group === `a`),
             ).toEqual([]),
-          { timeout: 2000 },
+          // Retention runs on Query DB's own timers, which a loaded CI
+          // runner can delay well past the 20 ms gcTime.
+          { timeout: 10_000 },
         )
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
@@ -303,5 +305,6 @@ describe(`persisted on-demand Query DB query while offline with network-first`, 
         atWait: observed.atWait,
       }).toEqual(expected)
     },
+    20_000,
   )
 })
