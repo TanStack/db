@@ -41,7 +41,6 @@
   "hasSettledSourceRequest": "aL",
   "pendingWindowGeneration": "aM",
   "deferral": "aN",
-  "isThisCollection": "aP",
   "activeDemands": "aQ",
   "truncateReplacementPending": "aR",
   "lastLiveQueryTimestamp": "aS",
@@ -99,7 +98,6 @@
   "lastPrefixCount": "bQ",
   "recordLoadSubsetError": "bR",
   "updateLiveQueryStatus": "bS",
-  "createVirtualPropsSnapshot": "bT",
   "isDrainingSyncTransactions": "bU",
   "leaseVersions": "bV",
   "_clone": "bW",
@@ -303,7 +301,6 @@
   "demandGeneration": "fp",
   "getActiveBuckets": "fq",
   "getEntry": "fr",
-  "getPreviousValue": "fs",
   "hydrateLiveQuery": "ft",
   "_lastError": "fu",
   "accumulate": "fv",
@@ -314,7 +311,6 @@
   "sendChangesToD2": "fA",
   "warnUnoptimized": "fB",
   "handleTruncate": "fC",
-  "performCleanup": "fD",
   "getSyncConfig": "fE",
   "prepareChange": "fF",
   "applyChanges": "fG",
@@ -417,5 +413,6 @@
   "ssrQueryWaiters": "bL",
   "includesRuntimeCache": "ch",
   "failSsrQueryWaiters": "cA",
-  "snapshotMetadata": "cE"
+  "gcGraceUntil": "aP",
+  "snapshotMetadata": "bT"
 }
