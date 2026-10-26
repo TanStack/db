@@ -503,9 +503,13 @@ readers that skip invalidated transactions in place. The marker is a bare
 bytes and the wrapper imports the symbol from `@tanstack/db`. Seed status
 became a key set on every seed transaction (a `DbClient` chunk passes its
 keys), so per-key storage reads cost no extra check. `@tanstack/db` as a
-whole package grows 375, `db-sqlite-persistence-core` 699 (876 before that
-round: removing the operation walk and the hydration-deferred metadata
-path paid for the new rules), and `query-db-collection` shrinks 14.
+whole package grows 375, `db-sqlite-persistence-core` 849, and
+`query-db-collection` shrinks 14. In persistence, the second high review
+went from 876 to 699 because removing the operation walk and the
+hydration-deferred metadata path paid for its rules; the third added 150
+for the per-object record of writes in this run, judging open inserts
+again after internal writes, and the `begin` guard. `app` did not change
+in the third.
 
 Earlier rounds: the private-member mangle cache now
 covers the branch's new private methods. Removing Query's owner supplement
@@ -665,6 +669,25 @@ the `persisted-reads` lane, a public-message witness, and scaling runs.
 | R9: re-judgment was quadratic | Fixed by the same change as R5: 8000 implicit inserts re-judge in 2.5 ms (2000 took 18 ms). A mutant that judges against the transaction's whole row fails two witnesses and three campaigns |
 | R10: readers copied the pending queue on every read | Fixed: they skip invalidated transactions in place |
 | S1 (sibling): a commit threw when an on-demand read started during its transaction | Fixed by decision 12; the `persisted-reads` lane found it |
+
+## Sixth review round (third high review)
+
+A high review of `ff80a31c3` raised nine items. The oracle changes came
+first: a peer-route witness grid (metadata-only notice, a missed notice, a
+peer row during an open insert) and stored rows for the `persisted-reads`
+lane's read hold, with reach `storage read of a stored row`.
+
+| Finding | Disposition |
+|---|---|
+| H1: a peer's metadata-only notice did not count as a source write | Fixed: the runtime records row keys and metadata keys apart (D5 judges them separately). Witness `treats a peer's write in this run as a source write (metadata-only notice over a held seed)` failed on `ff80a31c3` |
+| H2: the gap-recovery fallback and term-fence reloads left the run's writes known | Fixed: both mark them unknown. Witness `… (write whose notice was missed)` failed on `ff80a31c3` |
+| H3: rows a peer's notice or a storage read landed ahead of an open wrapper insert did not judge it again | Fixed: every internal apply judges the open transactions' inserts again. Witness `… (peer row during an open insert)` failed on `ff80a31c3` |
+| H4: a held seed ignores the unknown-writes state that seed marking honours | Awaiting the maintainer: what holds when a stored row's author is unknown |
+| H5: the read lane's storage read returned no rows | Fixed in the oracle: the holding adapter keeps durable rows; the lane reaches `storage read of a stored row` and passes |
+| H6: the storage read assumed `begin` opened the transaction it marks | Fixed: it marks seeds only when `begin` opened one |
+| H7: the staged-row fold copied the queues on every read | Fixed: it iterates them in place |
+| H8: re-judgment scanned every implicit insert on each inner commit | Fixed: it looks up the inner transaction's keys |
+| H9: `syncWriteNamesWholeRow` was exported without `@internal` | Fixed |
 
 ## Open
 

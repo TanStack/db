@@ -472,6 +472,13 @@ export function historyRegimes(
     if (action.type === `release`) reading = false
     if (reading && writesSource(action) && model.depth > 0)
       regimes.add(`write during a storage read`)
+    // A read hold over rows the source already committed reads them back.
+    if (
+      action.type === `hold` &&
+      action.read === true &&
+      sessionRowKeys.some((key) => model.sourceWroteRow(key))
+    )
+      regimes.add(`storage read of a stored row`)
     const before = {
       held: model.heldTransactions,
       depth: model.depth,

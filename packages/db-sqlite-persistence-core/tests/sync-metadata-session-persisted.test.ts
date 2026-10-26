@@ -67,20 +67,27 @@ type Row = { id: number; v: unknown }
 type SyncActions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 
 /**
- * An in-memory adapter that can hold its next durable step. It stores no
- * rows of its own. With `cached`, its reads supply row 1 from a previous
- * run's storage until this run's first durable commit; the oracle observes
- * one run, so later reads do not occur in its histories.
+ * An in-memory adapter that can hold its next durable step. With `cached`,
+ * its reads supply row 1 from a previous run's storage until this run's
+ * first durable commit; the oracle observes one run. With `stores`, it keeps
+ * every durable row and returns them to reads, so a storage read during the
+ * run hands this tab's own rows back to the wrapper.
  */
-function createHoldingAdapter(cached = false) {
+function createHoldingAdapter(cached = false, stores = false) {
   let holdNext = false
   let releaseStore: (() => void) | undefined
   let latest = { term: 0, seq: 0, rowVersion: 0 }
   let cachedRows = cached
     ? [{ key: 1, value: cachedRow, metadata: cachedMetadata }]
     : []
+  const stored = new Map<number, { value: Row; metadata?: unknown }>()
   const adapter: PersistenceAdapter = {
-    loadSubset: () => Promise.resolve(cachedRows),
+    loadSubset: () =>
+      Promise.resolve(
+        stores
+          ? Array.from(stored, ([key, row]) => ({ key, ...row }))
+          : cachedRows,
+      ),
     loadResumeSnapshot: () =>
       Promise.resolve({
         rows: cachedRows,
@@ -101,6 +108,24 @@ function createHoldingAdapter(cached = false) {
         })
       }
       latest = { term: tx.term, seq: tx.seq, rowVersion: tx.rowVersion }
+      if (!stores) return
+      if (tx.truncate) stored.clear()
+      for (const mutation of tx.mutations) {
+        const key = mutation.key as number
+        if (mutation.type === `delete`) stored.delete(key)
+        else
+          stored.set(key, {
+            value: (mutation.type === `update`
+              ? { ...stored.get(key)?.value, ...mutation.value }
+              : mutation.value) as Row,
+            metadata: stored.get(key)?.metadata,
+          })
+      }
+      for (const mutation of tx.rowMetadataMutations ?? []) {
+        const row = stored.get(mutation.key as number)
+        if (row)
+          row.metadata = mutation.type === `delete` ? undefined : mutation.value
+      }
     },
     ensureIndex: () => Promise.resolve(),
   }
@@ -129,7 +154,7 @@ async function createPersistedDriver(
   cached = false,
   reads = false,
 ): Promise<SessionDriver> {
-  const store = createHoldingAdapter(cached)
+  const store = createHoldingAdapter(cached, reads)
   const id = `sync-metadata-session-persisted-${run++}`
   let sync!: SyncActions
   let resolveMutation: (() => void) | undefined
@@ -665,7 +690,12 @@ const extraLanes: Array<{
     lane: persistedReadLane,
     seed: 2_220_017,
     runs: 150,
-    reach: [`write during a storage read`, `nested commit`, `store hold`],
+    reach: [
+      `write during a storage read`,
+      `storage read of a stored row`,
+      `nested commit`,
+      `store hold`,
+    ],
   },
   // A seed's metadata still governs a row whose metadata an accepted
   // re-insert kept, here also when the re-insert committed ahead of the

@@ -4714,7 +4714,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         getKey: (row: Todo) => row.id,
         persistence: { adapter },
       }
-      const options =
+      // Each branch creates its Collection from one options type, so the
+      // call never resolves overloads against a union.
+      const syncOptions =
         mode === `sync-present`
           ? persistedCollectionOptions<Todo, string>({
               ...base,
@@ -4725,8 +4727,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 },
               },
             })
-          : persistedCollectionOptions<Todo, string>(base)
-      const first = createCollection(options)
+          : undefined
+      const localOptions = syncOptions
+        ? undefined
+        : persistedCollectionOptions<Todo, string>(base)
+      const options = syncOptions ?? localOptions!
+      const first = syncOptions
+        ? createCollection(syncOptions)
+        : createCollection(localOptions!)
       const second = createCollection({
         id: `unclaimed-${mode}`,
         getKey: (row: Todo) => row.id,
@@ -4855,7 +4863,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         getKey: (row: Todo) => row.id,
         persistence: { adapter },
       }
-      const options =
+      // Each branch creates its Collection from one options type, so the
+      // call never resolves overloads against a union.
+      const syncOptions =
         mode === `sync-present`
           ? persistedCollectionOptions<Todo, string>({
               ...base,
@@ -4866,8 +4876,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 },
               },
             })
-          : persistedCollectionOptions<Todo, string>(base)
-      const first = createCollection(options)
+          : undefined
+      const localOptions = syncOptions
+        ? undefined
+        : persistedCollectionOptions<Todo, string>(base)
+      const options = syncOptions ?? localOptions!
+      const first = syncOptions
+        ? createCollection(syncOptions)
+        : createCollection(localOptions!)
       const second = createCollection({
         id: `post-cleanup-copy-${mode}`,
         getKey: (row: Todo) => row.id,
@@ -32433,6 +32449,187 @@ it.each([
         title: collection.get(`remote`)?.title,
         metadata: source.metadata?.row.get(`remote`),
       }).toEqual({ title: `written by a peer`, metadata: { peer: true } })
+    } finally {
+      await client.cleanup()
+    }
+  },
+)
+
+// Peer writes in this run, per object and per route (decision 11). A peer's
+// notice can name only row metadata; a peer's write can reach this tab only
+// through a reload after a gap the catch-up cannot fill; and a peer's row can
+// arrive while this tab's source has an open insert of the same key.
+// Recorded in docs/contributing/oracle-reviews/
+// 2026-10-22-sync-metadata-session.md.
+it.each([
+  `metadata-only notice over a held seed`,
+  `write whose notice was missed`,
+  `peer row during an open insert`,
+] as const)(
+  `treats a peer's write in this run as a source write (%s)`,
+  async (variant) => {
+    const adapter = createRecordingAdapter([])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `peer-route-${variant.replace(/ /g, `-`)}`
+    const client = new DbClient()
+    let source!: TodoSyncParams
+    const collection = client.collection(
+      collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      ),
+    )
+    const seed = (title: string, metadata: Record<string, unknown>) =>
+      client.hydrate({
+        collections: [
+          {
+            collectionId,
+            rows: [{ key: `k`, value: { id: `k`, title }, metadata }],
+          },
+        ],
+      })
+    const observe = () => ({
+      title: collection.get(`k`)?.title,
+      metadata: source.metadata?.row.get(`k`),
+    })
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+      if (variant === `metadata-only notice over a held seed`) {
+        seed(`held seed`, { seed: 0 })
+        await flushAsyncWork()
+        adapter.rowMetadata.set(`k`, { peer: true })
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `peer-metadata`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [],
+            deletedKeys: [],
+            rowMetadataMutations: [
+              { type: `set`, key: `k`, value: { peer: true } },
+            ],
+          },
+          `peer`,
+          collectionId,
+        )
+        await flushAsyncWork()
+        seed(`late seed`, { seeded: true })
+        await flushAsyncWork()
+        // The peer wrote only metadata, so the row stays a seed's and the
+        // later seed wins it; the peer's metadata stays.
+        expect(observe()).toEqual({
+          title: `late seed`,
+          metadata: { peer: true },
+        })
+      } else if (variant === `write whose notice was missed`) {
+        coordinator.setPullSinceResponse({
+          type: `rpc:pullSince:res`,
+          rpcId: `pull-failed`,
+          ok: false,
+          error: `unavailable`,
+        } as never)
+        // The notice for the peer's write of `k` never arrives. The next
+        // notice names another key and reveals the gap.
+        adapter.rows.set(`k`, { id: `k`, title: `written by a peer` })
+        adapter.rowMetadata.set(`k`, { peer: true })
+        adapter.rows.set(`other`, { id: `other`, title: `later peer write` })
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 3,
+            txId: `peer-after-gap`,
+            latestRowVersion: 3,
+            requiresFullReload: false,
+            changedRows: [
+              {
+                key: `other`,
+                value: { id: `other`, title: `later peer write` },
+              },
+            ],
+            deletedKeys: [],
+          },
+          `peer`,
+          collectionId,
+        )
+        await flushAsyncWork()
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(collection._sync.loadSubset({})),
+          `demand loaded`,
+        )
+        await vi.waitFor(() =>
+          expect(collection.get(`k`)?.title).toBe(`written by a peer`),
+        )
+        seed(`stale seed`, { seeded: true })
+        await flushAsyncWork()
+        expect(observe()).toEqual({
+          title: `written by a peer`,
+          metadata: { peer: true },
+        })
+      } else {
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(collection._sync.loadSubset({})),
+          `demand loaded`,
+        )
+        source.begin()
+        source.write({ type: `insert`, value: { id: `k`, title: `mine` } })
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(source.commit()),
+          `first row applied`,
+        )
+        source.begin()
+        // An equal re-insert of this tab's row, judged before the peer writes.
+        source.write({ type: `insert`, value: { id: `k`, title: `mine` } })
+        adapter.rows.set(`k`, { id: `k`, title: `written by a peer` })
+        adapter.rowMetadata.set(`k`, { peer: true })
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 2,
+            txId: `peer-during-open-insert`,
+            latestRowVersion: 2,
+            requiresFullReload: false,
+            changedRows: [
+              { key: `k`, value: { id: `k`, title: `written by a peer` } },
+            ],
+            deletedKeys: [],
+            rowMetadataMutations: [
+              { type: `set`, key: `k`, value: { peer: true } },
+            ],
+          },
+          `peer`,
+          collectionId,
+        )
+        await flushAsyncWork()
+        // The peer's row lands ahead of the open insert, which now changes
+        // the row it lands on, so the insert clears metadata (decisions 7,
+        // 10, and 11); the source reads its own open clear.
+        expect(observe()).toEqual({
+          title: `written by a peer`,
+          metadata: undefined,
+        })
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(source.commit()),
+          `insert applied`,
+        )
+        await flushAsyncWork()
+        expect(observe()).toEqual({ title: `mine`, metadata: undefined })
+      }
     } finally {
       await client.cleanup()
     }

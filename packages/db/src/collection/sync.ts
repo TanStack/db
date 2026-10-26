@@ -40,6 +40,8 @@ import type { Deferred } from '../deferred'
  * Internal marker on a sync write: an update that names the whole row, as an
  * insert does. The persisted wrapper hands an insert it already judged this
  * way. It is not part of the public sync API.
+ *
+ * @internal
  */
 export const syncWriteNamesWholeRow: unique symbol = Symbol()
 

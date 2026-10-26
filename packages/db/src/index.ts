@@ -10,6 +10,7 @@ export * from './client.js'
 export { withCollectionConfigFactory } from './client.js'
 /** @internal First-party adapter ownership marker. */
 export { collectionOptionsClaim } from './collection-options.js'
+/** @internal */
 export { syncWriteNamesWholeRow } from './collection/sync.js'
 export * from './types'
 export * from './proxy'
