@@ -1,5 +1,7 @@
 import { oracleReplayReporter } from './oracle-replay-witness.js'
 
+export { recordOracleReplay } from './oracle-replay-witness.js'
+
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
@@ -26,6 +28,7 @@ const staticOracleProperties = [
   `structural-identity.independent-values`,
   `opfs-worker.diagnostics`,
   `indexeddb.cross-tab-history`,
+  `indexeddb.browser-native-history`,
   `proxy.callback-history`,
   `indexeddb.pending-history`,
   `proxy.revert-history`,
@@ -403,6 +406,8 @@ const retiredReplayVariables = [
   `TANSTACK_DB_WS5A_PATH`,
   `TANSTACK_INDEXEDDB_ORACLE_SEED`,
   `TANSTACK_INDEXEDDB_ORACLE_PATH`,
+  `TANSTACK_INDEXEDDB_BROWSER_SEED`,
+  `TANSTACK_INDEXEDDB_BROWSER_PATH`,
   `TANSTACK_DB_PROXY_CALLBACK_SEED`,
   `TANSTACK_DB_PROXY_CALLBACK_PATH`,
   `TANSTACK_DB_PROXY_REVERT_SEED`,

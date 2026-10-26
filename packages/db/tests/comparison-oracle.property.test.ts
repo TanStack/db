@@ -15,6 +15,7 @@ import {
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRuns,
+  recordOracleReplay,
 } from './oracle-config.js'
 import type { CompareOptions } from '../src/query/builder/types'
 
@@ -104,6 +105,7 @@ function checkWithOriginalFailure<T>(
   arbitrary: fc.Arbitrary<T>,
   check: (value: T) => void,
   options: Parameters<typeof fc.check>[1],
+  replayProperty?: string,
 ) {
   let original: ComparisonFailure | undefined
   let reduced: ComparisonFailure | undefined
@@ -121,6 +123,7 @@ function checkWithOriginalFailure<T>(
     }
   })
   const result = fc.check(property, options)
+  if (replayProperty !== undefined) recordOracleReplay(replayProperty, result)
   return { result, original, reduced }
 }
 
@@ -129,11 +132,14 @@ function assertComparisonProperty<T>(
   arbitrary: fc.Arbitrary<T>,
   check: (value: T) => void,
   options: Parameters<typeof fc.check>[1],
+  // The registered property, so a guarded replay can witness this run.
+  replayProperty?: string,
 ): void {
   const { result, original, reduced } = checkWithOriginalFailure(
     arbitrary,
     check,
     options,
+    replayProperty,
   )
   if (!result.failed) return
   if (!original || !reduced || result.counterexamplePath === null) {
@@ -186,6 +192,7 @@ function comparisonProperty<
         arbitrary,
         checkValues,
         oraclePropertyOptions(campaignRuns, property),
+        property,
       )
     })
   }

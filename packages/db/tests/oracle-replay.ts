@@ -73,21 +73,38 @@ try {
     entry.testNamePattern === undefined
       ? requestedArgs
       : selectReplayTest(requestedArgs, entry.testNamePattern)
-  const result = spawnSync(process.execPath, [vitest, `run`, ...args], {
-    cwd: process.cwd(),
-    env: { ...process.env, TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel },
-    stdio: `inherit`,
-  })
-  if (result.error) throw result.error
-  const records = existsSync(channel)
-    ? readFileSync(channel, `utf8`).trim()
-    : ``
-  const witnesses: Array<OracleReplayWitness> =
-    records === ``
-      ? []
-      : records
-          .split(`\n`)
-          .map((line: string) => JSON.parse(line) as OracleReplayWitness)
+  // A synchronous property rejects the async witness before it runs, so the
+  // first attempt records nothing and fails. Retry once with the synchronous
+  // witness. An async property records its witness on the first attempt.
+  const attempt = (mode: `async` | `sync`) => {
+    rmSync(channel, { force: true })
+    const run = spawnSync(process.execPath, [vitest, `run`, ...args], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel,
+        TANSTACK_DB_ORACLE_REPLAY_WITNESS_MODE: mode,
+      },
+      stdio: `inherit`,
+    })
+    if (run.error) throw run.error
+    const lines = existsSync(channel)
+      ? readFileSync(channel, `utf8`).trim()
+      : ``
+    const recorded: Array<OracleReplayWitness> =
+      lines === ``
+        ? []
+        : lines
+            .split(`\n`)
+            .map((line: string) => JSON.parse(line) as OracleReplayWitness)
+    return { run, recorded }
+  }
+  let { run: result, recorded: witnesses } = attempt(`async`)
+  let witnessMode: `async` | `sync` = `async`
+  if (witnesses.length === 0 && result.status !== 0) {
+    ;({ run: result, recorded: witnesses } = attempt(`sync`))
+    witnessMode = `sync`
+  }
   const reached = witnesses.filter(
     (witness) =>
       witness.property === property &&
@@ -102,6 +119,7 @@ try {
       path: config.replayPath,
       owner: entry.file,
       command: [process.execPath, vitest, `run`, ...args],
+      witnessMode,
       witnesses,
       executions: reached.length,
     })}`,

@@ -386,6 +386,11 @@ const ownerGroups: ReadonlyArray<
   ],
   [`db/tests/proxy-oracle.test.ts`, `proxy`, `callback-history`],
   [
+    `db/e2e/indexed-db/cross-tab-oracle.spec.ts`,
+    `indexeddb`,
+    `browser-native-history`,
+  ],
+  [
     `db/tests/indexed-db/pending-history-oracle.test.ts`,
     `indexeddb`,
     `pending-history`,
@@ -519,7 +524,11 @@ for (const property of registeredOracleProperties) {
 
 export type OracleReplayManifestEntry = {
   property: string
-  status: `assertion` | `statistics-only` | `no-named-owner`
+  /**
+   * `browser-replay` names a Playwright owner. The guarded Vitest runner
+   * cannot witness it, so it rejects the target. Replay it with `command`.
+   */
+  status: `assertion` | `statistics-only` | `browser-replay` | `no-named-owner`
   file?: string
   /** The module that names the property, when the owner file imports it. */
   source?: string
@@ -576,10 +585,12 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
   const status =
     file === undefined
       ? `no-named-owner`
-      : property.endsWith(`-statistics`) ||
-          property.endsWith(`.scenario-statistics`)
-        ? `statistics-only`
-        : `assertion`
+      : file.endsWith(`.spec.ts`)
+        ? `browser-replay`
+        : property.endsWith(`-statistics`) ||
+            property.endsWith(`.scenario-statistics`)
+          ? `statistics-only`
+          : `assertion`
   const cwd = file?.split(`/`).slice(0, 2).join(`/`)
   return {
     property,
@@ -591,7 +602,9 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
     command:
       file === undefined
         ? undefined
-        : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+        : status === `browser-replay`
+          ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
+          : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [

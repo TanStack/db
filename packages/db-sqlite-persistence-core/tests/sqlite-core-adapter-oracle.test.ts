@@ -13,6 +13,7 @@ import {
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
+  recordOracleReplay,
 } from '../../db/tests/oracle-config.js'
 import {
   SQLiteCorePersistenceAdapter,
@@ -4399,6 +4400,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         }
       })
       const details = await fc.check(property, parameters)
+      recordOracleReplay(BINDING_PROPERTY, details)
       const reduced = details.counterexample?.[0]
       const reducedProblem = reduced
         ? violation(reduced, await observe(reduced))

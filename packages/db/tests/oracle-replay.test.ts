@@ -207,6 +207,13 @@ describe(`guarded oracle replay`, () => {
     40_000,
   )
 
+  it(`witnesses a synchronous target through the synchronous witness`, () => {
+    const result = runReplay([fixture], `sync`)
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).toContain(`"witnessMode":"sync"`)
+    expect(result.output).toContain(`"executions":1`)
+  }, 60_000)
+
   it.each([
     {
       name: `wrong file`,
