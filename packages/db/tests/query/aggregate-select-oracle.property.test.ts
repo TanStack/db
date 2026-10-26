@@ -135,7 +135,7 @@ import { createOracleReach } from '../oracle-reach.js'
  * valid on its own, `count()` alone, so only the missing runtime can fail it.
  * Half the histories that strip the grouping compiler likewise give the
  * top-level query a select of `count()` alone, with an aggregate HAVING when
- * the generated shape has one. One history in three is such a forced
+ * the generated shape has one. One history in four is such a forced
  * history: it strips the grouping compiler everywhere or from orderBy only,
  * with no grouping, one key, or two keys, in turn, so every campaign reaches
  * each path whatever its seed. A model error set of exactly
@@ -144,19 +144,31 @@ import { createOracleReach } from '../oracle-reach.js'
  * property declares the states these laws need with `createOracleReach` and
  * fails when a campaign does not reach each of them.
  *
- * The top-level query may order its groups by one aggregate, ascending or
- * descending. Published rows then fall into blocks of equal orderBy value in
- * that order; order within a block is not part of the law. In one generated
- * history of six, and in half the forced ones, the driver strips the grouping compiler from the orderBy aggregate
- * only; the query then compiles with the compiler that `groupKeys()` or a
- * select or HAVING aggregate brings, and throws `GroupingOperatorRequiredError`
- * when none does. Half the generated ones and all forced ones select the
- * aggregate they order by, so only that path can fail them.
+ * Both the top-level query and the include query may order their groups
+ * with one or two `orderBy` calls, the first primary (docs: "Multiple Column
+ * Ordering"). A term orders by an aggregate, ascending or descending, or by a
+ * select field through `$selected` (docs: "Ordering by SELECT Fields"): a
+ * number field, or a string group key with the documented `en-US` locale
+ * collation. Published rows, and each parent's `kids`, then fall into blocks
+ * whose orderBy values compare equal, in the order the terms give; order
+ * within a block is not part of the law. An orderBy aggregate that no
+ * top-level field selects throws `AggregateFunctionNotInSelectError`. In one
+ * generated history of six, in half the forced ones, and in one ordered
+ * history of three, the driver strips the grouping compiler from the
+ * top-level orderBy aggregates only; the query then compiles with the
+ * compiler that `groupKeys()` or a select or HAVING aggregate brings, and
+ * throws `GroupingOperatorRequiredError` when none does. Generated shapes
+ * with an orderBy rarely compile, so one history in four takes ordered
+ * shapes from a grammar whose shapes compile. The source starts with a row
+ * whose key `A` sorts between `a` and `b`, where locale and code-unit order
+ * differ.
  *
- * Limits: one parent field (`x`) and one source field (`v`); groups by one
- * key or by the pair `c.k`, `gt(c.v, 1)`; numbers only. orderBy appears only
- * on the top-level query and on one aggregate. A nested include in a unionAll query is rejected
- * before compilation, so the driver checks only that it throws.
+ * Limits: one parent field (`x`) and one source field (`v`); groups by one,
+ * two, or three keys; numbers and string keys only. A boolean, Date, `NaN`,
+ * or nested-object select field never orders the rows, and no orderBy term
+ * is a raw expression other than an aggregate. A nested include in a
+ * unionAll query is rejected before compilation, so the driver checks only
+ * that it throws.
  */
 
 const PROPERTY = `aggregate.select-shapes`
@@ -183,10 +195,11 @@ type Shape = {
   having?: { part: Part; lit: number | string; selected?: string }
   spread?: `source` | `parent`
   /**
-   * A top-level `orderBy` on one aggregate. Like a HAVING aggregate, it reads
-   * the same aggregate selected as a top-level field.
+   * One or two `orderBy` calls; the first is the primary sort. A term orders
+   * by an aggregate, which reads the same aggregate selected as a top-level
+   * field, or by a select field through `$selected`.
    */
-  orderBy?: { fn: `count` | `sum` | `max`; dir: `asc` | `desc` }
+  orderBy?: Array<OrderTerm>
   /**
    * A nested include beside the aggregate: wrapped in `toArray()` or bare, as
    * a field, inside a nested object, or in both branches of a conditional.
@@ -197,14 +210,31 @@ type Shape = {
   }
 }
 
+type OrderTerm =
+  | { by: `agg`; fn: `count` | `sum` | `max`; dir: `asc` | `desc` }
+  | {
+      by: `selected`
+      field: string
+      /** A string field sorts with the documented `en-US` locale collation. */
+      kind: `number` | `string`
+      dir: `asc` | `desc`
+    }
+
 /**
  * How a history groups: not at all, by the ref `c.k`, or by the computed
  * expression `upper(c.k)` or `inArray(c.k, ['a', 'b'])`. The `key` leaf is
  * that group expression, built again with a new list literal each time.
- * `pair` groups by two keys, `c.k` and `gt(c.v, 1)`; its `key` leaf is `c.k`,
- * and an update of `v` can move a row to another group.
+ * `pair` groups by two keys, `c.k` and `gt(c.v, 1)`, and `triple` by three,
+ * adding `gt(c.v, 2)`; their `key` leaf is `c.k`, and an update of `v` can
+ * move a row to another group.
  */
-type Grouping = `none` | `key` | `upper` | `inList` | `date` | `nan` | `pair`
+type Grouping =
+  `none` | `key` | `upper` | `inList` | `date` | `nan` | `pair` | `triple`
+
+/** Groupings whose keys include the raw field `c.k`. */
+function groupsByRawKey(grouping: Grouping): boolean {
+  return grouping === `key` || grouping === `pair` || grouping === `triple`
+}
 
 type Issue = { id: number; k: string; x: number }
 type Comment = { id: number; k: string; v: number }
@@ -240,7 +270,7 @@ function readsSourceOutsideAggregate(part: Part, grouping: Grouping): boolean {
     // Under `upper(c.k)`, `a` and `A` share a group, so `c.k` is a source
     // field with no single value for it.
     case `rawKey`:
-      return grouping !== `key` && grouping !== `pair`
+      return !groupsByRawKey(grouping)
     case `add`:
       return [part.a, part.b].some(reads)
     case `case`:
@@ -328,9 +358,16 @@ function selectOrHavingAggregate(shape: Shape): boolean {
   )
 }
 
+/** The aggregates the orderBy terms read. */
+function orderAggregates(shape: Shape): Array<`count` | `sum` | `max`> {
+  return (shape.orderBy ?? []).flatMap((term) =>
+    term.by === `agg` ? [term.fn] : [],
+  )
+}
+
 /** An aggregate in the select, HAVING, or orderBy brings the grouping compiler. */
 function shapeHasAggregate(shape: Shape): boolean {
-  return selectOrHavingAggregate(shape) || shape.orderBy !== undefined
+  return selectOrHavingAggregate(shape) || orderAggregates(shape).length > 0
 }
 
 /**
@@ -376,18 +413,14 @@ function modelErrors(
   // `groupKeys()` or a select or HAVING aggregate brings, if any.
   if (
     stripped === `orderBy` &&
-    shape.orderBy !== undefined &&
+    orderAggregates(shape).length > 0 &&
     !(grouping !== `none` && !bareKeys) &&
     !selectOrHavingAggregate(shape)
   )
     errors.add(`groupingRequired`)
   // An orderBy aggregate reads the same aggregate selected as a top-level
-  // field. The docs state this rule for HAVING only (error 72); `main`
-  // applies it to orderBy too, and this model keeps that behavior.
-  if (
-    shape.orderBy !== undefined &&
-    !selectedAggregates(shape).has(shape.orderBy.fn)
-  )
+  // field (docs: "Ordering by SELECT Fields").
+  if (orderAggregates(shape).some((fn) => !selectedAggregates(shape).has(fn)))
     errors.add(`aggregateNotInSelect`)
   const error = modelError(shape, grouping)
   if (error) errors.add(error)
@@ -425,6 +458,8 @@ function groupKeyOf(
 /** Group identity by value: equal Dates and NaN each form one group. */
 function groupIdOf(row: Comment, grouping: Grouping): string {
   if (grouping === `pair`) return `${row.k}|${String(row.v > 1)}`
+  if (grouping === `triple`)
+    return `${row.k}|${String(row.v > 1)}|${String(row.v > 2)}`
   const key = groupKeyOf(row, grouping)
   return key instanceof Date
     ? `date:${key.getTime()}`
@@ -527,27 +562,51 @@ function modelGroup(
   )
 }
 
+/** The documented `en-US` locale collation for string orderBy terms. */
+const collator = new Intl.Collator(`en-US`)
+
 /**
- * The published order under `orderBy`: blocks of rows with equal orderBy
- * values, in ascending or descending value order. Order within a block is
- * not part of the law.
+ * The published order under `orderBy`: blocks of rows whose orderBy values
+ * compare equal, in the order the terms give, the first term primary. Order
+ * within a block is not part of the law.
  */
 function modelOrderBlocks(
   shape: Shape,
   rows: ReadonlyArray<Comment>,
+  parent: Issue | undefined,
   grouping: Grouping,
 ): Array<Array<Record<string, unknown>>> {
-  const { fn, dir } = shape.orderBy!
-  const keyed = modelGroups(shape, rows, undefined, grouping).map((group) => ({
-    value: evaluate({ k: `agg`, fn }, group, undefined, grouping) as number,
-    row: modelRow(shape, group, undefined, grouping),
-  }))
-  const values = [...new Set(keyed.map(({ value }) => value))].sort((a, b) =>
-    dir === `asc` ? a - b : b - a,
-  )
-  return values.map((value) =>
-    sortRows(keyed.filter((k) => k.value === value).map(({ row }) => row)),
-  )
+  const terms = shape.orderBy!
+  const keyed = modelGroups(shape, rows, parent, grouping).map((group) => {
+    const row = modelRow(shape, group, parent, grouping)
+    return {
+      row,
+      values: terms.map((term) =>
+        term.by === `agg`
+          ? evaluate({ k: `agg`, fn: term.fn }, group, parent, grouping)
+          : row[term.field],
+      ),
+    }
+  })
+  const compare = (a: Array<unknown>, b: Array<unknown>): number => {
+    for (const [index, term] of terms.entries()) {
+      const [x, y] = [a[index], b[index]]
+      const result =
+        typeof x === `string` && typeof y === `string`
+          ? collator.compare(x, y)
+          : (x as number) - (y as number)
+      if (result !== 0) return term.dir === `asc` ? result : -result
+    }
+    return 0
+  }
+  const sorted = [...keyed].sort((a, b) => compare(a.values, b.values))
+  const blocks: Array<Array<Record<string, unknown>>> = []
+  sorted.forEach((entry, index) => {
+    if (index === 0 || compare(sorted[index - 1]!.values, entry.values) !== 0)
+      blocks.push([])
+    blocks[blocks.length - 1]!.push(entry.row)
+  })
+  return blocks.map(sortRows)
 }
 
 /** Group order is not part of the law. */
@@ -647,6 +706,12 @@ const part = (
   )
 // A grouped query needs no aggregate; an ungrouped one is an aggregate query
 // only when it holds one.
+const orderSeed: fc.Arbitrary<OrderSeed> = fc.record({
+  fn: fc.constantFrom(`count` as const, `sum` as const, `max` as const),
+  dir: fc.constantFrom(`asc` as const, `desc` as const),
+  selected: fc.option(fc.nat(2), { nil: undefined, freq: 2 }),
+})
+
 const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
   fc
     .record({
@@ -663,20 +728,11 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
         ),
         { nil: undefined, freq: 5 },
       ),
-      // Only the top-level query, which has no parent, orders its groups.
-      orderBy: include
-        ? fc.constant(undefined)
-        : fc.option(
-            fc.record({
-              fn: fc.constantFrom(
-                `count` as const,
-                `sum` as const,
-                `max` as const,
-              ),
-              dir: fc.constantFrom(`asc` as const, `desc` as const),
-            }),
-            { nil: undefined, freq: 2 },
-          ),
+      // Terms are chosen after the fields, so they can name one.
+      orderSeeds: fc.option(
+        fc.array(orderSeed, { minLength: 1, maxLength: 2 }),
+        { nil: undefined, freq: 2 },
+      ),
       include: fc.option(
         fc.record({
           wrap: fc.constantFrom(
@@ -721,6 +777,127 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
     .filter(
       (s) => grouping !== `none` || Object.values(s.fields).some(hasAggregate),
     )
+    .map(({ orderSeeds, ...s }): Shape =>
+      orderSeeds ? { ...s, orderBy: orderTerms(s, orderSeeds, grouping) } : s,
+    )
+
+type OrderSeed = {
+  fn: `count` | `sum` | `max`
+  dir: `asc` | `desc`
+  selected: number | undefined
+}
+
+/**
+ * The orderBy terms for some seeds. A seed with a field index orders by that
+ * select field when the field has an order: a number, or a string group key.
+ */
+function orderTerms(
+  s: Shape,
+  seeds: ReadonlyArray<OrderSeed>,
+  grouping: Grouping,
+): Array<OrderTerm> {
+  const orderable = Object.entries(s.fields).flatMap(([field, part]) => {
+    const kind = orderKind(part, grouping)
+    return kind ? [{ field, kind }] : []
+  })
+  return seeds.map(({ fn, dir, selected }): OrderTerm => {
+    const target =
+      selected === undefined || orderable.length === 0
+        ? undefined
+        : orderable[selected % orderable.length]!
+    return target ? { by: `selected`, ...target, dir } : { by: `agg`, fn, dir }
+  })
+}
+
+/**
+ * Ordered shapes that compile: fields of aggregates, literals, the group
+ * key (always, when it is a string), a parent field, or an aggregate plus a
+ * literal, with no HAVING,
+ * spread, or include, ordered by one or two terms. An aggregate term orders
+ * by an aggregate that a field selects. Generated shapes compile too rarely
+ * to reach the ordering laws on their own.
+ */
+const orderedShape = (
+  include: boolean,
+  grouping: Grouping,
+): fc.Arbitrary<Shape> => {
+  const agg = fc
+    .constantFrom(`count` as const, `sum` as const, `max` as const)
+    .map((fn): Part => ({ k: `agg`, fn }))
+  const field = fc.oneof(
+    { weight: 3, arbitrary: agg },
+    literal.map((n): Part => ({ k: `lit`, n })),
+    ...(grouping === `none` ? [] : [fc.constant<Part>({ k: `key` })]),
+    ...(include ? [fc.constant<Part>({ k: `parent` })] : []),
+    fc
+      .tuple(agg, literal)
+      .map(([a, n]): Part => ({ k: `add`, a, b: { k: `lit`, n } })),
+  )
+  return fc
+    .tuple(
+      fc.dictionary(fc.constantFrom(`f0`, `f1`, `f2`), field, {
+        minKeys: 1,
+        maxKeys: 3,
+      }),
+      fc.array(orderSeed, { minLength: 1, maxLength: 2 }),
+    )
+    .filter(
+      ([fields]) =>
+        grouping !== `none` || Object.values(fields).some(hasAggregate),
+    )
+    .map(([generated, seeds]): Shape => {
+      // A grouping with a string key always selects it, so string terms occur.
+      const fields =
+        orderKind({ k: `key` }, grouping) === `string`
+          ? { ...generated, fk: { k: `key` } as Part }
+          : generated
+      const s: Shape = { fields }
+      const selected = [...selectedAggregates(s)]
+      // An aggregate term names an aggregate the select holds, if any.
+      const usable = seeds.map((seed) =>
+        selected.length === 0 || selected.includes(seed.fn)
+          ? seed
+          : { ...seed, fn: selected[0]! },
+      )
+      return { ...s, orderBy: orderTerms(s, usable, grouping) }
+    })
+}
+
+/**
+ * Whether a select field has an order the model can state: numbers, or the
+ * string group key under the documented locale collation. Booleans, Dates,
+ * `NaN`, nested objects, and values that mix types do not.
+ */
+function orderKind(
+  part: Part,
+  grouping: Grouping,
+): `number` | `string` | undefined {
+  switch (part.k) {
+    case `lit`:
+    case `parent`:
+    case `agg`:
+      return `number`
+    case `add`:
+      return orderKind(part.a, grouping) === `number` &&
+        orderKind(part.b, grouping) === `number`
+        ? `number`
+        : undefined
+    case `case`: {
+      const a = orderKind(part.a, grouping)
+      return a !== undefined && a === orderKind(part.b, grouping)
+        ? a
+        : undefined
+    }
+    case `key`:
+      return groupsByRawKey(grouping) || grouping === `upper`
+        ? `string`
+        : undefined
+    case `rawKey`:
+      return groupsByRawKey(grouping) ? `string` : undefined
+    default:
+      return undefined
+  }
+}
 
 type Step =
   | { t: `parent`; id: number; x: number }
@@ -887,6 +1064,46 @@ function withoutOperatorCode<T>(value: T, stripped: Stripped): T {
   return strip(value)
 }
 
+/**
+ * The published sequence splits into the model's blocks, in order. A
+ * sequence with several blocks witnesses each kind of term it orders by.
+ */
+function expectOrder(
+  label: string,
+  shape: Shape,
+  published: ReadonlyArray<unknown>,
+  blocks: Array<Array<Record<string, unknown>>>,
+): void {
+  const rows = published.map((row: any) => stripVirtualProps(row))
+  let at = 0
+  for (const block of blocks) {
+    expect(
+      sortRows(rows.slice(at, at + block.length)),
+      `${label} rows in orderBy position ${at}`,
+    ).toEqual(block)
+    at += block.length
+  }
+  expect(rows.length, `${label} row count`).toBe(at)
+  if (blocks.length < 2) return
+  const terms = shape.orderBy!
+  if (terms.some((term) => term.by === `agg`))
+    reach?.reach(`an aggregate orders the published rows`)
+  if (terms.some((term) => term.by === `selected` && term.kind === `number`))
+    reach?.reach(`a number select field orders the published rows`)
+  const strings = terms.flatMap((term) =>
+    term.by === `selected` && term.kind === `string` ? [term.field] : [],
+  )
+  if (strings.length > 0)
+    reach?.reach(`a string select field orders the published rows`)
+  // Locale and code-unit order differ only between `A` and a lowercase key.
+  const keys = new Set(
+    rows.flatMap((row: any) => strings.map((field) => row[field])),
+  )
+  if (keys.has(`A`) && (keys.has(`a`) || keys.has(`b`)))
+    reach?.reach(`a string field orders A against a lowercase key`)
+  if (terms.length > 1) reach?.reach(`two orderBy terms order the rows`)
+}
+
 /** A copy of query IR whose orderBy aggregates lack the grouping compiler. */
 function withoutOrderByGrouping(ir: any): any {
   return {
@@ -929,8 +1146,10 @@ async function runHistory(
   // Likewise half the orderBy-stripped histories select the aggregate they
   // order by, so the select aggregate's compiler must order the rows.
   if (stripped === `orderBy` && alone) {
-    const order = top.orderBy ?? { fn: `sum`, dir: `asc` }
-    top = { fields: { f0: { k: `agg`, fn: order.fn } }, orderBy: order }
+    const first = top.orderBy?.[0]
+    const term: OrderTerm =
+      first?.by === `agg` ? first : { by: `agg`, fn: `sum`, dir: `asc` }
+    top = { fields: { f0: { k: `agg`, fn: term.fn } }, orderBy: [term] }
   }
   reach?.beginHistory()
   if (stripped === `runtime`) reach?.reach(`include runtime stripped`)
@@ -960,16 +1179,23 @@ async function runHistory(
             ? (c) => add(c.v, NaN)
             : (c) => c.k
   groupExpressions =
-    grouping === `pair` ? (c) => [c.k, gt(c.v, 1)] : keyExpression
+    grouping === `pair`
+      ? (c) => [c.k, gt(c.v, 1)]
+      : grouping === `triple`
+        ? (c) => [c.k, gt(c.v, 1), gt(c.v, 2)]
+        : keyExpression
   const suffix = Math.random().toString(36).slice(2)
   let issues: Array<Issue> = [
     { id: 1, k: `a`, x: 1 },
     { id: 2, k: `b`, x: 2 },
   ]
+  // `A` matches no parent; under `upper(c.k)` it shares a group with `a`,
+  // and a string term orders it between `a` and `b` in `en-US` collation.
   let comments: Array<Comment> = [
     { id: 10, k: `a`, v: 1 },
     { id: 11, k: `a`, v: 2 },
     { id: 12, k: `b`, v: 3 },
+    { id: 13, k: `A`, v: 2 },
   ]
   let nextId = 20
   const issueSource = createCollection(
@@ -1050,18 +1276,22 @@ async function runHistory(
             ? withoutOrderByGrouping(getQueryIR(built))
             : withoutOperatorCode(getQueryIR(built), stripped),
         )
+  // Each term is one `orderBy` call, in order; a string term passes the
+  // documented locale collation.
   const order = (s: Shape, query: any, alias: string | undefined) =>
-    s.orderBy
-      ? query.orderBy(
+    (s.orderBy ?? []).reduce(
+      (ordered: any, term: OrderTerm) =>
+        ordered.orderBy(
           (refs: any) =>
-            build(
-              { k: `agg`, fn: s.orderBy!.fn },
-              rowOf(refs, alias),
-              undefined,
-            ),
-          s.orderBy.dir,
-        )
-      : query
+            term.by === `agg`
+              ? build({ k: `agg`, fn: term.fn }, rowOf(refs, alias), undefined)
+              : refs.$selected[term.field],
+          term.by === `selected` && term.kind === `string`
+            ? { direction: term.dir, stringSort: `locale`, locale: `en-US` }
+            : term.dir,
+        ),
+      query,
+    )
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
       finish(
@@ -1091,18 +1321,22 @@ async function runHistory(
         q.from({ issue: issueSource }).select(({ issue }) => ({
           id: issue.id,
           kids: toArray(
-            having(
+            order(
               nested,
-              group(
-                q
-                  .from({ [childAlias]: commentSource })
-                  .where((refs: any) => eq(refs[childAlias].k, issue.k)),
+              having(
+                nested,
+                group(
+                  q
+                    .from({ [childAlias]: commentSource })
+                    .where((refs: any) => eq(refs[childAlias].k, issue.k)),
+                  childAlias,
+                ).select((refs: any) =>
+                  buildSelect(nested, refs[childAlias], issue, q, issueSource),
+                ),
                 childAlias,
-              ).select((refs: any) =>
-                buildSelect(nested, refs[childAlias], issue, q, issueSource),
+                issue,
               ),
               childAlias,
-              issue,
             ),
           ),
         })),
@@ -1114,7 +1348,13 @@ async function runHistory(
     [`top`, topQuery, top],
     [`include`, includeQuery, nested],
   ] as const) {
-    const errors = modelErrors(s, grouping, bareKeys, stripped)
+    // The orderBy strip reaches the top-level query only.
+    const errors = modelErrors(
+      s,
+      grouping,
+      bareKeys,
+      label === `include` && stripped === `orderBy` ? `none` : stripped,
+    )
     // The include query's `kids` include loses its runtime too.
     if (stripped === `runtime` && label === `include`)
       errors.add(`includeRequired`)
@@ -1136,7 +1376,7 @@ async function runHistory(
     if (
       stripped === `orderBy` &&
       label === `top` &&
-      s.orderBy !== undefined &&
+      orderAggregates(s).length > 0 &&
       errors.size === 0
     )
       reach?.reach(`orderBy aggregate stripped beside a select aggregate`)
@@ -1173,23 +1413,15 @@ async function runHistory(
         ).toEqual(modelGroup(top, comments, undefined, grouping))
         if (grouping === `pair` && topQuery.value.toArray.length > 1)
           reach?.reach(`two group keys publish several groups`)
-        if (top.orderBy) {
-          // The published sequence splits into the model's blocks in order.
-          const published = topQuery.value.toArray.map((row: any) =>
-            stripVirtualProps(row),
+        if (grouping === `triple` && topQuery.value.toArray.length > 1)
+          reach?.reach(`three group keys publish several groups`)
+        if (top.orderBy)
+          expectOrder(
+            `${label}: top-level`,
+            top,
+            topQuery.value.toArray,
+            modelOrderBlocks(top, comments, undefined, grouping),
           )
-          const blocks = modelOrderBlocks(top, comments, grouping)
-          let at = 0
-          for (const block of blocks) {
-            expect(
-              sortRows(published.slice(at, at + block.length)),
-              `${label}: rows in orderBy position ${at}`,
-            ).toEqual(block)
-            at += block.length
-          }
-          if (blocks.length > 1)
-            reach?.reach(`orderBy aggregate orders the published rows`)
-        }
       }
       if (includeQuery.ok) {
         for (const issue of issues) {
@@ -1207,6 +1439,20 @@ async function runHistory(
               grouping,
             ),
           )
+          if (nested.orderBy && row) {
+            expectOrder(
+              `${label}: kids of issue ${issue.id}`,
+              nested,
+              row.kids,
+              modelOrderBlocks(
+                nested,
+                comments.filter((comment) => comment.k === issue.k),
+                issue,
+                grouping,
+              ),
+            )
+            reach?.reach(`an include query orders its rows`)
+          }
         }
       }
     }
@@ -1258,16 +1504,18 @@ const groupings = [
   `date`,
   `nan`,
   `pair`,
+  `triple`,
 ] as const satisfies ReadonlyArray<Grouping>
 
 const historyFor = (
   grouping: Grouping,
   stripped: fc.Arbitrary<Stripped>,
   alone: fc.Arbitrary<boolean>,
+  shapes: typeof shape = shape,
 ) =>
   fc.tuple(
-    shape(false, grouping),
-    shape(true, grouping),
+    shapes(false, grouping),
+    shapes(true, grouping),
     fc.constant(grouping),
     fc.boolean(),
     fc.array(step, { maxLength: 6 }),
@@ -1277,12 +1525,14 @@ const historyFor = (
     alone,
   )
 
-// Three generated histories in six build their IR by hand without one kind
-// of operator code. One history in three instead strips the grouping
-// compiler, everywhere or from orderBy only, and takes the forced shape,
-// for one or several groups chosen in turn. About 40 forced histories per
-// campaign make each path's reach state certain in practice: a campaign
-// misses the rarest one about once in 1,500 seeds.
+// Half the histories are generated; three in six of those build their IR by
+// hand without one kind of operator code. One history in four instead strips
+// the grouping compiler, everywhere or from orderBy only, and takes the
+// forced shape, for one or several groups chosen in turn. One in four takes
+// ordered shapes that compile, at the top level and in the include query,
+// and in one of three strips the orderBy aggregates' compiler. About 40
+// histories of each kind per campaign of 160 make each reach state certain
+// in practice: a campaign misses the rarest one about once in 1,500 seeds.
 const history = fc.oneof(
   {
     weight: 2,
@@ -1315,6 +1565,22 @@ const history = fc.oneof(
         historyFor(grouping, fc.constant(stripped), fc.constant(true)),
       ),
   },
+  {
+    weight: 1,
+    arbitrary: fc
+      .constantFrom(...groupings)
+      .chain((grouping) =>
+        historyFor(
+          grouping,
+          fc.oneof(
+            { weight: 2, arbitrary: fc.constant<Stripped>(`none`) },
+            fc.constant<Stripped>(`orderBy`),
+          ),
+          fc.constant(false),
+          orderedShape,
+        ),
+      ),
+  },
 )
 
 /** The states the operator laws need; each campaign must reach all of them. */
@@ -1332,8 +1598,14 @@ const reachStates = [
   `grouping stripped alone: HAVING aggregate`,
   `include runtime stripped`,
   `orderBy aggregate stripped beside a select aggregate`,
-  `orderBy aggregate orders the published rows`,
+  `an aggregate orders the published rows`,
+  `a number select field orders the published rows`,
+  `a string select field orders the published rows`,
+  `a string field orders A against a lowercase key`,
+  `two orderBy terms order the rows`,
+  `an include query orders its rows`,
   `two group keys publish several groups`,
+  `three group keys publish several groups`,
 ] as const
 let reach:
   ReturnType<typeof createOracleReach<(typeof reachStates)[number]>> | undefined
@@ -1368,7 +1640,7 @@ describe(`aggregate select shapes`, () => {
             alone,
           ),
       ),
-      { numRuns: oracleRuns(120), seed: 2094 },
+      { numRuns: oracleRuns(160), seed: 2094 },
     )
     reach.assertReached()
     reach = undefined
@@ -1402,7 +1674,7 @@ describe(`aggregate select shapes`, () => {
             alone,
           ),
       ),
-      oraclePropertyOptions(120, PROPERTY),
+      oraclePropertyOptions(160, PROPERTY),
     )
     reach.assertReached()
     reach = undefined

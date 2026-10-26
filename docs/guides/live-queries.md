@@ -2022,6 +2022,11 @@ const topCustomers = createLiveQueryCollection((q) =>
 )
 ```
 
+An aggregate in `orderBy`, such as `.orderBy(({ order }) => sum(order.amount))`,
+reads the value of the same aggregate in `select()`, as an aggregate in
+`having` does. Select it as a field first. Otherwise the query throws
+`AggregateFunctionNotInSelectError`.
+
 ### Descending Order
 
 Use `desc` for descending order:
