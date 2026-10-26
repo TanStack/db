@@ -450,3 +450,133 @@ transform loops preserve the intended overlays and make independent controls
 usable when unrelated historical sources drift. The review accurately found
 portable-calibration weaknesses; no production claim follows from those setup
 failures. The previous owner hash and oracle evidence remain unchanged.
+
+## Adversarial round two and reserved utility decision
+
+Reviewed head: `39065e399894913874d5f6965f75322cbac82ad7`. The containing
+follow-up commit identifies the repaired tree. Three fresh reviewers examined
+enforcement, authority, and compiler infrastructure. This section supersedes
+the earlier current-grammar counts and the claim that production contains only
+the schema-free return correction. The original experiments remain historical.
+
+### Law, experiment, inference, and repair
+
+| Law and authority | Decisive experiment | Repair |
+| --- | --- | --- |
+| Schema input accepts output, so already-transformed rows remain legal input. Authority: schema guide, Core Concepts and Critical Design Principle. | A real persisted Collection with input `string \| number` and output `number` accepts an output row. Restoring the old negative directive gives TS2578. The old disjoint grammar also allowed output-optional/input-required fields. | Generate the superset relation, retain exact input equality, and observe legal output insertion. No production change for this finding. |
+| Public read types retain declared readonly user properties. Authority: schema-free createCollection return type and WithVirtualProps. | A getter mutant strips user-property readonly while retaining virtual modifiers. It passes the old path-0 history. A schema-free readonly row passes production and rejects the mutant at the shared published-row equality. | Generate independent modifiers and eight structural mutable/readonly neighbors across schema and sync modes. Declare and measure their reach. |
+| Local persistence owns its utility names and rejects caller collisions. Authority: the user's decision, “let's just throw an error as those names are reserved,” now documented in the SQLite guide. | Before the guard, both real receivers accept a reserved caller property and resolve persistence. TypeScript permits a caller leadership return type of `'caller'`, while runtime returns the persistence leadership object. | Reject acceptMutations, getLeadershipState and forceReloadSubset before persistence resolution. The guard uses the existing utility object's keys. Synced wrapping preserves adapter utilities because that path adds none of these local capabilities. |
+
+The runtime law is an explicit contract decision, rather than an inference from
+the previous overwrite behavior. It applies to a present reserved property,
+including inherited/non-enumerable properties and undefined values. The wrapper
+throws InvalidPersistedCollectionConfigError. This is runtime admission, not a
+new compile-time rejection. Successful local results cannot retain a conflicting
+caller signature because the conflicting construction does not return.
+
+The existing option owner now includes a runtime receiving driver for this
+namespace boundary. Its independent rule uses reserved names and sync presence.
+The production driver records return/throw, error identity, persistence resolver
+calls, caller-function calls, and preservation of admitted utilities. Each
+history crosses schema presence, both sync modes, each reserved name, their
+union, a generated subset, ordinary names, three descriptor forms, and
+undefined/function values. A rejected configuration must do zero resolver work.
+No Collection is created and no SQLite operation or sync starts.
+
+### Lossless round-two ledger
+
+| ID | Claim | Technical verdict and PR action | Durable value |
+| --- | --- | --- | --- |
+| R2-A1 | Caller utility preservation conflicts with local reserved-name overwrites. | Confirmed type/runtime mismatch. User chose rejection. fixed-now: runtime guard, shared generated admission judgment, real core/browser RED and GREEN, guide and changeset. | Explicit admission contract and reserved-name controls. |
+| R2-A2 | Phantom schema generic acceptance lacks a guide-level meaning. | Refuted as a current correctness defect. Existing public signatures accept this source form; executable prose now labels the compatibility basis. | Distinguish source compatibility from runtime schema semantics. |
+| R2-A3 | Exact Query utility equality also rejects future typed additions. | Refuted as a current defect. The current API remains the independent expected shape. Prose clarifies that an intentional documented addition updates the model. | Distinguish a current namespace check from a prohibition on API evolution. |
+| R2-A4 | The transformation grammar misses the documented update-safe input domain. | Confirmed. fixed-now: compatible transform, optionality relation, and legal output admission. Exact input equality still rejects reversed schema roles. | Schema-output-rejection and blanket-never controls. |
+| R2-A5 | The header implies a generated persistence utility reference page that does not exist. | Confirmed citation issue. fixed-now: cite the exported PersistedCollectionUtils interface directly. | Trace the law to the actual public API. |
+| R2-E1 | Readonly user fields are absent from the grammar. | Confirmed old-owner survivor. fixed-now: generated modifiers and measured structural neighbors. | Readonly-row control, including a schema-free witness. |
+| R2-S1 | Concurrent calibration processes can overwrite the same scratch runner. | Found during reconciliation: core/browser parent controls shared a filename, causing a missing-campaign setup error. fixed-now: receiver and process ID in type-runner names, process ID in runtime bundles. Repeated concurrent controls both reject TS2769. | Calibration isolation across receivers and owner versions. |
+
+Loss audit: six supplied items plus one reconciliation finding equal five
+fixed-now and two refuted. No deferrals, unresolved policy decisions, or known
+in-scope counterexamples remain in this bounded option review. Technical reviewer
+assessment: the enforcement review demonstrated a concrete survivor and supplied
+an independent schema-free witness. The authority review verified the contract
+conflict and runtime mismatch. The infrastructure review accurately separated
+executed controls from source inspection and found no additional supported bug.
+
+### Evidence block and reproduction
+
+- **Law:** Input/output and modifier preservation follow the existing public
+  contracts. Reserved local utility rejection follows the explicit decision
+  above. The runtime comparison does not import production's merge/classifier.
+- **Reach:** Each type shape now compiles 52 core or 53 browser constructions.
+  Four default campaigns cover 48 generated histories and 2520 constructions,
+  plus 630 fixed replay constructions outside reach. Every type state reaches
+  12 histories per campaign, including schema-compatible-input, readonly-input,
+  readonly-output and mutable-fields. Four runtime campaigns cover 48 histories
+  and 6912 wrapper constructions; all ten admission states reach 12 histories
+  in each campaign, including schema-collision.
+- **RED:** Before production edits, both real entry points fail admission at
+  the intended return/throw comparison: a reserved property is admitted, no
+  config error appears, and the resolver runs once. Schema-free and
+  schema-bearing histories both demonstrate this. The type owner rejects the
+  original schema-free overloads with TS2769 on both receivers.
+- **GREEN:** The type campaigns and nine neighboring core type tests pass.
+  The final expanded admission campaigns pass on both receivers with no source
+  errors. Three existing runtime checks also pass: local loopback utilities,
+  manual acceptMutations, and terminal-failure fencing of direct acceptance.
+  Formatting, ESLint, lint:changed and diff checks pass.
+- **Mutants:** The readonly-stripping getter rejects on both receivers. The
+  obsolete schema-output rejection fails TS2578, and blanket schema erasure
+  fails the exact type laws. Runtime controls reject the old production,
+  removed guard, own-properties-only guard, truthiness-only guard, and a guard
+  missing forceReloadSubset. Failures identify admission or type comparisons,
+  not setup errors or timeouts. The initial concurrent-runner setup error is
+  R2-S1 above and is not counted as a mutant rejection.
+- **Weight and limits:** The production bundle grows 64 gzip bytes and 29
+  brotli bytes against the merge-base on fetched origin/main. Reusing the
+  existing utility object and inlining its acceptance callback avoids a second
+  name registry and helper. The new rejection branch accounts for the growth.
+  Type evidence remains source-only on TS 5.9.3. Runtime evidence stops at
+  wrapper admission and does not establish database I/O, schema parsing,
+  Collection mutation behavior, native hosts, or published package resolution.
+
+From each receiving package, the normal persisted-options.test.ts command runs
+both type and admission campaigns. To select admission alone, add
+`-t 'reserved local utility'`. Direct runtime replay uses seed 2259, path
+`0:0:0`, and property `persisted-options.utilities.core` or `.browser`.
+
+The following repository-root commands use only versioned inputs:
+
+```sh
+# Old grammar accepts the readonly-stripping getter.
+TANSTACK_DB_ORACLE_PATH=0 node scripts/calibrate-persisted-option-types.mjs readonly-row 39065e399
+
+# Current grammar rejects these controls. Use the browser receiver for readonly-row too.
+TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs readonly-row
+TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs schema-output-rejection
+TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs blanket-never
+
+# Runtime controls bundle the same shared admission model and the real core entry.
+node scripts/calibrate-persisted-option-types.mjs utility-parent
+node scripts/calibrate-persisted-option-types.mjs utility-no-guard
+node scripts/calibrate-persisted-option-types.mjs utility-own-only
+node scripts/calibrate-persisted-option-types.mjs utility-truthy
+node scripts/calibrate-persisted-option-types.mjs utility-missing-name
+```
+
+The runtime controls use esbuild and write isolated bundles under .context.
+They leave tracked production files unchanged. A failure must show the intended
+comparison and selected input, rather than merely exit nonzero.
+
+ORC-001/002 tie the revised input rule and new admission policy to their actual
+authorities. ORC-003/004 retain adjacent prose and add modifier, schema and
+property-descriptor neighbors. ORC-005/006 now include real wrapper admission
+and the calibrated rejection boundary. ORC-007/009/010 preserve campaign parity,
+replay, source/type diagnostics and isolated calibration artifacts. ORC-008 is
+still inapplicable: neither model adds a state machine. ORC-011 retains the
+independent Query formulation and identifies no new shared semantic-fault
+hypothesis. ORC-012 is this versioned audit. ORC-013 checks ordinary local and
+synced collisions beside rejected local collisions. ORC-014 uses both real
+receiving exports without transferring a SQLite/provider premise. ORC-015
+measures the new type and admission states. ORC-016 keeps all observations in
+shared judgments over generated inputs, without standalone regression answers.

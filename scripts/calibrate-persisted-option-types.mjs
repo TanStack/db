@@ -12,8 +12,106 @@ let source = ownerRef
       encoding: `utf8`,
     })
   : readFileSync(ownerPath, `utf8`)
+// Runtime controls use the same generated admission model and real core entry.
+// Bundle only this selected experiment; type-only controls need no bundler.
+if (mutation.startsWith(`utility-`)) {
+  const { build } = await import(`esbuild`)
+  const original = readFileSync(
+    resolve(packageRoot, `src/persisted.ts`),
+    `utf8`,
+  )
+  const guard = `options.utils && name in options.utils`
+  const controls = {
+    'utility-parent': () =>
+      execFileSync(
+        `git`,
+        [
+          `show`,
+          `39065e399894913874d5f6965f75322cbac82ad7:packages/db-sqlite-persistence-core/src/persisted.ts`,
+        ],
+        { encoding: `utf8` },
+      ),
+    'utility-no-guard': () => original.replace(guard, `false`),
+    'utility-own-only': () =>
+      original.replace(
+        guard,
+        `options.utils && Object.prototype.hasOwnProperty.call(options.utils, name)`,
+      ),
+    'utility-truthy': () =>
+      original.replace(guard, `${guard} && options.utils[name]`),
+    'utility-missing-name': () =>
+      original.replace(guard, `${guard} && name !== "forceReloadSubset"`),
+  }
+  if (!(mutation in controls))
+    throw new Error(`Unknown runtime control: ${mutation}`)
+  const altered = controls[mutation]()
+  if (altered === original)
+    throw new Error(`Missing mutation target: ${mutation}`)
+  mkdirSync(`.context`, { recursive: true })
+  const filename = resolve(
+    root,
+    `.context/calibrate-persisted-${mutation}-${process.pid}.mjs`,
+  )
+  await build({
+    stdin: {
+      contents: `import { registerPersistedUtilityAdmissionOracle } from ${JSON.stringify(resolve(root, ownerPath))};
+        import { persistedCollectionOptions } from ${JSON.stringify(resolve(packageRoot, `src/index.ts`))};
+        import { callbacks } from 'vitest';
+        registerPersistedUtilityAdmissionOracle('core', persistedCollectionOptions);
+        for (const { fn } of callbacks) await fn();`,
+      resolveDir: root,
+      loader: `ts`,
+    },
+    outfile: filename,
+    bundle: true,
+    platform: `node`,
+    format: `esm`,
+    packages: `external`,
+    alias: Object.fromEntries(
+      [`db`, `db-ivm`, `store`].map((name) => [
+        `@tanstack/${name}`,
+        resolve(root, `packages/${name}/src/index.ts`),
+      ]),
+    ),
+    plugins: [
+      {
+        name: `utility-admission-calibration`,
+        setup(builder) {
+          builder.onResolve({ filter: /^vitest$/ }, () => ({
+            path: `vitest`,
+            namespace: `calibration`,
+          }))
+          builder.onLoad({ filter: /.*/, namespace: `calibration` }, () => ({
+            contents: `export const callbacks = []; export const it = Object.assign((name, fn) => callbacks.push({ name, fn }), { skip() {} });`,
+          }))
+          builder.onLoad({ filter: /\/persisted\.ts$/ }, ({ path }) =>
+            path === resolve(packageRoot, `src/persisted.ts`)
+              ? { contents: altered, loader: `ts` }
+              : undefined,
+          )
+          builder.onLoad(
+            { filter: /\/persisted-options-type-oracle\.ts$/ },
+            () => ({ contents: source, loader: `ts` }),
+          )
+        },
+      },
+    ],
+  })
+  const result = spawnSync(process.execPath, [filename], {
+    stdio: `inherit`,
+    env: {
+      ...process.env,
+      TANSTACK_DB_ORACLE_SEED: `2259`,
+      TANSTACK_DB_ORACLE_PATH: process.env.TANSTACK_DB_ORACLE_PATH ?? `0:0:0`,
+      TANSTACK_DB_ORACLE_PROPERTY: `persisted-options.utilities.core`,
+    },
+  })
+  if (result.error) throw result.error
+  process.exit(result.status ?? 1)
+}
 const mutations = {
   none: ``,
+  'schema-output-rejection': ``,
   get parent() {
     const parent = execFileSync(
       `git`,
@@ -112,6 +210,11 @@ for (const [name, transform] of Object.entries({
     `if (name === resolve(packageRoot, 'src/persisted.ts')) { source = ts.createSourceFile(name, ${JSON.stringify(altered)}, languageVersion, true); }`
 }
 for (const [name, transform] of Object.entries({
+  'readonly-row': (text) =>
+    text.replace(
+      `public get(key: TKey): WithVirtualProps<TOutput, TKey> | undefined {`,
+      `public get(key: TKey): WithVirtualProps<{-readonly [P in keyof TOutput]: TOutput[P]}, TKey> | undefined {`,
+    ),
   'missing-undefined': (text) =>
     text
       .replace(
@@ -152,6 +255,15 @@ export function persistedCollectionOptions<`)}), languageVersion, true);
 mutations['undefined-sync'] = admission
 mutations['collateral-sync'] = admission
 if (!(mutation in mutations)) throw new Error(`Unknown mutant: ${mutation}`)
+if (mutation === `schema-output-rejection`) {
+  const target = `           collection.insert(output);`
+  if (!source.includes(target))
+    throw new Error(`Missing mutation target: ${mutation}`)
+  source = source.replace(
+    target,
+    `           // @ts-expect-error schema output cannot stand in for schema input\n${target}`,
+  )
+}
 const receiver =
   process.env.ORACLE_RECEIVER ??
   (mutation.startsWith(`query-`) ? `browser` : `core`)
@@ -227,7 +339,10 @@ if (process.env.ORACLE_REGISTRATION_ONLY === '1') {
 }
 console.info('CALIBRATION ACCEPTED: ${mutation}');\n`
 mkdirSync(`.context`, { recursive: true })
-const filename = resolve(root, `.context/calibrate-persisted-${mutation}.ts`)
+const filename = resolve(
+  root,
+  `.context/calibrate-persisted-${mutation}-${receiver}-${process.pid}.ts`,
+)
 writeFileSync(filename, source)
 const result = spawnSync(resolve(root, `node_modules/.bin/tsx`), [filename], {
   stdio: `inherit`,

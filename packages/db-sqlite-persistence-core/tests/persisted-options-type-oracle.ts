@@ -1,24 +1,29 @@
 /**
- * # Persistence wrapping preserves the caller's type contract
+ * # Persistence options preserve admitted caller contracts
  *
  * Authority: docs/guides/sqlite-persistence.md, "Add persistence to a synced
  * Collection", composes adapter options with persistedCollectionOptions and
  * createCollection. The createCollection API assigns schema input to insert,
  * schema output to reads, and the configured key and utilities to callers.
  * Wrapping must preserve those distinctions, including without a schema.
- * The public PersistedCollectionUtils and QueryCollectionUtils references
- * specify the added local capabilities and the closed Query utility namespace.
+ * The exported PersistedCollectionUtils interface in src/persisted.ts and the
+ * QueryCollectionUtils reference specify the local and adapter capabilities.
+ * docs/guides/schemas.md requires schema input to accept schema output, so
+ * already-transformed rows remain legal mutation input.
  * docs/reference/type-aliases/WithVirtualProps.md and the VirtualRowProps
  * interface specify the readonly fields on a published row.
  *
- * This is a source-level type oracle. A history declares a row/key/utility
- * shape, constructs options, wraps them, and observes the resulting public
- * types at compilation. It does not execute Collection mutations, parse a
- * schema, use SQLite, or establish published declaration/package resolution.
- * Compiler acceptance is the observation; the independently declared shapes
- * below supply the expected result, not production's inference helpers.
+ * Each type history declares a row/key/utility shape, constructs options,
+ * wraps them, and observes public types at compilation. A utility-admission
+ * driver observes wrapping
+ * through the real core/browser entry before persistence resolution. Neither
+ * driver executes Collection mutations, parses a schema, uses SQLite, or
+ * establishes published declaration/package resolution. Compiler acceptance
+ * observes type preservation; return/throw observes utility admission. The
+ * declared shapes and reserved-name rule supply independent expected results.
  */
 import { resolve } from 'node:path'
+import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import { setImmediate } from 'node:timers/promises'
 import fc from 'fast-check'
@@ -30,6 +35,12 @@ import {
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import type {
+  PersistedCollectionPersistence,
+  PersistenceAdapter,
+  persistedCollectionOptions,
+} from '../src/index.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 type Receiver = `core` | `browser`
 type Shape = {
@@ -40,6 +51,8 @@ type Shape = {
     type: string
     optional: boolean
     inputOptional: boolean
+    readonly?: boolean
+    inputReadonly?: boolean
   }>
   utilityName: string
   utilityArgument: string
@@ -58,7 +71,7 @@ const fieldTypes = [
 
 /**
  * Grammar: rows have one string/number-compatible key and 1–4 other fields;
- * fields may be optional, nullable, arrays, or a nested record. Each history
+ * fields may be optional, readonly, nullable, arrays, or a nested record. Each history
  * varies property names, key domains, and a utility's argument/return types.
  * Its construction paths cross schema-free/transforming schema, local/synced,
  * inline/typed-spread config, and inferred/explicit type arguments. Those
@@ -71,6 +84,10 @@ const fieldTypes = [
  * schema-free here; it supplies its real adapter utility namespace.
  * Inline schema forms also leave getKey's row unannotated. The schema must
  * contextually supply its output type without help from a caller annotation.
+ * Every history includes mutable and readonly first-field neighbors in both
+ * persistence modes, with and without a schema. Other modifiers vary freely.
+ * A phantom schema generic without a schema value preserves an accepted source
+ * form; it does not establish a runtime schema promise.
  */
 const shapeArbitrary: fc.Arbitrary<Shape> = fc.record({
   key: fc.constantFrom(
@@ -88,6 +105,8 @@ const shapeArbitrary: fc.Arbitrary<Shape> = fc.record({
       type: fc.constantFrom(...fieldTypes),
       optional: fc.boolean(),
       inputOptional: fc.boolean(),
+      readonly: fc.boolean(),
+      inputReadonly: fc.boolean(),
     }),
     { selector: (field) => field.name, minLength: 1, maxLength: 4 },
   ),
@@ -153,10 +172,13 @@ const repositoryRoot = resolve(packageRoot, `../..`)
  * Independent model: insert accepts the declared input; reads retain every
  * declared output field; get takes exactly the declared key; user utilities
  * keep their declared signatures. A transforming schema changes one required
- * field from string to number, making input/output reversal distinguishable.
+ * field from string | number to number, distinguishing input/output reversal
+ * while accepting output as input, as required by the schema guide.
  * A public get result includes undefined for a missing row, and excludes null.
  * Other schema fields may become required, retaining the original oracle's
  * optional-input/required-output histories as instances of this grammar.
+ * An optional output field stays optional on input. Property readonly modifiers
+ * vary independently; publication and insert input retain the declared types.
  * Public PendingMutation and LoadSubsetOptions are trusted parameter-domain
  * carriers, never used to compute capability names, modifiers, or signatures.
  * Local additions are observed separately because UtilsRecord has an index
@@ -166,16 +188,27 @@ const repositoryRoot = resolve(packageRoot, `../..`)
  * The model does not reproduce persistence or Collection's overload logic.
  * An unannotated schema callback receives exactly the declared output row.
  */
-function rowType(shape: Shape, transformed: boolean, output: boolean): string {
+function rowType(
+  shape: Shape,
+  transformed: boolean,
+  output: boolean,
+  modifiers?: `mutable` | `readonly`,
+): string {
   const fields = shape.fields.map((field, index) => {
     const changed = transformed && index === 0
     const optional = changed
       ? false
       : transformed && !output
-        ? field.inputOptional
+        ? field.optional || field.inputOptional
         : field.optional
-    const type = changed ? (output ? `number` : `string`) : field.type
-    return `${field.name}${optional ? `?` : ``}: ${type}`
+    const type = changed ? (output ? `number` : `string | number`) : field.type
+    const readonly =
+      index === 0 && modifiers !== undefined
+        ? modifiers === `readonly`
+        : transformed && !output
+          ? field.inputReadonly
+          : field.readonly
+    return `${readonly ? `readonly ` : ``}${field.name}${optional ? `?` : ``}: ${type}`
   })
   return `{ ${shape.keyName}: Key; ${fields.join(`; `)} }`
 }
@@ -243,7 +276,7 @@ function comparison(
     ${
       transformed
         ? `declare const output: Output;
-           // @ts-expect-error schema output cannot stand in for schema input
+           type SchemaInputLaw = Assert<Equal<Output extends Input ? true : false, true>>;
            collection.insert(output);`
         : ``
     }
@@ -262,13 +295,18 @@ type Cell = {
   contextualKey: boolean
   arguments: `inferred` | `row-key` | `full` | `phantom-schema`
   configuration?: `eager` | `on-demand` | `network-first`
+  modifiers?: `mutable` | `readonly`
 }
 
-function declarations(shape: Shape, transformed: boolean): string {
+function declarations(
+  shape: Shape,
+  transformed: boolean,
+  modifiers?: Cell[`modifiers`],
+): string {
   return `
     type Key = ${shape.key};
-    type Input = ${rowType(shape, transformed, false)};
-    type Output = ${rowType(shape, transformed, true)};
+    type Input = ${rowType(shape, transformed, false, modifiers)};
+    type Output = ${rowType(shape, transformed, true, modifiers)};
     type Utils = { ${shape.utilityName}: (value: ${shape.utilityArgument}) => ${shape.utilityResult} };
     declare const utils: Utils;
     declare const schema: StandardSchemaV1<Input, Output>;
@@ -325,7 +363,7 @@ function collectionSource(shape: Shape, cell: Cell): string {
       ? `options`
       : `{ ...config, persistence, ${syncProperty} }`
   return `
-    ${declarations(shape, cell.transformed)}
+    ${declarations(shape, cell.transformed, cell.modifiers)}
     ${
       cell.configuration
         ? `
@@ -355,6 +393,8 @@ function collectionSource(shape: Shape, cell: Cell): string {
  * A supplemental transparency relation preserves the full payload across the
  * wrapper; QueryObserverResult internals have no independent model here.
  * This single model replaces standalone fixed refetch/nonexistent-method calls.
+ * Exact namespace equality pins the current API. An intentional documented
+ * utility addition must update this model; closure does not prohibit additions.
  */
 function querySource(shape: Shape): string {
   return `
@@ -561,6 +601,10 @@ const states = [
   `network-first-options`,
   `contextual-sync`,
   `phantom-schema-argument`,
+  `schema-compatible-input`,
+  `readonly-input`,
+  `readonly-output`,
+  `mutable-fields`,
 ] as const
 
 /**
@@ -686,6 +730,33 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
               states: [`phantom-schema-argument`],
             })
           }
+          // Generated modifier neighbors guarantee reach without requiring a
+          // fortunate random boolean. Their row domains and other fields still
+          // come from the same grammar, model, driver, and refinement check.
+          for (const transformed of [false, true]) {
+            for (const synced of [false, true]) {
+              for (const modifiers of [`mutable`, `readonly`] as const) {
+                witnesses.push({
+                  source: collectionSource(shape, {
+                    transformed,
+                    synced,
+                    typed: false,
+                    contextualKey: transformed,
+                    arguments: `inferred`,
+                    modifiers,
+                  }),
+                  states: [
+                    ...(transformed
+                      ? ([`schema-compatible-input`] as const)
+                      : []),
+                    ...(modifiers === `readonly`
+                      ? ([`readonly-input`, `readonly-output`] as const)
+                      : ([`mutable-fields`] as const)),
+                  ],
+                })
+              }
+            }
+          }
           if (receiver === `browser`) {
             witnesses.push({
               source: querySource(shape),
@@ -745,5 +816,238 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
       },
       120_000 * replay.multiplier,
     )
+  }
+}
+
+/**
+ * Local persistence owns three utility names. The maintainer chose rejection
+ * rather than silent replacement; see the SQLite guide's manual-transaction
+ * section and the round-two decision in the versioned type-preservation audit.
+ * Synced wrapping installs none of these local utilities, so it preserves the
+ * adapter namespace. This judgment depends on names and sync presence, not on
+ * production's merge code, the value's truthiness, or its property descriptor.
+ */
+const reservedUtilityNames = [
+  `acceptMutations`,
+  `getLeadershipState`,
+  `forceReloadSubset`,
+] as const
+
+const utilityAdmissionArbitrary = fc.record({
+  token: fc.string(),
+  extraNames: fc.subarray([
+    `measure`,
+    `convert`,
+    `AcceptMutations`,
+    `acceptMutations2`,
+    `getLeadershipStates`,
+    `forceReloadSubsetLater`,
+  ]),
+  names: fc.subarray([...reservedUtilityNames]),
+})
+
+/**
+ * The runtime production driver calls only the supplied public wrapper. Its
+ * resolver records whether admission reached persistence setup. Histories vary
+ * ordinary names and caller identity; structural neighbors include each reserved
+ * name, their union, both sync modes, schema presence, undefined/function values,
+ * and own enumerable,
+ * non-enumerable or inherited properties. Those forms all reserve the same name.
+ * At return/throw, the shared comparison checks admission, config-error identity,
+ * zero resolver work on rejection, and caller utility preservation on success.
+ * No Collection is constructed, so no sync, database I/O or cleanup starts.
+ */
+export function registerPersistedUtilityAdmissionOracle(
+  receiver: Receiver,
+  construct: typeof persistedCollectionOptions,
+): void {
+  const propertyName = `persisted-options.utilities.${receiver}`
+  const replay = readOracleRunConfig()
+  if (replay.replayPath !== undefined && replay.replayProperty !== propertyName)
+    return
+  for (const campaign of replay.replayPath === undefined
+    ? [`fixed`, `random`]
+    : [`replay`]) {
+    it(`rejects reserved local utility names through ${receiver} (${campaign})`, () => {
+      const reach = createOracleReach(propertyName, [
+        ...reservedUtilityNames,
+        `local-ordinary`,
+        `synced-collision`,
+        `multiple-names`,
+        `undefined-value`,
+        `non-enumerable`,
+        `inherited`,
+        `schema-collision`,
+      ])
+      fc.assert(
+        fc.property(
+          utilityAdmissionArbitrary,
+          ({ token, extraNames, names }) => {
+            reach.beginHistory()
+            const schemas: Array<StandardSchemaV1<{ id: string }> | undefined> =
+              [
+                {
+                  '~standard': {
+                    version: 1,
+                    vendor: `oracle`,
+                    validate: (value) => ({ value: value as { id: string } }),
+                  },
+                },
+                undefined,
+              ]
+            for (const schema of schemas) {
+              for (const selected of [
+                [],
+                ...reservedUtilityNames.map((name) => [name]),
+                reservedUtilityNames,
+                names,
+              ]) {
+                for (const synced of [false, true]) {
+                  for (const descriptor of [
+                    `enumerable`,
+                    `non-enumerable`,
+                    `inherited`,
+                  ] as const) {
+                    for (const defined of [false, true]) {
+                      let resolverCalls = 0
+                      let callerCalls = 0
+                      const caller = () => {
+                        callerCalls++
+                        return token
+                      }
+                      const utils: Record<string, unknown> = Object.fromEntries(
+                        extraNames.map((name) => [name, caller]),
+                      )
+                      const properties = Object.fromEntries(
+                        selected.map((name) => [
+                          name,
+                          {
+                            value: defined ? caller : undefined,
+                            enumerable: descriptor === `enumerable`,
+                          },
+                        ]),
+                      )
+                      if (descriptor === `inherited`)
+                        Object.setPrototypeOf(
+                          utils,
+                          Object.defineProperties({}, properties),
+                        )
+                      else Object.defineProperties(utils, properties)
+                      const adapter: PersistenceAdapter = {
+                        loadSubset: () => Promise.resolve([]),
+                        loadResumeSnapshot: () =>
+                          Promise.resolve({
+                            rows: [],
+                            keySet: { status: `consistent` },
+                            collectionMetadata: [],
+                            latestTerm: 0,
+                            latestSeq: 0,
+                            latestRowVersion: 0,
+                            resetEpoch: 0,
+                          }),
+                        applyCommittedTx: async () => {},
+                        ensureIndex: async () => {},
+                      }
+                      const persistence: PersistedCollectionPersistence = {
+                        adapter,
+                        resolvePersistenceForCollection: () => {
+                          resolverCalls++
+                          return { adapter }
+                        },
+                      }
+                      const options = {
+                        id: `utility-admission`,
+                        getKey: (row: { id: string }) => row.id,
+                        utils,
+                        persistence,
+                      }
+                      const rejected =
+                        !synced &&
+                        selected.some((name) =>
+                          reservedUtilityNames.includes(name),
+                        )
+                      let accepted = false
+                      let errorName: string | undefined
+                      let preserved = false
+                      try {
+                        const result = schema
+                          ? synced
+                            ? construct({
+                                ...options,
+                                schema,
+                                sync: { sync: () => {} },
+                              })
+                            : construct({ ...options, schema })
+                          : synced
+                            ? construct({
+                                ...options,
+                                sync: { sync: () => {} },
+                              })
+                            : construct(options)
+                        accepted = true
+                        preserved = [...extraNames, ...selected].every(
+                          (name) =>
+                            result.utils !== undefined &&
+                            name in result.utils &&
+                            result.utils[name] === utils[name],
+                        )
+                      } catch (error) {
+                        errorName =
+                          error instanceof Error ? error.name : `non-error`
+                      }
+                      assert.deepEqual(
+                        {
+                          accepted,
+                          errorName,
+                          resolverCalls,
+                          callerCalls,
+                          preserved,
+                        },
+                        {
+                          accepted: !rejected,
+                          errorName: rejected
+                            ? `InvalidPersistedCollectionConfigError`
+                            : undefined,
+                          resolverCalls: rejected ? 0 : 1,
+                          callerCalls: 0,
+                          preserved: !rejected,
+                        },
+                        JSON.stringify({
+                          names: selected,
+                          synced,
+                          descriptor,
+                          defined,
+                          schema: schema !== undefined,
+                        }),
+                      )
+                      if (!synced && selected.length === 0)
+                        reach.reach(`local-ordinary`)
+                      if (synced && selected.length > 0)
+                        reach.reach(`synced-collision`)
+                      if (selected.length > 1) reach.reach(`multiple-names`)
+                      if (schema && !synced && selected.length > 0)
+                        reach.reach(`schema-collision`)
+                      if (selected.length > 0) {
+                        for (const name of selected) reach.reach(name)
+                        if (!defined) reach.reach(`undefined-value`)
+                        if (descriptor !== `enumerable`) reach.reach(descriptor)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(12), seed: 2259 }
+          : oraclePropertyOptions(12, propertyName),
+      )
+      reach.assertReached()
+      console.info(
+        `${propertyName} ${campaign} reach`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
   }
 }
