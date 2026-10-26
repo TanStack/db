@@ -227,6 +227,17 @@ Coverage also ends when the restore returns fewer rows than it recorded.
 - **Optimistic writes while offline.** An optimistic mutation that touches a
   covered demand's rows is outside this law. Optimistic overlay rules apply as
   usual, and this proposal has no witness for them.
+- **Ordered windows.** A window settles from SQLite only while its restore
+  holds the rows it held when it settled. The tie-boundary load's key comes
+  from the restored boundary row, so a window that lost, gained, or replaced
+  a row asks for a key that no load covered.
+- **Expired cache claims.** A coverage read under an expired claim proves
+  nothing. The wrapper then starts claim recovery: it records no coverage, and
+  a load that would settle from SQLite waits for the network. Neither path
+  fails a load whose rows applied.
+- **Source settlement.** Coverage counts the rows that SQLite holds when the
+  load settles. It relies on the source settling a load only after its rows
+  are durable (law 7 in `ARCHITECTURE.md`).
 - **Multi-tab coordinators.** By maintainer decision (2026-10-26), the law
   covers only the default `SingleProcessCoordinator`. Under a Browser or
   Electron multi-tab coordinator, demand routes through the coordinator, so a

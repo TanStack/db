@@ -2957,16 +2957,26 @@ class PersistedCollectionRuntime<
   }
 
   // The rows that this demand reads from SQLite in the current generation.
-  private async countDemandRows(options: LoadSubsetOptions): Promise<number> {
-    const rows = await this.persistence.adapter.loadSubset(
-      this.storageTargetFor(),
-      options,
-      {
-        requiredIndexSignatures: this.getRequiredIndexSignatures(),
-        cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
-      },
-    )
-    return rows.length
+  // A read under an expired cache claim proves nothing: it returns undefined
+  // and starts claim recovery. Any other failure propagates.
+  private async countDemandRows(
+    options: LoadSubsetOptions,
+  ): Promise<number | undefined> {
+    try {
+      const rows = await this.persistence.adapter.loadSubset(
+        this.storageTargetFor(),
+        options,
+        {
+          requiredIndexSignatures: this.getRequiredIndexSignatures(),
+          cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
+        },
+      )
+      return rows.length
+    } catch (error) {
+      if (!this.hasExpiredCacheClaim()) throw error
+      this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
+      return undefined
+    }
   }
 
   // A row deleted after the covered load settled, by the source or by
@@ -2974,10 +2984,9 @@ class PersistedCollectionRuntime<
   // proves the demand complete (maintainer decision, 2026-10-26).
   private async isDemandCovered(options: LoadSubsetOptions): Promise<boolean> {
     const record = this.currentCoverageRecord(options)
-    return (
-      record !== undefined &&
-      (await this.countDemandRows(options)) >= record.rows
-    )
+    if (record === undefined) return false
+    const rows = await this.countDemandRows(options)
+    return rows !== undefined && rows >= record.rows
   }
 
   // The coverage record for a load that just settled, or undefined when the
@@ -2988,7 +2997,11 @@ class PersistedCollectionRuntime<
     { settledAt: number; generation: string; rows: number } | undefined
   > {
     const rows = await this.countDemandRows(options)
-    if (this.currentCoverageRecord(options)?.rows === rows) return undefined
+    if (
+      rows === undefined ||
+      this.currentCoverageRecord(options)?.rows === rows
+    )
+      return undefined
     return { settledAt: Date.now(), generation: this.storageCollectionId, rows }
   }
 

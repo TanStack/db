@@ -305,3 +305,44 @@ issue #2221. Its seed `1535602160` fails the same way on `main` at
 `5649a07d4`, in the core ordered loader. The fixed-seed case of that run timed
 out under CI load and passes locally in about one second.
 
+## 2026-10-26: closing open limits and the expired-claim finding
+
+Starting head: `5ba90763d` (CI green). The maintainer asked to close the open
+limits and then evaluate CodeRabbit review `5657028264` (CR8: a coverage read
+under an expired cache claim fails a load whose rows applied).
+
+Test-only commit `0949bc478` turned open limits into enforced cases, with no
+production change. Each passed on the existing code except where noted:
+
+- the restore-before-forward invariant;
+- macrotask reads in session 2, which put CR6 inside the oracle (removing the
+  early rejection handler raises six unhandled rejections);
+- a schema reset over an empty covered demand (killed by a mutant that keeps
+  collection metadata);
+- an optimistic write that rolls back on a demand settled from SQLite;
+- ordered windows (Part 4): row deleted, moved out, moved in, swapped, and
+  page 2 with an index (killed by a coverage key that ignores cursor and
+  offset);
+- Electric on-demand must-refetch, and Electric's own load after release;
+- React and Solid Suspense over a real persisted on-demand Collection (each
+  killed by a mutant that ignores coverage).
+
+An on-demand Electric mock that ended a subset with `snapshot-end` instead of
+`subset-end` let Electric settle its load before its rows committed. Coverage
+then recorded zero rows, and the offline session went ready on `[]`. The SDK
+ends injected subsets with `subset-end`, so the mock now does. The law record
+states the dependency on source settlement.
+
+CR8, confirmed on two paths. RED on the parent production code: the session-1
+query went to `error` when the claim expired before the coverage record, and
+D went to `error` when it expired before the coverage check. With coverage
+recording disabled, the first history stays `ready`, so the coverage read
+caused it. Repair: a coverage read that fails under an expired claim returns
+no count and schedules claim recovery; other failures propagate. GREEN: the
+oracle passes 227 of 227.
+
+X7 stays open: a probe that queued an empty load's coverage record during
+another demand's hydration, truncated, and started scoped recovery left the
+Collection `ready`, but it did not prove that the record was queued when the
+truncate listed metadata.
+

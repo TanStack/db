@@ -2666,23 +2666,33 @@ must then keep loading. React
 receive the joined gate with capability fixtures: an eager source that restores
 but never becomes ready and an on-demand source keep the first render
 suspended until the on-demand load settles; a gate that lets the on-demand
-opt-in permit fallback alone fails both. Ordered windows, cursor
-pages, and later demand in session 2 (including a demand key that ignores
-offset or cursor but honors limit, which no history distinguishes),
-optimistic writes on a covered demand, a failure before the restore
-publishes, an upstream failure held across the coverage read by a slow driver
-(a real-timer probe in the review record; the oracle's fake clock cannot drive
-timer-delayed reads), cache-claim expiry rotation, must-refetch, schema reset, a
-covered window whose order changes without a delete, a pending coverage
-record that a truncate lists and a later abort turns into a terminal failure
-(code reading only),
-and Suspense over a real
-persisted on-demand Collection remain open. A coordinator other than the
-default `SingleProcessCoordinator`, as in multi-tab Browser and Electron
-setups, is outside this law by maintainer decision (2026-10-26): demand there
-routes through the coordinator, so a covered demand neither settles from
-SQLite nor records coverage. A probe shows a covered demand staying loading
-offline even in the leader tab. No oracle history exercises a coordinator.
+opt-in permit fallback alone fails both. A later round closed most open limits with enforced cases. The driver checks
+that the wrapper forwards a load only after its persisted subset restore is
+visible, so no upstream event can precede it. Session 2 reads answer on a
+later macrotask, so a load that fails at once reaches the coverage read, and
+removing the wrapper's early rejection handler raises unhandled rejections.
+Part 2b adds a schema reset over an empty covered demand, an optimistic write
+that rolls back on a demand settled from SQLite, and two cache-claim expiry
+histories: one before the coverage record and one before the coverage check.
+Part 4 covers ordered windows: a row deleted, moved out, or moved in after the
+window settled keeps it loading, a swap keeps it covered, and with an index a
+page move settles offline only when session 1 loaded that page with a cursor.
+The Electric witness adds on-demand must-refetch and checks that Electric
+writes nothing from a snapshot that answers after release. React
+(`useLiveSuspenseQuery-persisted-on-demand.test.tsx`) and Solid
+(`useLiveQuery-persisted-on-demand.test.tsx`) Suspense render a covered demand
+from a real persisted on-demand Collection on `node:sqlite`. Mutants that drop
+the early rejection handler, keep collection metadata across a schema reset,
+key coverage without cursor and offset, ignore coverage, or let a coverage
+read under an expired claim fail the load each fail these cases.
+
+Remaining limits: a pending coverage record that a truncate lists and a later
+abort turns into a terminal failure (code reading; a probe of the path did not
+show the failure and did not prove its precondition); coverage relies on the
+source settling a load only after its rows are durable (law 7), so a source
+that breaks that rule records too low a row count; ordered windows with
+duplicate ranks and offset-based pages without an index; and multi-tab
+coordinators, outside the law by maintainer decision (2026-10-26).
 
 ## Deferred contracts and evidence
 
