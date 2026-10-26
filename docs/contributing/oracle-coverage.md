@@ -123,9 +123,69 @@ of all four public virtual fields directly after implicit, expression, and
 functional root publication. Its fixed controlled-Collection cases do not
 establish every nested projection shape or framework receiving boundary.
 
-Three type-only owners check compile-time boundaries:
-`packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.test-d.ts`
-checks local and synced persisted option input/output and key types;
+The generated persistence option type/admission owner is
+`packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`.
+It generates row shapes (1–4 scalar, nullable, array, or nested fields), six
+key domains, field optionality/readonly modifiers, utility signatures, numeric schema versions,
+and network deadlines. Each shape retains 30 construction forms across
+local/synced, schema-free/transforming schema, typed-spread/inline arguments,
+and inferred/partial/full type arguments, including contextual schema callbacks.
+Twelve configured forms cross eager/on-demand/network-first options with schema
+and sync modes; network-first remains eager. Two schema-free forms supply a
+phantom schema generic without a schema value and still preserve row input.
+Eight modifier neighbors cross mutable/readonly first fields with schema and
+persistence modes, bringing each shape to 52 core or 53 browser constructions.
+Transforming schemas accept their output as input, as required by the schema
+guide: their distinguished field narrows string | number to number, and output
+optional fields remain optional on input. Exact input equality distinguishes
+the two domains; inserting an output row is a legal neighboring observation.
+
+Independent type laws compare insert input, complete published row types,
+exact keys, user utilities, added local persistence capabilities (including
+optional leadership/reload signatures), option types, and contextual getKey /
+markReady callbacks. The browser driver uses real Query Collection options.
+Declared schema-compatible-input, readonly-input, readonly-output and
+mutable-fields reaches occur structurally in every generated history.
+Its independent closed capability model checks direct-write signatures,
+observer state, refetch parameters and a non-any Promise-array envelope. A
+supplemental before/after relation preserves the full Query utility types;
+QueryObserverResult's internal payload has no independent model here.
+Fresh-object sync rejection uses an exact unsuppressed overload diagnostic and
+a legal neighbor that changes only sync, so a collateral option error cannot
+substitute for the promised rejection.
+
+Core and browser `persisted-options.test.ts` runners share the grammar/model
+and use their respective receiver tsconfig. Package and root `test:oracles`
+commands select them. Both run 12 histories with seed 2259 and 12 with a fresh
+seed, measure per-path reach, and accept the shared seed/path/property replay
+interface (`persisted-options.types.core` / `.browser`). A shared semantic
+builder retains source and declaration diagnostics while caching dependencies;
+timeouts scale with the campaign multiplier, and histories yield for worker RPC.
+This owner does not execute runtime parsing, adapter I/O, sync, or publication,
+and does not check built declarations, npm resolution, other host packages,
+every TS version, arbitrary extra-property structural assignment, or the
+internal semantics of trusted PendingMutation/LoadSubsetOptions carriers.
+The [type-preservation audit](oracle-reviews/pr-2259-persisted-option-types.md)
+and `scripts/calibrate-persisted-option-types.mjs` preserve parent RED, GREEN,
+legacy-suite survival, hostile-mutant evidence, and runnable overlay recipes.
+The readonly-row overlay strips user-property readonly modifiers from get's
+return while retaining readonly virtual fields. The prior grammar accepted it;
+the modifier histories reject it at the shared exact published-row comparison.
+
+The maintainer chose rejection for local caller utility collisions. The same
+owner's runtime admission grammar checks the three reserved names
+acceptMutations, getLeadershipState and forceReloadSubset, individually and in
+combinations, against both public core/browser wrappers. It crosses local/synced
+options, schema presence, function/undefined values, and enumerable/non-enumerable/inherited
+properties. Rejection must be an InvalidPersistedCollectionConfigError before
+persistence resolution; ordinary local utilities and synced adapter utilities
+remain available. Each fixed/fresh campaign measures all ten admission states
+under `persisted-options.utilities.core` / `.browser`. No Collection is created,
+and no sync, SQLite I/O, native-host or publication claim follows from this path.
+The versioned audit records the user decision, original overwrite RED, GREEN,
+and guards that check only own/truthy properties or omit a reserved name.
+
+Other existing fixed type checks cover adjacent compile-time boundaries:
 `packages/db/tests/mutation-handler-type-oracle.test-d.ts` checks sibling
 Collection/key/utilities in mutation handlers; and
 `packages/db/tests/query/virtual-row-fields-oracle.test-d.ts` checks all four
