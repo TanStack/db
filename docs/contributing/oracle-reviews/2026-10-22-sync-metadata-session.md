@@ -111,6 +111,15 @@ encoding the author had extended without asking. Three more followed on
    error, and never invalidates its transaction. Its metadata still follows
    the 2026-10-05 rules: it clears unless it is an equal re-insert of a row
    the source wrote. Core keeps duplicates and invalidation.
+9. **Cached rows are seeds in core too (2026-10-26).** The prep-PR review
+   found that a later `DbClient` seed could not replace a persisted cache
+   row: the wrapper loaded cached rows into core as ordinary adapter work, so
+   core counted them as source rows. The maintainer confirmed that cached
+   rows are seeds there too ("yeah they're seeds too"). A cache load
+   happens at preload, so a `DbClient` seed arrives after it and wins, as a
+   later seed does. The same review confirmed the metadata law that a kept
+   value is not a write: an equal re-insert keeps metadata as an update
+   does, so the latest seed still governs it until the source writes it.
 
 ## Laws and sources
 
@@ -155,9 +164,14 @@ comparison. Drivers:
   `persistedCollectionOptions` over an in-memory adapter, with store and core
   holds; lanes `persisted-flat`, `persisted-nested`, `persisted-seeds`,
   `persisted-cached` (row 1 is in storage when the run starts; the model
-  holds it as a seed accepted before any action), and `persisted-conflicts`.
-  Every persisted lane declares the one model difference of decision 8: an
-  insert over a different row replaces it.
+  holds it as a seed accepted before any action), `persisted-conflicts`, and
+  `persisted-nested-seeds`. The last crosses `DbClient` seeds with nesting
+  and the cached row, with the conflict lane's weighting; its
+  `keepsMetadata` flag favours writes that keep metadata over writes that
+  clear it, without excluding any action, so a later seed often meets
+  metadata that an accepted re-insert kept. Every persisted lane declares
+  the one model difference of decision 8: an insert over a different row
+  replaces it.
 
 The row-metadata composition oracle keeps its base nested lane, which
 already judged independent transactions: a transaction begun inside T1
@@ -300,15 +314,37 @@ The repair keeps the existing structures and changes these rules.
   row while the transaction is held. Before, an inner commit during a hold
   kept the outer transaction valid, and the same history without the hold
   invalidated it.
-- **Wrapper inserts (decision 8).** A source insert replaces the row it lands
-  on: in core as a delete then the insert when core holds a different row,
-  and in storage as an `insert` mutation, which the SQLite adapter upserts.
+- **Wrapper inserts (decisions 8 and 9).** A source insert replaces the row
+  it lands on. The wrapper judges its metadata when the source writes it and
+  hands it to core as an update that names the whole row
+  (`originalSyncType: 'insert'`, core's own form for an equal re-insert), so
+  core replaces the row and only the wrapper's metadata writes change its
+  metadata: an insert that clears staged a delete, and an equal re-insert
+  keeps the value without writing it. Before, the wrapper wrote the kept
+  value back as explicit metadata, which made the source its owner, and a
+  delete then the insert over a different row. In storage it is an `insert`
+  mutation, which the SQLite adapter upserts.
   The wrapper records the keys its source transactions handed to core in this
   run; any other row came from the cache or a seed, so an insert equal to it
   still clears metadata. After an inner commit, the wrapper re-judges each
   enclosing transaction's implicit metadata clears on the keys the inner
   transaction wrote, as core's replay does, and an inner re-insert keeps its
-  metadata when it lands where the row is absent.
+  metadata when it lands where the row is absent. The wrapper keeps, per key,
+  every insert without metadata since the last write that named the key's
+  metadata, and re-judges them all: if any no longer re-inserts the row it
+  lands on, the key's metadata clears; otherwise the write before them
+  stands. An update without metadata keeps that judgment open, because the
+  inserts before it still decide the row's metadata.
+- **Duplicate inserts.** A seed exempts a source insert from the duplicate
+  check only over a row that only seeds supplied; over a row the source
+  wrote, it is judged like any insert, whatever holds or seeds there are. In
+  the replay, a seed beneath an open insert of a row the source also wrote
+  keeps that insert's kind.
+- **Cached rows (decision 9).** A storage read marks each row it applies as
+  a seed unless core already holds the row as a source row, and its core
+  transaction preserves seed keys, as a `DbClient` hydration chunk does.
+  A later seed then replaces a cached row and its metadata until the source
+  writes them.
 
 ### Evidence block
 
@@ -319,7 +355,11 @@ The repair keeps the existing structures and changes these rules.
 - **Reach:** declared with `createOracleReach` in each fixed campaign
   (ORC-015); a campaign fails below its minimum. Core lanes: 11, or 5 for
   states that need a seed and a source write on one row, or a write after an
-  invalidation. Persisted lanes: 5. Counts in the fixed campaigns:
+  invalidation. Persisted lanes: 5. The prep-PR round added the states
+  `duplicate source insert` (and its hold and seeded forms) and `seed under
+  a kept re-insert`, and raised the seeds and nested-conflicts campaigns to
+  150 and 450 histories; every fixed campaign meets its minimums. Counts in
+  the fixed campaigns before that round:
 
   | State | flat | nested | seeds | nested-seeds | seeds-full | nested-conflicts |
   |---|---|---|---|---|---|---|
@@ -388,21 +428,44 @@ The repair keeps the existing structures and changes these rules.
     kept metadata survives every campaign; the pinned witness `keeps an inner
     re-insert's metadata when it commits ahead of the row it re-inserted`
     kills it.
+  - Decision 9 (prep-PR round): the original handoff on `743a6ce14` fails
+    all four new witnesses and `persisted-nested-seeds`; writing the kept
+    value only when core would not keep it fails the inner re-insert
+    witness; loading cached rows as source rows fails the cached-row witness
+    and `persisted-nested-seeds`; a core that ignores a wrapper's
+    `originalSyncType` merges over seeded rows and fails `persisted-seeds`
+    and `persisted-cached`; dropping the insert's judgment at a later update
+    fails `rejudges an enclosing re-insert that a later update kept`; re-judging
+    only a key's last insert fails the two chain witnesses.
 - **Limits:** under partial row updates the seed-order property drops
   `reinsert` from both runs, because decision "b" lets a moved seed change a
   re-insert's planned row. Key independence skips histories that invalidate
   a transaction. The persisted test adapter stores no rows: its cached row is
   readable only until the run's first durable commit, so reloads within a run
-  are not exercised. The error an invalid commit rejects with, and restart
+  are not exercised. That also bounds decision 9: a storage read marks a row
+  a seed unless core holds it as a source row, so a row the source wrote
+  that later left core and is read back would become a seed; no lane
+  reaches that. The error an invalid commit rejects with, and restart
   and resume, stay outside this oracle.
 
 ### Code weight
 
-`pnpm size:compare` against `65d9ada50` (`origin/main` after the merge):
-the typical `app` scenario grows 111 bytes gzip; `@tanstack/db` as a whole
-package grows 295 (`client.js` +451 minified bytes, `collection/sync.js`
-+276, `collection/state.js` +259); `db-sqlite-persistence-core` grows 536;
-`query-db-collection` shrinks 5.
+`pnpm size:compare` against `427a7c31e` (`origin/main` after the second
+merge): the typical `app` scenario grows 131 bytes gzip; `@tanstack/db` as a
+whole package grows 322 (`client.js` +459 minified bytes,
+`collection/sync.js` +288, `collection/state.js` +331);
+`db-sqlite-persistence-core` grows 785; `query-db-collection` shrinks 5.
+
+The prep-PR round changed these numbers. Decision 9 costs core 12 minified
+bytes (a wrapper's `originalSyncType` passes through `write`), paid for by
+the state rebuild that `reset()` now reuses; `app` stayed at +111. The
+duplicate-insert repair (B, C) adds 14 bytes to `app`. H first added 19
+bytes as a delete-and-return pair of set updates; merging the two
+`DbClient` key sets into one map cut that to 6. In persistence, decision 9
+removed the kept-value lookup and the delete-then-insert handoff and added
+the cached seed marking and the per-key chain of implicit inserts (+83);
+the per-transaction staged rows that make a write-time read linear (D) add
+the rest. Each addition has a witness or mutant that fails without it.
 
 - Core, paid by every app: the readers' loops over every pending
   transaction and their skip of invalid transactions, commit-order
@@ -500,6 +563,28 @@ tests, and a mutant campaign in a separate worktree.
 | The persisted equal-insert witness is insensitive to core seed mutants | Accepted: it checks the wrapper's own clearing; core seeds are judged by the core lanes |
 | A scratch D5 seed implementation still leaves seed lanes RED on histories with deletes, releases, and truncates between seeds | Open: diagnose during the production fix |
 
+## Fourth review round (prep-PR)
+
+A code review, a simplification pass, and 10× random campaigns examined the
+branch before its pull request. Items B to H were then taken through one
+plan of oracle changes before any repair: one grammar action for B and C, a
+late-abort probe for E, a scaling experiment for D, and a churn count for H.
+
+| Finding | Disposition |
+|---|---|
+| A: a seed's metadata returns through the wrapper after an accepted equal re-insert (`persisted-seeds`, random seed -387838471) | Fixed: the wrapper hands inserts to core as whole-row updates (decision 9). Witness `lets a later seed replace metadata that an accepted re-insert kept` fails on `743a6ce14` |
+| A sibling: an inner re-insert of an enclosing row commits ahead onto a seeded row; core classifies it `insert` and the kept value again claims the metadata | Fixed by the same change. Witness `lets a later seed replace metadata that an inner re-insert kept`; it alone kills the narrow fix that writes the kept value only when core would not keep it |
+| A gap: no persisted lane crossed seeds with nesting or with the cached row | Fixed: `persisted-nested-seeds`, with reach `seed under a kept re-insert` (minimum 5) |
+| Cached row versus a later `DbClient` seed: the seed could not replace the cached row or its metadata | Fixed (decision 9). Witness `lets a later seed replace a cached row's metadata` |
+| An update without metadata after an enclosing insert dropped the insert's re-judgment, so an inner commit could not make it clear metadata (found by the 10× campaign) | Fixed. Witness `rejudges an enclosing re-insert that a later update kept` |
+| The wrapper re-judged only a key's last insert without metadata against the value saved before it, so an earlier insert whose kind an inner commit changed was missed, in either direction (found by a second 10× campaign) | Fixed: each key keeps its chain of such inserts. Witnesses `rejudges every enclosing re-insert of a key, not only the last` and `lets an enclosing clear become an equal re-insert after an inner commit` |
+| B: a hold hides a duplicate source insert (`acceptSyncTransaction` refreshes the projection only when a transaction moves) | Fixed. The grammar never wrote a different insert over a row the source wrote; the `conflictingInsert` action does, and the model expects core's duplicate-key error (decision 8 keeps duplicates in core). On `743a6ce14` plus decision 9, 26 core tests fail, every seeded lane among them, including hold invariance. Core's classifier now exempts only a row that only seeds supplied; a seed beneath an open insert keeps that insert's kind in the replay instead |
+| C: a seed hides a duplicate insert in the same or an enclosing transaction | Fixed by the same change and caught by the same action (`seed(1) begin upsert(1) conflictingInsert(1)` was accepted) |
+| D: the wrapper's staged-row fold is O(N²) per transaction | Fixed. 4000 inserts in one transaction took 48 ms against 0.8 ms on `origin/main`. Each staged transaction now keeps its row per key, so a write-time read folds one entry per transaction; 16000 inserts take 6 ms. A mutant that drops partial updates' merge base fails three witnesses and four persisted campaigns. No oracle measures work; the scaling run is the evidence |
+| E: an aborted staged transaction leaves enclosing implicit metadata judged against it | Refuted for the signal path: `commit` says that aborting after acceptance has no effect, and a store-held inner transaction whose signal aborted still applied. A durable failure ends the run with a terminal error, outside this law. A hydration-buffered transaction dropped on abort is not probed |
+| F: Query's owner read lost its applied-metadata fallback for a sync without `metadata` | No action: core always supplies `metadata`, and no wrapper in the repository drops it |
+| G: state internals are public for `client.ts` | Accepted design: the seed authority lookups moved to `client.ts` so that an app without `DbClient` ships 130 fewer gzip bytes |
+| H: `appliedAdapterMetadataKeys` grows with every deleted key | Fixed: the deleted-key and metadata-key sets became one map, `appliedAdapterKeys`, from each key whose metadata an applied adapter write fixed to whether that write deleted the row. After 5000 keys were inserted and deleted it holds 5000 entries instead of 10000 across two sets; the deleted keys remain, as D4 requires. The hydration authority grid gains `delete,update` cells, which a mutant that loses the returning key's authority fails. `sourceWrittenKeys` in the wrapper is unchanged |
 ## Open
 
 - **Query owner supplement.** The `rowToQueries` supplement in

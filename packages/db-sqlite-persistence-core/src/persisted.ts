@@ -1308,12 +1308,18 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
     reject: (error: unknown) => void
   }>
   terminalFailure?: { error: unknown }
-  // Each key's last insert without metadata, and the metadata write it
-  // displaced, while no later write names the key's metadata. Its kind, and
-  // so whether it clears, can change when an inner transaction commits first.
+  // Each key's row as this transaction leaves it: a whole row, or the merged
+  // fields of partial updates to apply over the row before the transaction.
+  stagedRows: Map<TKey, { present: boolean; value?: T; partial: boolean }>
+  // Each key's inserts without metadata since the last write that named its
+  // metadata, and that write. Their kinds, and so whether they clear, can
+  // change when an inner transaction commits first.
   implicitMetadata: Map<
     TKey,
-    { operation: NormalizedSyncOperation<T, TKey>; previous?: MetadataWrite }
+    {
+      operations: Array<NormalizedSyncOperation<T, TKey>>
+      previous?: MetadataWrite
+    }
   >
   // Set just before the transaction is handed to the Collection; from then
   // on core holds its keys itself.
@@ -3626,6 +3632,13 @@ class PersistedCollectionRuntime<
 
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
+      // A row read from storage that the Collection does not hold as a
+      // source row is a previous run's cache: a seed, older than every source
+      // write (decision C). Core holds it as it holds a DbClient seed, so a
+      // later seed can replace it until the source writes it.
+      const state = this.collection?._state
+      const pending = state?.pendingSyncedTransactions.at(-1)
+      if (pending) pending.preserveHydrationSeedKeys = true
 
       // A full durable snapshot validates already public keys. Only the
       // requested subset may add keys to the public Collection.
@@ -3689,6 +3702,12 @@ class PersistedCollectionRuntime<
         ) {
           this.syncControls.write?.({ type: `delete`, key: row.key })
         }
+        if (
+          state &&
+          (!state.syncedData.has(row.key) ||
+            state.hydrationSeedKeys.has(row.key))
+        )
+          state.hydrationSeedKeys.add(row.key)
         this.syncControls.write?.({
           type: `update`,
           value: row.value,
@@ -5698,8 +5717,26 @@ function createWrappedSyncConfig<
           ...transactionStack,
         ]) {
           if (transaction.truncate) row = { present: false }
+          // Each write keeps the transaction's row, so a read without `until`
+          // folds one entry per transaction instead of its operations.
+          if (!until) {
+            const staged = transaction.stagedRows.get(key)
+            if (!staged) continue
+            row = staged.partial
+              ? {
+                  present: true,
+                  value: {
+                    ...(row === undefined
+                      ? params.collection._state.getAcceptedSyncedRow(key)
+                      : row.value),
+                    ...staged.value,
+                  } as T,
+                }
+              : staged
+            continue
+          }
           const end =
-            transaction === until?.transaction
+            transaction === until.transaction
               ? until.index
               : transaction.operations.length
           transaction.operations.slice(0, end).forEach((operation, index) => {
@@ -5713,7 +5750,7 @@ function createWrappedSyncConfig<
               row = { present: true, value: { ...before, ...operation.value } }
             } else row = { present: true, value: operation.value }
           })
-          if (transaction === until?.transaction) break
+          if (transaction === until.transaction) break
         }
         return row
       }
@@ -5724,15 +5761,19 @@ function createWrappedSyncConfig<
       // metadata follows the row it now lands on, as in core.
       const rejudgeEnclosing = (committed: OpenSyncTransaction<T, TKey>) => {
         for (const transaction of transactionStack) {
-          // An insert without metadata clears it unless it now re-inserts.
+          // An insert without metadata clears it unless it now re-inserts;
+          // when every one re-inserts, the write before them stands.
           for (const [key, implicit] of transaction.implicitMetadata) {
             if (!committed.truncate && !committed.operationKeys.has(key))
               continue
-            const until = {
-              transaction,
-              index: transaction.operations.indexOf(implicit.operation),
-            }
-            if (!isEqualReinsert(key, implicit.operation.value, until))
+            const clears = implicit.operations.some(
+              (operation) =>
+                !isEqualReinsert(key, operation.value, {
+                  transaction,
+                  index: transaction.operations.indexOf(operation),
+                }),
+            )
+            if (clears)
               transaction.rowMetadataWrites.set(key, { type: `delete` })
             else if (implicit.previous)
               transaction.rowMetadataWrites.set(key, implicit.previous)
@@ -5926,32 +5967,19 @@ function createWrappedSyncConfig<
             // An insert names the whole row, so it replaces the row it lands
             // on: a seeded or cached row, which is older than every source
             // write, or a row an enclosing open transaction hid when it was
-            // written and this insert committed ahead of. Over a row core
-            // holds, that is a delete and then the insert.
-            const inserts = transaction.insertOperations.has(operation)
-            // An insert without metadata that the wrapper judged a re-insert
-            // stages no metadata write; it keeps the current value, so core
-            // must not clear it.
-            const kept =
-              inserts &&
-              operation.metadata === undefined &&
-              !transaction.rowMetadataWrites.has(operation.key)
-                ? (params.metadata?.row.get(operation.key) as
-                    Record<string, unknown> | undefined)
-                : undefined
-            if (
-              inserts &&
-              params.collection._state.classifyPendingSyncedInsert(
-                operation.key,
-                operation.value,
-              ) === `duplicate`
-            )
-              params.write({ type: `delete`, key: operation.key })
+            // written and this insert committed ahead of. The wrapper judged
+            // its metadata when the source wrote it: an insert that clears
+            // metadata staged a delete, and an equal re-insert keeps it
+            // without writing it. Core applies it as an update that names the
+            // whole row, so only those writes change its metadata.
             params.write({
-              type: inserts ? `insert` : `update`,
+              type: `update`,
               value: operation.value,
-              metadata: operation.metadata ?? kept,
-            })
+              metadata: operation.metadata,
+              ...(transaction.insertOperations.has(operation)
+                ? { originalSyncType: `insert` }
+                : {}),
+            } as ChangeMessageOrDeleteKeyMessage<T, TKey>)
           })
           if (params.metadata) {
             for (const [key, write] of transaction.rowMetadataWrites) {
@@ -6075,6 +6103,7 @@ function createWrappedSyncConfig<
             partialUpdateOperationIndexes: new Set(),
             insertOperations: new Set(),
             implicitMetadata: new Map(),
+            stagedRows: new Map(),
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
             deferredHydrationMetadataDeleteKeys: new Set(),
@@ -6143,7 +6172,35 @@ function createWrappedSyncConfig<
             openTransaction.insertOperations.add(normalization.operation)
           openTransaction.operations.push(normalization.operation)
           openTransaction.operationKeys.add(normalization.operation.key)
-          openTransaction.implicitMetadata.delete(normalization.operation.key)
+          const staged = openTransaction.stagedRows.get(
+            normalization.operation.key,
+          )
+          openTransaction.stagedRows.set(
+            normalization.operation.key,
+            normalization.operation.type === `delete`
+              ? { present: false, partial: false }
+              : openTransaction.partialUpdateOperationIndexes.has(
+                    openTransaction.operations.length - 1,
+                  )
+                ? {
+                    present: true,
+                    value: {
+                      ...staged?.value,
+                      ...normalization.operation.value,
+                    },
+                    partial: staged?.partial ?? true,
+                  }
+                : {
+                    present: true,
+                    value: normalization.operation.value,
+                    partial: false,
+                  },
+          )
+          // A write that names the row's metadata ends the inserts that
+          // decided it. An update without metadata keeps it, and an insert
+          // without metadata joins those inserts.
+          if (message.type === `delete` || message.metadata !== undefined)
+            openTransaction.implicitMetadata.delete(normalization.operation.key)
           if (normalization.operation.type === `delete`) {
             openTransaction.rowMetadataWrites.set(normalization.operation.key, {
               type: `delete`,
@@ -6160,10 +6217,13 @@ function createWrappedSyncConfig<
               )
             } else {
               const key = normalization.operation.key
-              openTransaction.implicitMetadata.set(key, {
-                operation: normalization.operation,
-                previous: openTransaction.rowMetadataWrites.get(key),
-              })
+              const implicit = openTransaction.implicitMetadata.get(key)
+              if (implicit) implicit.operations.push(normalization.operation)
+              else
+                openTransaction.implicitMetadata.set(key, {
+                  operations: [normalization.operation],
+                  previous: openTransaction.rowMetadataWrites.get(key),
+                })
               if (!reinserts)
                 openTransaction.rowMetadataWrites.set(key, { type: `delete` })
             }
@@ -6286,6 +6346,7 @@ function createWrappedSyncConfig<
           openTransaction.partialUpdateOperationIndexes.clear()
           openTransaction.insertOperations.clear()
           openTransaction.implicitMetadata.clear()
+          openTransaction.stagedRows.clear()
           openTransaction.rowMetadataWrites.clear()
           openTransaction.deferredHydrationMetadataDeleteKeys.clear()
           // Intentionally preserve collectionMetadataWrites across truncate.
@@ -6362,7 +6423,16 @@ function createWrappedSyncConfig<
               openTransaction.operations = baselineOperations.concat(
                 openTransaction.operations,
               )
-              for (const { key, metadata } of rows) {
+              for (const { key, value, metadata } of rows) {
+                // The baseline row comes first, under the transaction's own
+                // writes of the key.
+                const staged = openTransaction.stagedRows.get(key)
+                if (!staged || staged.partial)
+                  openTransaction.stagedRows.set(key, {
+                    present: true,
+                    value: { ...value, ...staged?.value },
+                    partial: false,
+                  })
                 if (
                   metadata !== undefined &&
                   !openTransaction.rowMetadataWrites.has(key)

@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
+import { DuplicateKeySyncError } from '../src/errors.js'
 import { createOracleReach } from './oracle-reach.js'
 import {
   oraclePropertyOptions,
@@ -181,6 +182,7 @@ async function createCoreDriver(fullRows = false): Promise<SessionDriver> {
       blocker = collection.insert({ id: 1000 + holdCount++, v: 0 })
     },
     release,
+    isDuplicateKeyError: (error) => error instanceof DuplicateKeySyncError,
     seed: (key, row, rowMetadata) =>
       client.hydrate({
         collections: [
@@ -525,7 +527,14 @@ const lanes = [
     property: `sync-metadata-session.nested`,
     seed: 2_220_002,
   },
-  { lane: seedLane, property: `sync-metadata-session.seeds`, seed: 2_220_003 },
+  {
+    lane: seedLane,
+    property: `sync-metadata-session.seeds`,
+    seed: 2_220_003,
+    // A seed beneath an open update needs both on one row, and duplicate
+    // inserts share the lane's weight, so it runs more fixed histories.
+    runs: 150,
+  },
   {
     lane: seedFullLane,
     property: `sync-metadata-session.seeds-full`,
@@ -542,7 +551,7 @@ const lanes = [
     seed: 2_220_006,
     // Invalidation needs an outer insert, an inner write to the same row,
     // and the inner commit, so this lane runs more fixed histories.
-    runs: 300,
+    runs: 450,
   },
 ] as const
 
@@ -559,6 +568,7 @@ const declaredReach: Record<string, Array<[string, number]>> = {
     [`read with two held transactions`, common],
     [`open transaction over a held transaction`, common],
     [`truncate during a hold`, common],
+    [`duplicate source insert`, rare],
   ],
   nested: [
     [`nested commit`, common],
@@ -571,6 +581,8 @@ const declaredReach: Record<string, Array<[string, number]>> = {
     [`seed under a source insert`, rare],
     [`seed under an open update`, rare],
     [`open transaction over a held transaction`, common],
+    [`duplicate source insert over a seeded row`, rare],
+    [`duplicate source insert during a hold`, rare],
   ],
   'nested-seeds': [
     [`seed`, common],
@@ -578,6 +590,7 @@ const declaredReach: Record<string, Array<[string, number]>> = {
     [`inner write to an enclosing row`, rare],
     [`seed under a source insert`, rare],
     [`seed under an open update`, rare],
+    [`duplicate source insert over a seeded row`, rare],
   ],
   'seeds-full': [
     [`seed`, common],

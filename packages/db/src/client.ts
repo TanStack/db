@@ -364,8 +364,7 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
     for (const key of transaction.rowMetadataWrites.keys())
       metadataKeys.add(key)
   }
-  const deleted = (key: TKey) =>
-    state.appliedAdapterDeletedKeys?.has(key) === true
+  const deleted = (key: TKey) => state.appliedAdapterKeys?.get(key) === true
   return {
     rows: (key) =>
       truncated ||
@@ -376,7 +375,7 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
       truncated ||
       metadataKeys.has(key) ||
       deleted(key) ||
-      state.appliedAdapterMetadataKeys?.has(key) === true,
+      state.appliedAdapterKeys?.has(key) === true,
   }
 }
 

@@ -140,13 +140,13 @@ export class CollectionStateManager<
   public syncedCollectionMetadata = new Map<string, unknown>()
   public hydrationSeedKeys = new Set<TKey>()
   public hydratedKeys = new Set<TKey>()
-  // DbClient may receive a stale hydration chunk after an adapter delete.
-  // Only DbClient collections retain these absences until cleanup because
+  // DbClient may receive a stale hydration chunk after adapter work. Each key
+  // whose row metadata an applied adapter write fixed maps to whether that
+  // write deleted the row: row metadata is a separate object, closed to later
+  // seeds even when the adapter never wrote the row, and a delete also closes
+  // the row. Only DbClient collections retain these until cleanup because
   // hydration has no completion boundary.
-  public appliedAdapterDeletedKeys?: Set<TKey>
-  // Row metadata is a separate object: an adapter write to it closes the key's
-  // metadata to later seeds even when the adapter never wrote the row.
-  public appliedAdapterMetadataKeys?: Set<TKey>
+  public appliedAdapterKeys?: Map<TKey, boolean>
   public hasAppliedAdapterTruncate = false
 
   // Optimistic state tracking - make public for testing
@@ -867,8 +867,7 @@ export class CollectionStateManager<
   }
 
   enableHydrationAuthorityTracking(): void {
-    this.appliedAdapterDeletedKeys ??= new Set<TKey>()
-    this.appliedAdapterMetadataKeys ??= new Set<TKey>()
+    this.appliedAdapterKeys ??= new Map<TKey, boolean>()
   }
 
   private getProjectedSyncedKeyState(
@@ -947,17 +946,11 @@ export class CollectionStateManager<
   ): PendingInsertDisposition {
     const current = this.getProjectedSyncedKeyState(projection, key)
     if (!current.exists) return `insert`
-    // A seed is older than every source write, so it never makes a source
-    // insert a duplicate. An insert replaces a row that only a seed supplied;
-    // over a row an open transaction also wrote, a seed beneath can change
-    // the row, and the insert stays the re-insert the source wrote. An
-    // accepted source write makes the row the source's, as its application
-    // does.
-    if (
-      this.hydrationSeedKeys.has(key) &&
-      !projection.acceptedSourceKeys.has(key)
-    )
-      return projection.sourceKeys.has(key) ? `update` : `insert`
+    // A seed is older than every source write, so an insert replaces a row
+    // that only a seed supplied. Over a row the source wrote, it is judged
+    // like any insert, holds and seeds notwithstanding.
+    if (this.hydrationSeedKeys.has(key) && !projection.sourceKeys.has(key))
+      return `insert`
     if (current.value !== undefined && deepEquals(current.value, value)) {
       return `update`
     }
@@ -1082,10 +1075,19 @@ export class CollectionStateManager<
       let invalidKey: TKey | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
+        // A seed beneath an open insert of a row the source also wrote can
+        // change that row, but not the insert's kind: it stays what the
+        // source wrote. An accepted source write makes the row the source's,
+        // as its application does.
         if (
           !transaction.committed &&
           operation.originalSyncType === `insert` &&
-          operation.type !== `delete`
+          operation.type !== `delete` &&
+          !(
+            this.hydrationSeedKeys.has(key) &&
+            projection.sourceKeys.has(key) &&
+            !projection.acceptedSourceKeys.has(key)
+          )
         ) {
           const disposition = this.classifyProjectedInsert(
             projection,
@@ -1280,10 +1282,10 @@ export class CollectionStateManager<
           this.hydratedKeys.clear()
           if (
             !transaction.preserveHydrationSeedKeys &&
-            this.appliedAdapterDeletedKeys
+            this.appliedAdapterKeys
           ) {
             this.hasAppliedAdapterTruncate = true
-            this.appliedAdapterDeletedKeys.clear()
+            this.appliedAdapterKeys.clear()
           }
           this.virtualPropsCache.clear()
           this.rowOrigins.clear()
@@ -1345,15 +1347,21 @@ export class CollectionStateManager<
           if (!transaction.preserveHydrationSeedKeys) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
+            // A write that brings a deleted row back keeps the metadata the
+            // delete cleared.
             if (operation.type === `delete`)
-              this.appliedAdapterDeletedKeys?.add(key)
-            else this.appliedAdapterDeletedKeys?.delete(key)
+              this.appliedAdapterKeys?.set(key, true)
+            else if (this.appliedAdapterKeys?.get(key))
+              this.appliedAdapterKeys.set(key, false)
           }
         }
 
         for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
-          if (!transaction.preserveHydrationSeedKeys)
-            this.appliedAdapterMetadataKeys?.add(key)
+          if (
+            !transaction.preserveHydrationSeedKeys &&
+            !this.appliedAdapterKeys?.has(key)
+          )
+            this.appliedAdapterKeys?.set(key, false)
           if (metadataWrite.type === `delete`) {
             this.syncedMetadata.delete(key)
             continue
@@ -1663,20 +1671,14 @@ export class CollectionStateManager<
     this.heldOptimisticRows.clear()
     this.hydrationSeedKeys.clear()
     this.hydratedKeys.clear()
-    this.appliedAdapterDeletedKeys?.clear()
-    this.appliedAdapterMetadataKeys?.clear()
+    this.appliedAdapterKeys?.clear()
     this.hasAppliedAdapterTruncate = false
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.localOnlyDirectWrite = undefined
     this.size = 0
     this.pendingSyncedTransactions = []
-    this.pendingSyncedProjection = {
-      states: new Map(),
-      truncated: false,
-      sourceKeys: new Set(),
-      acceptedSourceKeys: new Set(),
-    }
+    this.refreshPendingSyncedProjection()
     this.preSyncVisibleState.clear()
     this.preSyncVirtualState.clear()
     this.recentlySyncedKeys.clear()

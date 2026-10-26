@@ -2610,15 +2610,17 @@ sync run is a session with read-your-writes, own reads, and monotonic writes
 in commit order. Every sync transaction is independent, including one begun
 inside another; accepted transactions apply in commit order, and a hold
 cannot change that order. An outer insert that lands on a different source
-row in commit order makes its transaction invalid. Consumers see whole
+row in commit order makes its transaction invalid, and an insert written over
+such a row is rejected as a duplicate, whatever holds or seeds there are. Consumers see whole
 transactions. Hydration seeds and persisted cache rows are older than every
-source write. In the persisted wrapper an insert replaces whatever row it
-lands on.
+source write, and a later seed replaces either until the source writes the
+row or its metadata; an equal re-insert keeps metadata without writing it.
+In the persisted wrapper an insert replaces whatever row it lands on.
 
 | Owner | Production paths | Observations and checkpoint |
 |---|---|---|
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`) | `persistedCollectionOptions` over an in-memory adapter, store hold and core hold; seeds through a `DbClient`; a row cached in storage at startup | the same source reads after every action; `collection.base` and receipts after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`) | `persistedCollectionOptions` over an in-memory adapter, store hold and core hold; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup | the same source reads after every action; `collection.base` and receipts after settlement |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested lanes | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
 | [hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts) | `DbClient` initialData, hydration chunks, and an adapter sync transaction (inserts, updates, deletes, truncates, and metadata-only writes) in full and partial row modes | public rows, the synced store, and row metadata through `client.dehydrate()` after each action; D5 per object |
@@ -2648,7 +2650,9 @@ the review record:
   included (decision 7).
 
 The persisted test adapter stores no rows of its own, so reloads within one
-run are not exercised. The Query owner supplement in `getOwnersFromMetadata`
+run are not exercised. A storage read marks a row a seed unless core holds it
+as a source row, so a source row that left core and is read back within the
+run would become a seed; no lane reaches that. The Query owner supplement in `getOwnersFromMetadata`
 remains open in the review record. Restart and resume reads belong to the
 SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
 with one sync run.

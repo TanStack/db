@@ -125,6 +125,7 @@ export type SessionAction =
   | { type: `release` }
   | { type: `seed`; key: SessionRowKey; narrow?: boolean; bare?: boolean }
   | { type: `insertOverSeed`; key: SessionRowKey; metadata: boolean }
+  | { type: `conflictingInsert`; key: SessionRowKey; metadata: boolean }
 
 /**
  * A lane fixes which actions the grammar may choose and the nesting depth.
@@ -174,6 +175,14 @@ export type SessionLane = {
    * transaction invalid. The insert still clears metadata, as an insert.
    */
   insertsReplace?: boolean
+  /**
+   * Whether the grammar favours row writes that keep metadata: upserts and
+   * re-inserts without metadata, over metadata writes, removes, and inserts
+   * over a seeded row, which clear it. No action is excluded. A row's
+   * metadata then often stays a seed's after the source wrote the row and
+   * an equal re-insert kept it.
+   */
+  keepsMetadata?: boolean
 }
 
 export const flatLane: SessionLane = {
@@ -251,6 +260,23 @@ export const persistedSeedLane: SessionLane = {
   storeHold: true,
   insertsReplace: true,
 }
+/**
+ * Seeds crossed with nested transactions through the persisted wrapper, with
+ * the conflict lane's weighting: an inner re-insert of an enclosing row can
+ * commit first and land on a seeded row. The cached row and the favoured
+ * metadata-keeping writes let a row's metadata stay a seed's after the
+ * source wrote the row, so a later seed can replace it.
+ */
+export const persistedNestedSeedLane: SessionLane = {
+  name: `persisted-nested-seeds`,
+  maxDepth: 2,
+  seeds: true,
+  storeHold: true,
+  insertsReplace: true,
+  conflicts: true,
+  cached: true,
+  keepsMetadata: true,
+}
 
 const anyRowKey = fc.constantFrom(...sessionRowKeys)
 
@@ -286,12 +312,16 @@ export function sessionActionArbitrary(
     weight: number,
     arbitrary: fc.Arbitrary<SessionAction>,
   ): fc.WeightedArbitrary<SessionAction> => ({ weight, arbitrary })
+  const metadataArbitrary =
+    lane.keepsMetadata === true
+      ? fc.constantFrom(false, false, false, false, false, false, false, true)
+      : fc.boolean()
   const actions: Array<fc.WeightedArbitrary<SessionAction>> = [
     weighted(4, fc.constant({ type: `begin` as const })),
     weighted(4, fc.constant({ type: `commit` as const })),
     weighted(1, fc.constant({ type: `cancel` as const })),
     weighted(
-      2,
+      lane.keepsMetadata === true ? 1 : 2,
       rowKeyArbitrary.map((key) => ({ type: `rowSet` as const, key })),
     ),
     weighted(
@@ -299,21 +329,21 @@ export function sessionActionArbitrary(
       rowKeyArbitrary.map((key) => ({ type: `rowDelete` as const, key })),
     ),
     weighted(
-      2 * rows,
+      lane.keepsMetadata === true ? 4 * rows : 2 * rows,
       fc
-        .tuple(rowKeyArbitrary, fc.boolean())
+        .tuple(rowKeyArbitrary, metadataArbitrary)
         .map(([key, metadata]) => ({ type: `upsert` as const, key, metadata })),
     ),
     weighted(
       rows,
-      fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
+      fc.tuple(rowKeyArbitrary, metadataArbitrary).map(([key, metadata]) => ({
         type: `reinsert` as const,
         key,
         metadata,
       })),
     ),
     weighted(
-      rows,
+      lane.keepsMetadata === true ? 1 : rows,
       rowKeyArbitrary.map((key) => ({ type: `remove` as const, key })),
     ),
     weighted(1, fc.constant({ type: `truncate` as const })),
@@ -352,7 +382,7 @@ export function sessionActionArbitrary(
   if (lane.seeds || lane.cached === true)
     actions.push(
       weighted(
-        2,
+        lane.keepsMetadata === true ? 1 : 2,
         fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
           type: `insertOverSeed` as const,
           key,
@@ -374,6 +404,19 @@ export function sessionActionArbitrary(
           })),
       ),
     )
+  // A fresh insert over a row the source wrote names a different row. Core
+  // rejects it as a duplicate whatever holds or seeds there are; where
+  // inserts replace, it replaces that row.
+  actions.push(
+    weighted(
+      1,
+      fc.tuple(rowKeyArbitrary, metadataArbitrary).map(([key, metadata]) => ({
+        type: `conflictingInsert` as const,
+        key,
+        metadata,
+      })),
+    ),
+  )
   return fc.oneof(...actions)
 }
 
@@ -417,7 +460,8 @@ export function historyRegimes(
         (action.type === `upsert` ||
           action.type === `reinsert` ||
           action.type === `remove` ||
-          action.type === `insertOverSeed`) &&
+          action.type === `insertOverSeed` ||
+          action.type === `conflictingInsert`) &&
         model.enclosingWroteRow(action.key),
     }
     void planAction(model, action, { s: step })(modelOnly)
@@ -437,6 +481,12 @@ export function historyRegimes(
       regimes.add(`source insert over a seeded row`)
     if (before.seedOnlyRow && action.type === `upsert`)
       regimes.add(`source update over a seeded row`)
+    if (action.type === `conflictingInsert`) {
+      regimes.add(`duplicate source insert`)
+      if (model.isHolding) regimes.add(`duplicate source insert during a hold`)
+      if (model.hasSeed(action.key))
+        regimes.add(`duplicate source insert over a seeded row`)
+    }
     if (model.invalidations > before.invalidations)
       regimes.add(`transaction invalidated`)
     if (model.replacedConflicts > before.replacedConflicts)
@@ -455,6 +505,8 @@ export function historyRegimes(
         regimes.add(`seed under a source insert`)
       if (model.hasOpenRowUpdate(action.key))
         regimes.add(`seed under an open update`)
+      if (model.keptByAcceptedReinsert(action.key))
+        regimes.add(`seed under a kept re-insert`)
       if (action.bare === true) regimes.add(`seed without metadata`)
     }
     if (action.type === `reinsert`) regimes.add(`equal re-insert`)
@@ -577,6 +629,18 @@ export class SessionModel {
     private readonly fullRows = false,
     private readonly insertsReplace = false,
   ) {}
+
+  /** Whether an insert over a different source row replaces it. */
+  get insertsReplaceRows(): boolean {
+    return this.insertsReplace
+  }
+
+  /** Whether a seed of this row arrived in the session. */
+  hasSeed(key: SessionRowKey): boolean {
+    return this.sessionEntries().some(
+      (entry) => `seed` in entry && entry.seed.key === key,
+    )
+  }
 
   private events: Array<ModelEvent> = []
   private frames: Array<ModelFrame> = []
@@ -812,6 +876,25 @@ export class SessionModel {
     )
   }
 
+  /**
+   * Whether an accepted source insert kept this row's metadata, and no source
+   * write has named it since: an equal re-insert keeps metadata as an update
+   * does, without writing it. A seed's metadata then still governs the row.
+   */
+  keptByAcceptedReinsert(key: SessionRowKey): boolean {
+    const entries = this.sessionEntries()
+    return (
+      !this.sourceWroteBefore(`rowMetadata`, key, entries, entries.length) &&
+      entries.some(
+        (entry) =>
+          `event` in entry &&
+          isInsert(entry.event) &&
+          entry.event.key === key &&
+          this.frames[entry.event.frame]!.status !== `open`,
+      )
+    )
+  }
+
   observe(): SessionObservation {
     const session = this.sessionEntries()
     const consumers = this.consumerEntries()
@@ -1044,6 +1127,8 @@ export type SessionDriver = {
   hold: (store: boolean) => void
   release: () => Promise<void>
   seed?: (key: SessionRowKey, row: unknown, metadata: unknown) => void
+  /** Whether a thrown error is core's duplicate-key rejection. */
+  isDuplicateKeyError?: (error: unknown) => boolean
   observe: () => SessionObservation
   /** Lets receipt continuations run before an observation. */
   flush: () => Promise<void>
@@ -1109,18 +1194,20 @@ export async function runSessionHistory(
       steps++
       const value = { s: step }
       let thrown: string | undefined
+      let lawError: string | undefined
       try {
         await planAction(model, action, value)(driver)
       } catch (error) {
         thrown = describeError(error)
+        if (error instanceof SessionLawError) lawError = error.law
       }
       if (thrown !== undefined) {
         mismatch = {
           step,
           action,
-          law: `legal action threw`,
-          expected: `no error`,
-          actual: thrown,
+          law: lawError ?? `legal action threw`,
+          expected: lawError ? `a duplicate-key error` : `no error`,
+          actual: lawError ? `no error` : thrown,
         }
         break
       }
@@ -1460,6 +1547,12 @@ function isLegal(
         model.sourceRow(action.key).present &&
         !model.sourceWroteRow(action.key)
       )
+    case `conflictingInsert`:
+      return (
+        model.depth > 0 &&
+        !model.innermostInvalid &&
+        model.sourceWroteRow(action.key)
+      )
     case `remove`:
     case `reinsert`:
       return model.depth > 0 && model.sourceRow(action.key).present
@@ -1574,6 +1667,36 @@ function planAction(
       )
       return (driver) => driver.seed!(action.key, row, metadata)
     }
+    case `conflictingInsert`: {
+      // A fresh insert over a row the source wrote. Core rejects it with a
+      // duplicate-key error and records nothing; where inserts replace, it
+      // replaces the row and, without metadata, clears its metadata.
+      const row = action.metadata
+        ? { id: action.key, v: value, m: value }
+        : { id: action.key, v: value }
+      const metadata = action.metadata ? value : undefined
+      if (!model.insertsReplaceRows)
+        return async (driver) => {
+          // The model alone records nothing for a rejected insert.
+          if (driver === modelOnly) return
+          try {
+            await driver.insert(action.key, row, metadata)
+          } catch (error) {
+            if (driver.isDuplicateKeyError?.(error) === true) return
+            throw error
+          }
+          throw new SessionLawError(
+            `a source insert over a different source row is rejected`,
+          )
+        }
+      model.writeRow(action.key, row, `insert`, metadata === undefined)
+      if (metadata !== undefined)
+        model.write(`rowMetadata`, action.key, {
+          present: true,
+          value: metadata,
+        })
+      return (driver) => driver.insert(action.key, row, metadata)
+    }
     case `insertOverSeed`: {
       // A fresh source insert over a row only a seed supplied replaces it.
       const row = action.metadata
@@ -1647,6 +1770,13 @@ function compareSource(
   actual: SessionObservation,
 ): SessionMismatch | undefined {
   return compare(step, action, expected, actual, true)
+}
+
+/** A driver call that observed a production result the law forbids. */
+class SessionLawError extends Error {
+  constructor(readonly law: string) {
+    super(law)
+  }
 }
 
 function describeError(error: unknown): string {

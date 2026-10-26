@@ -46,10 +46,10 @@ import type { ChangeMessage } from '../src/types'
  * The grammar crosses seven adapter decisions in both `full` and `partial` row
  * update modes: insert and update, each with and without metadata, a
  * metadata-only write, delete, and truncate. Hydration arrives before, after,
- * or on both sides of the adapter's applied receipt. That gives a grid of 52
- * cells (2 modes times 26): 7 single decisions times 3 hydration orders, and 5
- * two-decision histories (delete/reinsert, insert/delete, truncate/reinsert)
- * after hydration. Each chunk row carries metadata and a field that no adapter
+ * or on both sides of the adapter's applied receipt. That gives a grid of 56
+ * cells (2 modes times 28): 7 single decisions times 3 hydration orders, and 7
+ * two-decision histories (delete/reinsert, delete/update, insert/delete,
+ * truncate/reinsert) after hydration. Each chunk row carries metadata and a field that no adapter
  * write names, `seeded`. The early chunk has `seeded`; the late chunk does not,
  * so a partial merge of the late seed over the early one would keep the stale
  * field. `initialData` gives its target `seeded: 'initial'`, so an adapter
@@ -445,9 +445,13 @@ describe(`DbClient hydration authority oracle`, () => {
     `delete`,
     `truncate`,
   ]
+  // A row an update brings back after a delete keeps the metadata the delete
+  // cleared: neither write leaves the metadata for a later seed.
   const pairs = [
     `delete,insert`,
     `delete,insert+metadata`,
+    `delete,update`,
+    `delete,update+metadata`,
     `insert,delete`,
     `truncate,insert`,
     `truncate,insert+metadata`,

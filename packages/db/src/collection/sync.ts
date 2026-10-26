@@ -262,6 +262,10 @@ export class CollectionSyncManager<
               this.checkReusedRow(key, messageType, messageWithOptionalKey)
             }
 
+            // An insert names the whole row, so it replaces the row even as
+            // an update. A wrapping sync that judged its insert already hands
+            // it on as such an update: its metadata then changes only
+            // through the wrapper's own writes.
             const message = {
               ...messageWithOptionalKey,
               type: messageType,
@@ -269,7 +273,8 @@ export class CollectionSyncManager<
               originalSyncType:
                 messageWithOptionalKey.type === `insert`
                   ? (`insert` as const)
-                  : undefined,
+                  : (messageWithOptionalKey as { originalSyncType?: `insert` })
+                      .originalSyncType,
             } as OptimisticChangeMessage<TOutput, TKey> & {
               originalSyncType?: `insert`
             }

@@ -11,6 +11,7 @@ import {
   persistedConflictLane,
   persistedFlatLane,
   persistedNestedLane,
+  persistedNestedSeedLane,
   persistedSeedLane,
   runSessionHistory,
   sessionCollectionKeys,
@@ -52,8 +53,9 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * drain. The wrapper hands rows to core after its durable step, so consumers
  * see them a turn or more later even with no hold.
  *
- * Lanes: `persisted-flat`, `persisted-nested`, and `persisted-seeds`. Seeds
- * use a `DbClient` that owns the persisted Collection. The adapter ignores
+ * Lanes: `persisted-flat`, `persisted-nested`, `persisted-seeds`, and
+ * `persisted-nested-seeds`, which crosses seeds with nested transactions.
+ * Seeds use a `DbClient` that owns the persisted Collection. The adapter ignores
  * stored metadata, so restart and resume reads are outside these lanes.
  */
 
@@ -372,6 +374,109 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
     )
   })
 
+  // An equal re-insert keeps metadata as an update does, without writing it,
+  // so the latest seed still governs the row's metadata after it commits.
+  it(`lets a later seed replace metadata that an accepted re-insert kept`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `seed`, key: 1, bare: true },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `seed`, key: 1 },
+        { type: `commit` },
+        { type: `seed`, key: 1, bare: true },
+      ],
+      persistedSeedLane,
+    )
+  })
+
+  // The same holds when the re-insert commits ahead of the enclosing
+  // transaction whose row it re-inserted and lands on a seeded row.
+  it(`lets a later seed replace metadata that an inner re-insert kept`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `seed`, key: 2 },
+        { type: `upsert`, key: 2, metadata: false },
+        { type: `begin` },
+        { type: `reinsert`, key: 2, metadata: false },
+        { type: `commit` },
+        { type: `seed`, key: 2, bare: true },
+      ],
+      persistedNestedSeedLane,
+    )
+  })
+
+  // A persisted cache row is a seed (decision C), so a later DbClient seed
+  // replaces its metadata until the source writes the metadata.
+  it(`lets a later seed replace a cached row's metadata`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `seed`, key: 1, bare: true },
+      ],
+      persistedNestedSeedLane,
+    )
+  })
+
+  // An update without metadata keeps metadata, so the insert before it still
+  // decides the row's metadata. When an inner transaction commits ahead and
+  // changes the row that insert lands on, the insert clears the metadata.
+  it(`rejudges an enclosing re-insert that a later update kept`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: true },
+        { type: `commit` },
+      ],
+      persistedNestedSeedLane,
+    )
+  })
+
+  // Every insert without metadata in an enclosing transaction is re-judged
+  // when an inner one commits ahead: an earlier re-insert that now lands on a
+  // different row clears metadata, and a later equal re-insert keeps that.
+  it(`rejudges every enclosing re-insert of a key, not only the last`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `insertOverSeed`, key: 1, metadata: false },
+        { type: `commit` },
+        { type: `begin` },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: true },
+        { type: `commit` },
+      ],
+      persistedNestedSeedLane,
+    )
+  })
+
+  // An enclosing insert that cleared metadata can become an equal re-insert
+  // of the row an inner transaction committed ahead; it then keeps the
+  // metadata a seed supplied beneath.
+  it(`lets an enclosing clear become an equal re-insert after an inner commit`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `insertOverSeed`, key: 1, metadata: false },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `begin` },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `seed`, key: 1 },
+        { type: `commit` },
+      ],
+      persistedNestedSeedLane,
+    )
+  })
+
   // An inner transaction reads the open writes of the transactions it began
   // inside: one session reads all its open writes.
   it(`reads an enclosing transaction's write inside a nested transaction`, async () => {
@@ -499,6 +604,22 @@ const extraLanes: Array<{
     reach: [
       `inner write to an enclosing row`,
       `insert replaces a different row`,
+      `duplicate source insert`,
+      `store hold`,
+    ],
+  },
+  // A seed's metadata still governs a row whose metadata an accepted
+  // re-insert kept, here also when the re-insert committed ahead of the
+  // enclosing transaction whose row it re-inserted.
+  {
+    lane: persistedNestedSeedLane,
+    seed: 2_220_016,
+    runs: 300,
+    reach: [
+      `seed under a kept re-insert`,
+      `inner write to an enclosing row`,
+      `insert replaces a different row`,
+      `duplicate source insert`,
       `store hold`,
     ],
   },
