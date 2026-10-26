@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { withChangeTracking } from '../src/proxy.js'
 import { declareOracle } from './oracle-config.js'
-import { protocols, visit } from './proxy-iteration-fixture.js'
-import type { Item } from './proxy-iteration-fixture.js'
+import { expectMembers, protocols, visit } from './proxy-iteration-fixture.js'
+import type { Item, Protocol } from './proxy-iteration-fixture.js'
 
 /**
  * # Do draft Map and Set iterators preserve native live semantics?
@@ -34,33 +34,25 @@ function expectNativeVisits(actual: unknown, expected: unknown): void {
   expect(actual).toEqual(expected)
 }
 
-function expectMembers(
-  actual: Map<unknown, Item> | Set<Item>,
-  expected: Map<unknown, Item> | Set<Item>,
-): void {
-  expect(actual).toBeInstanceOf(expected instanceof Map ? Map : Set)
-  // Preserve Map keys, cardinality and iteration order before checking values.
-  // An empty container must not pass a per-member predicate vacuously.
-  expect([...actual]).toEqual([...expected])
+/**
+ * The native Map or Set after `visit` writes `x = 2` through every member.
+ * A draft write under the same protocol must match these values before and
+ * after the update persists. This is the native model of that write.
+ */
+function nativeWrittenValues<T extends Map<unknown, Item> | Set<Item>>(
+  values: T,
+  protocol: Protocol,
+): T {
+  visit(values, protocol, (value) => {
+    value.x = 2
+  })
+  return values
 }
 
-declareOracle({ check: [expectNativeVisits, expectMembers] })
-
-it.each([`Map`, `Set`] as const)(
-  `%s member checker rejects missing output and accepts complete output`,
-  (kind) => {
-    const expected =
-      kind === `Map` ? new Map([[`item`, { x: 2 }]]) : new Set([{ x: 2 }])
-    const empty = kind === `Map` ? new Map() : new Set<Item>()
-    expect(() => expectMembers(empty, expected)).toThrow()
-    expectMembers(expected, expected)
-    if (kind === `Map`) {
-      expect(() =>
-        expectMembers(new Map([[`wrong`, { x: 2 }]]), expected),
-      ).toThrow()
-    }
-  },
-)
+declareOracle({
+  check: [expectNativeVisits],
+  model: [nativeWrittenValues],
+})
 
 describe(`Array draft iteration`, () => {
   type Element = { x: number } | number
@@ -161,32 +153,6 @@ describe.each([`Map`, `Set`] as const)(
 )
 
 describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
-  it(`reuses an original member handle without duplicating or splitting its draft identity`, () => {
-    const item = { x: 1 }
-    const values = kind === `Map` ? new Map([[`old`, item]]) : new Set([item])
-    const changes = withChangeTracking({ values }, (draft) => {
-      if (draft.values instanceof Map) {
-        draft.values.set(`new`, item)
-        draft.values.get(`new`)!.x = 2
-        expect(draft.values.get(`old`)!.x).toBe(2)
-      } else {
-        draft.values.add(item)
-        expect(draft.values.size).toBe(1)
-        draft.values.values().next().value!.x = 2
-      }
-    })
-    expect(item.x).toBe(1)
-    expectMembers(
-      changes.values as typeof values,
-      kind === `Map`
-        ? new Map([
-            [`old`, { x: 2 }],
-            [`new`, { x: 2 }],
-          ])
-        : new Set([{ x: 2 }]),
-    )
-  })
-
   it.each(protocols)(
     `%s matches native membership changes during iteration`,
     (protocol) => {
@@ -224,34 +190,6 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
       ]).toEqual(expected.values)
     },
   )
-
-  it(`shares newly added values during chained mutators and detaches the result`, () => {
-    const item = { x: 1 }
-    const values = kind === `Map` ? new Map<unknown, Item>() : new Set<Item>()
-    const changes = withChangeTracking({ values }, (draft) => {
-      if (draft.values instanceof Map) {
-        expect(draft.values.set(`a`, item).set(`b`, item)).toBe(draft.values)
-        draft.values.get(`a`)!.x = 2
-        expect(draft.values.get(`b`)!.x).toBe(2)
-      } else {
-        expect(draft.values.add(item).add(item)).toBe(draft.values)
-        expect(draft.values.has(item)).toBe(true)
-        draft.values.values().next().value!.x = 2
-        expect(draft.values.size).toBe(1)
-      }
-    })
-    expect(item.x).toBe(2)
-    item.x = 3
-    expectMembers(
-      changes.values as typeof values,
-      kind === `Map`
-        ? new Map([
-            [`a`, { x: 2 }],
-            [`b`, { x: 2 }],
-          ])
-        : new Set([{ x: 2 }]),
-    )
-  })
 })
 
 it.each(protocols)(
@@ -290,10 +228,7 @@ it.each(
   async ({ kind, protocol }) => {
     const make = () =>
       kind === `Map` ? new Map([[`a`, { x: 1 }]]) : new Set([{ x: 1 }])
-    const expected = make()
-    visit(expected, protocol, (value) => {
-      value.x = 2
-    })
+    const expected = nativeWrittenValues(make(), protocol)
     let confirm: (value: {
       id: number
       values: ReturnType<typeof make>

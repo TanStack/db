@@ -4,6 +4,8 @@
  * oracle compares against; `visit` runs one protocol over a draft or native
  * container.
  */
+import { expect } from 'vitest'
+
 export type Item = { x: number }
 
 export const protocols = [`values`, `entries`, `iterator`, `forEach`] as const
@@ -29,4 +31,14 @@ export function visit(
       if (values instanceof Map) for (const [, value] of values) callback(value)
       else for (const value of values) callback(value)
   }
+}
+
+export function expectMembers(
+  actual: Map<unknown, Item> | Set<Item>,
+  expected: Map<unknown, Item> | Set<Item>,
+): void {
+  expect(actual).toBeInstanceOf(expected instanceof Map ? Map : Set)
+  // Preserve Map keys, cardinality and iteration order before checking values.
+  // An empty container must not pass a per-member predicate vacuously.
+  expect([...actual]).toEqual([...expected])
 }

@@ -12,7 +12,7 @@ import {
   withArrayChangeTracking,
   withChangeTracking,
 } from '../src/proxy.js'
-import { protocols, visit } from './proxy-iteration-fixture.js'
+import { expectMembers, protocols, visit } from './proxy-iteration-fixture.js'
 import type { Item } from './proxy-iteration-fixture.js'
 
 describe.each([`Map`, `Set`] as const)(`%s draft iteration`, (kind) => {
@@ -260,6 +260,60 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
       ])
     },
   )
+
+  it(`reuses an original member handle without duplicating or splitting its draft identity`, () => {
+    const item = { x: 1 }
+    const values = kind === `Map` ? new Map([[`old`, item]]) : new Set([item])
+    const changes = withChangeTracking({ values }, (draft) => {
+      if (draft.values instanceof Map) {
+        draft.values.set(`new`, item)
+        draft.values.get(`new`)!.x = 2
+        expect(draft.values.get(`old`)!.x).toBe(2)
+      } else {
+        draft.values.add(item)
+        expect(draft.values.size).toBe(1)
+        draft.values.values().next().value!.x = 2
+      }
+    })
+    expect(item.x).toBe(1)
+    expectMembers(
+      changes.values as typeof values,
+      kind === `Map`
+        ? new Map([
+            [`old`, { x: 2 }],
+            [`new`, { x: 2 }],
+          ])
+        : new Set([{ x: 2 }]),
+    )
+  })
+
+  it(`shares newly added values during chained mutators and detaches the result`, () => {
+    const item = { x: 1 }
+    const values = kind === `Map` ? new Map<unknown, Item>() : new Set<Item>()
+    const changes = withChangeTracking({ values }, (draft) => {
+      if (draft.values instanceof Map) {
+        expect(draft.values.set(`a`, item).set(`b`, item)).toBe(draft.values)
+        draft.values.get(`a`)!.x = 2
+        expect(draft.values.get(`b`)!.x).toBe(2)
+      } else {
+        expect(draft.values.add(item).add(item)).toBe(draft.values)
+        expect(draft.values.has(item)).toBe(true)
+        draft.values.values().next().value!.x = 2
+        expect(draft.values.size).toBe(1)
+      }
+    })
+    expect(item.x).toBe(2)
+    item.x = 3
+    expectMembers(
+      changes.values as typeof values,
+      kind === `Map`
+        ? new Map([
+            [`a`, { x: 2 }],
+            [`b`, { x: 2 }],
+          ])
+        : new Set([{ x: 2 }]),
+    )
+  })
 })
 
 it.each(protocols)(
@@ -369,6 +423,22 @@ it.each([`entries`, `values`] as const)(
       expect(visits).toBe(1)
     } finally {
       spy.mockRestore()
+    }
+  },
+)
+
+it.each([`Map`, `Set`] as const)(
+  `%s member checker rejects missing output and accepts complete output`,
+  (kind) => {
+    const expected =
+      kind === `Map` ? new Map([[`item`, { x: 2 }]]) : new Set([{ x: 2 }])
+    const empty = kind === `Map` ? new Map() : new Set<Item>()
+    expect(() => expectMembers(empty, expected)).toThrow()
+    expectMembers(expected, expected)
+    if (kind === `Map`) {
+      expect(() =>
+        expectMembers(new Map([[`wrong`, { x: 2 }]]), expected),
+      ).toThrow()
     }
   },
 )
