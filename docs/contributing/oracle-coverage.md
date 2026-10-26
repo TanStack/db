@@ -126,26 +126,40 @@ establish every nested projection shape or framework receiving boundary.
 The generated compile-time persistence owner is
 `packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`.
 It generates row shapes (1–4 scalar, nullable, array, or nested fields), six
-key domains, field optionality, and utility signatures. Every generated shape
-crosses local/synced, schema-free/transforming schema, typed-spread/inline
-arguments, and inferred/partial/full explicit type arguments. Six additional
-inline schema forms infer the unannotated `getKey` callback's row, preserving
-all 24 annotated construction forms. One independent
-type law compares insert input, complete published row types (including the
-documented virtual fields), exact keys, and supplied
-utility signatures at TypeScript compilation. Contextual callbacks also compare
-their parameter with the independent output row. Partial explicit arguments use
-TypeScript's utility default rather than promising inference of unspecified
-generic arguments. The core `persisted-options.test.ts` runner and the browser
-`persisted-options.test.ts` receiving runner share that judgment; browser also
-passes real Query Collection options through it and compares adapter utilities
-before/after wrapping. Both run 12 histories with seed 2259 and 12 with a fresh
+key domains, field optionality, utility signatures, numeric schema versions,
+and network deadlines. Each shape retains 30 construction forms across
+local/synced, schema-free/transforming schema, typed-spread/inline arguments,
+and inferred/partial/full type arguments, including contextual schema callbacks.
+Twelve configured forms cross eager/on-demand/network-first options with schema
+and sync modes; network-first remains eager. Two schema-free forms supply a
+phantom schema generic without a schema value and still preserve row input.
+
+Independent type laws compare insert input, complete published row types,
+exact keys, user utilities, added local persistence capabilities (including
+optional leadership/reload signatures), option types, and contextual getKey /
+markReady callbacks. The browser driver uses real Query Collection options.
+Its independent closed capability model checks direct-write signatures,
+observer state, refetch parameters and a non-any Promise-array envelope. A
+supplemental before/after relation preserves the full Query utility types;
+QueryObserverResult's internal payload has no independent model here.
+Fresh-object sync rejection uses an exact unsuppressed overload diagnostic and
+a legal neighbor that changes only sync, so a collateral option error cannot
+substitute for the promised rejection.
+
+Core and browser `persisted-options.test.ts` runners share the grammar/model
+and use their respective receiver tsconfig. Package and root `test:oracles`
+commands select them. Both run 12 histories with seed 2259 and 12 with a fresh
 seed, measure per-path reach, and accept the shared seed/path/property replay
-interface (`persisted-options.types.core` / `.browser`). This owner does not
-execute runtime parsing, adapter I/O, sync, or publication, and does not check
-built declarations, npm resolution, other host packages, or every TS version.
+interface (`persisted-options.types.core` / `.browser`). A shared semantic
+builder retains source and declaration diagnostics while caching dependencies;
+timeouts scale with the campaign multiplier, and histories yield for worker RPC.
+This owner does not execute runtime parsing, adapter I/O, sync, or publication,
+and does not check built declarations, npm resolution, other host packages,
+every TS version, arbitrary extra-property structural assignment, or the
+internal semantics of trusted PendingMutation/LoadSubsetOptions carriers.
 The [type-preservation audit](oracle-reviews/pr-2259-persisted-option-types.md)
-records parent RED, GREEN, legacy-suite survival, and hostile-mutant evidence.
+and `scripts/calibrate-persisted-option-types.mjs` preserve parent RED, GREEN,
+legacy-suite survival, hostile-mutant evidence, and runnable overlay recipes.
 
 Other existing fixed type checks cover adjacent compile-time boundaries:
 `packages/db/tests/mutation-handler-type-oracle.test-d.ts` checks sibling

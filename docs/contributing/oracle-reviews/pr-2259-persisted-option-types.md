@@ -4,8 +4,8 @@ Reviewed PR head: `e3e8a9b5bce0a99d889b73f6eb7578b6d7ef3769`.
 Original defective parent: `d2935d0fcac164163adc231c6a796b8a4c234d9b`.
 This self-audit covers the oracle migration built on that head. Production
 `persisted.ts` is unchanged from the reviewed PR after all temporary mutants.
-The review ledger and raw GitHub responses are retained under `.context/`;
-this record preserves the verdict-critical evidence for version control.
+Optional raw logs remain in local scratch storage. This versioned record and
+the calibration command below preserve the verdict-critical reproduction steps.
 
 The initial migration record below precedes the prep-pr follow-up at the end.
 That follow-up supersedes its owner hash, construction counts, and scoped
@@ -15,7 +15,8 @@ The migrated executable owner has SHA-256
 `c164515bf9705864bd5f0b27dc6e7769d1f7214cfba8158130fb12b36c04c9a0`.
 The replay registry has SHA-256
 `53837b427c149964cd6dda52c7f87d71de57626790c48012527d1d2028f90889`.
-These identify the repaired instrument while its changes remain uncommitted.
+These identify the historical initial instrument. Later sections explicitly
+supersede them. They are not hashes of the current owner.
 
 ## Law, experiment, and inference
 
@@ -176,7 +177,7 @@ empty at capture. There were no additional capped findings or footnotes.
 
 CodeRabbit's overload summary was technically accurate. Its oracle analysis
 had low depth and prioritized a documentation metric over a real enforcement
-gap. **No hire for an oracle-review role on this evidence.** The preceding
+gap. The preceding
 assistant review located the right owner and distinguished compile-time from
 runtime coverage, but was too generous in treating fixed expected shapes as
 sufficient independent oracle judgment. The surviving mutant corrects that
@@ -255,7 +256,7 @@ retain their scope, with the expanded counts and owner hash stated here.
 
 Finding ledger: **one raw prep-pr finding = one repaired coverage regression**.
 The simplifier made no changes and proposed no additional suggestions.
-Reviewer assessment: **hire for this scoped oracle review**. The reviewer
+Technical reviewer assessment: the reviewer
 identified a lost public path and proved its significance with a full-campaign
 survivor and a distinguishing old-path failure. Root independently reran the
 four-way probe and inspected the full-campaign overlay and diagnostics.
@@ -266,3 +267,160 @@ The bundle-size comparison could not build the cached baseline because that
 worktree lacks Vitest/TypeScript dependencies. A separate TypeScript 5.9.3
 transpile comparison emits identical JavaScript for the parent and repaired
 `persisted.ts`. This is emit evidence, not a completed bundle measurement.
+
+## External review follow-up at 4ea6b7663
+
+The supplied review read PR head
+`4ea6b76634ef3b16ec8461fb29bb4aebb51819da` without running its tests.
+This follow-up evaluates all ten items and repairs confirmed oracle gaps.
+Production remains the original two schema-free result corrections; no new
+production defect was demonstrated. This section supersedes earlier descriptions
+of the current grammar, Query expectation, diagnostics, counts, and replay path.
+The follow-up owner SHA-256 is `8f206d9195231239989e2a2c3370fd4abaf4fe4bab32717689c0b5e04834905c`.
+The containing Git commit identifies the complete follow-up tree. Historical
+hashes above describe earlier experiments, rather than a mutable current file.
+
+### Law, experiment, inference, and enforcement
+
+| Law and authority | Experiment and inference | Final enforcement and limits |
+| --- | --- | --- |
+| Public persistence utilities retain required/optional signatures, alongside caller utilities. Authority: PersistedCollectionUtils API and SQLite guide. | Removing the local result intersection passes the reviewed full campaign. The expanded comparison rejects TS2344 at LocalCapabilities. | Independent signatures observe acceptMutations, optional getLeadershipState and optional forceReloadSubset. PendingMutation/LoadSubsetOptions are trusted domain carriers, not expected-result helpers. |
+| Documented persistence options and contextual callbacks remain usable across schema/sync configurations. Authority: SQLite guide and public SyncConfig/option contracts. | Old grammar omits those options and uses no-argument sync functions. Widening schemaVersion, initialRender strategy, syncMode or contextual sync input now rejects TS2344. | Twelve extra configurations per shape cross schema and sync modes with eager/on-demand/network-first. Network-first is eager. Generated schemaVersion is 1–100 and timeout is 0–10000. This checks types, not runtime option validation. |
+| Query composition preserves its documented closed capabilities. Authority: QueryCollectionUtils public reference and the guide's adapter composition. | isLoading:any survives the reviewed full browser campaign. The independent model rejects it, widened refetch options, and an extra optional adapter capability. | Generated row/key write signatures plus exact state fields and refetch parameters. Non-any Promise-array envelope is independent; supplemental before/after equality preserves the full return payload. No independent QueryObserverResult payload semantics are claimed. |
+| A fresh sync:undefined argument must fail for sync admission, rather than collateral corruption. | Undefined-sync admission alone already failed the old directive. Adding unrelated getKey:42 to the negative expressions masks it and passes the old full campaign. New paired observations reject that compound corruption. | Unsuppressed TS2769 must point at the exact fresh sync property. The legal neighbor changes only sync and must compile. Every other diagnostic remains fatal. Structural extra properties carried through variables have different TypeScript freshness semantics and are not this rejection claim. |
+| Run budget, receiving configuration and diagnostic fidelity must remain effective. | Multiplier10 originally registers 120 runs but 120000ms. Revised registration gives 1200000ms. Source-only TS2322 and declaration-only TS4094 controls reject. | Receiver tsconfig, one compiler per receiver across campaigns, dependency caching, all original diagnostic classes, and event-loop yields between generated histories. No generated-file-only diagnostic filtering. |
+
+### Lossless finding ledger
+
+| ID | Supplied claim | Technical verdict / evidence | PR action | Durable value |
+| --- | --- | --- | --- | --- |
+| E1 | Local-added utilities are unchecked; removing their result intersection survives. | Confirmed by full reviewed-campaign survivor and new TS2344 rejection. | fixed-now: independent LocalCapabilities comparison. | Primary owner and local-utils recipe. |
+| E2 | Deleted schemaVersion/markReady examples lost coverage; initialRender/syncMode absent. | Confirmed grammar omissions. No new runtime defect claimed. | fixed-now: generated legal options, exact declared option law, contextual readiness signature and reaches. | Primary grammar; four option/callback mutants. |
+| E3 | Unused schema generic silently drops a schema; using never in inputs fixes it. | Refuted as stated. Eighteen compiler probes show current and proposed inputs both accept no-value phantom generic, reject an actual schema value (TS2769), and retain correct schema-input composition. Suggested change has no effect. | refuted: no production edit. | Two phantom-generic paths preserve useful normalization coverage. |
+| E4 | Whole-program work repeats; timeout ignores multiplier; check only generated file and share compiler. | Timeout confirmed. Repeated dependency checking is avoidable. Generated-only diagnostics would hide source errors. | fixed-now: semantic builder shared across campaigns, scaled timeout, retained source/declaration diagnostics. | Deterministic affected-file telemetry and budget/source controls. |
+| E5 | Fixed refetch/nonexistent-method examples violate law-only policy. | Confirmed standalone concrete expressions in Query driver. | fixed-now: reusable closed capability model replaces them. | Model parameterized by generated rows/keys, not fixed call examples. |
+| E6 | Expected Query utils derive from production; shared erasure can pass. | Independent judgment gap confirmed by isLoading:any survivor. Whole-namespace any was overstated: old negative writes already detect some erasure. | fixed-now: independent model plus supplemental transparency relation. | State, namespace and refetch corruption controls. |
+| E7 | Named campaigns omit runners; tests can only get12 runs. | Registration omission confirmed. Hardcoded12 claim refuted: multiplier3 helper experiment executes36 fixed and36 random checks; normal package test globs already include runners. | fixed-now: package/root test:oracles registration. | Distinguish selection, count, reach and completion. |
+| E8 | Browser uses core tsconfig, invalidating browser witness. | Config selection confirmed; current semantic compiler settings match. Both configs compile the same consumer and resolve the same browser/Query source modules. | fixed-now: select receiving package config to prevent drift. | Preserve accurate source-only browser scope. |
+| E9 | Any unrelated error can satisfy bare sync directive. | Checker fragility confirmed with the two-factor control above; original admission-only mutant was already detected. | fixed-now: exact unsuppressed property diagnostic and legal same-candidate neighbor. | Reusable admission observation rejects collateral corruption. |
+| E10 | Audit depends on inaccessible scratch, mutable hashes, personnel verdicts. | Mixed: versioned record already contains authority, commands, outcomes and limits, and historical hashes match. Exact overlay recipes and stale wording needed improvement. | fixed-now: versioned runnable calibration command, historical-hash clarification, technical-only reviewer assessment. | Others can reproduce decisive results without prior scratch files. |
+
+Loss audit: **10 supplied items = 9 fixed-now + 1 refuted**. No raw item,
+footnote, or suggested fix was dropped. Proposed remedies rejected as ineffective
+or unsafe remain recorded in their original item. No deferrals or unresolved
+product decisions remain in this scoped evaluation.
+
+The review had high signal for missing observations and grammar dimensions,
+and clearly disclosed that its findings were unexecuted. Its weaker points were
+the ineffective input-never proposal, generated-only diagnostics suggestion,
+and overstatements about multiplier use, compiler settings, and missing evidence.
+Execution supports the oracle repairs, not a newly discovered production bug.
+Personnel recommendations remain in the local review ledger.
+
+### Reproducible calibration
+
+From the repository root, with the workspace dependencies installed:
+
+```sh
+# Unmodified current fixed campaign: must succeed.
+node scripts/calibrate-persisted-option-types.mjs none
+
+# Reviewed full campaigns: both accept these wrong implementations.
+node scripts/calibrate-persisted-option-types.mjs local-utils 4ea6b7663
+node scripts/calibrate-persisted-option-types.mjs query-status 4ea6b7663
+node scripts/calibrate-persisted-option-types.mjs collateral-sync 4ea6b7663
+
+# Current owner rejects each at the named comparison.
+node scripts/calibrate-persisted-option-types.mjs local-utils
+node scripts/calibrate-persisted-option-types.mjs query-status
+node scripts/calibrate-persisted-option-types.mjs collateral-sync
+
+# Exact original production, without touching source files on disk: rejects TS2769.
+node scripts/calibrate-persisted-option-types.mjs parent
+ORACLE_RECEIVER=browser node scripts/calibrate-persisted-option-types.mjs parent
+
+# Retained source and declaration diagnostic fidelity: reject TS2322 / TS4094.
+node scripts/calibrate-persisted-option-types.mjs source-error
+node scripts/calibrate-persisted-option-types.mjs declaration-error
+
+# Budget must report 120 runs and two 1200000ms registrations.
+ORACLE_REGISTRATION_ONLY=1 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 node scripts/calibrate-persisted-option-types.mjs none
+
+# Observe builder invalidation and worker progress through both campaigns.
+ORACLE_COMPILER_WORK=1 ORACLE_ALL_CAMPAIGNS=1 node scripts/calibrate-persisted-option-types.mjs none
+```
+
+Calibration failures intentionally exit nonzero. Classify the reported compiler
+constraint or missing exact admission rejection, rather than treating any
+nonzero exit as a killed mutant. The script creates disposable files under
+`.context` from versioned sources; it needs no existing scratch evidence and
+never mutates production on disk. Its optional second argument pins only the
+historical owner; production starts from the current checkout unless the
+selected overlay replaces it. To reproduce the precise historical whole tree,
+run the command from a checkout of the reviewed commit with this calibration
+script available.
+
+The command also supports sync-regression, local-regression, widened-key,
+erased-utils, blanket-never, contextual-key, missing-undefined, extra-read-field,
+undefined-sync, query-refetch, query-namespace, schema-version, initial-render,
+sync-mode and contextual-sync. The widened-key control requires normal generated
+sampling; the other observed controls reject at seed 2259 and reduced path
+`0:0:0:0:0:0:0:0:0:0:0`. The property and replay interface are the same as the
+normal receiver runners. Explicit replay starts at the requested generated path and bypasses normal
+campaigns and fixed examples. Fast-check 3.23 can also visit remaining sibling
+shrinks after a passing colon-path replay, despite numRuns: 1; a calibrated
+repaired replay visited 14 histories. Failing minimal replays stop after the
+first rejected history. No single-history claim is made for successful replays.
+
+### Follow-up evidence and requirement audit
+
+- **Law:** The original composition law remains, with independent capability,
+  option and contextual-callback observations from the public references above.
+- **Reach:** Each core campaign compiles 44 constructions per shape; browser
+  compiles 45. Across four 12-history campaigns this is 2136 generated constructions,
+  plus 534 fixed-replay constructions outside generated reach. Every prior state
+  and each new local-capabilities, configured-options, on-demand-options,
+  network-first-options, contextual-sync and phantom-schema-argument state
+  reaches 12 histories per campaign; query-adapter reaches 12 on browser.
+- **RED / mutants:** Original production still fails at public composition.
+  Local utility removal, Query state widening and collateral-error masking are
+  demonstrated false greens on the reviewed owner and reject on the expanded
+  owner. Twenty-one original/hostile/collateral controls reject, including source and
+  declaration-only controls. Outcomes are compiler comparison failures or the
+  exact missing-admission observation, not timeouts or setup failures.
+- **GREEN:** Both receiver campaigns and neighboring core type contracts pass
+  on unchanged PR production (11 core tests and two browser campaigns, no type
+  errors). Both named package commands also pass at multiplier 2, with 24
+  histories per declared state in each campaign. Browser's command filters to
+  the changed type property; its 99 older runtime tests are not rerun by that
+  check. Semantic affected-file instrumentation records 290 files for the first
+  core history and 1 for every later history across both campaigns. Declaration
+  diagnostics are still collected separately, so this count does not claim all
+  compiler work is eliminated. The worker heartbeat advances 24 times across
+  the 24 generated histories. Formatting, ESLint, lint:changed and diff checks pass.
+- **Limits:** Source compilation with TS 5.9.3 / Vitest 3.2.4 / fast-check 3.23.2 and the
+  stated finite grammar. No runtime, package/declaration publication, or other
+  host/compiler-version claim. Declaration diagnostics are retained for source
+  fidelity, not proof of emitted artifact consumption.
+
+The independent follow-up challenge found sibling S1: the initial builder
+rewrite omitted declaration diagnostics. An exported anonymous class with a
+private field survives that gate but fails TS4094 when declaration diagnostics
+return. The final gate retains them and the declaration-error recipe. This was
+an oracle-repair regression, not a production defect.
+
+ORC-001/002 now cover independent local/Query capability and option laws.
+ORC-003 prose follows the revised grammar, model, driver and exact diagnostic
+cut. ORC-004 reconstruction retains all 30 old forms and adds configured/phantom
+forms; option ablations and the documented calibration controls distinguish
+their contribution. ORC-005/006 observe real receivers and reject the controls
+above. ORC-007 retains campaign parity and the shared direct replay interface.
+ORC-008 remains inapplicable to a static model. ORC-009's type-history mapping
+is unchanged. ORC-010 retains unexpected source/declaration diagnostics and
+original shrinking evidence; no disk restoration is needed for the overlays.
+ORC-011's shared Query fault is answered by the independent capability model.
+ORC-012 is this versioned evidence. ORC-013 observes legal option neighbors and
+invalid sync with a same-candidate legal neighbor. ORC-014 retains the real
+browser/Query receiving source paths, with no runtime provider claim.
+ORC-015 measures every new declared state. ORC-016 contains no standalone fixed
+API examples; fixed regressions remain shared model inputs.
