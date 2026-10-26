@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { PropRef, Value } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
@@ -231,6 +232,11 @@ const assertRepeatedCursor = (
   )
 }
 
+declareOracle({
+  check: [expectCursorDenotation, expectLocalTupleOrder, assertRepeatedCursor],
+  model: [compareValue, compareTuple],
+})
+
 // Boundary width distinguishes one-value continuation from rejected composite
 // values; one value remains legal with several order terms. Direction reverses
 // numeric order, null placement reverses null-versus-number order, and equal
@@ -356,16 +362,6 @@ describe(`buildCursor properties`, () => {
         () => new Value(++calls === 1),
       ),
     ).toThrow()
-  })
-
-  it(`returns no cursor without boundary values and rejects a boundary without an order`, () => {
-    expect(() => buildCursor([], [1])).toThrow(
-      `Only leading-column cursors are supported`,
-    )
-    expect(buildCursor([], [])).toBeUndefined()
-    expect(
-      buildCursor(orderBy([{ direction: `asc`, nulls: `first` }]), []),
-    ).toBeUndefined()
   })
 
   fixedCampaign.prop([exactCursorArbitrary], {

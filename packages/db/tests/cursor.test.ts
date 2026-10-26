@@ -109,3 +109,15 @@ describe(`buildCursor`, () => {
     expect(canExpressCursorOrder(customOrder, [`item2`])).toBe(false)
   })
 })
+
+describe(`buildCursor properties`, () => {
+  it(`returns no cursor without boundary values and rejects a boundary without an order`, () => {
+    expect(() => buildCursor([], [1])).toThrow(
+      `Only leading-column cursors are supported`,
+    )
+    expect(buildCursor([], [])).toBeUndefined()
+    expect(
+      buildCursor(orderBy([`column0`, `asc`, `first`]), []),
+    ).toBeUndefined()
+  })
+})
