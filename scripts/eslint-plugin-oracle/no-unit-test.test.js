@@ -63,6 +63,8 @@ function modelHistory(history) { return history }
 declareOracle({ check: [checkHistory], model: [modelHistory] })
 `
 
+const fcImport = `import { fc, test as fcTest } from '@fast-check/vitest'\n`
+
 const ruleTester = new RuleTester({
   languageOptions: { parser: tsParser, sourceType: `module` },
 })
@@ -155,6 +157,28 @@ const historyGrammar = fc.array(action)
 function checkHistory(h) { return h }
 declareOracle({ check: [checkHistory], grammar: [historyGrammar] })
 it('reaches every action kind', () => { expect(kinds(fc.sample(historyGrammar, 200))).toEqual(allKinds) })`,
+      filename,
+    },
+    // A generated property is its own check, with or without a declaration.
+    {
+      code: `${fcImport}fcTest.prop([fc.integer(), fc.integer()])('compares antisymmetrically', (a, b) => {
+  expect(Math.sign(compare(a, b))).toBe(-Math.sign(compare(b, a)))
+})`,
+      filename,
+    },
+    {
+      code: `${fcImport}it('round-trips every value', () => {
+  fc.assert(fc.property(fc.string(), (value) => expect(decode(encode(value))).toBe(value)))
+})`,
+      filename,
+    },
+    // A property defined elsewhere, and a helper whose callers pass laws.
+    {
+      code: `${fcImport}const roundTrip = fc.property(fc.string(), (value) => decode(encode(value)) === value)
+it('round-trips', () => fc.assert(roundTrip))
+function utilsProperty(name, arbitraries, check) { fcTest.prop(arbitraries)(name, check) }
+utilsProperty('is reflexive', [fc.anything()], (x) => expect(isEqual(x, x)).toBe(true))
+utilsProperty('is symmetric', [fc.anything(), fc.anything()], (x, y) => expect(isEqual(x, y)).toBe(isEqual(y, x)))`,
       filename,
     },
     // A placeholder registered during a replay runs nothing.
@@ -266,6 +290,33 @@ serializerProp('encodes a date', () => expect(encode(date)).toBe('x'))`,
       code: `${header}export function register(name, check) { it(name, check) }`,
       filename,
       errors: [{ messageId: `unitTest` }],
+    },
+    // A property over constants, or one that ignores its input, checks
+    // written values.
+    {
+      code: `${fcImport}fcTest.prop([fc.constant(1)])('compiles one', (n) => expect(compile(n)).toBe(1))`,
+      filename,
+      errors: [{ messageId: `undeclared` }],
+    },
+    {
+      code: `${fcImport}fcTest.prop([fc.integer()])('encodes a date', () => expect(encode(date)).toBe('x'))`,
+      filename,
+      errors: [{ messageId: `undeclared` }],
+    },
+    {
+      code: `${fcImport}it('encodes a date', () => {
+  fc.assert(fc.property(fc.integer(), () => expect(encode(date)).toBe('x')))
+})`,
+      filename,
+      errors: [{ messageId: `undeclared` }],
+    },
+    {
+      code: `${header}${fcImport}function utilsProperty(name, arbitraries, check) { fcTest.prop(arbitraries)(name, check) }
+utilsProperty('is reflexive', [fc.anything()], (x) => expect(isEqual(x, x)).toBe(true))
+utilsProperty('encodes a date', [fc.integer()], () => expect(encode(date)).toBe('x'))
+it('checks', () => checkHistory([]))`,
+      filename,
+      errors: [{ messageId: `unitTest`, line: 6 }],
     },
     // A test inside a suite and a test passed a timeout are still tests.
     {

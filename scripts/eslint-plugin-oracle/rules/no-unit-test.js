@@ -33,6 +33,13 @@ import {
  * - A grammar calibration reaches the grammar. It shows that the generators
  *   reach the states that the laws need.
  *
+ * A generated property counts as its own check: `fc.property(...)` or
+ * `fc.asyncProperty(...)` from fast-check, run by the test directly or
+ * through code it calls, or a `.prop([...])` registration. Its predicate
+ * states a law over inputs that nobody wrote down. It does not count when all
+ * its arbitraries are `fc.constant` or `fc.constantFrom`, or when its
+ * predicate never reads its input: then it checks written values.
+ *
  * A test reaches a part when its body uses the part, or uses a function or
  * value that reaches it. The rule follows bindings through the file and
  * through relative imports of other test modules, so a driver in a companion
@@ -152,6 +159,18 @@ class OracleModule {
           !inTypeQuery(reference.identifier),
       )
       .sort((a, b) => a.identifier.range[0] - b.identifier.range[0])
+    this.resolvedAt = new Map(
+      this.references.map((reference) => [
+        reference.identifier,
+        reference.resolved,
+      ]),
+    )
+    // Start offsets of the generated properties in this module, in order.
+    this.properties = []
+    walk(ast, (node) => {
+      if (this.#isGeneratedProperty(node)) this.properties.push(node.range[0])
+    })
+    this.properties.sort((a, b) => a - b)
     this.declared = this.#declaredParts()
     this.exported = new Map()
     this.starSources = []
@@ -287,19 +306,32 @@ class OracleModule {
    * passes nothing the rule can see.
    */
   #parameterReaches(definition) {
+    const index = definition.node.params.indexOf(definition.name)
+    const calls = this.#callsOf(definition)
+    return (
+      index >= 0 &&
+      calls.length > 0 &&
+      calls.every((call) => {
+        const argument = call.arguments[index]
+        return argument !== undefined && this.nodeReaches(argument)
+      })
+    )
+  }
+
+  /** The calls, by name, of the function that declares a parameter. */
+  #callsOf(definition) {
     const fn = definition.node
-    const index = fn.params.indexOf(definition.name)
     const binding =
       fn.type === `FunctionDeclaration`
         ? fn.id
         : fn.parent.type === `VariableDeclarator`
           ? fn.parent.id
           : undefined
-    if (index < 0 || binding?.type !== `Identifier`) return false
+    if (binding?.type !== `Identifier`) return []
     const variable = this.scopeManager
       .getDeclaredVariables(fn.type === `FunctionDeclaration` ? fn : fn.parent)
       .find((declared) => declared.name === binding.name)
-    const calls = (variable?.references ?? [])
+    return (variable?.references ?? [])
       .map((reference) => reference.identifier.parent)
       .filter(
         (call) =>
@@ -307,13 +339,6 @@ class OracleModule {
           call.callee.type === `Identifier` &&
           call.callee.name === binding.name,
       )
-    return (
-      calls.length > 0 &&
-      calls.every((call) => {
-        const argument = call.arguments[index]
-        return argument !== undefined && this.nodeReaches(argument)
-      })
-    )
   }
 
   #importReaches(source, name) {
@@ -331,8 +356,98 @@ class OracleModule {
     return this.starSources.some((source) => this.#importReaches(source, name))
   }
 
+  /**
+   * A generated property: `fc.property(...)` or `fc.asyncProperty(...)` from
+   * fast-check, or a `.prop([...])` registration. Its predicate states a law
+   * over inputs that nobody wrote down, so it is its own check. A property
+   * whose arbitraries are all constants checks one written input, so it does
+   * not count.
+   */
+  #isGeneratedProperty(node) {
+    if (node.type !== `CallExpression`) return false
+    const { callee } = node
+    if (callee.type !== `MemberExpression` || callee.computed) return false
+    const name = callee.property.name
+    if (name !== `property` && name !== `asyncProperty`) return false
+    if (!this.#isFastCheck(callee.object)) return false
+    const predicate = node.arguments.at(-1)
+    return (
+      node.arguments.slice(0, -1).some((value) => !isConstant(value)) &&
+      (predicate?.type === `Identifier` || this.usesInput(predicate))
+    )
+  }
+
+  /** A function that reads at least one of its parameters. */
+  usesInput(fn) {
+    if (!isFunction(fn)) return false
+    return this.scopeManager
+      .getDeclaredVariables(fn)
+      .some(
+        (variable) =>
+          variable.defs[0]?.type === `Parameter` &&
+          variable.references.length > 0,
+      )
+  }
+
+  /**
+   * Whether a `.prop([...])` registration runs a generated property: some
+   * arbitrary is not a constant, and the test reads its input. A test passed
+   * in as a parameter is checked at every call of its helper.
+   */
+  propRegistrationGenerates(registration, body, sourceCode) {
+    const prop = calleeProp(registration.callee)
+    if (prop === undefined) return false
+    const [arbitraries] = prop.arguments
+    const values =
+      arbitraries?.type === `ArrayExpression`
+        ? arbitraries.elements
+        : arbitraries?.type === `ObjectExpression`
+          ? arbitraries.properties.map((property) => property.value)
+          : undefined
+    // Arbitraries that a caller passes in are not visible here, so only
+    // written-out constants disqualify the registration.
+    if (values?.every((value) => isConstant(value))) return false
+    if (isFunction(body)) return this.usesInput(body)
+    const definition = findVariable(sourceCode.getScope(body), body.name)
+      ?.defs[0]
+    if (definition?.type !== `Parameter`) return false
+    const calls = this.#callsOf(definition)
+    return (
+      calls.length > 0 &&
+      calls.every((call) => {
+        const index = definition.node.params.indexOf(definition.name)
+        return this.usesInput(call.arguments[index])
+      })
+    )
+  }
+
+  #isFastCheck(node) {
+    const definition =
+      node.type === `Identifier`
+        ? this.resolvedAt.get(node)?.defs[0]
+        : undefined
+    return (
+      definition?.type === `ImportBinding` &&
+      fastCheckModules.has(definition.parent.source.value)
+    )
+  }
+
+  /** Whether code runs a generated property that it contains. */
+  containsProperty(node) {
+    const [start, end] = node.range
+    let low = 0
+    let high = this.properties.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (this.properties[middle] < start) low = middle + 1
+      else high = middle
+    }
+    return low < this.properties.length && this.properties[low] < end
+  }
+
   /** Whether code uses a declared part, directly or through a binding. */
   nodeReaches(node) {
+    if (this.containsProperty(node)) return true
     const [start, end] = node.range
     let low = 0
     let high = this.references.length
@@ -348,6 +463,49 @@ class OracleModule {
     }
     return false
   }
+}
+
+const fastCheckModules = new Set([`fast-check`, `@fast-check/vitest`])
+
+/** `fc.constant(x)` or `fc.constantFrom(...)`: an arbitrary of written values. */
+function isConstant(node) {
+  return (
+    node?.type === `CallExpression` &&
+    node.callee.type === `MemberExpression` &&
+    !node.callee.computed &&
+    [`constant`, `constantFrom`].includes(node.callee.property.name)
+  )
+}
+
+function walk(node, visit) {
+  visit(node)
+  for (const [key, child] of Object.entries(node)) {
+    if (key === `parent`) continue
+    for (const item of Array.isArray(child) ? child : [child]) {
+      if (typeof item?.type === `string`) walk(item, visit)
+    }
+  }
+}
+
+/** The `.prop([...])` call in a registration's callee chain, if any. */
+function calleeProp(callee) {
+  for (let node = callee; node;) {
+    if (
+      node.type === `CallExpression` &&
+      node.callee.type === `MemberExpression` &&
+      !node.callee.computed &&
+      node.callee.property.name === `prop`
+    ) {
+      return node
+    }
+    node =
+      node.type === `CallExpression`
+        ? node.callee
+        : node.type === `MemberExpression`
+          ? node.object
+          : undefined
+  }
+  return undefined
 }
 
 function isPlaceholder(body) {
@@ -387,11 +545,12 @@ export default {
         const test = registeredTest(node, sourceCode)
         if (test === undefined || isPlaceholder(test.body)) return
         const reaches =
-          test.body.type === `Identifier`
+          module.propRegistrationGenerates(node, test.body, sourceCode) ||
+          (test.body.type === `Identifier`
             ? module.variableReaches(
                 findVariable(sourceCode.getScope(test.body), test.body.name),
               )
-            : module.nodeReaches(test.body)
+            : module.nodeReaches(test.body))
         if (reaches) anyReached = true
         else unreached.push(node)
       },

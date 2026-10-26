@@ -384,6 +384,10 @@ or through a driver:
 - A calibration shows that the check rejects a wrong answer (ORC-006).
 - A grammar calibration shows that the generators reach the states that the
   laws need (ORC-004, ORC-015).
+- A generated property can state its law inline: its predicate relates
+  production to inputs that nobody wrote down. A property whose arbitraries
+  are all constants, or whose predicate ignores its input, checks written
+  values instead.
 
 A test that uses none of them compares production with a hand-written value. It
 is a unit test, even when it asserts a contract, and it belongs in an
