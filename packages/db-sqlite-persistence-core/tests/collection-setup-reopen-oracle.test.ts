@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import type { PersistedTx, SQLiteDriver } from '../src'
 
 /**
@@ -378,6 +379,8 @@ function expectedRows(start: Start): Array<Row> {
 function workLawApplies(start: Start): boolean {
   return start.absent.length === 0 && start.reopenSchemaVersion === undefined
 }
+
+declareOracle({ model: [modelSchemaObjects] })
 
 describe(`collection setup reopen oracle`, () => {
   it(`repairs every legal starting state to a fresh install and skips complete setup`, async () => {

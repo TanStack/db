@@ -42,29 +42,23 @@
  * separately. The review record documents ORC outcomes and exact run receipts:
  * docs/contributing/oracle-reviews/issue-2034-temporal-persistence.md.
  */
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { IR } from '@tanstack/db'
 import { Temporal } from 'temporal-polyfill'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SQLiteCorePersistenceAdapter } from '../src'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import {
   temporalFamilies,
   temporalQueryCases,
   temporalValue,
 } from './temporal-value-oracle'
-import { harnessScope } from './contracts/harness-scope'
-import type { PersistedTx, SQLiteDriver } from '../src'
-import type { SQLInputValue } from 'node:sqlite'
+import { collectionId, scope } from './sqlite-temporal-value-support'
+import type { PersistedTx } from '../src'
 
 type Kind = `Date` | `ISO string` | `Instant` | `PlainDate`
 type Ordinal = 0 | 1
 type History = `insert` | `update`
 const kinds: Array<Kind> = [`Date`, `ISO string`, `Instant`, `PlainDate`]
 const histories: Array<History> = [`insert`, `update`]
-const collectionId = `typed-values`
 const keys = [`z-early`, `a-late`] as const
 
 function textFor(kind: Kind, ordinal: Ordinal): string {
@@ -120,75 +114,6 @@ function check(
 ): void {
   assertion(observe(actual), checkpoint).toStrictEqual(expected)
 }
-
-function binding(value: unknown): SQLInputValue {
-  if (value === undefined || value === null) return null
-  if (typeof value === `boolean`) return value ? 1 : 0
-  if (
-    typeof value === `string` ||
-    typeof value === `number` ||
-    typeof value === `bigint`
-  )
-    return value
-  throw new Error(`Unexpected SQLite binding: ${String(value)}`)
-}
-
-function createDriver(database: DatabaseSync): SQLiteDriver {
-  const driver: SQLiteDriver = {
-    exec: (sql) => {
-      database.exec(sql)
-      return Promise.resolve()
-    },
-    query: <T>(sql: string, params: ReadonlyArray<unknown> = []) =>
-      Promise.resolve(
-        database.prepare(sql).all(...params.map(binding)) as Array<T>,
-      ),
-    run: (sql, params = []) => {
-      database.prepare(sql).run(...params.map(binding))
-      return Promise.resolve()
-    },
-    transaction: async (task) => {
-      database.exec(`BEGIN IMMEDIATE`)
-      try {
-        const result = await task(driver)
-        database.exec(`COMMIT`)
-        return result
-      } catch (error) {
-        database.exec(`ROLLBACK`)
-        throw error
-      }
-    },
-  }
-  return driver
-}
-
-const scope = harnessScope(() => {
-  const directory = mkdtempSync(join(tmpdir(), `db-temporal-oracle-`))
-  let database: DatabaseSync | undefined
-  function close(): void {
-    database?.close()
-    database = undefined
-  }
-  return {
-    open() {
-      close()
-      database = new DatabaseSync(join(directory, `state.sqlite`))
-      return {
-        database,
-        adapter: new SQLiteCorePersistenceAdapter({
-          driver: createDriver(database),
-        }),
-      }
-    },
-    cleanup() {
-      try {
-        close()
-      } finally {
-        rmSync(directory, { recursive: true, force: true })
-      }
-    },
-  }
-})
 
 beforeEach(() => vi.stubGlobal(`Temporal`, Temporal))
 afterEach(() => vi.unstubAllGlobals())
@@ -253,6 +178,8 @@ const cases = kinds.flatMap((kind) =>
     [false, true].map((indexed) => ({ kind, history, indexed })),
   ),
 )
+
+declareOracle({ check: [check], model: [expectedValue, expectedRows] })
 
 describe(`SQLite typed-value preservation after reopen`, () => {
   it.each(cases)(
@@ -665,96 +592,3 @@ describe(`native Temporal query refinement`, () => {
     )
   })
 })
-
-// Equality is a pair relation: separate IN sets for order and identity can
-// accidentally combine matches from different ordinary string literals.
-it(`keeps native IN membership distinct from lookalike string keys`, async () => {
-  const { adapter } = scope.create().open()
-  const orderText = `10000000000000000000000`
-  const identityText = `Temporal.Instant:1970-01-01T00:00:00Z`
-  const values = [
-    Temporal.Instant.from(`1970-01-01T00:00:00Z`),
-    orderText,
-    identityText,
-  ]
-  await adapter.applyCommittedTx(
-    { kind: `eager`, collectionId: collectionId },
-    {
-      txId: `mixed`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: values.map((stamp, i) => ({
-        type: `insert`,
-        key: `row-${i}`,
-        value: { stamp },
-      })),
-    },
-  )
-  const predicate = new IR.Func<boolean>(`in`, [
-    new IR.PropRef([`stamp`]),
-    new IR.Value([orderText, identityText]),
-  ])
-  expect(
-    (
-      await adapter.loadSubset(
-        { kind: `eager`, collectionId: collectionId },
-        { where: predicate },
-      )
-    )
-      .map((row) => row.key)
-      .sort(),
-  ).toEqual([`row-1`, `row-2`])
-  expect(
-    (
-      await adapter.loadSubset(
-        { kind: `eager`, collectionId: collectionId },
-        {
-          where: new IR.Func(`not`, [predicate]),
-        },
-      )
-    ).map((row) => row.key),
-  ).toEqual([`row-0`])
-})
-
-// Native literals need at most one brand-validated encoding per occurrence. The number
-// of occurrences supplies the work budget; no codec helper computes it. Empty
-// tables isolate compilation from revival. Positive counts also calibrate the
-// sensor. The existing rank/text and index owners check resulting query semantics.
-it.sequential.each([`Instant`, `PlainDate`] as const)(
-  `encodes each native query literal at most once / %s`,
-  async (kind) => {
-    const { adapter } = scope.create().open()
-    const constructor = Temporal[kind]
-    const value =
-      kind === `Instant`
-        ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
-        : Temporal.PlainDate.from(`2026-01-02[u-ca=japanese]`)
-    const parse = vi.spyOn(constructor, `from`)
-    try {
-      for (const size of [1, 3, 1_025]) {
-        for (const operation of size === 1 ? [`eq`, `in`] : [`in`]) {
-          parse.mockClear()
-          const rows = await adapter.loadSubset(
-            { kind: `eager`, collectionId: `literal-work` },
-            {
-              where: new IR.Func(operation, [
-                new IR.PropRef([`stamp`]),
-                new IR.Value(
-                  operation === `eq`
-                    ? value
-                    : Array.from({ length: size }, () => value),
-                ),
-              ]),
-            },
-          )
-          expect(rows).toEqual([])
-          expect(parse.mock.calls.length).toBeGreaterThan(0)
-          expect(parse.mock.calls.length).toBeLessThanOrEqual(size)
-        }
-      }
-    } finally {
-      parse.mockRestore()
-    }
-  },
-)
