@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
@@ -279,6 +280,8 @@ function expectRefinement(
   expectPair(tree.nextHigherPair(undefined), sorted[0], model)
   expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
 }
+
+declareOracle({ check: [expectRefinement], model: [stepModel] })
 
 describe(`BTree Map oracle`, () => {
   // The 120,000-operation corpus takes about nine seconds with CI coverage.
