@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
+import { where } from './collection-subscription-reentrancy-fixture.js'
 import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
-import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
+import { declareOracle } from './oracle-config.js'
+import type { LoadSubsetOptions } from '../src/types.js'
 
 /**
  * # Which snapshot work survives callback reentry?
@@ -22,7 +24,38 @@ import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
  * separate primary owners in the lifecycle and replay oracles.
  */
 
-const where = () => new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+// The ownership law fixes what a direct snapshot publishes and releases when
+// its callback retires the demand. The phase decides whether the callback
+// runs before the result hook, and whether the optimized read is reached.
+function expectSnapshotReentryOutcome(observed: {
+  phase: string
+  reentries: number
+  resultHooks: number
+  accepted: boolean
+  publications: ReadonlyArray<ReadonlyArray<string>>
+  loads: ReadonlyArray<LoadSubsetOptions>
+  unloads: ReadonlyArray<LoadSubsetOptions>
+  reads: unknown
+}): void {
+  const { phase, reentries, resultHooks, accepted, publications } = observed
+  const { loads, unloads, reads } = observed
+  expect(reentries).toBe(1)
+  expect(resultHooks).toBe(phase === `loadSubset` ? 0 : 1)
+  expect(accepted).toBe(false)
+  expect(publications).toEqual([])
+  expect(loads).toHaveLength(1)
+  expect(unloads).toEqual(loads)
+  expect(loads[0]?.signal?.aborted).toBe(true)
+  expect(reads).toHaveBeenCalledTimes(
+    phase === `loadSubset` ||
+      phase === `onLoadSubsetResult` ||
+      phase === `statusLoadingSubset`
+      ? 0
+      : 1,
+  )
+}
+
+declareOracle({ check: [expectSnapshotReentryOutcome] })
 
 describe(`Collection subscription callback reentry oracle`, () => {
   it.each(reentrantSnapshotHistories)(
@@ -115,20 +148,16 @@ describe(`Collection subscription callback reentry oracle`, () => {
             : {}),
         })
 
-        expect(reentries).toBe(1)
-        expect(resultHooks).toBe(phase === `loadSubset` ? 0 : 1)
-        expect(accepted).toBe(false)
-        expect(publications).toEqual([])
-        expect(loads).toHaveLength(1)
-        expect(unloads).toEqual(loads)
-        expect(loads[0]?.signal?.aborted).toBe(true)
-        expect(reads).toHaveBeenCalledTimes(
-          phase === `loadSubset` ||
-            phase === `onLoadSubsetResult` ||
-            phase === `statusLoadingSubset`
-            ? 0
-            : 1,
-        )
+        expectSnapshotReentryOutcome({
+          phase,
+          reentries,
+          resultHooks,
+          accepted,
+          publications,
+          loads,
+          unloads,
+          reads,
+        })
       } finally {
         transport.resolve()
         reads.mockRestore()
@@ -137,485 +166,4 @@ describe(`Collection subscription callback reentry oracle`, () => {
       }
     },
   )
-
-  it(`releases a request by its predicate when the subscription adds a predicate`, async () => {
-    const requestedWhere = where()
-    const subscriptionWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`row`),
-    ])
-    const loads: Array<LoadSubsetOptions> = []
-    const unloads: Array<LoadSubsetOptions> = []
-    const collection = createCollection<{ id: string }>({
-      id: `combined-predicate-release`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: (options) => {
-              loads.push(options)
-              return true
-            },
-            unloadSubset: (options) => unloads.push(options),
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-      whereExpression: subscriptionWhere,
-    })
-
-    try {
-      subscription.requestSnapshot({ where: requestedWhere })
-      expect(loads).toHaveLength(1)
-      expect(loads[0]?.where).not.toBe(requestedWhere)
-      subscription.releaseSnapshot(requestedWhere)
-      expect(unloads).toEqual(loads)
-      expect(loads[0]?.signal?.aborted).toBe(true)
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`retires a combined-predicate request when its loader releases the original predicate`, async () => {
-    const requestedWhere = where()
-    const loads: Array<LoadSubsetOptions> = []
-    const unloads: Array<LoadSubsetOptions> = []
-    const publications: Array<ReadonlyArray<string>> = []
-    let resultHooks = 0
-    const collection = createCollection<{ id: string }>({
-      id: `combined-predicate-loader-release`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          operations.begin()
-          operations.write({ type: `insert`, value: { id: `row` } })
-          operations.commit()
-          operations.markReady()
-          return {
-            loadSubset: (options) => {
-              loads.push(options)
-              subscription.releaseSnapshot(requestedWhere)
-              return true
-            },
-            unloadSubset: (options) => unloads.push(options),
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(
-      (changes) => publications.push(changes.map(({ value }) => value.id)),
-      { includeInitialState: false, whereExpression: where() },
-    )
-
-    try {
-      const accepted = subscription.requestSnapshot({
-        where: requestedWhere,
-        onLoadSubsetResult: () => resultHooks++,
-      })
-      expect(loads).toHaveLength(1)
-      expect(loads[0]?.where).not.toBe(requestedWhere)
-      expect(unloads).toEqual(loads)
-      expect(loads[0]?.signal?.aborted).toBe(true)
-      expect(resultHooks).toBe(0)
-      expect(accepted).toBe(false)
-      expect(publications).toEqual([])
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`removes the request abort listener after acquisition release`, async () => {
-    const requestedWhere = where()
-    const request = new AbortController()
-    const additions = vi.spyOn(request.signal, `addEventListener`)
-    const removals = vi.spyOn(request.signal, `removeEventListener`)
-    const collection = createCollection<{ id: string }>({
-      id: `released-abort-forwarding`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return { loadSubset: () => true }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-
-    try {
-      subscription.requestSnapshot({
-        where: requestedWhere,
-        signal: request.signal,
-      })
-      subscription.releaseSnapshot(requestedWhere)
-      const forwarded = additions.mock.calls.filter(
-        ([type]) => type === `abort`,
-      )
-      expect(forwarded).toHaveLength(1)
-      expect(removals.mock.calls).toContainEqual([`abort`, forwarded[0]?.[1]])
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-      additions.mockRestore()
-      removals.mockRestore()
-    }
-  })
-
-  it(`does not start delegated replay after status reentry retires its only demand`, async () => {
-    const requestedWhere = where()
-    const delegate: Array<`start` | `succeed`> = []
-    let statusReentries = 0
-    let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
-    const collection = createCollection<{ id: string }>({
-      id: `reentrant-replay-status-release`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (next) => {
-          operations = next
-          next.markReady()
-          return { loadSubset: () => true }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-      truncateReplayPublication: {
-        start: () => delegate.push(`start`),
-        succeed: () => delegate.push(`succeed`),
-      },
-    })
-
-    try {
-      subscription.requestSnapshot({ where: requestedWhere })
-      subscription.on(`status:loadingSubset`, () => {
-        statusReentries++
-        subscription.releaseSnapshot(requestedWhere)
-      })
-      operations.begin()
-      operations.truncate()
-      operations.commit()
-      expect(statusReentries).toBe(1)
-      expect(delegate).toEqual([`succeed`])
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`keeps an acquisition until the current replay setup reaches it`, async () => {
-    const requestedWhere = where()
-    const unloads: Array<LoadSubsetOptions> = []
-    let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
-    const collection = createCollection<{ id: string }>({
-      id: `obsolete-replay-setup`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (next) => {
-          operations = next
-          next.markReady()
-          return {
-            loadSubset: () => true,
-            unloadSubset: (options) => unloads.push(options),
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-
-    try {
-      subscription.requestSnapshot({ where: requestedWhere })
-      operations.begin()
-      operations.truncate()
-      operations.commit()
-      const beforeCurrentSetup = new Promise<number>((resolve) => {
-        queueMicrotask(() => resolve(unloads.length))
-      })
-      operations.begin()
-      operations.truncate()
-      operations.commit()
-      expect(await beforeCurrentSetup).toBe(0)
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`stops an obsolete replay setup when its loader starts a newer replay`, async () => {
-    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`first`)])
-    const secondWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`second`),
-    ])
-    const loads: Array<LoadSubsetOptions> = []
-    const unloads: Array<LoadSubsetOptions> = []
-    let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
-    let startedNestedReplay = false
-    const collection = createCollection<{ id: string }>({
-      id: `loader-starts-new-replay`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (next) => {
-          operations = next
-          next.markReady()
-          return {
-            loadSubset: (options) => {
-              loads.push(options)
-              if (loads.length === 3) {
-                startedNestedReplay = true
-                operations.begin()
-                operations.truncate()
-                operations.commit()
-              }
-              return true
-            },
-            unloadSubset: (options) => unloads.push(options),
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-
-    try {
-      subscription.requestSnapshot({ where: firstWhere })
-      subscription.requestSnapshot({ where: secondWhere })
-      expect(loads.map(({ where: predicate }) => predicate)).toEqual([
-        firstWhere,
-        secondWhere,
-      ])
-      operations.begin()
-      operations.truncate()
-      operations.commit()
-      const beforeNestedSetup = new Promise<number>((resolve) => {
-        queueMicrotask(() =>
-          resolve(
-            unloads.filter(({ where: predicate }) => predicate === secondWhere)
-              .length,
-          ),
-        )
-      })
-      expect(await beforeNestedSetup).toBe(0)
-      expect(startedNestedReplay).toBe(true)
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`keeps detached demand loading when an obsolete acquisition settles before restart setup`, async () => {
-    const requestedWhere = where()
-    const oldLoad = createDeferred<void>()
-    const newLoad = createDeferred<void>()
-    let syncRuns = 0
-    const collection = createCollection<{ id: string }>({
-      id: `obsolete-settlement-before-restart-setup`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          const run = syncRuns++
-          markReady()
-          return {
-            loadSubset: () => (run === 0 ? oldLoad.promise : newLoad.promise),
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-
-    try {
-      subscription.requestSnapshot({ where: requestedWhere })
-      expect(subscription.status).toBe(`loadingSubset`)
-      await collection.cleanup()
-      oldLoad.resolve()
-      const beforeSetup = new Promise<string>((resolve) => {
-        queueMicrotask(() => resolve(subscription.status))
-      })
-      collection.startSyncImmediate()
-      expect(await beforeSetup).toBe(`loadingSubset`)
-    } finally {
-      oldLoad.resolve()
-      newLoad.resolve()
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`does not retain a released replay rejection while a peer remains pending`, async () => {
-    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`first`)])
-    const secondWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`second`),
-    ])
-    const released = createDeferred<void>()
-    const peer = createDeferred<void>()
-    const failure = new Error(`released acquisition failed`)
-    let loads = 0
-    let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
-    const collection = createCollection<{ id: string }>({
-      id: `released-replay-rejection-retention`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (next) => {
-          operations = next
-          next.markReady()
-          return {
-            loadSubset: () => {
-              loads++
-              if (loads <= 2) return true
-              return loads === 3 ? released.promise : peer.promise
-            },
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-
-    try {
-      subscription.requestSnapshot({ where: firstWhere })
-      subscription.requestSnapshot({ where: secondWhere })
-      operations.begin()
-      operations.truncate()
-      operations.commit()
-      await Promise.resolve()
-      expect(loads).toBe(4)
-      subscription.releaseSnapshot(firstWhere)
-      released.reject(failure)
-      await Promise.resolve()
-      await Promise.resolve()
-
-      // Only the retention boundary needs a white-box observation. The
-      // public failure and publication checks live in the replay oracle.
-      const replayState = subscription as unknown as {
-        truncateReplayState?: { failures: Map<unknown, Error> }
-      }
-      expect([...replayState.truncateReplayState!.failures.values()]).toEqual(
-        [],
-      )
-      expect(subscription.lastError).toBeUndefined()
-      expect(subscription.status).toBe(`loadingSubset`)
-    } finally {
-      released.resolve()
-      peer.resolve()
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`does not publish when adapter cleanup invalidates a starting acquisition`, async () => {
-    const requestedWhere = where()
-    const publications: Array<ReadonlyArray<string>> = []
-    const unloads: Array<LoadSubsetOptions> = []
-    let cleanup: Promise<void> | undefined
-    let enteredLoader = false
-    const collection = createCollection<{ id: string }>({
-      id: `cleanup-during-starting-acquisition`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          operations.begin()
-          operations.write({ type: `insert`, value: { id: `row` } })
-          operations.commit()
-          operations.markReady()
-          return {
-            loadSubset: () => {
-              enteredLoader = true
-              cleanup = collection.cleanup()
-              return true
-            },
-            unloadSubset: (options) => unloads.push(options),
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(
-      (changes) => publications.push(changes.map(({ value }) => value.id)),
-      { includeInitialState: false },
-    )
-
-    try {
-      const accepted = subscription.requestSnapshot({ where: requestedWhere })
-      expect(enteredLoader).toBe(true)
-      expect(accepted).toBe(false)
-      expect(publications).toEqual([])
-      expect(unloads).toEqual([])
-      await cleanup
-      expect(collection.status).toBe(`cleaned-up`)
-    } finally {
-      subscription.unsubscribe()
-      await cleanup
-    }
-  })
-
-  it(`does not acquire detached demand after cleanup reenters its restart status`, async () => {
-    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`first`)])
-    const secondWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`second`),
-    ])
-    let loads = 0
-    let cleanup: Promise<void> | undefined
-    const collection = createCollection<{ id: string }>({
-      id: `cleanup-during-detached-restart`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              loads++
-              return true
-            },
-          }
-        },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-
-    try {
-      subscription.requestSnapshot({ where: firstWhere })
-      subscription.requestSnapshot({ where: secondWhere })
-      expect(loads).toBe(2)
-      await collection.cleanup()
-      collection.startSyncImmediate()
-      subscription.on(`status:loadingSubset`, () => {
-        cleanup = collection.cleanup()
-      })
-      subscription.releaseSnapshot(firstWhere)
-      expect(subscription.status).toBe(`ready`)
-      await Promise.resolve()
-      expect(cleanup).toBeDefined()
-      await cleanup
-      expect(loads).toBe(2)
-      expect(collection.status).toBe(`cleaned-up`)
-    } finally {
-      subscription.unsubscribe()
-      await cleanup
-      await collection.cleanup()
-    }
-  })
 })
