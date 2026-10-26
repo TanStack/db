@@ -493,3 +493,14 @@ The initial dependency failure receives no application-assertion credit.
 This real Vite Start check supplements the byte-preserving mini-host witness.
 It does not establish deployed Electric timing or every provider/renderer
 version. Final library sources are unchanged from the binding table above.
+
+### Post-commit source-binding correction
+
+The pre-commit ESLint task sorted two imported names in
+`packages/svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`. No test
+logic or runtime source changed. Its committed SHA-256 is
+`e71adfcf7052b2040a3cc8cb90f693fd815c34deda80bc31761db938a18d2d06`,
+replacing `05cfef8f6ac8be3d2ad1690a269259a2084b990c5495e178a44e696ef550c05f`
+in the binding table. The final Svelte invocation passed all 236 runtime/type
+assertions with zero source/type errors. All other bindings match the committed
+files. The repair commit is `0cf7294da3c14fbda6c8186da3c11eebb89ce064`.
