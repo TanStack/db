@@ -12,6 +12,7 @@ import {
   oracleRuns,
 } from './oracle-config.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
+import { metadataWorlds } from './metadata-publication-worlds.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
@@ -49,13 +50,6 @@ type MetadataWrite = { key: number } & MetadataOperation
 
 type MetadataDriver = (value: unknown) => unknown
 const unchangedMetadata: MetadataDriver = (value) => value
-
-// This grammar contains structured values only. Clone the whole scenario, not
-// each write: aliases within one world stay intact, but cannot rewrite the
-// other world's authority or the original replay input.
-function metadataWorlds<T>(scenario: T): { model: T; driver: T } {
-  return { model: structuredClone(scenario), driver: structuredClone(scenario) }
-}
 
 type PublicationRound = {
   key: number
@@ -575,26 +569,6 @@ async function expectMetadataCancellationOwnership(
     ],
   )
 }
-
-it(`keeps metadata aliases within each independent input world`, () => {
-  const value = { nested: 1 }
-  const input = {
-    first: value,
-    second: value,
-    absentValue: undefined,
-    nan: NaN,
-  }
-  const worlds = metadataWorlds(input)
-  for (const world of [worlds.model, worlds.driver]) {
-    expect(world.first).toBe(world.second)
-    expect(world.first).not.toBe(value)
-    expect(world).toEqual(input)
-  }
-  expect(worlds.model.first).not.toBe(worlds.driver.first)
-  worlds.driver.first.nested = 2
-  expect(worlds.model.first.nested).toBe(1)
-  expect(value.nested).toBe(1)
-})
 
 const mutateDriverMetadata: MetadataDriver = (value) => {
   if (typeof value === `object` && value !== null && `nested` in value) {
