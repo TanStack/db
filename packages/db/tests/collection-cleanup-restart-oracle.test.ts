@@ -126,19 +126,6 @@ function observeDependent(active: boolean): `active` | `terminal` {
   return active ? `active` : `terminal`
 }
 
-/**
- * Checks the fields that one cut observes against the cut that
- * `expectedCleanupBoundary` predicts. Only the observed fields are compared,
- * and the expected values come from the model alone.
- */
-function checkCleanupBoundary<TStatus extends string>(
-  priorStatus: TStatus,
-  boundary: CleanupBoundary,
-  observed: Partial<CleanupBoundaryObservation<TStatus>>,
-): void {
-  expect(expectedCleanupBoundary(priorStatus, boundary)).toMatchObject(observed)
-}
-
 function expectExactCaseIds(
   actual: ReadonlyArray<{ id: string }>,
   expected: ReadonlyArray<string>,
@@ -149,7 +136,6 @@ function expectExactCaseIds(
 }
 
 declareOracle({
-  check: [checkCleanupBoundary],
   model: [expectedCleanupBoundary],
   grammar: [reentryScenarios, completedBoundaryScenarios],
 })
@@ -228,29 +214,33 @@ describe(`Collection cleanup admission oracle`, () => {
         settlementOrder.push(`public-cleanup-promise-continuation`)
       })
 
+      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
       expect(sourceCleanupSettled).toBe(false)
+      expect(collection.status).toBe(atCleanupStart.collectionStatus)
       expect(statuses).toEqual([])
       expect(cleanups).toBe(1)
       expect(concurrentCleanup).toBe(firstCleanup)
-      checkCleanupBoundary(`ready`, `cleanup-start`, {
-        collectionStatus: collection.status,
-        restartAdmission: observeRestartAdmission(() =>
-          collection.startSyncImmediate(),
-        ),
-      })
+      expect(
+        observeRestartAdmission(() => collection.startSyncImmediate()),
+      ).toBe(atCleanupStart.restartAdmission)
 
       cleanupGate.resolve()
       await Promise.all([firstCleanup, concurrentCleanup])
 
+      const atCleanupSettlement = expectedCleanupBoundary(
+        `ready`,
+        `cleanup-settlement`,
+      )
       expect(sourceCleanupSettled).toBe(true)
-      checkCleanupBoundary(
+      const terminalPublication = expectedCleanupBoundary(
         `ready`,
         `terminal-publication`,
-        atTerminalPublication!,
       )
-      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
-        collectionStatus: collection.status,
+      expect(atTerminalPublication).toEqual({
+        collectionStatus: terminalPublication.collectionStatus,
+        cleanup: terminalPublication.cleanup,
       })
+      expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
       expect(statuses).toEqual([`cleaned-up`])
       expect(settlementOrder).toEqual([
         `adapter-cleanup-settled`,
@@ -261,11 +251,9 @@ describe(`Collection cleanup admission oracle`, () => {
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(cleanups).toBe(1)
 
-      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
-        restartAdmission: observeRestartAdmission(() =>
-          collection.startSyncImmediate(),
-        ),
-      })
+      expect(
+        observeRestartAdmission(() => collection.startSyncImmediate()),
+      ).toBe(atCleanupSettlement.restartAdmission)
       expect(starts).toBe(2)
       expect(collection.status).toBe(`ready`)
     } finally {
@@ -302,23 +290,29 @@ describe(`Collection cleanup admission oracle`, () => {
       const cleanup = collection.cleanup().then(() => {
         cleanupSettled = true
       })
-      expect(statuses).toEqual([])
+      const atCleanupStart = expectedCleanupBoundary(`loading`, `cleanup-start`)
+
       // A rule that forces ready at cleanup start fails at this held cut.
-      checkCleanupBoundary(`loading`, `cleanup-start`, {
-        collectionStatus: collection.status,
-        cleanup: observeCleanupSettlement(cleanupSettled),
-        restartAdmission: observeRestartAdmission(() =>
-          collection.startSyncImmediate(),
-        ),
-      })
+      expect(collection.status).toBe(atCleanupStart.collectionStatus)
+      expect(statuses).toEqual([])
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupStart.cleanup,
+      )
+      expect(
+        observeRestartAdmission(() => collection.startSyncImmediate()),
+      ).toBe(atCleanupStart.restartAdmission)
 
       cleanupGate.resolve()
       await cleanup
-      checkCleanupBoundary(`loading`, `cleanup-settlement`, {
-        collectionStatus: collection.status,
-        cleanup: observeCleanupSettlement(cleanupSettled),
-      })
+      const atCleanupSettlement = expectedCleanupBoundary(
+        `loading`,
+        `cleanup-settlement`,
+      )
+      expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
       expect(statuses).toEqual([`cleaned-up`])
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupSettlement.cleanup,
+      )
 
       collection.startSyncImmediate()
       expect(starts).toBe(2)
@@ -367,11 +361,14 @@ describe(`Collection cleanup admission oracle`, () => {
         cleanupSettled = true
       })
 
-      checkCleanupBoundary(`ready`, `cleanup-start`, {
-        collectionStatus: source.status,
-        cleanup: observeCleanupSettlement(cleanupSettled),
-        dependent: observeDependent(live.status !== `error`),
-      })
+      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
+      expect(source.status).toBe(atCleanupStart.collectionStatus)
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupStart.cleanup,
+      )
+      expect(observeDependent(live.status !== `error`)).toBe(
+        atCleanupStart.dependent,
+      )
       expect(await preload).toMatchObject({
         status: `rejected`,
         error: { message },
@@ -379,9 +376,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
       cleanupGate.resolve()
       await cleanup
-      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
-        collectionStatus: source.status,
-      })
+      expect(source.status).toBe(`cleaned-up`)
       expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
     } finally {
       cleanupGate.resolve()
@@ -433,12 +428,14 @@ describe(`Collection cleanup admission oracle`, () => {
       const cleanup = source.cleanup().then(() => {
         cleanupSettled = true
       })
+      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
+
       expect(adapterCleanupStarted).toBe(1)
-      checkCleanupBoundary(`ready`, `cleanup-start`, {
-        collectionStatus: source.status,
-        cleanup: observeCleanupSettlement(cleanupSettled),
-        dependent: observeDependent(!effect.disposed),
-      })
+      expect(source.status).toBe(atCleanupStart.collectionStatus)
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupStart.cleanup,
+      )
+      expect(observeDependent(!effect.disposed)).toBe(atCleanupStart.dependent)
       expect(source.subscriberCount).toBe(0)
       expect(sourceErrors).toEqual([
         expect.objectContaining({
@@ -458,11 +455,18 @@ describe(`Collection cleanup admission oracle`, () => {
 
       cleanupGate.resolve()
       await cleanup
-      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
-        collectionStatus: source.status,
-        cleanup: observeCleanupSettlement(cleanupSettled),
-        dependent: observeDependent(!effect.disposed),
-      })
+      const atCleanupSettlement = expectedCleanupBoundary(
+        `ready`,
+        `cleanup-settlement`,
+      )
+
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupSettlement.cleanup,
+      )
+      expect(source.status).toBe(atCleanupSettlement.collectionStatus)
+      expect(observeDependent(!effect.disposed)).toBe(
+        atCleanupSettlement.dependent,
+      )
       expect(sourceErrors).toHaveLength(1)
     } finally {
       cleanupGate.resolve()
