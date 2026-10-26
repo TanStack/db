@@ -1296,7 +1296,7 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   applicationReceipt?: SyncAppliedReceipt
   operationKeys: Set<TKey>
   queuedBecauseHydrating: boolean
-  // Set by `reserveCommitTurn`: subset hydration waits for this commit.
+  // Set by `reserveCommitTurn`: every hydration waits for this commit.
   reservesCommitTurn?: boolean
   hasDependentSuccessor: boolean
   publicationAdmissionWaiters?: Set<{
@@ -1312,6 +1312,22 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
   operation: NormalizedSyncOperation<T, TKey>
 }
+
+/**
+ * Returns undefined when no reserved sync transaction (`reserveCommitTurn`)
+ * is open. Otherwise returns a promise that settles when it commits or ends.
+ * No hydration may start while one is open: a new hydration cycle would make
+ * its commit fail.
+ */
+type WaitForReservedCommit = () => Promise<void> | undefined
+
+/**
+ * Thrown where a hydration would start while a reserved sync transaction is
+ * open, before the hydration changes any state. Its apply-mutex turn ends,
+ * waits for the commit outside the mutex, and retries: the commit's own
+ * durable write needs the mutex.
+ */
+class ReservedCommitPending extends Error {}
 
 class ApplyMutex {
   private queue: Promise<void> = Promise.resolve()
@@ -1546,6 +1562,7 @@ class PersistedCollectionRuntime<
   private readonly activeSubsets = new Map<string, LoadSubsetOptions>()
   private activeHydrationContext: { suppliedRowKeys: Set<TKey> } | undefined
   private hydrationSequence = 0
+  private waitForReservedCommit: WaitForReservedCommit | undefined
   // An unscheduled startup read may finish after a coordinator reset publishes.
   private resetSequence = 0
   private readonly pendingRemoteSubsetEnsures = new Map<
@@ -1566,10 +1583,13 @@ class PersistedCollectionRuntime<
   private readonly queuedHydrationTransactions: Array<
     BufferedSyncTransaction<T, TKey>
   > = []
+  // Peer commits and resets, in arrival order.
   private readonly queuedTxCommitted: Array<{
-    txCommitted: TxCommitted
+    notice: TxCommitted | CollectionReset
     lifecycleGeneration: number
     storageCollectionId: string
+    // Set when the notice met an open reservation; it retries after that ends.
+    waitsForReservedCommit?: boolean
   }> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
   private readonly hydratedDemands = new Set<string | undefined>()
@@ -1898,6 +1918,45 @@ class PersistedCollectionRuntime<
     this.restartSourceAfterScopedRecovery = restart ?? null
   }
 
+  setWaitForReservedCommit(wait: WaitForReservedCommit): void {
+    this.waitForReservedCommit = wait
+  }
+
+  // Every hydration start calls this before it changes state. The check runs
+  // inside the hydration's own scope, because a shared scheduler can hold the
+  // scope long after its apply-mutex turn began.
+  private throwIfReservedCommitOpen(): void {
+    if (this.waitForReservedCommit?.()) throw new ReservedCommitPending()
+  }
+
+  /** Runs a hydration turn, retrying it after a reserved commit it met. */
+  private async runHydrationTurn<TResult>(
+    turn: () => Promise<TResult>,
+  ): Promise<TResult> {
+    for (;;) {
+      try {
+        return await this.applyMutex.run(turn)
+      } catch (error) {
+        if (!(error instanceof ReservedCommitPending)) throw error
+        await this.waitForReservedCommit?.()
+      }
+    }
+  }
+
+  // A deferred notice stays at the head of the queue, so later notices still
+  // apply in arrival order once the reserved transaction commits.
+  private flushAfterReservedCommit(): void {
+    const lifecycleGeneration = this.lifecycleGeneration
+    void Promise.resolve(this.waitForReservedCommit?.())
+      .then(() => {
+        if (lifecycleGeneration !== this.lifecycleGeneration) return
+        return this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      })
+      .catch((error) => {
+        this.markTerminalFailure(error, lifecycleGeneration)
+      })
+  }
+
   clearSourceRestartAfterScopedRecovery(): void {
     this.restartSourceAfterScopedRecovery = undefined
   }
@@ -1969,6 +2028,17 @@ class PersistedCollectionRuntime<
         await this.ensureCacheClaimActive()
       }
       await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      // A broadcast whose reload waits for a reserved commit has not applied
+      // yet, so the load waits with it.
+      for (;;) {
+        const closed =
+          this.queuedTxCommitted.length > 0
+            ? this.waitForReservedCommit?.()
+            : undefined
+        if (!closed) break
+        await closed
+        await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      }
       // A broadcast that failed to apply made the runtime terminal; its rows
       // are not visible, so the load must not settle successfully.
       this.throwIfTerminal()
@@ -2314,7 +2384,7 @@ class PersistedCollectionRuntime<
       if (this.syncMode !== `on-demand`) return
       if (this.scopedRecovery) return
 
-      const appliedCursor = await this.applyMutex.run(async () => {
+      const appliedCursor = await this.runHydrationTurn(async () => {
         const result = await this.runInHydrationScope((adapter) =>
           this.hydrateBaseline(lifecycleGeneration, adapter),
         )
@@ -2752,15 +2822,25 @@ class PersistedCollectionRuntime<
     this.activeSubsets.set(subsetKey, options)
     const appliedCursor = this.appliedReceiptSequence
     try {
-      const hydrated = await this.applyMutex.run(
+      const hydrated = await this.runHydrationTurn(
         async (): Promise<boolean | `aborted`> => {
-          if (options.signal?.aborted) return `aborted`
+          // The turn may start long after admission, behind other work or a
+          // reserved commit; demand retired or cleaned up meanwhile reads
+          // nothing.
+          if (
+            options.signal?.aborted ||
+            (isDemandRetained !== undefined && !isDemandRetained())
+          ) {
+            return `aborted`
+          }
           try {
             return await this.runInHydrationScope<boolean | `aborted`>(
               (adapter) => {
                 if (options.signal?.aborted) {
                   return Promise.resolve(`aborted`)
                 }
+                // Until the reserved commit lands, the load can still abort.
+                this.throwIfReservedCommitOpen()
                 onHydrationStarted?.()
                 return this.hydrateSubsetUnsafe(
                   options,
@@ -2985,6 +3065,7 @@ class PersistedCollectionRuntime<
     await this.ensureCacheClaimActive()
     const lifecycleGeneration = this.lifecycleGeneration
     // A one-shot refresh does not acquire an enduring subscription lease.
+    // Only a sync-absent Collection exposes it, so no reservation can be open.
     const hydrated = await this.applyMutex.run(async () => {
       const result = await this.runInHydrationScope((adapter) =>
         this.hydrateSubsetUnsafe(
@@ -3325,6 +3406,7 @@ class PersistedCollectionRuntime<
     },
     adapter: HydrationPersistenceAdapter,
   ): Promise<boolean> {
+    this.throwIfReservedCommitOpen()
     let rowsLoaded = false
     let boundRowVersion: number | undefined
     let replayFailure: { reason: unknown } | undefined
@@ -4613,7 +4695,7 @@ class PersistedCollectionRuntime<
       // a renewed generation still owes its rows. A hydration flushes the
       // queue when it ends.
       this.queuedTxCommitted.push({
-        txCommitted: payload,
+        notice: payload,
         lifecycleGeneration,
         storageCollectionId: message.collectionId,
       })
@@ -4635,30 +4717,39 @@ class PersistedCollectionRuntime<
     }
 
     if (isCollectionResetPayload(payload)) {
-      void this.applyMutex
-        .run(async () => {
-          if (message.collectionId !== this.storageCollectionId) return
-          await this.runInHydrationScope(async (adapter) => {
-            await this.truncateAndReloadUnsafe(adapter, lifecycleGeneration)
-            await this.rebaseDurableStreamFromSnapshotUnsafe(
-              adapter,
-              lifecycleGeneration,
-            )
-            if (lifecycleGeneration === this.lifecycleGeneration) {
-              // Reloaded rows and the later position-only read are separate
-              // cuts. Zero is the conservative public version in the new epoch.
-              this.publicRowVersion = 0
-              this.resetTermFence = this.latestTerm
-            }
+      // A reset queues with peer commits, so a commit that arrived after it
+      // applies after it, behind its term fence.
+      this.queuedTxCommitted.push({
+        notice: payload,
+        lifecycleGeneration,
+        storageCollectionId: message.collectionId,
+      })
+      if (!this.isHydratingNow()) {
+        void this.applyMutex
+          .run(() => this.flushQueuedTxCommittedUnsafe())
+          .catch((error) => {
+            this.markTerminalFailure(error, lifecycleGeneration)
           })
-          if (lifecycleGeneration === this.lifecycleGeneration) {
-            await this.flushQueuedTxCommittedUnsafe()
-          }
-        })
-        .catch((error) => {
-          this.markTerminalFailure(error, lifecycleGeneration)
-        })
+      }
     }
+  }
+
+  private async applyCollectionResetUnsafe(
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    await this.runInHydrationScope(async (adapter) => {
+      await this.truncateAndReloadUnsafe(adapter, lifecycleGeneration)
+      await this.rebaseDurableStreamFromSnapshotUnsafe(
+        adapter,
+        lifecycleGeneration,
+      )
+      if (lifecycleGeneration === this.lifecycleGeneration) {
+        // Reloaded rows and the later position-only read are separate
+        // cuts. Zero is the conservative public version in the new epoch.
+        this.publicRowVersion = 0
+        this.resetTermFence = this.latestTerm
+      }
+    })
   }
 
   private async flushQueuedTxCommittedUnsafe(): Promise<void> {
@@ -4668,19 +4759,39 @@ class PersistedCollectionRuntime<
         this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
         return
       }
-      const queued = this.queuedTxCommitted.shift()
-      if (!queued) {
-        continue
+      // A notice that waited retries only after the reservation ends, so
+      // notices that arrive meanwhile neither retry it nor overtake it.
+      if (
+        this.queuedTxCommitted[0]!.waitsForReservedCommit &&
+        this.waitForReservedCommit?.()
+      ) {
+        this.flushAfterReservedCommit()
+        return
       }
+      const queued = this.queuedTxCommitted.shift()!
       if (queued.storageCollectionId !== this.storageCollectionId) continue
-      // A queued commit has left the queue, so a failure must be terminal,
-      // as it is for a commit applied when it arrives.
       try {
-        await this.processCommittedTxUnsafe(
-          queued.txCommitted,
-          queued.lifecycleGeneration,
-        )
+        if (isCollectionResetPayload(queued.notice)) {
+          await this.applyCollectionResetUnsafe(queued.lifecycleGeneration)
+        } else {
+          await this.processCommittedTxUnsafe(
+            queued.notice,
+            queued.lifecycleGeneration,
+          )
+        }
       } catch (error) {
+        if (error instanceof ReservedCommitPending) {
+          // Only a notice that reaches a hydration waits; later notices stay
+          // queued behind it. The reserved commit lands first and takes the
+          // next stream position, so the retry may run as gap recovery, which
+          // rereads durable rows (maintainer decision on #2226).
+          queued.waitsForReservedCommit = true
+          this.queuedTxCommitted.unshift(queued)
+          this.flushAfterReservedCommit()
+          return
+        }
+        // A queued commit has left the queue, so a failure must be terminal,
+        // as it is for a commit applied when it arrives.
         throw this.markTerminalFailure(error, queued.lifecycleGeneration)
       }
     }
@@ -4950,6 +5061,30 @@ class PersistedCollectionRuntime<
       this.refreshScopedSubsets()
       return
     }
+    // The reset is one hydration cycle from here, before its eager truncate
+    // publishes. A sync transaction that begins during it straddles the
+    // hydration instead of crossing it, so readers never wait on a truncated
+    // Collection.
+    this.throwIfReservedCommitOpen()
+    this.hydrationSequence++
+    this.hydratingGeneration = lifecycleGeneration
+    try {
+      await this.truncateThenReloadUnsafe(adapter, lifecycleGeneration)
+    } finally {
+      // The reload ends the cycle; this covers an early return before it.
+      if (
+        this.hydratingGeneration === lifecycleGeneration &&
+        this.activeHydrationContext === undefined
+      ) {
+        this.hydratingGeneration = null
+      }
+    }
+  }
+
+  private async truncateThenReloadUnsafe(
+    adapter: HydrationPersistenceAdapter,
+    lifecycleGeneration: number,
+  ): Promise<void> {
     // A subscriber may reacquire reentrantly from the truncate commit.
     this.hydratedDemands.clear()
     this.resetSequence++
@@ -4976,6 +5111,7 @@ class PersistedCollectionRuntime<
       adapter,
       false,
       this.syncMode === `eager`,
+      true,
       true,
     )
   }
@@ -5126,11 +5262,14 @@ class PersistedCollectionRuntime<
     skipUnchangedReplace = false,
     restoreResetBaseline = false,
     replayDemand = false,
+    // A reset's reload continues the cycle its truncate began.
+    continuesHydrationCycle = false,
   ): Promise<void> {
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
       return
     }
+    if (!continuesHydrationCycle) this.throwIfReservedCommitOpen()
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
     const activeSubsetOptions = Array.from(this.activeSubsets.values())
@@ -5159,7 +5298,7 @@ class PersistedCollectionRuntime<
           .map(([key]) => key)
 
     this.hydratedDemands.clear()
-    this.hydrationSequence++
+    if (!continuesHydrationCycle) this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
     this.hydratingGeneration = lifecycleGeneration
@@ -5863,6 +6002,24 @@ function createWrappedSyncConfig<
         },
       )
 
+      const findReservedTransaction = () =>
+        transactionStack.find(
+          (transaction) =>
+            transaction.reservesCommitTurn === true && !transaction.internal,
+        )
+      runtime.setWaitForReservedCommit(() => {
+        const transaction = findReservedTransaction()
+        if (!transaction) return undefined
+        // Admission waiters settle when the transaction commits, aborts, or
+        // cleanup discards it. Every outcome closes the reservation.
+        return new Promise<void>((resolve) => {
+          ;(transaction.publicationAdmissionWaiters ??= new Set()).add({
+            resolve,
+            reject: () => resolve(),
+          })
+        })
+      })
+
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
         protocol: SYNC_PERSISTENCE_PROTOCOL,
         version: SYNC_PERSISTENCE_VERSION,
@@ -5879,6 +6036,13 @@ function createWrappedSyncConfig<
         },
         hydrateBaseline: async () => {
           if (startupState.cleanedUp) return
+          // The source holds this reservation itself, so waiting for its
+          // commit here would wait for the caller.
+          if (findReservedTransaction()) {
+            throw new InvalidPersistedCollectionConfigError(
+              `hydrateBaseline cannot run while this source's reserved sync transaction is open`,
+            )
+          }
           try {
             await runtime.ensureResumeBaselineHydrated()
           } catch (error) {
@@ -6636,8 +6800,12 @@ function createWrappedSyncConfig<
               return
             }
             const currentTransaction = getOpenTransaction()
-            // A source transaction that reserved its FIFO turn commits before
+            // A sync transaction that reserved its FIFO turn commits before
             // subset hydration advances the generation it was built against.
+            // A load admitted during the reservation waits here, before it
+            // takes an apply-mutex turn, so it runs after the commit's durable
+            // write. The runtime's deferral covers hydrations whose turn
+            // began earlier; it cannot keep that FIFO order.
             if (currentTransaction?.reservesCommitTurn) {
               await waitForPublicationAdmission(
                 currentTransaction,

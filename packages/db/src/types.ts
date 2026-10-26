@@ -583,8 +583,13 @@ export type SyncPersistenceCapabilityV1<
     value: unknown
   }) => Promise<void>
   /**
-   * Reserve the open sync transaction's FIFO turn, so a subset hydration
-   * that starts before it commits waits for that commit.
+   * Reserve the open sync transaction's FIFO turn. Every persisted hydration
+   * that would start before it commits waits for that commit: a subset load,
+   * a reload or reset from a peer notice, and sequence-gap recovery. A subset
+   * load admitted while the turn is reserved also runs after the commit's
+   * durable write. The source must end the transaction: commit it, or abandon
+   * it by committing with an aborted signal. A source that stops for good
+   * abandons it, or every later hydration keeps waiting.
    */
   readonly reserveCommitTurn: () => void
   readonly scanPersistedRows: (

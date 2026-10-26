@@ -2001,6 +2001,9 @@ function createElectricSync<T extends Row<unknown>>(
         const fail = (cause: unknown) => {
           rejectFullSnapshot(cause)
           if (collection.status === `loading`) failInitialSync(cause)
+          // No retry follows, so the open transaction can never commit. A
+          // source that stops must end its reserved transaction.
+          abandonOpenTransaction()
         }
 
         if (shapeOptions.onError) {
@@ -2030,6 +2033,16 @@ function createElectricSync<T extends Row<unknown>>(
       },
     })
     let transactionStarted = false
+    // Commit with an aborted signal: the wrapper discards the transaction and
+    // its reserved commit turn ends.
+    const abandonOpenTransaction = () => {
+      if (!transactionStarted) return
+      transactionStarted = false
+      const cancellation = new AbortController()
+      cancellation.abort()
+      const abandoned = commit(cancellation.signal)
+      if (abandoned !== true) void abandoned.catch(() => undefined)
+    }
     const newTxids = new Set<Txid>()
     const newSnapshots: Array<PostgresSnapshot> = []
     // Track if we've completed initial sync in progressive mode. A persisted
@@ -2306,12 +2319,7 @@ function createElectricSync<T extends Row<unknown>>(
 
     const invalidateResume = () => {
       resumeInvalid = true
-      if (transactionStarted) {
-        const cancellation = new AbortController()
-        cancellation.abort()
-        commit(cancellation.signal)
-        transactionStarted = false
-      }
+      abandonOpenTransaction()
       syncedKeys.clear()
       newTxids.clear()
       newSnapshots.length = 0
@@ -2758,13 +2766,7 @@ function createElectricSync<T extends Row<unknown>>(
         unsubscribeStream()
         // Abort the abort controller to stop the stream
         abortController.abort()
-        if (transactionStarted) {
-          transactionStarted = false
-          const cancellation = new AbortController()
-          cancellation.abort()
-          const abandoned = commit(cancellation.signal)
-          if (abandoned !== true) void abandoned.catch(() => undefined)
-        }
+        abandonOpenTransaction()
         pendingResumeBatches.length = 0
         // Reset deduplication tracking so collection can load fresh data if restarted
         loadSubsetDedupe?.reset()

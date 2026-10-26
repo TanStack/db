@@ -1650,7 +1650,20 @@ consistency between them: while their streams interleave, a lagging tab's
 copy of an older transaction can be stored and announced after a newer one,
 so a tab can briefly show an older server state. Every tab delivers the
 same log in order, so durable state and every tab converge once the streams
-catch up. No lane checks this yet. Ordering the copies would need a generic
+catch up. No lane checks this yet.
+A counterexample bounds that convergence claim
+([#2209](https://github.com/TanStack/db/issues/2209)). Two Browser tabs
+share one SQLite file through the real coordinator, with a controlled
+Electric stream per tab. Tab A's stream applies v1 then v2 at `30_0`. Tab B's
+lagging stream applies v1 at `20_0`, and tab B closes before it reaches v2.
+Tab A then shows v1, and the durable `electric:resume` offset is back at
+`20_0`. Nothing redelivers v2 to tab A while it stays open, because its
+stream is already past it. A tab that opens later resumes from `20_0` and
+repairs the cache. The convergence above therefore holds only while the
+lagging tab keeps running or another tab restarts its stream. The
+multi-tab Electric oracle in `browser-db-sqlite-persistence` pins this
+history with `it.fails` beside a passing control in which the lagging tab
+catches up. Ordering the copies would need a generic
 source position on sync commits; Electric already stores `{ handle, offset }`
 with each commit, PowerSync does not use this wrapper, and persisted Query
 collections have no log position.
@@ -2467,6 +2480,59 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       not establish behavior after schema changes or invalidated resume points,
       or each intermediate publication during a multi-transaction truncate replay.
       The same owner needs those histories before claiming those stronger laws.
+      Reserved commits (#2226). The same driver and model also own the
+      reserved-commit law: a persisted hydration that would start while a
+      reserved sync transaction is open waits until it ends, and the commit is
+      accepted. Authority: `reserveCommitTurn` in `packages/db/src/types.ts`,
+      widened by maintainer decision on #2226 to every persisted hydration.
+      Further maintainer decisions fix its edges. Readers keep the rows from
+      before a hydration while it waits; a transaction opened after a
+      hydration began straddles it. A notice that waited may be retried as
+      gap recovery, with at most one more pullSince request and no added
+      upstream request. A source that stops for good abandons its
+      reservation.
+      A second registration crosses the routes with the reserving timings,
+      ending, and follow-up dimensions. The routes are subset, complete
+      subset, a follower's routed subset, the source's own baseline,
+      reset, full reload, sequence gap with or without pullSince, and a
+      targeted change that starts no hydration. The reserving timings are
+      across the mutex turn, across scope entry, during the read, in the
+      route's first publication, and across startup. The ending is commits,
+      abandoned, cleanup, an aborted demand, or the source awaiting its own
+      baseline. The follow-up is a reset then a pre-reset commit.
+      Observations: receipts, final rows, row metadata, cursor, status,
+      reads during the reservation, upstream requests, pullSince count,
+      rows while waiting, and every read against the fold of the durable
+      events before it. Every cell declares reach (ORC-015).
+      | Evidence | Result |
+      | --- | --- |
+      | Row-algebra cross | 360 cells pass. |
+      | Reservation cross | 188 cells pass. |
+      | `5649a07d4` | The open cells fail with `a persisted sync transaction cannot cross a hydration cycle`. Three `after read` reset follow-up cells also fail, because `main` applied a pre-reset commit before the reset set its term fence. Queueing resets with notices fixes this pre-existing defect. |
+      | Hostile mutants | Each mutant fails its cells, and every failure is an assertion. Deferring every notice fails the targeted change. Dropping the follower reply's wait fails the routed subset. Reporting hydration start before the check fails the aborted demand. A reset reload that starts its own cycle fails the first-publication reset. Applying a reset outside the notice queue fails the reset follow-ups. Retrying a waited notice while the reservation is open fails the follow-up and routed cells (repeated pullSince). Checking only at the mutex turn fails every scope-entry cell. Gating subset hydration only fails every reset, reload, and gap cell. Requeueing a waited notice behind later notices fails 12 reset follow-up cells: the pre-reset commit is published before its reset, and a reload is lost. |
+      Not covered: `forceReloadSubset`, which only a sync-absent Collection
+      has, and which therefore never meets a reservation; startup hydration,
+      which source entry follows (an `open across startup` observation);
+      and row visibility for on-demand Collections without demand beyond the
+      source's own rows. Cleaned-up cells judge only cleanup.
+      Real SQLite adapter:
+      `packages/db-sqlite-persistence-core/tests/reserved-commit-sqlite-adapter-oracle.test.ts`
+      crosses three routes (peer full reload, peer reset, and a subset
+      admitted earlier) with two timings (a held write of this Collection,
+      or the shared scheduler holding the scope after its turn) and two
+      endings (commits, abandoned). It runs on `SQLiteCorePersistenceAdapter`.
+      Its 10 cells pass. Every committing cell fails on `5649a07d4`. A peer
+      full reload behind this Collection's own held write cannot become
+      durable through the single SQLite writer, so it is excluded here and
+      left to the grammar's fixture leader.
+      Browser host: the multi-tab Electric oracle in
+      `browser-db-sqlite-persistence` crosses two or three tabs, eager or
+      on-demand Collections, which tab finishes first, a storm or staggered
+      arrival, and whether the last tab's stream fails while its refetch is
+      open. Its 32 cells pass. Every ordinary storm cell fails on
+      `5649a07d4`. Without Electric's abandon-on-failure, the eager storm
+      cells where a stream fails also fail. On-demand cells judge receipts
+      and status only.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in
