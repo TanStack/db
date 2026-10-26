@@ -146,7 +146,7 @@ export class LiveQueryObserverClient<
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.`
-          : codedMessage(245),
+          : codedMessage(247),
       )
     }
     // Capture at render, rather than sampling mutable source rows at dehydrate.
