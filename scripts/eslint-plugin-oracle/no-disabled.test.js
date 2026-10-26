@@ -12,6 +12,17 @@ const ruleTester = new RuleTester({
 
 ruleTester.run(`oracle/no-disabled`, noDisabled, {
   valid: [
+    // The shared replay variables, and variables that select no replay.
+    `const seed = process.env.TANSTACK_DB_ORACLE_SEED`,
+    `const { TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_PROPERTY } = process.env`,
+    `const statistics = process.env.TANSTACK_DB_ORACLE_STATISTICS`,
+    `const debug = process.env.RELOAD_ORACLE_DEBUG`,
+    `const seed = config.TANSTACK_DB_LIKE_ORACLE_SEED`,
+    // oracle-config implements replay selection, so it reads every variable.
+    {
+      code: `const seed = process.env.UTILS_ORACLE_SEED`,
+      filename: `/repo/packages/db/tests/oracle-config.ts`,
+    },
     // A replay that does not select this property registers an empty test.
     `it.skip('runs only when its replay property is selected', () => {})`,
     `it.todo('loads every subset from one generation')`,
@@ -79,6 +90,38 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     `it('reads a page', (_, ctx) => { ctx.skip() })`,
   ],
   invalid: [
+    // A private variable that selects a replay or a run count.
+    {
+      code: `const seed = process.env.TANSTACK_DB_LIKE_ORACLE_SEED`,
+      errors: [
+        {
+          messageId: `replayVariable`,
+          data: { name: `TANSTACK_DB_LIKE_ORACLE_SEED` },
+        },
+      ],
+    },
+    {
+      code: `fc.assert(property, { path: process.env['BTREE_MAP_ORACLE_PATH'] })`,
+      errors: [{ messageId: `replayVariable` }],
+    },
+    {
+      code: `const runs = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_RUNS ?? 20)`,
+      errors: [{ messageId: `replayVariable` }],
+    },
+    {
+      code: `const { INDEXEDDB_ORACLE_SEED: seed, TANSTACK_DB_ORACLE_PATH } = process.env`,
+      errors: [
+        {
+          messageId: `replayVariable`,
+          data: { name: `INDEXEDDB_ORACLE_SEED` },
+        },
+      ],
+    },
+    {
+      code: `const property = process.env.UTILS_ORACLE_PROPERTY`,
+      filename: `/repo/packages/db/tests/utils-oracle.property.test.ts`,
+      errors: [{ messageId: `replayVariable` }],
+    },
     {
       code: `it.only('checks the history', () => {})`,
       errors: [{ messageId: `only` }],

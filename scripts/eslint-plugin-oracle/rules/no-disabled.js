@@ -35,6 +35,11 @@
  *   returns one run for a path replay.
  * - A literal run count above 1 that pins no history. It does not scale with
  *   `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER`, so `oracleRuns` must wrap it.
+ * - A private replay variable: a `process.env` read whose name ends in
+ *   `_SEED`, `_PATH`, `_PROPERTY`, or `_RUNS`, other than the shared
+ *   `TANSTACK_DB_ORACLE_SEED`, `TANSTACK_DB_ORACLE_PATH`, and
+ *   `TANSTACK_DB_ORACLE_PROPERTY`. The replay manifest, the guarded replay
+ *   runner, and the retired-variable check see only the shared variables.
  *
  * The rule has no inline exception. A known gap is pinned with `it.fails` on
  * a fixed seed, not skipped.
@@ -74,6 +79,14 @@ const replaySelectionModule =
   /(^|[/\\])packages[/\\]db[/\\]tests[/\\]oracle-config\.ts$/
 // The shared helpers that return a test registration or its `skip` form.
 const selectionHelpers = new Set([`oracleCalibrationTest`, `oracleReplayTest`])
+// The variables that select a replay. Any other variable whose name ends
+// in one of these suffixes is a private replay selection.
+const sharedReplayVariables = new Set([
+  `TANSTACK_DB_ORACLE_PATH`,
+  `TANSTACK_DB_ORACLE_PROPERTY`,
+  `TANSTACK_DB_ORACLE_SEED`,
+])
+const replayVariableName = /_(PATH|PROPERTY|RUNS|SEED)$/
 const runHelpers = new Set([
   `oraclePropertyOptions`,
   `oracleRandomParameters`,
@@ -394,6 +407,30 @@ function findVariable(scope, name) {
   return undefined
 }
 
+function isProcessEnv(node) {
+  return (
+    node?.type === `MemberExpression` &&
+    !node.computed &&
+    node.object.type === `Identifier` &&
+    node.object.name === `process` &&
+    node.property.name === `env`
+  )
+}
+
+/** The name in `process.env.NAME` or `process.env['NAME']`. */
+function environmentKey(node) {
+  if (!isProcessEnv(node.object)) return undefined
+  if (!node.computed) return node.property.name
+  return node.property.type === `Literal` &&
+    typeof node.property.value === `string`
+    ? node.property.value
+    : undefined
+}
+
+function isPrivateReplayVariable(name) {
+  return replayVariableName.test(name) && !sharedReplayVariables.has(name)
+}
+
 /** A number literal, or a constant bound to one. */
 /** The number literal that `node` is, or that a constant `node` names. */
 function constantNumber(node, sourceCode) {
@@ -521,6 +558,7 @@ export default {
       aliasTest: `\`{{name}}\` is passed around as a value, so the rule cannot see what it registers or switches off. Call it directly, or select a replay with \`oracleReplayTest({{name}}, property)\` from oracle-config.`,
       guarded: `This test registers only under a condition, so it can stop running in ordinary runs. Register it unconditionally. A replay selection uses \`oracleReplayRequested()\` or \`oracleReplaySkips(property)\` from oracle-config, or \`oracleReplayTest(test, property)\`.`,
       singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions, which also selects a replay. A witness passes a recorded \`path\` or a seed that is a number literal or a constant.`,
+      replayVariable: `\`{{name}}\` selects a replay or a run count outside the shared variables, so the replay manifest, the guarded replay runner, and the retired-variable check cannot see it. Take the options from \`oraclePropertyOptions\` or \`oracleRandomParameters\` in oracle-config, which read TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY, and scale run counts with \`oracleRuns\`.`,
       literalRuns: `A literal run count does not scale with TANSTACK_DB_ORACLE_RUNS_MULTIPLIER. Wrap it in oracleRuns, or pass it to oraclePropertyOptions.`,
     },
   },
@@ -612,6 +650,18 @@ export default {
         })
       },
       MemberExpression(node) {
+        const variable = environmentKey(node)
+        if (
+          variable !== undefined &&
+          isPrivateReplayVariable(variable) &&
+          !replaySelectionModule.test(context.filename)
+        ) {
+          context.report({
+            node,
+            messageId: `replayVariable`,
+            data: { name: variable },
+          })
+        }
         // Report a chain such as `fcTest.skip` or `it.skip.prop` once, at its
         // outermost member, when nothing calls it.
         if (
@@ -630,6 +680,26 @@ export default {
         const name = names.find((member) => aliasModifiers.has(member))
         if (testRoots.has(root) && name !== undefined) {
           context.report({ node, messageId: `alias`, data: { name } })
+        }
+      },
+      VariableDeclarator(node) {
+        if (
+          node.id.type !== `ObjectPattern` ||
+          !isProcessEnv(node.init) ||
+          replaySelectionModule.test(context.filename)
+        ) {
+          return
+        }
+        for (const property of node.id.properties) {
+          const name =
+            property.type === `Property` ? propertyName(property) : undefined
+          if (name !== undefined && isPrivateReplayVariable(name)) {
+            context.report({
+              node: property,
+              messageId: `replayVariable`,
+              data: { name },
+            })
+          }
         }
       },
       Property(node) {
