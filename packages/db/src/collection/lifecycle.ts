@@ -10,7 +10,7 @@ import {
 import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
-import { CleanupQueue } from './cleanup-queue'
+import { CleanupQueue, cleanupNow } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { CollectionConfig, CollectionStatus } from '../types'
@@ -51,6 +51,7 @@ export class CollectionLifecycleManager<
   private readyFailureSink: ((failure: { error: unknown }) => void) | undefined
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
+  private gcGraceUntil = 0
   private syncError: unknown
   private cleanupConfig: () => void
   private statusRevision = 0
@@ -285,7 +286,8 @@ export class CollectionLifecycleManager<
    * Called when sync starts outside a subscription
    */
   public startGCTimerIfUnsubscribed(): void {
-    this.startGCTimer(UNSUBSCRIBED_GC_FLOOR_MS)
+    this.gcGraceUntil = cleanupNow() + UNSUBSCRIBED_GC_FLOOR_MS
+    this.startGCTimerAfterSettlement()
   }
 
   // A persisting transaction holds the Collection: collecting it would drop
@@ -303,7 +305,19 @@ export class CollectionLifecycleManager<
    * Start the garbage collection timer
    * Called when the collection becomes inactive (no subscribers)
    */
-  public startGCTimer(minDelay = 0): void {
+  public startGCTimer(): void {
+    // A real last unsubscribe uses gcTime exactly.
+    this.gcGraceUntil = 0
+    this.startGCTimerAfterSettlement()
+  }
+
+  /**
+   * Renew retention after a persisting hold ends, preserving any remaining
+   * startup/preload handoff time. Queued idle work belongs to the old deadline.
+   */
+  public startGCTimerAfterSettlement(): void {
+    if (this.status === `idle` || this.status === `cleaned-up`) return
+    this.cancelGCTimer()
     if (!this.canGarbageCollect()) return
 
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
@@ -317,7 +331,7 @@ export class CollectionLifecycleManager<
 
     CleanupQueue.getInstance().schedule(
       this,
-      Math.max(gcTime, minDelay),
+      Math.max(gcTime, this.gcGraceUntil - cleanupNow()),
       () => {
         if (this.canGarbageCollect()) {
           // Schedule cleanup during idle time to avoid blocking the UI thread
@@ -325,15 +339,6 @@ export class CollectionLifecycleManager<
         }
       },
     )
-  }
-
-  /**
-   * A transaction that touched this Collection settled. When nothing else
-   * holds the Collection, its `gcTime` delay starts now.
-   */
-  public startGCTimerAfterSettlement(): void {
-    if (this.status === `idle` || this.status === `cleaned-up`) return
-    this.startGCTimer()
   }
 
   /**

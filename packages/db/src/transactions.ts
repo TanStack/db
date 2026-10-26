@@ -676,6 +676,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       this.error = { message: config.error.message, error: config.error }
     }
 
+    const wasPersisting = this.state === `persisting`
     this.setState(`failed`)
 
     // A failing subscriber cannot leave this transaction unsettled.
@@ -694,7 +695,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     } finally {
       // Reject the promise
       this.isPersisted.reject(this.error?.error)
-      this.touchCollection()
+      this.touchCollection(wasPersisting)
     }
 
     return this
@@ -707,7 +708,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    * first error is thrown. A settled transaction then empties its set of
    * tracking Collections. Its mutations still name their Collection.
    */
-  touchCollection(): void {
+  touchCollection(releasedHold = false): void {
     const collections = new Set(this.collections)
     for (const mutation of this.mutations) collections.add(mutation.collection)
     const settled = this.state === `completed` || this.state === `failed`
@@ -716,7 +717,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     for (const collection of collections) {
       try {
         collection._state.onTransactionStateChange()
-        if (settled) collection._lifecycle.startGCTimerAfterSettlement()
+        if (releasedHold) collection._lifecycle.startGCTimerAfterSettlement()
 
         // Only call commitPendingTransactions if there are pending sync transactions
         if (collection._state.pendingSyncedTransactions.length > 0) {
@@ -779,7 +780,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       this.setState(`completed`)
       // A Collection whose mutations merged away still tracks this transaction.
       try {
-        this.touchCollection()
+        this.touchCollection(true)
       } finally {
         this.isPersisted.resolve(this)
       }
@@ -834,7 +835,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     // Publication errors cannot undo persistence or leave its receipt pending.
     // Keep normal publication queued before callers resume from the receipt.
     try {
-      this.touchCollection()
+      this.touchCollection(true)
     } finally {
       this.isPersisted.resolve(this)
     }

@@ -243,6 +243,11 @@ for (const law of [
   }
 }
 
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
+
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
     owners.set(
@@ -272,6 +277,14 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `collection-lifecycle.gc-persisting-transaction`,
+    `retires a Collection only after gcTime.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
   [
     `structural-identity.equal-representations`,
     `agrees with D2 value identity for equal representations`,

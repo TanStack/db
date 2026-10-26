@@ -1,0 +1,24 @@
+{
+  "reviewedHead": "f19f4908a3c0b8a91a696a2a77076e91230e4205",
+  "repairState": "evaluated on reviewedHead plus the source contents fingerprinted here; repair revision is the commit that first adds this record",
+  "sha256": {
+    "packages/db/src/collection/cleanup-queue.ts": "f1873937d0ae8e5f53a2557b607720636d17dec7eac34f5480a5480feb071005",
+    "packages/db/src/collection/lifecycle.ts": "0bf12a87ba70ce8cbf6f420d82fed5aaf62e00398514bb873660f123ee463517",
+    "packages/db/src/transactions.ts": "5254e65c5b92bce077d8d70660827cee3c6cad3f309cc32d81593d26f60f2c09",
+    "packages/db/src/types.ts": "604617928eaa154942b7c1c6db3582479a650a86d7f8b13a79894215dbfa55e3",
+    "packages/db/mangle-cache.json": "62f59eb00d91ea76da4d4028468d9b04242a57d684233c97ff676bf3c843f51e",
+    "packages/db/tests/collection-gc-transaction-oracle.property.test.ts": "f99df298d6d5ed44696da4da36b6ec44fcb57c8879096a2f76bc0404697fadb0",
+    "packages/db/tests/collection-gc-retention-oracle.property.test.ts": "c2f36965c1ab81f405f4f6b619010c47ccc9ec438a46c8926d890a570317004a",
+    "packages/db/tests/collection-gc-retention-oracle.ts": "34be905d72bbdb68d7f37c43ec802f616b13f65d2ec4f903c07bb115959b603d",
+    "packages/db/tests/oracle-config.ts": "61d3a191a34a7886c7e83fddbfa94a6597e12f8d52d3adef9dcf8b145acdd7ee",
+    "packages/db/tests/oracle-replay-manifest.ts": "492b9545f6102c4fc4f315b2bee841edf3957c29f91f3a75c38c1fc75cae2039",
+    "packages/db/tests/utils.ts": "13d5356bd2cb15850ba62967705d0dbb826d42427cf750340a516edd0f78fe3a",
+    "packages/db/e2e/collection-gc/browser.ts": "3162b0e273002ae99512007d6ee73781d9fe5b1d12fde78ccd05a2aaf8dd82d7",
+    "packages/db/e2e/collection-gc/browser.html": "4aa79460e5be04a6c3f46355ca0514c82305d6c4983152cce61fd127afc5cae1",
+    "packages/db/e2e/collection-gc/retention.spec.ts": "e7db26fc26c573b74836ecc762d79278d8727922bfb63885360fb7b6c261d718",
+    "packages/db/playwright.collection-gc.config.ts": "2c2ac0d6c14e17ff1f401e5b6b6ca2f7d43c1e205950ba6a8837f546e8c2bf37",
+    "packages/db/package.json": "69bc01bcb55f9f27618fd65873f61eb63212d7f2270f549336f86d99fe9fc38c",
+    "packages/db/tsconfig.json": "b759b1caa96020777b7833f756a9591c65939c467c4cb10b55f307ba325d7538",
+    ".github/workflows/e2e-tests.yml": "26550f9c26fe312a240413a9e76e0f1ac19b2e28dd17493e78a44134e268bc88"
+  }
+}

@@ -415,5 +415,6 @@
   "cancelRepairRetry": "cG",
   "coverSource": "fN",
   "windowRequestGeneration": "av",
-  "latestWindowRequest": "gE"
+  "latestWindowRequest": "gE",
+  "gcGraceUntil": "gT"
 }

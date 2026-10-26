@@ -791,7 +791,10 @@ export interface BaseCollectionConfig<
    * Pending preloads retain the collection until they settle. Preloading ready
    * data refreshes the retention period. A persisting transaction that touches
    * the collection also retains it, and the period starts again when the last
-   * one completes or fails. A non-positive or non-finite value
+   * one completes or fails, preserving any remaining startup grace. Rolling
+   * back a manual transaction that stayed pending preserves the existing GC
+   * deadline. Cleanup runs at a host idle opportunity after the delay.
+   * A non-positive or non-finite value
    * disables automatic garbage collection.
    */
   gcTime?: number

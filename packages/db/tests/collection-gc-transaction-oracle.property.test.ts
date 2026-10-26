@@ -5,14 +5,15 @@ import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions, readOracleRunConfig } from './oracle-config.js'
 import { createOracleReach } from './oracle-reach.js'
-import { resetCleanupQueue } from './utils.js'
+import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import type { Deferred } from '../src/deferred.js'
 
 /**
  * # When may garbage collection retire a Collection?
  *
- * Law: automatic garbage collection retires a Collection once it has had no
- * subscriber and no persisting transaction for `gcTime` elapsed milliseconds.
+ * Law: automatic garbage collection becomes eligible once a Collection has
+ * had no subscriber and no persisting transaction for `gcTime` milliseconds.
+ * Cleanup runs at a host idle opportunity after eligibility.
  * A transaction that touches the Collection holds it while it persists, and
  * the `gcTime` delay starts again when the last such transaction settles,
  * whether it completes or fails. A transaction that touches several
@@ -34,7 +35,9 @@ import type { Deferred } from '../src/deferred.js'
  * holds its Collection. It is set when the last hold ends: the sync start,
  * the last unsubscribe, or the last settlement. The model reads no production
  * state and does not copy the cleanup queue or idle scheduling; the
- * cleanup-queue oracle owns those.
+ * cleanup-queue oracle owns timer dispatch. The shared boundary model in
+ * collection-gc-retention-oracle.ts owns startup, phase and delayed-idle laws;
+ * collection-gc-retention-oracle.property.test.ts generates those histories.
  *
  * The history grammar, with `gcTime` 100: subscribe to either Collection,
  * unsubscribe one of its current subscribers, insert a row whose handler
@@ -98,7 +101,7 @@ type Model = {
   now: number
   collections: Record<Side, CollectionModel>
   // Pending handlers in settlement order, with the Collections each touches.
-  pending: Array<{ id: number; sides: Array<Side> }>
+  pendingHandlers: Array<{ id: number; sides: Array<Side> }>
 }
 
 const sides: Array<Side> = [`a`, `b`]
@@ -185,7 +188,7 @@ async function runHistory(history: History): Promise<void> {
   const model: Model = {
     now: 0,
     collections: { a: startModel(), b: startModel() },
-    pending: [],
+    pendingHandlers: [],
   }
   let nextId = 1
 
@@ -247,13 +250,13 @@ async function runHistory(history: History): Promise<void> {
           .insert({ id })
           .isPersisted.promise.catch(() => {})
       }
-      model.pending.push({ id, sides: into })
+      model.pendingHandlers.push({ id, sides: into })
       for (const side of into) {
         model.collections[side].persisting.push(id)
         model.collections[side].deadline = undefined
       }
     } else if (step.kind === `settle`) {
-      const settled = model.pending.shift()
+      const settled = model.pendingHandlers.shift()
       if (!settled) return
       const handler = handlers.get(settled.id)!
       if (step.outcome === `complete`) handler.resolve()
@@ -295,13 +298,14 @@ async function runHistory(history: History): Promise<void> {
     check(label)
   }
 
-  try {
+  await withOracleCleanup(async () => {
     await settle()
     check(`start`)
     for (const [index, step] of history.steps.entries())
       await apply(step, `step ${index} ${step.kind}`)
     if (history.end === `cleanup`) {
-      if (model.pending.length > 0) reach.reach(`cleanup-while-persisting`)
+      if (model.pendingHandlers.length > 0)
+        reach.reach(`cleanup-while-persisting`)
       for (const side of sides) {
         await collections[side].cleanup()
         expect(collections[side].status, `explicit cleanup of ${side}`).toBe(
@@ -314,19 +318,23 @@ async function runHistory(history: History): Promise<void> {
         ...sides.flatMap((side) =>
           subscriptions[side].map((): Step => ({ kind: `unsubscribe`, side })),
         ),
-        ...model.pending.map((): Step => ({ kind: `settle`, outcome })),
+        ...model.pendingHandlers.map((): Step => ({ kind: `settle`, outcome })),
         { kind: `advance`, elapsedMs: 120 },
       ]
       for (const step of drain) await apply(step, `drain ${step.kind}`)
     }
-  } finally {
-    for (const handler of handlers.values()) handler.resolve()
-    await settle()
-    for (const side of sides) await collections[side].cleanup()
-    resetCleanupQueue()
-    vi.clearAllTimers()
-    vi.useRealTimers()
-  }
+  }, [
+    async () => {
+      for (const handler of handlers.values()) handler.resolve()
+      await settle()
+    },
+    ...sides.map((side) => () => collections[side].cleanup()),
+    () => {
+      resetCleanupQueue()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    },
+  ])
 }
 
 const sideArbitrary = fc.constantFrom(`a` as const, `b` as const)
@@ -385,7 +393,9 @@ const property = fc.asyncProperty(
 
 // Replay one history with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
-it.each([20261024, undefined])(
+it.each(
+  runConfig.replaySeed === undefined ? [20261024, undefined] : [undefined],
+)(
   `retires a Collection only after gcTime with no subscriber and no persisting transaction (seed %s)`,
   async (seed) => {
     reach = createReach()
@@ -399,5 +409,8 @@ it.each([20261024, undefined])(
         : { seed }),
     })
     reach.assertReached()
+    console.info(
+      `GC transaction reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,
+    )
   },
 )
