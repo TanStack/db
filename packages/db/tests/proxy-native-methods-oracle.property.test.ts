@@ -60,18 +60,15 @@ import {
   arraySpecArb,
   expectArrayCall,
   expectTypedCall,
-  observeArray,
-  observeTyped,
   typedMethods,
   typedSpecArb,
 } from './proxy-native-methods-fixture.js'
 
 const it = oracleReplayTest(vitestIt)
 
-declareOracle({
-  check: [expectArrayCall, expectTypedCall],
-  model: [observeArray, observeTyped],
-})
+// The model is native array and typed-array behavior. observeArray and
+// observeTyped record a call on either side, so they are not declared.
+declareOracle({ check: [expectArrayCall, expectTypedCall] })
 
 describe(`array methods behave like native arrays`, () => {
   // The row of the original pinned table, for every method.
