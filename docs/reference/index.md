@@ -241,6 +241,8 @@ title: "@tanstack/db"
 - [GetResult](type-aliases/GetResult.md)
 - [GetStorageSizeFn](type-aliases/GetStorageSizeFn.md)
 - [GroupByCallback](type-aliases/GroupByCallback.md)
+- [Grouping](type-aliases/Grouping.md)
+- [IncludesRuntime](type-aliases/IncludesRuntime.md)
 - [IndexConstructor](type-aliases/IndexConstructor.md)
 - [IndexOperation](type-aliases/IndexOperation.md)
 - [IndexOperation](type-aliases/IndexOperation-1.md)
@@ -333,6 +335,8 @@ title: "@tanstack/db"
 ## Variables
 
 - [collectionOptionsClaim](variables/collectionOptionsClaim.md)
+- [groupingCompiler](variables/groupingCompiler.md)
+- [includesRuntime](variables/includesRuntime.md)
 - [operators](variables/operators.md)
 - [PERSISTED\_READINESS](variables/PERSISTED_READINESS.md)
 - [pooledLiveQueries](variables/pooledLiveQueries.md)

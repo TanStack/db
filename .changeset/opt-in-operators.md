@@ -7,7 +7,7 @@
 '@tanstack/angular-db': patch
 ---
 
-Breaking: grouping, includes, and pooling are now opt-in. An app bundles an operator's code only when it imports the value for that operator. Joins do not change. A typical app is about 7.5 kB smaller after gzip. This app has a query collection, a filtered live query, and React `useLiveQuery`.
+Breaking: grouping, includes, and pooling are now opt-in. An app bundles an operator's code only when it imports the value for that operator. Joins do not change. A typical app is about 8 kB smaller after gzip. This app has a query collection, a filtered live query, and React `useLiveQuery`.
 
 - An include needs `include()`, `toArray()`, or `materialize()`. Change `issues: q.from(...)` in `select()` to `issues: include(q.from(...))`. A subquery in `select()` without one of these throws `IncludeOperatorRequiredError`.
 - Aggregates such as `count()` need no change. A `groupBy` with no aggregate takes `groupKeys()`: `.groupBy(groupKeys(({ todo }) => todo.status))`. Without it, the query throws `GroupingOperatorRequiredError`.

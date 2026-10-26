@@ -7,7 +7,7 @@ title: LiveQueryHookConfig
 type LiveQueryHookConfig<TContext, TResult> = LiveQueryCollectionConfig<TContext, TResult> & object;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L72)
+Defined in: [packages/db/src/query/live/types.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L131)
 
 A live query config that a framework hook accepts. Pass `pooledLiveQueries`
 as `pool` to serve the query from a shared equality partition when its
