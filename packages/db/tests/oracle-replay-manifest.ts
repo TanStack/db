@@ -130,6 +130,16 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `reentrant-drain`,
   ],
   [
+    `db/tests/collection-gc-transaction-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-persisting-transaction`,
+  ],
+  [
+    `db/tests/collection-gc-mutation-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-mutation-shapes`,
+  ],
+  [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
     `retention optimistic-history optimistic-history-partial accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
@@ -283,6 +293,11 @@ for (const law of [
   }
 }
 
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
+
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
     owners.set(
@@ -312,6 +327,18 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `collection-lifecycle.gc-mutation-shapes`,
+    `retains every touched Collection across mutation shapes.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-persisting-transaction`,
+    `retires a Collection only after gcTime.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
   [
     `ssr.stream-record-lifetime`,
     `settles each record demand at its transport checkpoint.*random`,
