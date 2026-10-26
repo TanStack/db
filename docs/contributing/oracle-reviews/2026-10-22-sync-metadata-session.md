@@ -159,6 +159,18 @@ encoding the author had extended without asking. Three more followed on
     insert kept an explicit write before it (on every path) and kept the
     metadata of rows the read supplied, and that a commit crossing a read
     threw, are retired; ten persisted-oracle cases were rewritten.
+13. **Unknown authorship keeps what this tab holds (2026-10-26).** After a
+    full-reload notice, a missed notice, or a truncate, this tab cannot tell
+    which stored rows a source wrote in this run. The third high review
+    asked which way that should cut. The maintainer first chose to count
+    every such row as written, then, shown that a full reload would then
+    delete or roll back every held `DbClient` seed that storage lacks or
+    holds older (the persisted oracle's `keeps a DbClient hydration seed
+    across … peer notice` cases), chose the rule the code already followed:
+    a seed this tab holds stays, and a stored row this tab did not hold
+    counts as a source write, so a later seed cannot replace it. A peer's
+    write to a key this tab holds as a seed stays hidden until a notice
+    names the key or the source writes it.
 
 ## Laws and sources
 
@@ -682,7 +694,7 @@ lane's read hold, with reach `storage read of a stored row`.
 | H1: a peer's metadata-only notice did not count as a source write | Fixed: the runtime records row keys and metadata keys apart (D5 judges them separately). Witness `treats a peer's write in this run as a source write (metadata-only notice over a held seed)` failed on `ff80a31c3` |
 | H2: the gap-recovery fallback and term-fence reloads left the run's writes known | Fixed: both mark them unknown. Witness `… (write whose notice was missed)` failed on `ff80a31c3` |
 | H3: rows a peer's notice or a storage read landed ahead of an open wrapper insert did not judge it again | Fixed: every internal apply judges the open transactions' inserts again. Witness `… (peer row during an open insert)` failed on `ff80a31c3` |
-| H4: a held seed ignores the unknown-writes state that seed marking honours | Awaiting the maintainer: what holds when a stored row's author is unknown |
+| H4: a held seed ignores the unknown-writes state that seed marking honours | Accepted design (decision 13): under unknown authorship, what this tab holds wins. The persisted oracle's seed-across-peer-notice cases with absent, older, and equal durable data witness it; a trial that let unknown rows replace held seeds failed eight of them |
 | H5: the read lane's storage read returned no rows | Fixed in the oracle: the holding adapter keeps durable rows; the lane reaches `storage read of a stored row` and passes |
 | H6: the storage read assumed `begin` opened the transaction it marks | Fixed: it marks seeds only when `begin` opened one |
 | H7: the staged-row fold copied the queues on every read | Fixed: it iterates them in place |

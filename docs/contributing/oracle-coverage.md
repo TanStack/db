@@ -2618,7 +2618,8 @@ row or its metadata; an equal re-insert keeps metadata without writing it.
 In the persisted wrapper an insert replaces whatever row it lands on. A
 peer's notice of a write in this run counts as a source write, and writes
 during a storage read follow the same rules, the last write for a key
-winning.
+winning. When a stored row's author is unknown, a seed this tab holds stays
+and other stored rows count as source writes (decision 13).
 
 | Owner | Production paths | Observations and checkpoint |
 |---|---|---|
