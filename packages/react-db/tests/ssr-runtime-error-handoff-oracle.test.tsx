@@ -46,6 +46,11 @@ type RuntimeView = {
 }
 type Hook = `ordinary` | `infinite`
 
+const runtimeProperties = {
+  ordinary: `react.ssr-runtime-ordinary`,
+  infinite: `react.ssr-runtime-infinite`,
+} as const
+
 function runtimeReach(hook: Hook) {
   return createOracleReach(`react-ssr-runtime-${hook}`, [
     `server-error-browser-cold`,
@@ -298,7 +303,7 @@ describe(`runtime errors across SSR hydration`, () => {
               {
                 ...(campaign === `fixed`
                   ? { numRuns: oracleRuns(64), seed: 2229 }
-                  : oraclePropertyOptions(64, `react.ssr-runtime-${hook}`)),
+                  : oraclePropertyOptions(64, runtimeProperties[hook])),
                 examples: ssrRuntimeErrorExamples.map((history) => [history]),
               },
             )

@@ -504,3 +504,27 @@ replacing `05cfef8f6ac8be3d2ad1690a269259a2084b990c5495e178a44e696ef550c05f`
 in the binding table. The final Svelte invocation passed all 236 runtime/type
 assertions with zero source/type errors. All other bindings match the committed
 files. The repair commit is `0cf7294da3c14fbda6c8186da3c11eebb89ce064`.
+
+### CI replay-registration correction
+
+At `255312c4068714a7778c17bd6de4e325b8bddce0`, CI run `40397107769`,
+job `121834000852`, failed the replay manifest's literal-owner check.
+The React runtime receiver constructed both registered property IDs from the
+hook name. An explicit mapping now supplies the same IDs to the same campaigns.
+The manifest check, model, history grammar, run budgets, reach requirements and
+public comparisons are unchanged. No production source changed.
+
+The focused manifest test reproduced the failure before the edit and passed
+afterward. The complete `oracle-replay.test.ts` passed **38/38**. The React
+runtime receiver passed **36/36**, with no type errors; each fixed/random
+campaign executed 64 histories and satisfied its declared reach. Guarded
+replays of `react.ssr-runtime-ordinary` and `react.ssr-runtime-infinite`, each
+with seed `2229` and path `6`, reported exactly one completed property run.
+ESLint and `git diff --check` passed. This corrects registration representation;
+it adds no behavioral coverage or broader closure claim.
+
+The receiver's updated SHA-256 is
+`b616de7426e75970a6a8fd409d539b7daf2bc805602fbbc90ff37af2bb71fa3f`.
+All production bindings above remain unchanged. CodeRabbit review IDs and
+inline comments were unchanged on this CI poll; its summary remains paused at
+`da37bc9b`. GitHub reports a conflict with main, separately from CI status.
