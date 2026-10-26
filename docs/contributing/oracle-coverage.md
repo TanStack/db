@@ -3004,7 +3004,7 @@ persistence/Collection/observer boundary. Native SQLite, OPFS worker/browser
 scheduling, crash durability, Collection-valued includes, and arbitrary query
 identity migration are not established by this driver. The caller owns a stable
 persistence id/schema version. Existing ordered and pagination oracles retain
-their normal publication laws. See the accompanying review record for exact
+their normal publication laws. See the [review record](oracle-reviews/completed-query-snapshots.md) for exact
 RED/GREEN, mutants and scope.
 
 ## Deferred contracts and evidence
