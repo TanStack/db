@@ -49,6 +49,7 @@ import type {
   TxCommitted,
 } from '../../db-sqlite-persistence-core/src'
 import type { Message } from '@electric-sql/client'
+import type * as ElectricSdkModule from '@electric-sql/client'
 
 // Observe the real constructor boundary without changing the installed SDK's
 // options, prototype, methods, or HTTP behavior. Only the rotation lane enables
@@ -57,7 +58,7 @@ const sdkConstruction = vi.hoisted(() => ({
   observe: undefined as (() => void) | undefined,
 }))
 vi.mock(`@electric-sql/client`, async (importOriginal) => {
-  const original = await importOriginal<typeof import('@electric-sql/client')>()
+  const original = await importOriginal<typeof ElectricSdkModule>()
   return {
     ...original,
     ShapeStream: new Proxy(original.ShapeStream, {
@@ -365,7 +366,7 @@ function recordVisibilityListeners() {
         call: [type, listener, options],
         adding,
       } of calls) {
-        if (type !== `visibilitychange` || listener === null) continue
+        if (type !== `visibilitychange`) continue
         const capture =
           typeof options === `boolean` ? options : Boolean(options?.capture)
         if (adding) {
