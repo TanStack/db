@@ -1,13 +1,7 @@
 import {
-  assertLiveQueryWindowManyResult,
-  compareLiveQueryWindowDependencies,
-  createLiveQueryCollection,
-  createLiveQueryWindowController,
+  bindLiveQueryWindow,
   fetchNextLiveQueryWindowPage,
-  getLiveQueryWindowCollectionWarning,
-  normalizeLiveQueryWindowPageSize,
-  resolveLiveQueryWindowInput,
-  shouldPreserveLiveQueryWindowPageCount,
+  readLiveQueryWindowPageShape,
 } from '@tanstack/db'
 import { tick, untrack } from 'svelte'
 // Type-only: used in `ReturnType<typeof useLiveQuery>` below.
@@ -20,20 +14,12 @@ import type {
   Context,
   InferResultType,
   InitialQueryBuilder,
+  LiveQueryWindowBinding,
   NonSingleResult,
   QueryBuilder,
-  UtilsRecord,
 } from '@tanstack/db'
 
-const DEFAULT_GC_TIME_MS = 1
-
 type MaybeGetter<T> = T | (() => T)
-
-type InternalCollection = Collection<object, string | number, UtilsRecord>
-
-type PreviousController = {
-  getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
-}
 
 type InfiniteQueryOptions = {
   pageSize?: number
@@ -107,92 +93,22 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   config: InfiniteQueryOptions,
   deps: Array<() => unknown> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
-  if (`getNextPageParam` in config) {
-    throw new Error(
-      `getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.`,
-    )
-  }
-  let validatedCollection: InternalCollection | null = null
-  let previousController: PreviousController | null = null
-  let previousInput: ReturnType<
-    typeof resolveLiveQueryWindowInput<TContext>
-  > | null = null
-  let previousDependencies: Array<unknown> | null = null
-  let previousPageSize: number | null = null
-  let previousInitialPageParam: number | null = null
+  // Reject an unsupported config at construction, not on first read.
+  readLiveQueryWindowPageShape(config)
+  let binding: LiveQueryWindowBinding | null = null
 
-  const pageSize = $derived(normalizeLiveQueryWindowPageSize(config.pageSize))
-  const initialPageParam = $derived(config.initialPageParam ?? 0)
-
+  // Svelte reruns this only when something it reads changed: a dependency,
+  // the page shape, or state the query callback reads.
   const controller = $derived.by(() => {
-    const dependencies = deps.map((dependency) => dependency())
-
-    const input = resolveLiveQueryWindowInput<TContext>(queryFnOrCollection)
-    const dependencyComparison = compareLiveQueryWindowDependencies(
-      previousDependencies,
-      dependencies,
-    )
-    const dependenciesChanged = dependencyComparison.changed
-    const dependenciesStructurallyEqual = dependencyComparison.structurallyEqual
-    const pageShapeChanged =
-      previousPageSize !== pageSize ||
-      previousInitialPageParam !== initialPageParam
-    const sameCollection =
-      input.kind === `collection` &&
-      previousInput?.kind === `collection` &&
-      previousInput.collection === input.collection
-    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
-      hasPreviousController: previousController !== null,
-      previousInputKind: previousInput?.kind,
-      inputKind: input.kind,
-      sameCollection,
-      dependenciesChanged,
-      dependenciesStructurallyEqual,
-      pageShapeChanged,
+    const previous = binding
+    binding = bindLiveQueryWindow(previous, {
+      ...readLiveQueryWindowPageShape(config),
+      input: queryFnOrCollection,
+      dependencies: deps.map((dependency) => dependency()),
+      recompile: `always`,
     })
-    const previousPageCount = previousController
-      ? Math.max(1, previousController.getSnapshot().pages.length)
-      : 1
-    const initialPageCount = canPreservePageCount ? previousPageCount : 1
-
-    previousInput = input
-    previousDependencies = [...dependencies]
-    previousPageSize = pageSize
-    previousInitialPageParam = initialPageParam
-
-    if (input.kind === `collection`) {
-      const collection = input.collection
-      const warning = getLiveQueryWindowCollectionWarning(
-        collection,
-        pageSize + 1,
-      )
-
-      if (validatedCollection !== collection) {
-        validatedCollection = collection
-        if (warning) console.warn(warning)
-      }
-      const currentController = createLiveQueryWindowController(collection, {
-        pageSize,
-        initialPageParam,
-        initialPageCount,
-      })
-      previousController = currentController
-      return currentController
-    }
-
-    const collection = createLiveQueryCollection({
-      query: input.query.limit(pageSize + 1).offset(0),
-      startSync: false,
-      gcTime: DEFAULT_GC_TIME_MS,
-    })
-    assertLiveQueryWindowManyResult(collection)
-    const currentController = createLiveQueryWindowController(collection, {
-      pageSize,
-      initialPageParam,
-      initialPageCount,
-    })
-    previousController = currentController
-    return currentController
+    if (binding !== previous && binding.warning) console.warn(binding.warning)
+    return binding.controller
   })
 
   let snapshot = $state.raw(untrack(() => controller.getSnapshot()))

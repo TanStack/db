@@ -1,0 +1,58 @@
+Source: /tmp/pr1179-request-error-mutant.log
+SHA-256: d9c26943d21ccc8b96c28317660a4b90939a53039f78921164aa76df7d8f97e5
+Trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+--------------------xx
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 20 skipped (22)
+   Start at  08:41:33
+   Duration  1.15s (transform 396ms, setup 24ms, collect 553ms, tests 9ms, environment 346ms, prepare 78ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > uses terminal outcome after a request error canceled false
+AssertionError: expected Error: request error to match object { name: 'ConstraintError' }
+
+- Expected
++ Received
+
+- {
+-   "name": "ConstraintError",
++ Error {
++   "message": "request error",
+  }
+
+ ❯ tests/wrapper-settlement-oracle.test.ts:181:34
+    179|       await outcome
+    180|       if (cancelRequestError) expect(caller.result).toBe('callback res…
+    181|       else expect(caller.result).toMatchObject({ name: 'ConstraintErro…
+       |                                  ^
+    182|     })
+    183|   })
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/wrapper-settlement-oracle.test.ts:134:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > uses terminal outcome after a request error canceled true
+AssertionError: terminal outcome controls caller settlement: expected 'rejected' to be 'fulfilled' // Object.is equality
+
+Expected: "fulfilled"
+Received: "rejected"
+
+ ❯ tests/wrapper-settlement-oracle.test.ts:176:75
+    174|         cancelRequestError ? [seed, sibling] : [seed],
+    175|       )
+    176|       expect(caller.state, 'terminal outcome controls caller settlemen…
+       |                                                                           ^
+    177|         expectedCaller(native, true),
+    178|       )
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/wrapper-settlement-oracle.test.ts:134:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯

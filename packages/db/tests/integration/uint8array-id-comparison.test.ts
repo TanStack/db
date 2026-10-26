@@ -13,12 +13,10 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
     const makeItemName = (index: number) => `Item ${index}`
 
     // Create data exactly like the user's reproduction
-    const data = Array.from({ length: 10 }).map(
-      (_, index): Item => ({
-        id: new Uint8Array(index), // Creates arrays of different lengths
-        name: makeItemName(index),
-      }),
-    )
+    const data = Array.from({ length: 10 }).map((_, index): Item => ({
+      id: new Uint8Array(index), // Creates arrays of different lengths
+      name: makeItemName(index),
+    }))
 
     const itemCollection = createCollection(
       mockSyncCollectionOptions<Item>({

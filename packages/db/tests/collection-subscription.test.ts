@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
 import { CollectionSubscription } from '../src/collection/subscription.js'
@@ -6,7 +6,7 @@ import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
-import { flushPromises } from './utils'
+import { captureMicrotaskErrors, flushPromises } from './utils'
 import type { LoadSubsetOptions } from '../src/types.js'
 
 describe(`CollectionSubscription status tracking`, () => {
@@ -655,6 +655,9 @@ describe(`CollectionSubscription status tracking`, () => {
     `re-finds the $position demand after reentrant $nestedCleanup cleanup`,
     async ({ position, nestedCleanup }) => {
       const primaryFailure = new Error(`request failed after acquisition`)
+      // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+      const uncaught = captureMicrotaskErrors()
+      onTestFinished(uncaught.restore)
       const cleanupFailure = new Error(`nested cleanup failed`)
       const loaded: Array<LoadSubsetOptions> = []
       const unloaded: Array<LoadSubsetOptions> = []
@@ -698,11 +701,9 @@ describe(`CollectionSubscription status tracking`, () => {
         new Value(`second`),
       ])
       let releaseFirst:
-        | ((primaryFailure?: { error: unknown }) => void)
-        | undefined
+        ((primaryFailure?: { error: unknown }) => void) | undefined
       let releaseSecond:
-        | ((primaryFailure?: { error: unknown }) => void)
-        | undefined
+        ((primaryFailure?: { error: unknown }) => void) | undefined
 
       subscription.requestSnapshot({
         where: firstWhere,
@@ -734,8 +735,10 @@ describe(`CollectionSubscription status tracking`, () => {
       }
       expect(subscription.lastError).toBe(primaryFailure)
       expect(reported).toEqual([primaryFailure])
-      expect(caughtCleanup).toBe(
-        nestedCleanup === `throw` ? cleanupFailure : undefined,
+      expect(caughtCleanup).toBeUndefined()
+      await flushPromises()
+      expect(uncaught.errors).toEqual(
+        nestedCleanup === `throw` ? [cleanupFailure] : [],
       )
 
       subscription.unsubscribe()
@@ -750,6 +753,9 @@ describe(`CollectionSubscription status tracking`, () => {
     `attempts a failed exact release only once through %s`,
     async (releaseMode) => {
       const loads: Array<LoadSubsetOptions> = []
+      // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+      const uncaught = captureMicrotaskErrors()
+      onTestFinished(uncaught.restore)
       const unloads: Array<LoadSubsetOptions> = []
       const failure = new Error(`release failed`)
       const collection = createCollection<{ id: string }>({
@@ -776,7 +782,9 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
+      subscription.resumeDeferredAcquisition()
       const where = new Func(`eq`, [
         new PropRef([`id`]),
         new Value(`requested`),
@@ -796,9 +804,12 @@ describe(`CollectionSubscription status tracking`, () => {
           releaseMode === `releaseSnapshot`
             ? subscription.releaseSnapshot(where)
             : subscription.unsubscribe()
-        expect(firstRelease).toThrow(failure)
+        expect(firstRelease).not.toThrow()
         expect(() => subscription.unsubscribe()).not.toThrow()
         expect(unloads).toEqual([loads[0]])
+        await flushPromises()
+        expect(uncaught.errors).toEqual([failure])
+        expect(subscription.lastError).toBeUndefined()
 
         subscription.unsubscribe()
         expect(unloads).toHaveLength(1)
@@ -817,6 +828,9 @@ describe(`CollectionSubscription status tracking`, () => {
     `bounds throwing adapter cleanup at $throwAt release, reentry=$reenter`,
     async ({ throwAt, reenter }) => {
       const failure = new Error(`adapter cleanup failed`)
+      // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+      const uncaught = captureMicrotaskErrors()
+      onTestFinished(uncaught.restore)
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const externalLeases = new Set<LoadSubsetOptions>()
@@ -854,13 +868,15 @@ describe(`CollectionSubscription status tracking`, () => {
       try {
         subscription.requestSnapshot({ where: new Value(true) })
         subscription.requestSnapshot({ where: new Value(false) })
-        expect(dispose).toThrow(failure)
+        expect(dispose).not.toThrow()
         expect(dispose).not.toThrow()
         expect(unloads).toEqual(loads)
         expect(loads).toHaveLength(2)
         expect(loads.every(({ signal }) => signal?.aborted)).toBe(true)
         expect(collection.subscriberCount).toBe(0)
-        expect(subscription.lastError).toBe(failure)
+        expect(subscription.lastError).toBeUndefined()
+        await flushPromises()
+        expect(uncaught.errors).toEqual([failure])
         // Intentional support boundary: core cannot repair an adapter that throws
         // before freeing its resource, nor safely repeat a possibly completed release.
         expect([...externalLeases]).toEqual(
@@ -874,14 +890,16 @@ describe(`CollectionSubscription status tracking`, () => {
   )
 
   it(`preserves a primary error across reentrant teardown failure`, async () => {
+    // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+    const uncaught = captureMicrotaskErrors()
+    onTestFinished(uncaught.restore)
     const primaryFailure = new Error(`request failed after acquisition`)
     const cleanupFailure = new Error(`teardown failed`)
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
     const reported: Array<unknown> = []
     let releaseFailedDemand:
-      | ((primaryFailure?: { error: unknown }) => void)
-      | undefined
+      ((primaryFailure?: { error: unknown }) => void) | undefined
     let cleanupAttempts = 0
     let caughtCleanup: unknown
     const collection = createCollection<{ id: string }>({
@@ -928,7 +946,9 @@ describe(`CollectionSubscription status tracking`, () => {
 
     releaseFailedDemand!({ error: primaryFailure })
 
-    expect(caughtCleanup).toBe(cleanupFailure)
+    expect(caughtCleanup).toBeUndefined()
+    await flushPromises()
+    expect(uncaught.errors).toEqual([cleanupFailure])
     expect(reported).toEqual([primaryFailure])
     expect(subscription.lastError).toBe(primaryFailure)
     expect(unloads).toEqual([loads[0], loads[1]])
@@ -944,6 +964,9 @@ describe(`CollectionSubscription status tracking`, () => {
     async (failureMode) => {
       const primaryFailure = new Error(`${failureMode} load failed`)
       const cleanupFailure = new Error(`teardown failed`)
+      // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+      const uncaught = captureMicrotaskErrors()
+      onTestFinished(uncaught.restore)
       const victimWhere = new Func(`eq`, [
         new PropRef([`id`]),
         new Value(`victim`),
@@ -1022,7 +1045,8 @@ describe(`CollectionSubscription status tracking`, () => {
         }
         await flushPromises()
 
-        expect(caughtCleanup).toBe(cleanupFailure)
+        expect(caughtCleanup).toBeUndefined()
+        expect(uncaught.errors).toEqual([cleanupFailure])
         expect(reported).toEqual([primaryFailure])
         expect(subscription.lastError).toBe(primaryFailure)
       } finally {
@@ -1071,6 +1095,9 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`does not replay a logically retired demand after its unload fails`, async () => {
+    // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+    const uncaught = captureMicrotaskErrors()
+    onTestFinished(uncaught.restore)
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
     const releaseError = new Error(`release failed`)
@@ -1121,9 +1148,7 @@ describe(`CollectionSubscription status tracking`, () => {
       })
       await flushPromises()
 
-      expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
-        releaseError,
-      )
+      expect(() => subscription.releaseSnapshot(firstWhere)).not.toThrow()
 
       begin()
       truncate()
@@ -1134,6 +1159,7 @@ describe(`CollectionSubscription status tracking`, () => {
       // It must not join later replays or be released a second time.
       expect(loads).toHaveLength(3)
       expect(loads[2]?.where).toBe(secondWhere)
+      expect(uncaught.errors).toEqual([releaseError])
     } finally {
       allowUnload = true
       subscription.unsubscribe()
@@ -1142,6 +1168,9 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`retires pending status per demand even when physical cleanup fails`, async () => {
+    // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+    const uncaught = captureMicrotaskErrors()
+    onTestFinished(uncaught.restore)
     const firstLoad = createDeferred<void>()
     const secondLoad = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
@@ -1190,9 +1219,7 @@ describe(`CollectionSubscription status tracking`, () => {
       })
       expect(subscription.status).toBe(`loadingSubset`)
 
-      expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
-        releaseError,
-      )
+      expect(() => subscription.releaseSnapshot(firstWhere)).not.toThrow()
       expect(subscription.status).toBe(`loadingSubset`)
 
       secondLoad.resolve()
@@ -1202,6 +1229,7 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(() => subscription.unsubscribe()).not.toThrow()
       expect(() => subscription.unsubscribe()).not.toThrow()
       expect(unloads).toEqual([loads[0], loads[1]])
+      expect(uncaught.errors).toEqual([releaseError])
     } finally {
       firstLoad.resolve()
       secondLoad.resolve()
@@ -1211,6 +1239,9 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`attempts both leases once when throwing cleanup reenters teardown`, async () => {
+    // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+    const uncaught = captureMicrotaskErrors()
+    onTestFinished(uncaught.restore)
     const releaseFailure = new Error(`release failed`)
     const duplicateFailure = new Error(`duplicate release`)
     const loads: Array<LoadSubsetOptions> = []
@@ -1254,9 +1285,7 @@ describe(`CollectionSubscription status tracking`, () => {
     try {
       subscription.requestSnapshot({ where: firstWhere })
       subscription.requestSnapshot({ where: secondWhere })
-      expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
-        releaseFailure,
-      )
+      expect(() => subscription.releaseSnapshot(firstWhere)).not.toThrow()
       expect(() => subscription.releaseSnapshot(secondWhere)).not.toThrow()
       expect(() => subscription.unsubscribe()).not.toThrow()
       expect(unloads).toEqual([loads[0], loads[1]])
@@ -1264,6 +1293,9 @@ describe(`CollectionSubscription status tracking`, () => {
 
       subscription.unsubscribe()
       expect(unloads).toHaveLength(2)
+      // Each acquisition reports its own failure once, never a duplicate.
+      await flushPromises()
+      expect(uncaught.errors).toEqual([releaseFailure, releaseFailure])
     } finally {
       try {
         subscription.unsubscribe()
@@ -1357,6 +1389,9 @@ describe(`CollectionSubscription status tracking`, () => {
   )
 
   it(`attempts the exact in-flight replay release once`, async () => {
+    // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+    const uncaught = captureMicrotaskErrors()
+    onTestFinished(uncaught.restore)
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -1404,8 +1439,10 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
 
       expect(loads).toHaveLength(2)
-      expect(() => subscription.unsubscribe()).toThrow(failure)
       expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      await flushPromises()
+      expect(uncaught.errors).toEqual([failure])
       expect(unloads.filter((options) => options === loads[0])).toEqual([
         loads[0],
       ])
@@ -1455,7 +1492,9 @@ describe(`CollectionSubscription status tracking`, () => {
       if (start === `deferred`) expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: start === `deferred`,
       })
+      if (start === `deferred`) subscription.resumeDeferredAcquisition()
       unsubscribeDuringLoad = () => subscription.unsubscribe()
 
       try {
@@ -1700,9 +1739,9 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  // The next limited page starts after the rows this subscription published.
-  // A change its where clause drops is not published and cannot advance the
-  // offset, whether it arrives alone or beside a matching change. Change
+  // A change its where clause drops is not published and cannot count toward
+  // the safe provider prefix bound, whether it arrives alone or beside a
+  // matching change. Change
   // routing withholds dropped rows from an `eq` subscription before sent keys
   // are recorded, so an `or` predicate, which is not routed, is also needed to
   // reach that record.
@@ -1724,7 +1763,7 @@ describe(`CollectionSubscription status tracking`, () => {
       },
     ]),
   )(
-    `does not advance the page offset for a dropped change that arrives $grouping ($predicate)`,
+    `does not count a dropped change in the provider prefix after it arrives $grouping ($predicate)`,
     async ({ grouping, where }) => {
       type Row = { id: string; rank: number; status: string }
       const loads: Array<LoadSubsetOptions> = []
@@ -1781,6 +1820,8 @@ describe(`CollectionSubscription status tracking`, () => {
 
       try {
         requestPage()
+        const initialLimit = loads.at(-1)?.limit
+        expect(initialLimit).toBeDefined()
         sync.begin()
         if (grouping === `as an update beside a matching change`) {
           sync.write({
@@ -1805,7 +1846,12 @@ describe(`CollectionSubscription status tracking`, () => {
         expect([...published].sort()).toEqual(
           grouping === `alone` ? [`a1`] : [`a1`, `a2`],
         )
-        expect(loads.at(-1)?.offset).toBe(published.size)
+        expect(loads.at(-1)?.offset).toBe(0)
+        // A dropped source change cannot increase the provider prefix. Only
+        // the extra matching row in the grouped histories can add one slot.
+        expect(loads.at(-1)?.limit).toBe(
+          initialLimit! + (grouping === `alone` ? 0 : 1),
+        )
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -1915,6 +1961,9 @@ describe(`CollectionSubscription status tracking`, () => {
     `attempts a deferred failed release once after adapter startup: $name`,
     async ({ adapterCatches, result }) => {
       const failure = new Error(`reentrant release failed`)
+      // A throwing unloadSubset is an adapter bug: core reports it uncaught.
+      const uncaught = captureMicrotaskErrors()
+      onTestFinished(uncaught.restore)
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       let observedReleaseError: unknown
@@ -1956,9 +2005,10 @@ describe(`CollectionSubscription status tracking`, () => {
       try {
         const request = () =>
           subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
-        expect(request).toThrow(failure)
+        expect(request).not.toThrow()
         expect(observedReleaseError).toBeUndefined()
         await flushPromises()
+        expect(uncaught.errors).toEqual([failure])
 
         expect(unloads).toEqual([loads[0]])
         expect(() => subscription.unsubscribe()).not.toThrow()
@@ -2149,7 +2199,12 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`retries detached demand after retiring the old lease fails`, async () => {
+  it(`continues a replay after retiring the old lease fails`, async () => {
+    // A throwing unloadSubset is an adapter bug: core reports it uncaught,
+    // and the replay acquires a fresh lease as if the release had succeeded.
+    const uncaught = captureMicrotaskErrors()
+    onTestFinished(uncaught.restore)
+    const releaseFailure = new Error(`old lease release failed`)
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -2174,7 +2229,7 @@ describe(`CollectionSubscription status tracking`, () => {
             unloadSubset: (options) => {
               unloads.push(options)
               if (options === loads[0] && unloads.length === 1) {
-                throw new Error(`old lease release failed`)
+                throw releaseFailure
               }
             },
           }
@@ -2193,28 +2248,30 @@ describe(`CollectionSubscription status tracking`, () => {
       commit()
       await flushPromises()
 
-      expect(loads).toHaveLength(1)
-      expect(unloads).toEqual([loads[0]])
-      expect(subscription.status).toBe(`ready`)
-      expect(subscription.lastError).toEqual(
-        new Error(`old lease release failed`),
-      )
-
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
       expect(loads).toHaveLength(2)
+      expect(unloads).toEqual([loads[0]])
+      expect(uncaught.errors).toEqual([releaseFailure])
+      expect(subscription.lastError).toBeUndefined()
       expect(subscription.status).toBe(`loadingSubset`)
       expect(loads[1]?.signal?.aborted).toBe(false)
-      expect(unloads).toEqual([loads[0]])
+
       replay.resolve()
       await flushPromises()
       expect(subscription.status).toBe(`ready`)
 
+      // A later replay hands off the fresh lease once.
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(loads).toHaveLength(3)
+      expect(unloads).toEqual([loads[0], loads[1]])
+      expect(subscription.status).toBe(`ready`)
+
       subscription.unsubscribe()
       unsubscribed = true
-      expect(unloads).toEqual([loads[0], loads[1]])
+      expect(unloads).toEqual([loads[0], loads[1], loads[2]])
+      expect(uncaught.errors).toEqual([releaseFailure])
     } finally {
       replay.resolve()
       if (!unsubscribed) subscription.unsubscribe()

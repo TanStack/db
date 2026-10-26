@@ -1,5 +1,251 @@
 # @tanstack/db
 
+## 0.15.2
+
+### Patch Changes
+
+- Keep a settled optimistic row visible while its server row waits behind an earlier persisted write. Previously, two quick writes to one row in a persisted Collection could briefly show the row before the second write. ([#2208](https://github.com/TanStack/db/pull/2208))
+
+- LocalStorage Collections with the default JSON parser now reject an insert or update whose row a restore could not return, such as a row with a function, symbol, `NaN`, `Map`, `Set`, or `undefined` array entry. The write's `isPersisted` promise rejects with `SerializationError`, nothing is written, and the optimistic row rolls back. Previously, JSON silently dropped or replaced these values, so peers and later sessions saw a different row than the writer. ([#2207](https://github.com/TanStack/db/pull/2207))
+
+  IndexedDB Collections now report a value that structured clone cannot store as `SerializationError` instead of a raw `DataCloneError`. The `SerializationError` message no longer says "JSON".
+
+## 0.15.1
+
+### Patch Changes
+
+- Explain whether bounded `orderBy` queries lack a field index, have mismatched comparison options, or have an index that cannot support ordered lazy loading. ([#2196](https://github.com/TanStack/db/pull/2196))
+
+- Fix eager live-query preloads after collection cleanup so they wait for the restarted source snapshot and resolve with its rows. ([#2173](https://github.com/TanStack/db/pull/2173))
+
+- Publish the first window of an ordered live query synchronously when a full-source fallback returns `true` after applying its rows. This prevents an empty initial result when the first ordered request cannot fill the window. ([#2159](https://github.com/TanStack/db/pull/2159))
+
+  A later full-source fallback without ordering-repair debt can also settle in the current graph turn. Explicit window moves and full-source repairs keep their existing settlement rules.
+
+- Show the right ordered window after an on-demand Query Collection refetches. When a refetch changes a page that has a later page after it, or moves a page's end earlier, a row could sort past the page's end and be in neither result. Query DB now reports that through the new sync-adapter call `invalidateLoadedSubsets()`, and each ordered live query and Effect re-establishes its window with a bounded repair. A window that lies inside its own first page, such as a top-N list after an insert, skips the repair. This covers `utils.refetch()` and Query refetches such as `invalidateQueries`. An ordering repair that overlaps in-flight page or tie work now reads a bounded prefix instead of the full source. The SQLite persistence wrapper forwards the new call. Ordered live queries also keep paging when a source answers a request synchronously from its cache, and a finished repair no longer leaves a second first page that every later refetch re-reads. ([#2154](https://github.com/TanStack/db/pull/2154))
+
+- Retire adapter-created live-query collections after their final subscriber leaves. Treat an undefined `gcTime` as omitted, preserve explicit values and caller-supplied collections, and retain Solid projections while their Suspense boundary is pending. ([#2172](https://github.com/TanStack/db/pull/2172))
+
+- Publish optimistic membership departures from ordered live-query windows immediately, even when a provider refill is pending. Keep provider-backed rows private until their sync writes apply. ([#2177](https://github.com/TanStack/db/pull/2177))
+
+## 0.15.0
+
+### Minor Changes
+
+- Load includes only for the rows a windowed query or a `findOne` shows. A live query with an `orderBy`, or a `findOne`, no longer evaluates the includes in its own `select` (a child query, `toArray`, `materialize`, or `findOne`) for rows outside the rows it shows, whether `limit` and `offset` set the window or `setWindow` moves it. A late page now costs about the same as the first one. With `distinct`, the query no longer loads children for every source row. A `where` that names correlation values starts their child loads at once only when no enclosing query is windowed or a `findOne`, and either the query is neither windowed nor a `findOne`, or it is a `findOne` that shows one row for one named correlation value, with no `offset`, and offset 0 at start if a window was requested before start. Any other window or `findOne`, including a window that `setWindow` requests later, can drop those rows. Includes inherited from a subquery in `from`, and includes passed into `fn.select`, still load for every row before the window. ([#2156](https://github.com/TanStack/db/pull/2156))
+
+  `setWindow` now moves only the query's own window. A window inside a `from` subquery, a joined subquery, or an include child no longer answers it, so a query that is neither windowed nor a `findOne` throws `SetWindowRequiresOrderByError`, and one that is neither windowed nor an ordered `findOne` rejects offset moves.
+
+  **Breaking:** a `findOne` keeps its compiled limit, 1 (or 0 for `.limit(0).findOne()`). An ordered `findOne` has a movable window: `getWindow()` returns `{ offset, limit }` with that limit, and `setWindow` can move its offset but now throws the new `SetWindowFindOneLimitError` for any other limit; before, `setWindow({ limit: 3 })` made a `findOne` show three rows. An unordered `findOne` is a fixed one-row result that accepts only its compiled limit at offset 0: `getWindow()` returns `{ offset: 0, limit: 1 }`, and a nonzero offset throws `SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does.
+
+### Patch Changes
+
+- An ordered, limited live query over an on-demand source without an index no longer leaves its window short when a LEFT-joined filter removes rows from the loaded prefix. For example, an anti-join could show an empty window after a visible row was deleted. Such a plan now counts the rows its window still needs, and reads the full source when its prefix cannot fill the window. ([#2132](https://github.com/TanStack/db/pull/2132))
+
+## 0.14.0
+
+### Minor Changes
+
+- Allow a `Query` built with Collection descriptors outside a `DbClient` to bind its sources when a client consumes it. Building or extending a query keeps descriptors unbound until that consumption. A reusable factory descriptor can now serve the same prebuilt query in separate client scopes, including React providers and server preloads. A prepared query is a bound snapshot; reuse the original unbound query across clients. The exported IR now represents an unbound descriptor with `DescriptorRef`; visitors of `IR.From` must handle the `descriptorRef` variant. ([#2077](https://github.com/TanStack/db/pull/2077))
+
+  React hooks bind standalone descriptor queries through their `DbProvider` client and report a provider hint when no client is available. Svelte hooks bind through their client and release deferred sources after failed query setup.
+
+### Patch Changes
+
+- Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Require explicit eager or claim-bound managed targets for SQLite adapter data operations, and forward them through Electron IPC protocol v6. Bare collection IDs no longer work at this lower-level adapter boundary. ([#2069](https://github.com/TanStack/db/pull/2069))
+
+- Keep `undefined` in the configured nulls-first position when BasicIndex builds from existing rows. Preserve indexed key ownership and public query order across mixed and prefixed values. Make Duration equality follow its fields; order indexed ZonedDateTimes by instant, PlainDates by calendar, and time-only Durations by elapsed time; and preserve required errors for mixed or unordered Temporal values. Keep custom index callback inputs consistent across index types and ignore a manual index whose order conflicts with a limited public read. ([#2116](https://github.com/TanStack/db/pull/2116))
+
+- A direct write (`insert`, `update` or `delete` outside a transaction) whose change subscriber throws no longer leaves a pending transaction behind. Before, the write's transaction stayed pending with its optimistic row visible, its handler never ran, and the Collection kept tracking it. The write now rolls back its own transaction, without rolling back other transactions, and rethrows the subscriber's error. A local-only direct write that takes the fast path (the Collection has no handler for that operation and no other pending or persisting transaction) stores its rows when it publishes them, so it completes its transaction and rethrows. On the transaction path it rolls back and rethrows, as any other direct write does. ([#2091](https://github.com/TanStack/db/pull/2091))
+
+- Rolling back a transaction that has no mutations no longer causes an unhandled promise rejection. Such a transaction is tracked by no Collection, so nothing else observed its receipt, and Node reported the rejection. Every transaction now marks its receipt as observed when it is created. A caller that reads `when('settled')` still receives the rejection. ([#2104](https://github.com/TanStack/db/pull/2104))
+
+- A live query with included child collections now throws when the query graph retires a child collection that still has rows the graph never removed. The graph always removes a child collection's rows before it retires it, so this is an internal invariant violation. Before, the rows were removed silently, which hid the fault. The failed flush restores the child collections, as for any failed flush. ([#2092](https://github.com/TanStack/db/pull/2092))
+
+  Calling `cleanup()` on a child collection of a live query now returns a rejected promise. The live query owns its child collections, and several parent rows can share one. Before, a cleanup stopped the child collection for every parent that shared it, so they never saw its rows again. Clean up the live query instead. Ordinary Collections are not affected.
+
+  An optimistic update of a row in a child collection no longer throws "Bucket facade row has no public key". Each child row now carries its key in `$key`, so the copy that an update makes keeps it.
+
+  Also fix a lost child row behind a persisting transaction. When a user transaction on a child collection was persisting, an update to a child row that an earlier flush had written was applied as a delete, so the row disappeared when the transaction settled. A rollback in that state could also delete such a row. The adapter now decides each write from the child collection's synced rows, including writes that a persisting transaction holds, not from the rows the child collection shows.
+
+- An ordered, limited live query or Effect filtered through a LEFT join no longer shows a later row in place of an earlier one. The query loads a bounded prefix of root rows, and a row inserted after that prefix could enter the query's input. When a row left the window without a root delete, for example because its joined row was deleted or inserted, or its join key changed, the later row filled the window while an earlier eligible row was never loaded. A window row after the loaded prefix no longer counts toward a full window, so the query loads the next page first. ([#2122](https://github.com/TanStack/db/pull/2122))
+
+  An ordered, limited query with a full, outer or cross join now reads its full source, as inner and right joins already did. A full join loaded a bounded prefix of root rows, so a joined row whose root match had not loaded yet looked unmatched and could take a place in the window.
+
+- A live query over a progressive Electric collection is now ready once its own snapshot loads. Before, it stayed loading until the collection's background full sync completed, so `preload()`, `isReady`, and `useLiveSuspenseQuery` waited for the whole dataset even when the query's rows were already present. A live query now waits for an eager source to be ready and for an on-demand source's subset loads to settle. An on-demand source's own readiness no longer gates the query. ([#2115](https://github.com/TanStack/db/pull/2115))
+
+  An effect with `skipInitial: true` ends its initial suppression at the same point. Before, an effect over an on-demand source that was already ready reported its initial rows as `enter` events.
+
+  A live query no longer enters an error state when a truncate of a lazily loaded source (a joined or included collection) aborts that source's pending load during the initial load. The truncate's replacement load now decides the demand.
+
+  A progressive Electric load that arrives while a must-refetch is replacing the initial snapshot now settles when the replacement completes. Before, it settled at once without loading rows, which the new readiness rule would have reported as a ready, empty query. After a stream error that `onError` retries, later progressive loads settle once the stream recovers.
+
+  `toArrayWhenReady()` and `stateWhenReady()` now resolve when `preload()` does. Before, they resolved as soon as the collection held any row, so on a live query they could resolve before the query was ready.
+
+- A subscriber no longer keeps stale rows after a truncate replay that loses its last demand. When the last requested subset is released while the replay is still loading, nothing can complete the replay. If its current attempt has not failed, the subscriber now receives the rows the source wrote, replaced or deleted during it, instead of keeping the values from before the truncate. A replay whose attempt failed still keeps the last complete snapshot, as before, and a later request updates any row it still shows at an older value. ([#2121](https://github.com/TanStack/db/pull/2121))
+
+- An aggregate query without `groupBy` no longer drops its other select fields silently. Inside an include, a literal or a parent field now appears beside the aggregate, for example `{ n: count(c.id), px: issue.x }`. Before, `px` was `undefined`. A field of the query's own source has no single value for the group, so it now throws `NonAggregateExpressionNotInGroupByError`, as it already did with `groupBy`. Before, it was `undefined`. This also applies to a source field outside the aggregates of a wrapped, conditional or nested value, such as `add(count(c.id), c.v)`, and to a spread such as `{ ...c, n: count(c.id) }`. Aggregate the field (for example with `max`) or add it to `groupBy`. ([#2094](https://github.com/TanStack/db/pull/2094))
+
+  With `groupBy`, a literal or a parent field beside the aggregate is now accepted and published, because it has one value per group. Before, it threw. A nested include in a grouped or aggregate select now throws. Before, it was `null` without `groupBy`.
+
+  A HAVING condition that compares a group key, such as `having(({ c }) => eq(c.k, 'a'))`, now keeps the matching groups. Before, it removed every group. A HAVING condition that reads another source field outside an aggregate now throws `NonAggregateExpressionNotInGroupByError`. Before, it removed every group. A grouped select that repeats a `groupBy` expression with an array, Date or `NaN` literal no longer throws, and a parent field is accepted when the include's source reuses the parent's alias. The error message no longer says "in SELECT", because it also applies to HAVING. An aggregate query without `groupBy` whose select only wraps its aggregate, such as `{ n: add(count(c.id), 1) }`, now accepts HAVING on its selected values, parent fields and literals. Before, it threw `HavingRequiresGroupByError`. An aggregate inside HAVING must still be a top-level select field. The same rule applies after `unionAll`: a field of the union's rows outside an aggregate throws. A grouped row keeps the select's field order.
+
+- Keep ordered snapshots from resending rows already delivered by full-state or skip-filtering subscriptions. Release deleted keys from snapshot tracking. Preserve provider coverage when pending optimistic changes hide rows or change an ordered window. ([#2086](https://github.com/TanStack/db/pull/2086))
+
+- Reject reuse of mutable persisted and LocalStorage sync options across Collections while keeping DbClient materializations independent. Pass fresh options to each direct `createCollection(...)`; DbClient descriptors remain reusable. Keep on-demand peer reloads and schema resets scoped to active demand and previously visible rows. Refresh or delete visible rows from durable evidence without replacing unconfirmed DbClient hydration rows or metadata. Resolve targeted peer updates from storage when their notice cannot distinguish a replacing insert from a partial update. ([#2096](https://github.com/TanStack/db/pull/2096))
+
+- Preserve lexical source bindings when a correlated right or full join has an absent side, and allow captured ancestor references in join conditions. ([#2095](https://github.com/TanStack/db/pull/2095))
+
+- Aggregate queries hydrate and update faster. `groupBy` merges equal contributions to a group, and it used to find them by hashing every contribution. Each contribution now leads with an identity string built from its group key and its pre-aggregate values, and the reduce index merges contributions with equal identities without hashing them. D2 value identity (`equalHashValues`) defines the identity: two values get the same identity string exactly when D2 treats them as equal. Primitives, arrays, plain and class-instance objects, Dates, RegExps, Maps, Sets and Uint8Arrays get an identity. A contribution that holds anything else, a value nested more than four levels deep, or an object with an enumerable symbol key still goes through the structural hash. A grouped count or min over 10,000 rows hydrates about 2× faster. ([#2112](https://github.com/TanStack/db/pull/2112))
+
+- Live queries with includes hydrate faster. The rows that the include graph keeps in its join and reduce state now lead with their key, so the dataflow index tells them apart by key and hashes a whole row only to match it against a row with the same key, such as its own retraction. On a 10,000-issue benchmark, an issue-to-creator include hydrates about 30% faster and a two-level include about 33% faster. ([#2109](https://github.com/TanStack/db/pull/2109))
+
+- Updated dependencies [[`cf07eec`](https://github.com/TanStack/db/commit/cf07eec6bd9c3e33851a3b2068b16eeda7bf8a37), [`bbbf017`](https://github.com/TanStack/db/commit/bbbf017ef5b3884515295a4225faacdfd814499e), [`8b6b21d`](https://github.com/TanStack/db/commit/8b6b21dbe2cfb072589e25f80dd72d1150503fb6), [`be4a3d6`](https://github.com/TanStack/db/commit/be4a3d642c6d292150f7ff4e041442338e5a2de2), [`cd92156`](https://github.com/TanStack/db/commit/cd92156d61a50e570dbf2bfb490969ff41b40e74)]:
+  - @tanstack/db-ivm@0.2.0
+
+## 0.13.0
+
+### Minor Changes
+
+- Allow a nested query to reuse an ancestor's source alias. References captured in the ancestor keep their original source, while callbacks in the nested query read its local source. Start a descendant source declaration with a fresh `new Query().from(...)`; reusing one builder as both ancestor and descendant now gives a clear error. The same builder can still be placed in sibling includes. Aliases must still be unique within one query scope and across branches of one `unionAll()`. Captured whole-row and nested-object spreads now follow the same binding rule. ([#2079](https://github.com/TanStack/db/pull/2079))
+
+### Patch Changes
+
+- Clarify that `$origin` reflects local key attribution during sync, rather than the causal writer of a source row. Fix attribution leaking from a truncate to a later source transaction in the same drain. Cover pending and overlapping mutations, ordered same-key source writes, and refused persisted inserts. ([#2078](https://github.com/TanStack/db/pull/2078))
+
+- Production error messages no longer run a value's `toJSON()` when they show an array. A plain object inside an array always shows as `"[object]"`, so a row cannot put its contents into a production error message. ([#2082](https://github.com/TanStack/db/pull/2082))
+
+- Update a grouped count without re-reading the group when the group's members contribute identical inputs. Before, each change to a `groupBy` group or to a count inside an include re-read every member of the group, because each member's contribution carried its row key. For example, an include that counts the comments of an issue re-read all of that issue's comments on each new comment. A `sum` or `avg` consolidates equal inputs the same way. A `min` or `max` over distinct values still visits one contribution for each distinct exact input, a `min` or `max` over Dates visits one contribution for each member, and an include correlated on an object key, such as a Date or a binary array, still visits each member. ([#2081](https://github.com/TanStack/db/pull/2081))
+
+  A `groupBy` value now comes from the member with the smallest exact value, when several members are equal under query equality but differ exactly. A primitive comes before a Date, a binary array, or a Temporal value; another number comes before `-0`; a `Buffer` comes before a `Uint8Array` with the same bytes. Before, the member with the smallest row key supplied the value. For example, a group that holds `new Date(0)` and `0` now projects `0`, and a group that holds `-0` and `0` now projects `0`. When members hold content-equal instances, the member with the smallest row key supplies the instance, so the choice does not depend on the order in which rows arrived. The projected value is always an instance that a current member holds. Values that are not equal under query equality are in different groups and do not change.
+
+- Make an ordered, limited live query that needs its whole source ready in the call that creates it when its source answers synchronously. This applies to a query with an inner join, a function filter, `distinct`, or a custom string comparator. Before, such a query over an eager source, or over a source whose `loadSubset` returned `true`, reported `loading` with no rows until a later task, while the same query without those clauses was ready at once. A source that returns a Promise, a later full-source fallback, repair, and truncate replay keep their asynchronous timing. ([#2068](https://github.com/TanStack/db/pull/2068))
+
+- Copy an include bucket's rows for rollback only when a flush writes that bucket. Before, each flush of a live query with included child collections copied the rows of every child collection, so that it could restore them if the flush failed. A change to one child row in a list of 50 parents copied every row of all 50 child collections. A flush now copies the rows of only the child collections it writes. It still copies the small maps that track which child collections exist, so that part of the cost grows with the number of child collections. For an include query without a limit, that copy is about 6% of a write at 100 parents and about 31% at 1,000 parents. A query with a limit copies none of these maps. A failed flush still restores every written child collection to its rows, order and keys from before the flush. ([#2084](https://github.com/TanStack/db/pull/2084))
+
+  Fix a lost child update after a failed live-query commit. When the parent row commit of a live query with included child collections failed, the child collection changes from that flush were dropped, although the parent changes stayed pending. The next write then published the parent but left the child collection showing its old rows. The changes now stay pending, and the next flush publishes them once.
+
+  A failed flush also restores a child collection that a persisting transaction holds. Before, a row that the failed flush added appeared when the transaction settled, before any retry. One child collection's throwing subscriber no longer stops the other child collections from publishing, and a failed restore still lets each child collection publish later flushes.
+
+  A rollback now throws when graph output reached the child collections between a flush and its rollback, because restoring the flush would lose that output. This does not happen in a valid query. The rollback still restores the child collections and keeps them delivering events. A rollback after the live query is cleaned up does nothing.
+
+- Make LocalStorage persistence receipts wait for accepted writes in order, including un-awaited manual acceptance through DbClient. Synchronize active same-tab Collections that share one Storage object and key, preserve disjoint peer rows and authored native values, and publish clears. Reject malformed restore data and reused options, preserve rows after failed reads, and reconcile custom-parser output before reporting persistence. ([#2074](https://github.com/TanStack/db/pull/2074))
+
+- Include IndexedDB Collections in `@tanstack/db` alongside LocalStorage Collections. Export the database and collection APIs from the core package, use consistent IndexedDB file and guide names, and move the tests and documentation with the implementation. Remove the standalone `@tanstack/indexeddb-db-collection` workspace package. ([#2073](https://github.com/TanStack/db/pull/2073))
+
+- Shorten error messages in production builds to a code, the inputs that the error can show (as JSON), and a link to the new error codes page, for example `TanStack DB error 17 (key=1, collectionId="todos"): https://tanstack.com/db/latest/docs/errors#error-17`. This covers the exported error classes and the plain `Error`, `TypeError`, `RangeError`, and `AggregateError` values the library throws. An unbundled environment without `process` also gets the short form. Development builds keep the full messages, and `SchemaValidationError` keeps its full message in production too. Error classes, `name` values, `instanceof`, and error fields do not change. Production bundles get about 15.1 KB smaller minified (6.1 KB gzip). ([#2067](https://github.com/TanStack/db/pull/2067))
+
+- Production builds no longer include developer hints such as the on-demand `preload()` warning, missing-index warnings, index suggestions, and the infinite-query window warning. Console messages about runtime failures, such as LocalStorage save errors and Effect handler errors, now use the short coded form with a link to the error codes page. A console warning says `TanStack DB warning <code>` instead of `error`. Development builds keep every message unchanged. An environment without `process.env.NODE_ENV`, such as a browser loading the package without a bundler, gets the production behavior, as it already does for errors. Production bundles get about 2.7 KB smaller minified (1.3 KB gzip). ([#2083](https://github.com/TanStack/db/pull/2083))
+
+- Keep source-backed persisted Collections usable when a writer tab closes after a commit but before its reply. Certify the original transaction with the new writer and reload peers without duplicating unchanged row events. ([#2088](https://github.com/TanStack/db/pull/2088))
+
+  Forward exact-ID reconciliation through the Electron persistence bridge and require matching protocol v4 peers.
+
+- Stop tracking a transaction after it fails or rolls back. Before, a Collection kept every failed or rolled-back transaction, including a rolled-back offline restoration, until the Collection was cleaned up. Each later mutation walked all of them, so a mutation got slower with each rollback the Collection had seen (about 20× after 4,000 rollbacks), and the failed transactions kept their rows in memory. A settled transaction now leaves the Collection in the recompute that publishes its settlement, and removing it never removes a later transaction that reuses its id. ([#2080](https://github.com/TanStack/db/pull/2080))
+
+  A settled transaction leaves every Collection that tracked it, including a Collection whose mutations merged away, a second Collection instance with the same id, and a Collection whose transaction rolled back during a sync commit.
+
+  When a subscriber throws during settlement, every Collection still recomputes and `isPersisted` still settles, including when the throw comes from a conflicting transaction that the rollback also rolls back. The call then rethrows one of the subscriber errors. Before, a throw could leave other Collections showing the settled transaction's optimistic rows, and a throw from a conflicting rollback left the primary transaction's `isPersisted` pending.
+
+  A settled transaction no longer keeps the set of Collections that tracked it; its mutations still name their Collection. Offline restoration now tracks and releases its transaction through the same path as other transactions. A completed restoration settles its `isPersisted`, and a restoration that one Collection cannot track is rolled back so no Collection keeps its rows.
+
+  Repeated `mutate()` calls on one offline transaction now add to the same transaction. Before, each call created a new transaction with the same id, which replaced the earlier one and hid its rows. With `autoCommit` (the default), the first call commits, so a later call throws `TransactionNotPendingMutateError`, as `mutate()` does on any committed transaction. Create a new offline transaction for each auto-committed write.
+
+  When a mutation function rejects and a subscriber also throws during the rollback, `commit()` now rejects with the mutation error. Before, it rejected with the subscriber error and the mutation error was lost.
+
+  Transaction ids must be unique among unsettled transactions. A write that would make a Collection track a second unsettled transaction with an id it already tracks now throws `DuplicateTransactionIdError` and changes nothing. Before, the second transaction silently replaced the first, whose optimistic rows disappeared while it was still pending. Settling a transaction also no longer removes a different pending transaction that shares its id from conflict tracking.
+
+## 0.12.3
+
+### Patch Changes
+
+- A live query no longer starts network work for its source collections before it has a subscriber or a preload. Rendering a component that never commits, or creating a live query with `startSync: true`, reads only the rows its sources already hold; the first subscriber or `preload()` starts the sources' sync and loads on-demand data. This applies to nested live queries and pooled `eq` queries too. `useLiveSuspenseQuery` preloads during render, so a source that already holds the rows still renders without suspending. A source collection's `subscriberCount` and `subscribers:change` now count only subscribers that ask for data, so a live query waiting for its first subscriber no longer makes a Query Collection refetch. ([#2060](https://github.com/TanStack/db/pull/2060))
+
+## 0.12.2
+
+### Patch Changes
+
+- Share duplicated code in direct mutations, index writes, and the query optimizer. The full public API bundle is about 1.4 KB smaller when minified. Errors from a failed `BTreeIndex` expression now carry the original error as `cause`, as `BasicIndex` errors already did. ([#2057](https://github.com/TanStack/db/pull/2057))
+
+- Refill an ordered, limited live query over an eager, indexed source in bounded work. Before, deleting a visible row or changing a visible row's order value made the source resend every matching row to the query. For example, a 50-row window over 10,000 rows resent about 5,000 rows on each such change. The query now reads only the first rows of the window from the index, when the query orders by one term. On-demand sources, queries with more than one order term, queries that filter on a LEFT-joined source, and queries that need the whole source (an inner join, a function filter, or a custom collation) keep their existing behavior. ([#2055](https://github.com/TanStack/db/pull/2055))
+
+- Fix `useLiveInfiniteQuery` showing an empty idle result on its first render for a synchronously loaded source. The hook now starts sync during render, as `useLiveQuery` does, so the first committed render already shows the ready first page instead of flashing empty content before data arrives. This applies to query callbacks and to supplied live query collections whose window is exactly the first page or has no limit. A supplied collection with a wider finite limit waits for the hook to narrow its window at commit, so it never requests rows the hook does not need. Renders that never commit are reclaimed by garbage collection, and a React 19 StrictMode double render reuses one collection instead of starting two. In React, a startup error from a replacement query still reaches the error boundary, and the hook rejects a source replaced by a different collection with the same ID while it is mounted, as `useLiveQuery` does. ([#2027](https://github.com/TanStack/db/pull/2027))
+
+- Place null values first in a descending ordered query that uses an ascending index. Before, the query reversed the index and put rows with a null order value after every non-null row, while the documented order, and the same query without an index, put them first. ([#2055](https://github.com/TanStack/db/pull/2055))
+
+- Keep paced mutation persistence serial while a backend write is pending, including after rollback. Preserve every admitted write when managers share one strategy. Reject manual commits that bypass strategy timing. ([#2062](https://github.com/TanStack/db/pull/2062))
+  Restore a transaction's prior optimistic changes when a synchronous `mutate` callback throws. Reject all receipts in a failed group of paced mutations.
+
+## 0.12.1
+
+### Patch Changes
+
+- Fix CommonJS declaration imports so Node16 and NodeNext TypeScript consumers can resolve the public APIs. Preserve ESM module references and string-literal types. ([#1179](https://github.com/TanStack/db/pull/1179))
+
+- Evaluate `inArray` over a constant list with a Set lookup instead of comparing the value with every list item. A join that loads matching rows through a source with no index sends one large constant list, so a cold join over 10,000 rows no longer compares each row with every key. ([#2045](https://github.com/TanStack/db/pull/2045))
+
+- Build a live query's keyed `state` map only when code reads it. Most callers read only `data`, so an update no longer builds a second copy of the results: ([#2043](https://github.com/TanStack/db/pull/2043))
+
+  - The shared live query snapshot and the infinite query window build `state` on first read.
+  - `useLiveInfiniteQuery` in React reads `state` only when your code reads it.
+  - Vue and Svelte `useLiveQuery` build their `data` array from the snapshot's ordered rows instead of from `state`.
+
+  A retained snapshot still shows the rows from the time it was built.
+
+- Keep last-write-wins row metadata when a sync transaction begun inside an open one commits first. The open transaction's inserts are reclassified against the new rows. An explicit `metadata.row.set` followed by an insert that becomes a real insert is now cleared, and one followed by an insert that becomes an equal re-insert is now kept. ([#2048](https://github.com/TanStack/db/pull/2048))
+
+- Preserve native `Temporal.Instant` and `Temporal.PlainDate` values in SQLite rows, metadata, replay, and expression indexes when Temporal constructors are registered globally. Retain nanosecond precision, calendar identity, and native literals in Collection index metadata. ([#2039](https://github.com/TanStack/db/pull/2039))
+
+  Keep native index signatures distinct from ordinary tagged records, isolate mutable index metadata snapshots, and preserve NUL-bearing literals in SQLite expression indexes. Reuse each native query literal encoding for its order and identity.
+
+  Validate remote subset admission without constructing discarded wire snapshots, while preserving fresh coordinator snapshots and the existing wire-value restrictions.
+
+  Keep optional persisted index serialization failures inside existing warning boundaries so startup and ordinary reads remain available.
+
+- Keep numeric and string keys distinct within mutation transactions. Detach supported buffers and views at the update snapshot boundary while preserving bytes, ranges, aliases, and custom typed-array construction compatibility. ([#1179](https://github.com/TanStack/db/pull/1179))
+
+- Allow sync adapters to replace rows with `truncate({ markReady: false })` while ([#1179](https://github.com/TanStack/db/pull/1179))
+  preserving Collection status. Keep the existing default readiness behavior.
+
+- Fix a ready callback error from a sync truncate committed inside the sync function. The error now surfaces when the sync function returns, as it does for `markReady()`, instead of stopping the sync function and moving the collection to `error`. ([#2040](https://github.com/TanStack/db/pull/2040))
+
+- Updated dependencies [[`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab)]:
+  - @tanstack/db-ivm@0.1.26
+
+## 0.12.0
+
+### Minor Changes
+
+- Add compound joins with nested `and()` equality conditions, preserving existing ([#861](https://github.com/TanStack/db/pull/861))
+  value matching, lazy loading, and correlated include behavior. The low-level
+  `JoinClause` IR now stores the complete predicate in `on`; code that constructs
+  IR directly must replace `left` and `right` with
+  `on: new Func('eq', [left, right])` for a single equality.
+
+- Drop a transaction's optimistic state when its mutation function settles. A sync transaction committed while the transaction is persisting is accepted and held. It publishes together with that drop, and `isPersisted` settles after that publication. A mutation function that returns before its server row arrives shows the previous synced row until that row applies. A sync write is attributed `$origin: 'local'` only if it was accepted before the optimistic state dropped. A sync transaction still open at that point is not counted. ([#2030](https://github.com/TanStack/db/pull/2030))
+
+  Breaking: remove the `begin({ immediate })` option from the sync API. Writes made while a mutation persists now queue behind it instead of applying at once.
+
+  Each sync transaction now has two moments: accepted and visible. `commit()` receipts and subset loads resolve when the rows are visible. Collection readiness (`preload`, `stateWhenReady`, `toArrayWhenReady`) resolves once the startup rows are accepted, so a mutation handler that awaits its own collection's readiness during startup settles. An accepted transaction always applies. Handler-facing writes resolve at acceptance, so a mutation handler can await them: Query Collection direct writes, persisted mutation confirmation, and the PowerSync mutation path. A handler that awaits an on-demand load of its own collection waits for itself.
+
+  A subset load whose caller aborts rejects with `AbortError` at every point: before the fetch, when the fetch fails because of the abort, after the fetch but before the commit, and between pages. Pages that were already accepted still apply, and a TrailBase load waits until they are visible.
+
+  Query Collection direct writes read and validate the accepted rows and update the Query cache after acceptance. A refetch no longer cancels an accepted result, so overlapping refetches of a persisted collection apply in order (#1990). An eager fetch that started before a direct write keeps the server's rows for every key the write did not touch and the accepted row for each key it did, in both the collection and the Query cache.
+
+  A DbClient hydration chunk is accepted ahead of a still-open source transaction, so readers of accepted rows see it and the source's `commit()` still commits its own writes.
+
+  Partial sync updates now keep an own `__proto__` field. Metadata-only sync writes no longer publish a spurious insert when they apply with a held transaction. A rollback keeps its delete event when a sync transaction for the same key is still open. When two completed transactions hold one key, the newer transaction's row stays visible. Canceling any sync transaction other than the open last one throws `SyncQueueInvariantError`.
+
+### Patch Changes
+
+- Add development-only collection configuration diagnostics. Missing or invalid core options throw actionable errors. Extra adapter properties remain accepted without warnings, except for likely misspellings: casing mistakes or adjacent letter swaps in option names with at least five characters. A suggestion is suppressed when the correctly named option is already present. Keep the validator, warnings, and internal diagnostic classes out of production application bundles. ([#1278](https://github.com/TanStack/db/pull/1278))
+
+  Keep adapter-specific options inside PowerSync, RxDB, and TrailBase. Update the adapter guide to keep conversions in adapter code and place rowUpdateMode inside the sync config.
+
+- Make the collection state, sync, and lifecycle code smaller without changing behavior. The full public API bundle is about 3.7 KB smaller minified and about 630 B smaller with gzip. Sync commits are no slower. ([#2004](https://github.com/TanStack/db/pull/2004))
+
+- Fix invalid change messages when a ready callback writes during a sync truncate. Messages from an `onFirstReady` callback or a `status:change` listener now reach subscribers after the truncate's batch. Before, a subscriber could get a second delete, a delete for a row it never held, or a stale row. ([#2033](https://github.com/TanStack/db/pull/2033))
+
 ## 0.11.3
 
 ### Patch Changes

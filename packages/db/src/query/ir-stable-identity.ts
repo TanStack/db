@@ -1,4 +1,5 @@
 import { isPlainObject } from '../utils/type-guards.js'
+import { UnhashableQueryIRError } from '../errors.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
@@ -32,12 +33,11 @@ type StableIdentityValue =
   | { [key: string]: StableIdentityValue }
 
 type ValueIdentityContext =
-  | `exact-output`
-  | `equality-operand`
-  | `ordering-operand`
+  `exact-output` | `equality-operand` | `ordering-operand`
 
 type AliasScope = {
   bindings: ReadonlyMap<string, number>
+  bindingIds: ReadonlyMap<string, number>
   hasUnqualifiedOutput: boolean
   parent: AliasScope | undefined
 }
@@ -55,15 +55,7 @@ export type DemandKey = string & {
   readonly [demandKeyBrand]: true
 }
 
-export class UnhashableQueryIRError extends Error {
-  constructor(
-    public readonly path: string,
-    public readonly reason: string,
-  ) {
-    super(`Query IR is not stably hashable at ${path}: ${reason}`)
-    this.name = `UnhashableQueryIRError`
-  }
-}
+export { UnhashableQueryIRError }
 
 export function getStableQueryIRHash(query: QueryIR): string {
   return getQueryIdentity(query)
@@ -176,6 +168,7 @@ function createAliasScope(
   parent: AliasScope | undefined,
 ): AliasScope {
   const bindings = new Map<string, number>()
+  const bindingIds = new Map<string, number>()
 
   const bindSource = (source: From): void => {
     if (source.type === `unionFrom`) {
@@ -186,12 +179,14 @@ function createAliasScope(
     if (!bindings.has(source.alias)) {
       bindings.set(source.alias, bindings.size)
     }
+    bindingIds.set(source.bindingId, bindings.get(source.alias)!)
   }
 
   bindSource(query.from)
   query.join?.forEach(({ from }) => bindSource(from))
   return {
     bindings,
+    bindingIds,
     hasUnqualifiedOutput: query.from.type === `unionAll`,
     parent,
   }
@@ -200,11 +195,15 @@ function createAliasScope(
 function resolveAliasBinding(
   scope: AliasScope | undefined,
   alias: string,
+  bindingId?: string,
 ): readonly [number, number] | undefined {
   let current = scope
   let parentDistance = 0
   while (current) {
-    const binding = current.bindings.get(alias)
+    const binding =
+      bindingId === undefined
+        ? current.bindings.get(alias)
+        : current.bindingIds.get(bindingId)
     if (binding !== undefined) return [parentDistance, binding]
     // A result-level union has no source alias. Every downstream ref starts at
     // an output field, including nested paths such as profile.id, so it must
@@ -290,6 +289,11 @@ function canonicalizeQueryInScope(
       scope,
     )
   }
+
+  // Operator code decides whether a query compiles, so it is part of the
+  // query's identity. Only groupKeys() and hand-built IR without operator
+  // code mark it; other identities stay as they were.
+  if (query.grouping) result.grouping = true
 
   if (query.groupBy) {
     result.groupBy = query.groupBy.map((expression, index) =>
@@ -406,18 +410,11 @@ function canonicalizeJoin(
   return {
     type: join.type,
     from: canonicalizeSource(join.from, `${path}.from`, seen, scope),
-    left: canonicalizeExpression(
-      join.left,
-      `${path}.left`,
+    on: canonicalizeExpression(
+      join.on,
+      `${path}.on`,
       seen,
-      `equality-operand`,
-      scope,
-    ),
-    right: canonicalizeExpression(
-      join.right,
-      `${path}.right`,
-      seen,
-      `equality-operand`,
+      `exact-output`,
       scope,
     ),
   }
@@ -429,11 +426,13 @@ function canonicalizeSource(
   seen: WeakSet<object>,
   scope: AliasScope,
 ): StableIdentityValue {
-  if (source.type === `collectionRef`) {
+  if (source.type === `collectionRef` || source.type === `descriptorRef`) {
     return {
       type: `collectionRef`,
       collectionId: canonicalizeRuntimeValue(
-        source.collection.id,
+        source.type === `descriptorRef`
+          ? source.descriptor.id
+          : source.collection.id,
         `${path}.collection.id`,
         seen,
       ),
@@ -585,10 +584,7 @@ function canonicalizeCompareOptions(
 
 function canonicalizeExpression(
   expression:
-    | BasicExpression
-    | Aggregate
-    | IncludesSubquery
-    | ConditionalSelect,
+    BasicExpression | Aggregate | IncludesSubquery | ConditionalSelect,
   path: string,
   seen: WeakSet<object>,
   valueContext: ValueIdentityContext = `exact-output`,
@@ -597,7 +593,11 @@ function canonicalizeExpression(
   if (expression.type === `ref`) {
     const explicitAlias = getPropRefSourceAlias(expression)
     if (explicitAlias !== undefined) {
-      const binding = resolveAliasBinding(scope, explicitAlias)
+      const binding = resolveAliasBinding(
+        scope,
+        explicitAlias,
+        expression.bindingId,
+      )
       if (binding !== undefined) {
         return {
           type: `ref`,
@@ -627,7 +627,11 @@ function canonicalizeExpression(
       }
     }
 
-    const binding = resolveAliasBinding(scope, expression.path[0] ?? ``)
+    const binding = resolveAliasBinding(
+      scope,
+      expression.path[0] ?? ``,
+      expression.bindingId,
+    )
     return {
       type: `ref`,
       path:
@@ -731,6 +735,8 @@ function canonicalizeExpression(
   if (expression.type === `agg`) {
     return {
       type: `agg`,
+      // The types require operator code; IR built by hand may lack it.
+      ...((expression.grouping as unknown) ? {} : { withoutOperator: true }),
       name: expression.name,
       args: expression.args.map((arg, index) =>
         canonicalizeExpression(
@@ -779,6 +785,7 @@ function canonicalizeExpression(
   const childScope = createAliasScope(expression.query, scope)
   const result: Record<string, StableIdentityValue> = {
     type: `includesSubquery`,
+    ...((expression.runtime as unknown) ? {} : { withoutOperator: true }),
     query: canonicalizeQueryInScope(
       expression.query,
       `${path}.query`,

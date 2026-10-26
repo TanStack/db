@@ -7,12 +7,14 @@ import {
 } from '@testing-library/react'
 import {
   DbClient,
+  UnhashableQueryIRError,
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
   eq,
   getStableValueHash,
   gt,
+  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { Component, StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -94,6 +96,7 @@ describe(`useLiveSuspenseQuery`, () => {
       {
         value: {
           networkTimeoutMs: 60_000,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -159,6 +162,7 @@ describe(`useLiveSuspenseQuery`, () => {
         {
           value: {
             networkTimeoutMs: 60_000,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: `ready` }),
             subscribe: () => () => {},
@@ -311,6 +315,7 @@ describe(`useLiveSuspenseQuery`, () => {
       {
         value: {
           networkTimeoutMs: 60_000,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -419,6 +424,7 @@ describe(`useLiveSuspenseQuery`, () => {
         {
           value: {
             networkTimeoutMs,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () =>
               (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
             getSnapshot: () => ({ status: persistedStatus }),
@@ -503,14 +509,14 @@ describe(`useLiveSuspenseQuery`, () => {
                 runtime === `server`
                   ? async () => {
                       await serverLoad
-                      begin({ immediate: true })
+                      begin()
                       write({ type: `insert`, value: initialPersons[0]! })
                       commit()
                     }
                   : () => {
                       browserLoad()
                       resolveBrowserLoad = () => {
-                        begin({ immediate: true })
+                        begin()
                         write({
                           type: `insert`,
                           value: initialPersons[1]!,
@@ -563,7 +569,9 @@ describe(`useLiveSuspenseQuery`, () => {
       { wrapper: browserWrapper },
     )
 
-    expect(browserLoad).not.toHaveBeenCalled()
+    // Suspense preload is local demand even while the server stream is pending.
+    // Its rows remain authoritative until the browser acquisition completes.
+    expect(browserLoad).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       resolveServerLoad()
@@ -591,7 +599,6 @@ describe(`useLiveSuspenseQuery`, () => {
   })
 
   it(`requires queryKey for an opaque query during SSR streaming`, () => {
-    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const descriptor = collectionOptions(`streamed-people`, () => ({
       id: `streamed-people`,
       getKey: (person: Person) => person.id,
@@ -620,11 +627,7 @@ describe(`useLiveSuspenseQuery`, () => {
           }),
         { wrapper },
       ),
-    ).toThrow(/Provide an explicit serializable queryKey/)
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(`cannot derive a stable identity`),
-    )
-    warn.mockRestore()
+    ).toThrow(UnhashableQueryIRError)
   })
 
   it(`throws the original streamed query error`, async () => {
@@ -705,6 +708,79 @@ describe(`useLiveSuspenseQuery`, () => {
       name: `John Smith`,
       age: 35,
     })
+  })
+
+  // Suspense releases at initial-query readiness, the same point where
+  // useLiveQuery reports isReady. An on-demand source whose Collection
+  // readiness lags its settled subset, as a progressive source's does before
+  // its full sync, must not hold either one.
+  it(`releases with useLiveQuery isReady when a lagging source's subset settles`, async () => {
+    let resolveLoad: (() => void) | undefined
+    let sync:
+      | { begin: () => void; write: (row: Person) => void; commit: () => void }
+      | undefined
+    const source = createCollection<Person>({
+      id: `test-persons-suspense-lagging-source`,
+      getKey: (person) => person.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          sync = {
+            begin,
+            write: (row) => write({ type: `insert`, value: row }),
+            commit,
+          }
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => {
+                resolveLoad = resolve
+              }),
+          }
+        },
+      },
+    })
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ persons: source }).where(({ persons }) => eq(persons.id, `3`)),
+    )
+
+    function SuspendedNames() {
+      const { data } = useLiveSuspenseQuery(liveQuery)
+      return <div>names: {data.map((person) => person.name).join(`,`)}</div>
+    }
+    function Readiness() {
+      const { isReady } = useLiveQuery(liveQuery)
+      return <div>ready: {String(isReady)}</div>
+    }
+
+    const view = renderComponent(
+      <>
+        <Readiness />
+        <SuspenseWrapper>
+          <SuspendedNames />
+        </SuspenseWrapper>
+      </>,
+    )
+    await waitFor(() => expect(resolveLoad).toBeDefined())
+    await act(async () => {
+      sync!.begin()
+      sync!.write(initialPersons[2]!)
+      sync!.commit()
+      await Promise.resolve()
+    })
+    expect(view.getByText(`Loading...`)).toBeTruthy()
+    expect(view.getByText(`ready: false`)).toBeTruthy()
+
+    await act(async () => {
+      resolveLoad!()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(source.status).toBe(`loading`)
+    expect(view.getByText(`ready: true`)).toBeTruthy()
+    expect(view.getByText(`names: John Smith`)).toBeTruthy()
+    view.unmount()
+    await liveQuery.cleanup()
+    await source.cleanup()
   })
 
   it(`should return data that is always defined (type-safe)`, async () => {

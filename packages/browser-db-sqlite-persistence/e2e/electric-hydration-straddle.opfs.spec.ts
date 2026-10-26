@@ -187,7 +187,11 @@ test(`a live Electric row commits after OPFS hydration closes and survives hando
     )
     await expectExactRow(leader, updatedRow)
     expect((await reach(leader)).rowCommitApplied).toBe(true)
-    await expectReach(leader, { subsetDemandSettled: true }, 30_000)
+    await expectReach(
+      leader,
+      { subsetLoadAndReleaseChainSettled: true },
+      30_000,
+    )
     expect((await observe(leader)).phase).toBe(`ready`)
     expect((await observe(leader)).isLeader).toBe(true)
 

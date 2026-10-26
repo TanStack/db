@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { grouping } from '../../src/query/compiler/grouping.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
   Aggregate,
@@ -45,7 +46,7 @@ function createOr(...args: Array<any>) {
 }
 
 function createAgg(name: string, ...args: Array<any>) {
-  return new Aggregate(name, args)
+  return new Aggregate(name, args, grouping)
 }
 
 describe(`Query Optimizer`, () => {
@@ -136,8 +137,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -165,8 +168,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -205,8 +210,7 @@ describe(`Query Optimizer`, () => {
           {
             from: new QueryRef(distinctSource, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `id`),
+            on: createEq(createPropRef(`u`, `id`), createPropRef(`p`, `id`)),
           },
         ],
         where: [createEq(createPropRef(`u`, `id`), createValue(1))],
@@ -227,8 +231,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -273,8 +279,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -310,8 +318,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -345,8 +355,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -380,8 +392,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -421,8 +435,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -479,8 +495,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -511,8 +529,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -550,8 +570,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -585,8 +607,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -628,8 +652,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -654,8 +680,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(emptyPathPropRef, createValue(1))],
@@ -677,8 +705,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -730,8 +760,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [malformedExpression],
@@ -751,8 +783,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -784,8 +818,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -825,8 +861,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -871,8 +909,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -902,26 +942,33 @@ describe(`Query Optimizer`, () => {
       }
     })
 
-    test(`should remove redundant subqueries after optimization`, () => {
-      // Create a query with redundant subqueries that become empty after optimization
+    test(`collapses internal wrappers that share the source binding`, () => {
+      // Internal optimizer wrappers retain the source's lexical binding.
+      // User-declared wrappers have separate bindings and are not redundant
+      // when references outside the wrapper still name them.
+      const source = new CollectionRef(mockCollection, `u`)
       const queryWithRedundantSubqueries: QueryIR = {
         from: new QueryRef(
           {
             from: new QueryRef(
               {
-                from: new CollectionRef(mockCollection, `u`),
+                from: source,
               },
               `u`,
+              source.bindingId,
             ),
           },
           `u`,
+          source.bindingId,
         ),
         join: [
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -961,8 +1008,10 @@ describe(`Query Optimizer`, () => {
               `p`,
             ),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1033,8 +1082,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -1064,8 +1115,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
@@ -1098,8 +1151,7 @@ describe(`Query Optimizer`, () => {
         {
           from: new CollectionRef(mockCollection, `p`),
           type: `inner`,
-          left: createPropRef(`u`, `id`),
-          right: createPropRef(`p`, `user_id`),
+          on: createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
         },
       ]
       deepQuery.where = [
@@ -1125,8 +1177,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`u`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`u`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1179,8 +1233,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new QueryRef(sharedSubquery, `other_users`), // Same subquery object!
             type: `inner`,
-            left: createPropRef(`main_users`, `id`),
-            right: createPropRef(`other_users`, `id`),
+            on: createEq(
+              createPropRef(`main_users`, `id`),
+              createPropRef(`other_users`, `id`),
+            ),
           },
         ],
         where: [
@@ -1237,8 +1293,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`stats`, `department_id`),
-            right: createPropRef(`p`, `department_id`),
+            on: createEq(
+              createPropRef(`stats`, `department_id`),
+              createPropRef(`p`, `department_id`),
+            ),
           },
         ],
         where: [
@@ -1278,8 +1336,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`top_users`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`top_users`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1313,8 +1373,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`filtered_users`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`filtered_users`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1359,8 +1421,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`dept_stats`, `department_id`),
-            right: createPropRef(`p`, `department_id`),
+            on: createEq(
+              createPropRef(`dept_stats`, `department_id`),
+              createPropRef(`p`, `department_id`),
+            ),
           },
         ],
         where: [
@@ -1392,8 +1456,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`computed_users`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`computed_users`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1438,8 +1504,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`sorted_users`, `id`),
-            right: createPropRef(`p`, `user_id`),
+            on: createEq(
+              createPropRef(`sorted_users`, `id`),
+              createPropRef(`p`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1488,8 +1556,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new QueryRef(unsafeSubquery, `dept_stats`),
             type: `inner`,
-            left: createPropRef(`users`, `department_id`),
-            right: createPropRef(`dept_stats`, `department_id`),
+            on: createEq(
+              createPropRef(`users`, `department_id`),
+              createPropRef(`dept_stats`, `department_id`),
+            ),
           },
         ],
         where: [
@@ -1533,8 +1603,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`stats`, `department_id`),
-            right: createPropRef(`p`, `department_id`),
+            on: createEq(
+              createPropRef(`stats`, `department_id`),
+              createPropRef(`p`, `department_id`),
+            ),
           },
         ],
         where: [
@@ -1591,8 +1663,10 @@ describe(`Query Optimizer`, () => {
           {
             from: new CollectionRef(mockCollection, `p`),
             type: `inner`,
-            left: createPropRef(`stats`, `department_id`),
-            right: createPropRef(`p`, `department_id`),
+            on: createEq(
+              createPropRef(`stats`, `department_id`),
+              createPropRef(`p`, `department_id`),
+            ),
           },
         ],
         where: [
@@ -1679,8 +1753,10 @@ describe(`Query Optimizer`, () => {
           {
             type: `left`,
             from: new CollectionRef(teamMembersCollection, `teamMember`),
-            left: createPropRef(`team`, `id`),
-            right: createPropRef(`teamMember`, `team_id`),
+            on: createEq(
+              createPropRef(`team`, `id`),
+              createPropRef(`teamMember`, `team_id`),
+            ),
           },
         ],
         where: [
@@ -1722,8 +1798,10 @@ describe(`Query Optimizer`, () => {
           {
             type: `right`,
             from: new CollectionRef(profilesCollection, `profile`),
-            left: createPropRef(`user`, `id`),
-            right: createPropRef(`profile`, `user_id`),
+            on: createEq(
+              createPropRef(`user`, `id`),
+              createPropRef(`profile`, `user_id`),
+            ),
           },
         ],
         where: [
@@ -1770,8 +1848,10 @@ describe(`Query Optimizer`, () => {
           {
             type: `full`,
             from: new CollectionRef(paymentsCollection, `payment`),
-            left: createPropRef(`order`, `id`),
-            right: createPropRef(`payment`, `order_id`),
+            on: createEq(
+              createPropRef(`order`, `id`),
+              createPropRef(`payment`, `order_id`),
+            ),
           },
         ],
         where: [
@@ -1813,8 +1893,10 @@ describe(`Query Optimizer`, () => {
           {
             type: `inner`,
             from: new CollectionRef(departmentsCollection, `dept`),
-            left: createPropRef(`user`, `department_id`),
-            right: createPropRef(`dept`, `id`),
+            on: createEq(
+              createPropRef(`user`, `department_id`),
+              createPropRef(`dept`, `id`),
+            ),
           },
         ],
         where: [

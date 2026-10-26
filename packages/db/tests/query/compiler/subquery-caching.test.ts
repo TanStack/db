@@ -50,6 +50,42 @@ describe(`Subquery Caching`, () => {
     expect(queriesMatchForCaching(filtered, original)).toBe(false)
   })
 
+  it(`does not equate identical paths bound to different lexical sources`, () => {
+    const collection = createMockCollection(`users`)
+    const source = new CollectionRef(collection, `u`)
+    const queryFor = (bindingId: string): QueryIR => ({
+      from: source,
+      where: [
+        new Func(`eq`, [
+          new PropRef([`u`, `id`], `u`, bindingId),
+          new Value(1),
+        ]),
+      ],
+    })
+
+    // The path text is identical. One ref belongs to the query's source and
+    // the other names an enclosing source; a cache substitution changes which
+    // row the predicate reads. The older structural comparison missed this
+    // distinction because PropRef.bindingId is deliberately non-enumerable.
+    expect(
+      queriesMatchForCaching(
+        queryFor(source.bindingId),
+        queryFor(`enclosing-source`),
+      ),
+    ).toBe(false)
+  })
+
+  it(`does not hash function-form queries during cache comparison`, () => {
+    const collection = createMockCollection(`users`)
+    const predicate = () => true
+    const query: QueryIR = {
+      from: new CollectionRef(collection, `u`),
+      fnWhere: [predicate],
+    }
+
+    expect(queriesMatchForCaching(query, { ...query })).toBe(false)
+  })
+
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
     // Create a mock collection
     const usersCollection = createMockCollection(`users`)
@@ -70,8 +106,10 @@ describe(`Subquery Caching`, () => {
         {
           type: `inner`,
           from: new QueryRef(subquery, `joined_users`), // Same subquery object reference
-          left: new PropRef([`main_users`, `id`]),
-          right: new PropRef([`joined_users`, `id`]),
+          on: new Func('eq', [
+            new PropRef([`main_users`, `id`]),
+            new PropRef([`joined_users`, `id`]),
+          ]),
         },
       ],
       select: {
@@ -344,8 +382,10 @@ describe(`Subquery Caching`, () => {
         {
           type: `left`,
           from: new QueryRef(innerSubquery, `inner2`), // Same innerSubquery
-          left: new PropRef([`inner1`, `id`]),
-          right: new PropRef([`inner2`, `id`]),
+          on: new Func('eq', [
+            new PropRef([`inner1`, `id`]),
+            new PropRef([`inner2`, `id`]),
+          ]),
         },
       ],
     }
@@ -356,8 +396,10 @@ describe(`Subquery Caching`, () => {
         {
           type: `inner`,
           from: new QueryRef(innerSubquery, `direct`), // innerSubquery again at top level
-          left: new PropRef([`middle`, `id`]),
-          right: new PropRef([`direct`, `id`]),
+          on: new Func('eq', [
+            new PropRef([`middle`, `id`]),
+            new PropRef([`direct`, `id`]),
+          ]),
         },
       ],
     }

@@ -55,6 +55,10 @@
           "to": "guides/error-handling"
         },
         {
+          "label": "Error Codes",
+          "to": "errors"
+        },
+        {
           "label": "Creating Collection Options Creators",
           "to": "guides/collection-options-creator"
         }
@@ -84,6 +88,10 @@
           "to": "collections/powersync-collection"
         },
         {
+          "label": "IndexedDB Collection",
+          "to": "collections/indexed-db-collection"
+        },
+        {
           "label": "LocalStorage Collection",
           "to": "collections/local-storage-collection"
         },
@@ -99,6 +107,10 @@
         {
           "label": "React",
           "to": "framework/react/overview"
+        },
+        {
+          "label": "Preact",
+          "to": "framework/preact/overview"
         },
         {
           "label": "Vue",
@@ -189,6 +201,14 @@
         {
           "label": "powerSyncCollectionOptions",
           "to": "reference/powersync-db-collection/functions/powerSyncCollectionOptions"
+        },
+        {
+          "label": "createIndexedDB",
+          "to": "reference/functions/createIndexedDB"
+        },
+        {
+          "label": "indexedDBCollectionOptions",
+          "to": "reference/functions/indexedDBCollectionOptions"
         }
       ],
       "frameworks": [
@@ -202,6 +222,23 @@
             {
               "label": "useLiveQuery",
               "to": "framework/react/reference/functions/useLiveQuery"
+            }
+          ]
+        },
+        {
+          "label": "preact",
+          "children": [
+            {
+              "label": "Preact Hooks",
+              "to": "framework/preact/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/preact/reference/functions/useLiveQuery"
+            },
+            {
+              "label": "useLiveInfiniteQuery",
+              "to": "framework/preact/reference/functions/useLiveInfiniteQuery"
             }
           ]
         },

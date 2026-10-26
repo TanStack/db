@@ -1,6 +1,8 @@
 import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
+import { codedMessage, devBuild } from '../../error-message.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type {
@@ -77,7 +79,11 @@ export class SubsetDemandController {
     const state: DemandState = { keys: nextKeys, segments }
     this.states.set(plan.id, state)
 
-    for (const segment of retired) releaseSegment(subscription, segment)
+    // Release every retired segment even if subscriber code that a release
+    // runs throws, then report the first error.
+    runAllCallbacks(
+      retired.map((segment) => () => releaseSegment(subscription, segment)),
+    )
     if (this.states.get(plan.id) !== state) {
       return { changed: false, empty: false, ready: true }
     }
@@ -109,7 +115,12 @@ export class SubsetDemandController {
       if (this.states.get(plan.id) !== state) {
         return { changed: false, empty: false, ready: true }
       }
-      if (!started) throw new Error(`Subset demand snapshot did not start`)
+      if (!started)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Subset demand snapshot did not start`
+            : codedMessage(159),
+        )
       if (replace) {
         if (segment.ready instanceof Promise) {
           void segment.ready.then(
@@ -169,10 +180,13 @@ export class SubsetDemandController {
     const replaced = replacement.replaces ?? []
     replacement.replaces = undefined
     state.segments = [replacement]
-    for (const segment of replaced) releaseSegment(subscription, segment)
+    runAllCallbacks(
+      replaced.map((segment) => () => releaseSegment(subscription, segment)),
+    )
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
+    if (!(devBuild() && process.env.NODE_ENV !== `production`)) return
     if (this.warnedPlans.has(plan.id)) return
     this.warnedPlans.add(plan.id)
     const path = plan.path.join(`.`)
@@ -275,9 +289,5 @@ function releaseSegment(
   segment: DemandSegment,
 ): void {
   segment.abortController.abort()
-  try {
-    subscription.releaseSnapshot(segment.where)
-  } catch {
-    // CollectionSubscription has already reported the one cleanup failure.
-  }
+  subscription.releaseSnapshot(segment.where)
 }

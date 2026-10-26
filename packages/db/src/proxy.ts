@@ -4,6 +4,7 @@
  */
 
 import { deepEqualsInternal, isTemporal } from './utils'
+import { codedMessage, devBuild } from './error-message'
 
 // Resolve draft handles before calling native Map/Set membership methods.
 const draftCopies = new WeakMap<object, object>()
@@ -126,7 +127,11 @@ function createMapSetIteratorHandler<T extends object>(
     if (methodName === `forEach`) {
       const callback = args[0]
       if (typeof callback !== `function`)
-        throw new TypeError(`forEach callback must be a function`)
+        throw new TypeError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `forEach callback must be a function`
+            : codedMessage(109),
+        )
       return copy.forEach((value, key) => {
         const tracked = track(value)
         callback.call(args[1], tracked, isMap ? key : tracked, collectionProxy)
@@ -231,17 +236,67 @@ function deepClone<T extends unknown>(
     return arrayClone as unknown as T
   }
 
-  // Handle TypedArrays
-  if (ArrayBuffer.isView(obj) && !(obj instanceof DataView)) {
-    // Create an instance of the same type by length, then copy the values.
-    // A subclass constructor need not forward a source array to super.
-    const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
-    const clone = new TypedArrayConstructor(
-      (obj as unknown as TypedArray).length,
-    ) as TypedArray
-    visited.set(obj as object, clone)
+  const tag = Object.prototype.toString.call(obj)
+  const BufferConstructor =
+    tag === `[object ArrayBuffer]`
+      ? ArrayBuffer
+      : tag === `[object SharedArrayBuffer]` &&
+          typeof SharedArrayBuffer !== `undefined`
+        ? SharedArrayBuffer
+        : undefined
+  if (BufferConstructor) {
+    let byteLength: number | undefined
+    try {
+      // Validate the native brand across realms; ordinary tagged data is not a buffer.
+      byteLength = Object.getOwnPropertyDescriptor(
+        BufferConstructor.prototype,
+        `byteLength`,
+      )!.get!.call(obj)
+    } catch {
+      // Continue with the ordinary-object copy for a spoofed native tag.
+    }
+    if (byteLength !== undefined) {
+      const clone = new BufferConstructor(byteLength)
+      new Uint8Array(clone).set(
+        new Uint8Array(obj as unknown as ArrayBufferLike),
+      )
+      visited.set(obj, clone)
+      return clone as T
+    }
+  }
+
+  if (ArrayBuffer.isView(obj)) {
+    // Clone the buffer through the same identity table regardless of traversal
+    // order, so standard views retain their ranges and shared backing bytes.
+    const buffer = deepClone(obj.buffer, visited, detach)
+    const kind = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(Uint8Array.prototype),
+      Symbol.toStringTag,
+    )!.get!.call(obj) as string | undefined
+    if (kind === undefined) {
+      const clone = new DataView(buffer, obj.byteOffset, obj.byteLength)
+      visited.set(obj, clone)
+      return clone as T
+    }
+    const Constructor = Object.getPrototypeOf(obj).constructor as new (
+      bufferOrLength: ArrayBufferLike | number,
+      byteOffset?: number,
+      length?: number,
+    ) => TypedArray
+    const length = (obj as unknown as TypedArray).length
+    // Native constructors from another realm have the same intrinsic source.
+    // Preserve the existing single numeric argument for custom constructors.
+    const native =
+      Function.prototype.toString.call(Constructor) ===
+      Function.prototype.toString.call(
+        globalThis[kind as keyof typeof globalThis],
+      )
+    const clone = native
+      ? new Constructor(buffer, obj.byteOffset, length)
+      : new Constructor(length)
+    visited.set(obj, clone)
     clone.set(obj as unknown as TypedArray)
-    return clone as unknown as T
+    return clone as T
   }
 
   if (obj instanceof Map) {
@@ -270,7 +325,7 @@ function deepClone<T extends unknown>(
   }
 
   // Arbitrary instances may carry private/native state we cannot reconstruct.
-  // Keep them by reference at publication, rather than silently flattening them.
+  // Keep them by reference when detaching a change set.
   if (detach) {
     const prototype = Object.getPrototypeOf(obj)
     if (prototype !== Object.prototype && prototype !== null) return obj
@@ -402,8 +457,7 @@ export function createChangeProxy<
         Array.from(state.copy_),
         Array.from(
           state.originalObject as unknown as
-            | Map<unknown, unknown>
-            | Set<unknown>,
+            Map<unknown, unknown> | Set<unknown>,
         ),
       )
     }

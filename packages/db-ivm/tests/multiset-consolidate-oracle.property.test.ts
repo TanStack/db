@@ -39,7 +39,9 @@ import type { MultiSetArray } from '../src/multiset.js'
  * - Structural identity uses a 32-bit hash in production. The small value
  *   domain here makes a collision unlikely, but this is not an injectivity
  *   claim.
- * - Objects have one key, so this law does not cover key-order sensitivity.
+ * - Key order is covered only by one fixed pair of keys that tie under locale
+ *   collation (a precomposed and a decomposed Å), inserted in both orders in
+ *   structural histories; equal objects must merge whatever the order.
  */
 
 type Data = unknown
@@ -200,14 +202,12 @@ type StructuralStep =
   | null
   | { fresh: `object`; v: number }
   | { fresh: `array`; pair: [number, number] }
+  // Equal objects whose two keys tie under locale collation, inserted in
+  // either order. They must merge.
+  | { fresh: `collationTie`; reversed: boolean }
 
 type Mode =
-  | `keyed`
-  | `keyedCollision`
-  | `numbers`
-  | `strings`
-  | `structural`
-  | `fallback`
+  `keyed` | `keyedCollision` | `numbers` | `strings` | `structural` | `fallback`
 // `keyedCollision` selects grammar witnesses; it exercises the same keyed
 // production path as `keyed`. `caseName` labels a replay, not product state.
 type History = {
@@ -322,6 +322,10 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
           fc
             .tuple(fc.nat(1), fc.nat(1))
             .map((pair): StructuralStep => ({ fresh: `array`, pair })),
+          fc.boolean().map((reversed): StructuralStep => ({
+            fresh: `collationTie`,
+            reversed,
+          })),
         ),
         multiplicityArb,
       ),
@@ -369,8 +373,17 @@ function buildRecords(history: History): MultiSetArray<Data> {
     if (history.mode === `numbers` || history.mode === `strings`)
       return [step, m]
     const value = step as StructuralStep
-    if (value !== null && typeof value === `object`)
+    if (value !== null && typeof value === `object`) {
+      if (value.fresh === `collationTie`) {
+        const entries: Array<[string, number]> = [
+          [`\u00C5`, 1],
+          [`A\u030A`, 2],
+        ]
+        if (value.reversed) entries.reverse()
+        return [Object.fromEntries(entries), m]
+      }
       return [value.fresh === `object` ? { v: value.v } : [...value.pair], m]
+    }
     return [value, m]
   })
   // One non-keyed record makes the whole multiset unkeyed.

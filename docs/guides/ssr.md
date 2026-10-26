@@ -55,6 +55,12 @@ React derives live query identity from structured query IR by default. Add
 `queryKey` only for opaque functional query logic or for a hot render path where
 you want to skip derived identity work.
 
+If the old dependency array tracked a Collection object that you replace while
+the hook stays mounted, give the replacement a distinct ID. A different source
+object with the same ID now throws in the derived-identity form. To reuse the
+ID, unmount the old hook, clean up its source and client scope, then mount the
+replacement.
+
 ## Cheat Sheet
 
 | Task | Before | SSR-friendly |
@@ -72,12 +78,19 @@ you want to skip derived identity work.
 | Stream render-time results | none | `routerWithDbClient(router, dbClient)` |
 | React query identity | dependency array | derived IR, or `queryKey` when needed |
 
+Building or extending a Query keeps descriptors in its plan without starting
+their source Collections. The client-aware hook or `dbClient.preloadLiveQuery()`
+binds the finished plan when it consumes it. Reuse the original unbound Query
+across clients; a prepared Query contains Collections from the client that
+prepared it.
+
 ### Minimal React Pattern
 
 ```tsx
 import {
   DbClient,
   DbProvider,
+  Query,
   collectionOptions,
   eq,
   useDbClient,
@@ -133,6 +146,26 @@ root.render(
 )
 ```
 
+A descriptor query can also be defined outside React, without a `DbClient` at
+definition time:
+
+```tsx
+const openTodosQuery = new Query()
+  .from({ todo: todoCollection })
+  .where(({ todo }) => eq(todo.status, 'open'))
+
+function OpenTodos() {
+  const { data } = useLiveQuery({ query: openTodosQuery })
+  return <span>{data.length} open todos</span>
+}
+```
+
+The consuming hook binds this query to its `DbProvider` client. The same query
+can be used with `dbClient.preloadLiveQuery({ query: openTodosQuery })` on the
+server, or under another provider with a different client. For that reuse, the
+descriptor must have a reusable factory. Executing a descriptor query without
+a client throws when the source Collection is needed.
+
 The factory matters when config contains mutable adapter state or closures.
 Every `DbClient` gets a fresh config and collection instance. First-party
 adapter option creators already attach an equivalent factory, so this is also
@@ -183,6 +216,20 @@ external-store subscription, so the initial markup still matches the server.
 The snapshot remains visible while the source is loading. Once the browser live
 query is ready, DB publishes one handoff from the snapshot to the live result.
 
+A hydrated query hash identifies a portable result, but the payload does not
+contain the server's Collection objects. The first browser hook that commits a
+subscription, or the first browser `preloadLiveQuery()` call, claims the local
+source Collections for that reusable result. While the result is pending or
+successful, later local consumers with the same hash must use those Collection
+objects in the same query positions. A different source object with the same ID
+is rejected; give a genuinely different query a distinct `queryKey`. A newer
+hydration chunk updates the result without changing its established claim.
+`useLiveSuspenseQuery` can preload during render, claiming a source even if
+React never commits that render. A failed stream releases its claim, so a newer
+hydrated result can accept the first healthy local source. Once a subscribed
+live result becomes authoritative, the client consumes the stream;
+a later observer uses its own source Collection, even under the same hash.
+
 ### Server
 
 Create a fresh `DbClient` for each request. Materialize descriptors through that
@@ -202,7 +249,7 @@ export const todoCollection = collectionOptions('todos', () => ({
       return {
         loadSubset: async () => {
           const todos = await api.todos.list()
-          begin({ immediate: true })
+          begin()
           for (const todo of todos) {
             write({ type: 'insert', value: todo })
           }
@@ -244,6 +291,113 @@ const state = dbClient.dehydrate()
 
 This payload contains the projected query result and no source collection rows
 unless that collection was also materialized explicitly.
+
+Use the config object form in both the loader and the hook when they share a
+preloaded result:
+
+```tsx
+const openTodos = {
+  query: (q: InitialQueryBuilder) =>
+    q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.status, 'open')),
+}
+
+await dbClient.preloadLiveQuery(openTodos)
+// In the component:
+const { data } = useLiveQuery(openTodos)
+```
+
+The function form `useLiveQuery(openTodos.query)` currently derives a different
+identity from `useLiveQuery(openTodos)`. It will not reuse the loader's result.
+Sharing the query callback alone is insufficient. To use an explicit `queryKey`,
+pass config objects with the same `queryKey` to both `preloadLiveQuery` and
+`useLiveQuery`. Their sources and result configuration must still describe the
+same query.
+
+### Prepare every server snapshot
+
+An ordinary server hook can render empty/loading state without a preload. To
+render data, await a matching `preloadLiveQuery()` or explicitly preload the
+source Collections. A different query warming the same source does not prepare
+this query's result for transport. Reading those incidental rows or their
+readiness during SSR throws an error with the required preparation steps.
+Normal browser reads and runtime query errors keep their usual behavior.
+
+Normalized source transport carries rows without query readiness. When a server
+hook reads explicitly prepared sources, it captures the query's render-time
+rows and status as a query result. Ready prepared queries can therefore finish
+non-streaming Suspense; loading queries remain loading. Later server writes and
+browser writes before hydration do not change that initial view. Browser commit
+starts acquisition and publishes the live status normally. A loading capture
+does not complete an explicit data preload.
+
+An ordinary hook can render loading before a Suspense sibling completes the
+same query. Each hook retains its own server-rendered view during hydration.
+The Router stream forwards a newer result for that query without replacing the
+ordinary hook's earlier view. A later boundary waits for its missing streamed
+result instead of substituting browser rows. DbClient retains transported server
+snapshots until cleanup, so one reader's commit cannot consume another
+boundary's initial view. New ordinary browser reads still use live results.
+
+Streaming `useLiveSuspenseQuery` discovers and prepares its result during render,
+including when another query already warmed the source. Ordinary hooks require
+explicit preparation to render that data. Opaque SSR queries require a serializable
+`queryKey`, including when the source is already warm.
+
+For `useLiveInfiniteQuery`, preload the initial window plus its one-row peek:
+
+```tsx
+const orderedTodos = new Query()
+  .from({ todo: todoCollection })
+  .orderBy(({ todo }) => todo.id)
+const pageSize = 20
+
+await dbClient.preloadLiveQuery({
+  query: orderedTodos.limit(pageSize + 1).offset(0),
+})
+// In the component:
+const result = useLiveInfiniteQuery(() => orderedTodos, { pageSize })
+```
+
+With an explicit `queryKey`, the DbClient query hash also includes limit and
+offset. Use the same initial window in the preload and the infinite hook.
+
+Custom dehydration filters must retain the query result that the markup requires.
+
+### Indexes before query compilation
+
+Create manual indexes when initializing each request or browser client, before
+preloading or rendering queries that use them:
+
+```tsx
+import { BasicIndex, DbClient, type CollectionOptions } from '@tanstack/db'
+
+function createDbClient(todoCollection: CollectionOptions<{ id: string }>) {
+  const client = new DbClient()
+  client.collection(todoCollection).createIndex((todo) => todo.id, {
+    indexType: BasicIndex,
+  })
+  return client
+}
+```
+
+Collection materialization does not start sync unless its config requests it.
+An index installed inside the sync callback can arrive after the ordered query
+has compiled. `autoIndex: 'eager'` with `defaultIndexType: BasicIndex` is an
+alternative when indexes should be created as queries compile. Descriptors
+currently have no `indexes` or `onCreate` option.
+
+### Preload lifetime
+
+`preloadLiveQuery()` has no built-in deadline or `AbortSignal` option. A source
+that keeps retrying without becoming ready can keep its preload pending. Apply
+an application deadline to request work and clean up its request-scoped client
+when abandoning it; a timer race alone does not stop the underlying sync.
+
+Preloaded results belong to the client. There is no public method to release
+one preloaded query. `cleanup()` releases the entire client and its Collections.
+Avoid accumulating route-specific preloads in a browser client without an
+application lifetime policy. A separately owned `createLiveQueryCollection()`
+can be preloaded and cleaned up explicitly when per-query ownership is needed.
 
 ### Browser
 
@@ -287,7 +441,7 @@ snapshots synchronously during server rendering:
   client.hydrate(dehydratedDbState)
 </script>
 
-<DbProvider {client}>
+<DbProvider {client} hydrating>
   <Todos />
 </DbProvider>
 ```
@@ -295,6 +449,15 @@ snapshots synchronously during server rendering:
 Inside `Todos.svelte`, `useLiveQuery({ query })` can use collection descriptors
 directly. The browser subscription starts source sync and performs the same
 snapshot-to-live-result handoff as React.
+
+Set `hydrating` for each root initialized with Svelte's `hydrate()`. It preserves
+that root's server public snapshot even after another root publishes browser
+rows. Nested providers inherit it unless they specify another value. The
+provider clears it after mount, so later children read live rows. Omit it for
+ordinary `mount()` calls.
+
+Hooks that pass `client` explicitly also need a marked provider around their
+hydrated subtree. The client alone cannot identify hydration versus a fresh mount.
 
 Live demo: https://tanstack-db-ssr-demo.netlify.app/ssr-db
 
@@ -368,7 +531,7 @@ result, and pass that state to a client hydration boundary:
 ```tsx
 export default function Page() {
   const dbClient = new DbClient()
-  void dbClient.preloadLiveQuery(openTodosQuery)
+  void dbClient.preloadLiveQuery({ query: openTodosQuery })
 
   const state = dbClient.dehydrate({
     shouldDehydrateCollection: () => false,
@@ -532,10 +695,11 @@ Common reasons to add `queryKey`:
   the structured query
 - a render path where derived identity becomes measurably expensive
 
-Before 1.0, DB warns when structured IR cannot be hashed and preserves the
-legacy mount-stable identity. The query still works, but captured values inside
-opaque logic are not reactive unless they are represented in `queryKey`. In 1.0,
-an unhashable query without `queryKey` will throw.
+When structured IR cannot be hashed and the query has no `queryKey`, a hook
+that compares identity throws `UnhashableQueryIRError`: React and Preact hooks,
+and any hook backed by a `DbClient`, which matches queries by identity hash. An
+empty `queryKey` counts as none. Represent the values that opaque logic
+captures in `queryKey`, so the query recompiles when they change.
 
 DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
@@ -688,7 +852,7 @@ Preload a live query when the browser only needs the rendered result:
 
 ```tsx
 const dbClient = new DbClient()
-await dbClient.preloadLiveQuery(openTodosQuery)
+await dbClient.preloadLiveQuery({ query: openTodosQuery })
 
 return {
   dbState: dbClient.dehydrate(),
@@ -724,8 +888,8 @@ Still supported:
 Warnings:
 
 - React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` warns in development and keeps legacy
-  mount-stable identity until 1.0. In 1.0 it will throw.
+- Opaque query IR without `queryKey` throws `UnhashableQueryIRError` in a
+  hook that compares identity (React, Preact, or any `DbClient`-backed hook).
 - Expensive derived identity warns in development and suggests `queryKey`.
 
 Required for SSR:

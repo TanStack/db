@@ -53,7 +53,28 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   pnpm lint
   ```
 
+  `pnpm lint:changed` runs only the `oracle/` rules, on the oracle files that
+  your branch changes. It does not replace `pnpm lint`. If you work with a
+  coding agent, the repository's hooks return oracle lint reports to it as it
+  edits. Codex and Gemini CLI run project hooks only after you
+  trust them in `/hooks`; review them again when they change.
+
 - Implement your changes and tests in the relevant package or example.
+- For a production change that adds, removes, or changes observable behavior,
+  extend the primary oracle when it can express the governing law. A focused
+  unit test can supplement the oracle but cannot replace it. Internal refactors
+  need no new oracle coverage when existing oracles exercise the unchanged
+  contract. For a change that is not a bug fix, a focused test alone is
+  acceptable only when an oracle is not practical. Identify the relevant
+  coverage-map entry and explain why you cannot extend its owner, create an
+  independent oracle, or add a receiving witness. See the
+  [oracle coverage map](docs/contributing/oracle-coverage.md) and
+  [Oracle Testing Rubric](docs/contributing/oracle-rubric.md).
+- For a bug fix, state how the pull request evaluated and closed the declared
+  bug class. Include the violated law, exercised histories, production paths,
+  observation checkpoints, RED/GREEN evidence, and remaining limits. A passing
+  reproduction for one trace is not sufficient. The focused-test-only exception
+  does not apply to bug fixes. Resolve known in-scope gaps before submitting.
 - Document your changes in the appropriate doc page.
 - Git stage your required changes and commit them.
 - Submit a PR for review.

@@ -4,19 +4,30 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
-import { createOnDemandCollection, flushPromises } from './utils.js'
+import { createOracleReach } from './oracle-reach.js'
+import {
+  captureMicrotaskErrors,
+  createOnDemandCollection,
+  flushPromises,
+} from './utils.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
   readOracleRunConfig,
 } from './oracle-config.js'
+import {
+  modelSubscriberResumeRetirement,
+  modelSubscriberStartCleanup,
+  subscriberResumeRetirementHistories,
+  subscriberStartCleanupHistories,
+} from './collection-subscription-lifecycle-grammar-oracle.js'
 import type { CollectionSubscription } from '../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 /**
  * This is the boundary matrix for subscription acquisition and retirement.
  *
- * The model is a product of a small physical-acquisition state, logical owners,
+ * The model is a product of a small acquisition lifecycle state, logical owners,
  * sync run, and callback entry point. The explicit cell table names every
  * legal phase/entry pair and gives a reason for every excluded pair. Scenario
  * drivers then add sync return/throw/resolve/reject, abort, release, peer loss,
@@ -24,7 +35,14 @@ import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
  *
  * Each case declares the cells it may reach; undeclared reach is a failure and
  * the final audit fails if a legal cell was never observed. Counts, signals,
- * errors, readiness, owners, and rows are checked separately. This suite is the
+ * errors, readiness, owners, and rows are checked separately.
+ *
+ * Release law: an `unloadSubset` that throws is an adapter bug. The
+ * subscription attempts each physical release once and reports its error
+ * uncaught, once, with the adapter's identity. The error fails nothing: the
+ * call that released does not throw it, `lastError` and `loadSubset:error` do
+ * not record it, and logical demand still retires. `failed-release` therefore
+ * means "attempted once; never retried", not "failed the caller". This suite is the
  * exhaustive boundary companion to the generated lifecycle histories, not a
  * second copy of their transition implementation.
  */
@@ -39,11 +57,7 @@ type StartReentry =
   | `unsubscribe`
   | `cleanup`
 type RestartReentry =
-  | `none`
-  | `release-self`
-  | `release-peer`
-  | `unsubscribe`
-  | `cleanup`
+  `none` | `release-self` | `release-peer` | `unsubscribe` | `cleanup`
 
 const acquisitionPhases = [
   `deferred`,
@@ -65,8 +79,7 @@ type AcquisitionEntry = (typeof acquisitionEntries)[number]
 type AcquisitionCell = `${AcquisitionPhase}:${AcquisitionEntry}`
 
 type AcquisitionCellDefinition =
-  | { kind: `covered` }
-  | { kind: `excluded`; reason: string }
+  { kind: `covered` } | { kind: `excluded`; reason: string }
 
 const acquisitionCellDefinitions = {
   'deferred:request': { kind: `covered` },
@@ -182,36 +195,50 @@ function acquisitionCase(
   )
 }
 
-const physicalAcquisitionStates = [
+/**
+ * Model-only lifecycle projection spanning attempts and accepted acquisitions:
+ * `none` has no accepted work; `starting` is a tentative acquisition attempt;
+ * `active` has an accepted physical acquisition and its acquisition lease;
+ * `obsolete` has retired acquisition ownership; `failed-release` has attempted
+ * acquisition release and must not retry it.
+ */
+const acquisitionLifecycleStates = [
   `none`,
   `starting`,
   `active`,
   `obsolete`,
   `failed-release`,
 ] as const
-const physicalInteractionCauses = [
+const acquisitionInteractionCauses = [
   `release`,
   `abort`,
   `truncate`,
   `cleanup`,
   `unsubscribe`,
 ] as const
-type PhysicalAcquisitionState = (typeof physicalAcquisitionStates)[number]
-type PhysicalInteractionCause = (typeof physicalInteractionCauses)[number]
-type PhysicalInteractionCell =
-  `${PhysicalAcquisitionState}:${PhysicalInteractionCause}`
-type PhysicalInteraction =
+type AcquisitionLifecycleState = (typeof acquisitionLifecycleStates)[number]
+type AcquisitionInteractionCause = (typeof acquisitionInteractionCauses)[number]
+type AcquisitionInteractionCell =
+  `${AcquisitionLifecycleState}:${AcquisitionInteractionCause}`
+// `retire` projects the end of ownership, not necessarily acquisition release.
+// During `starting`, a synchronous throw fails the attempt before acceptance.
+// Cleanup invalidation cancels a returned tentative acquisition before activation
+// without retaining its lease. An accepted acquisition instead releases its lease.
+// Logical demand can survive this boundary, as it does during truncate replay.
+// An `active` interaction ends accepted ownership through acquisition release
+// or enclosing sync-run cleanup.
+type AcquisitionInteraction =
   | `no-acquisition`
   | `abort-only`
   | `retire`
   | `no-repeat-on-truncate`
   | `no-repeat-on-cleanup`
   | `no-repeat-on-unsubscribe`
-type PhysicalInteractionCellDefinition =
-  | { kind: `covered`; interaction: PhysicalInteraction }
+type AcquisitionInteractionCellDefinition =
+  | { kind: `covered`; interaction: AcquisitionInteraction }
   | { kind: `excluded`; reason: string }
 
-const physicalInteractionCellDefinitions = {
+const acquisitionInteractionCellDefinitions = {
   'none:release': {
     kind: `covered`,
     interaction: `no-acquisition`,
@@ -285,29 +312,32 @@ const physicalInteractionCellDefinitions = {
     kind: `covered`,
     interaction: `no-repeat-on-unsubscribe`,
   },
-} satisfies Record<PhysicalInteractionCell, PhysicalInteractionCellDefinition>
+} satisfies Record<
+  AcquisitionInteractionCell,
+  AcquisitionInteractionCellDefinition
+>
 
-const requiredPhysicalInteractions = new Map<
-  PhysicalInteractionCell,
-  PhysicalInteraction
+const requiredAcquisitionInteractions = new Map<
+  AcquisitionInteractionCell,
+  AcquisitionInteraction
 >(
-  Object.entries(physicalInteractionCellDefinitions).flatMap(
+  Object.entries(acquisitionInteractionCellDefinitions).flatMap(
     ([cell, definition]) =>
       definition.kind === `covered`
-        ? [[cell as PhysicalInteractionCell, definition.interaction]]
+        ? [[cell as AcquisitionInteractionCell, definition.interaction]]
         : [],
   ),
 )
-const observedPhysicalInteractions = new Map<
-  PhysicalInteractionCell,
-  PhysicalInteraction
+const observedAcquisitionInteractions = new Map<
+  AcquisitionInteractionCell,
+  AcquisitionInteraction
 >()
 
-function observePhysicalInteraction(
-  cell: PhysicalInteractionCell,
-  interaction: PhysicalInteraction,
+function observeAcquisitionInteraction(
+  cell: AcquisitionInteractionCell,
+  interaction: AcquisitionInteraction,
 ): void {
-  observedPhysicalInteractions.set(cell, interaction)
+  observedAcquisitionInteractions.set(cell, interaction)
 }
 
 const requiredSyncRunBoundaries = new Set([
@@ -1011,13 +1041,15 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     ).toEqual(allCells)
   })
 
-  it(`accounts for every physical acquisition state and interaction cause`, () => {
-    const allCells = new Set<PhysicalInteractionCell>(
-      physicalAcquisitionStates.flatMap((state) =>
-        physicalInteractionCauses.map((cause) => `${state}:${cause}` as const),
+  it(`accounts for every acquisition lifecycle state and interaction cause`, () => {
+    const allCells = new Set<AcquisitionInteractionCell>(
+      acquisitionLifecycleStates.flatMap((state) =>
+        acquisitionInteractionCauses.map(
+          (cause) => `${state}:${cause}` as const,
+        ),
       ),
     )
-    expect(new Set(Object.keys(physicalInteractionCellDefinitions))).toEqual(
+    expect(new Set(Object.keys(acquisitionInteractionCellDefinitions))).toEqual(
       allCells,
     )
   })
@@ -1026,7 +1058,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     // A direct property replay may select only that test by name.
     if (replay.replayPath !== undefined) return
     expect(observedAcquisitionCells).toEqual(legalAcquisitionCells)
-    expect(observedPhysicalInteractions).toEqual(requiredPhysicalInteractions)
+    expect(observedAcquisitionInteractions).toEqual(
+      requiredAcquisitionInteractions,
+    )
     expect(observedSyncRunBoundaries).toEqual(requiredSyncRunBoundaries)
     expect(observedFailureDeliverySuffixes).toEqual(
       requiredFailureDeliverySuffixes,
@@ -1155,7 +1189,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                     ? `starting:cleanup`
                     : undefined
       if (interaction) {
-        observePhysicalInteraction(
+        observeAcquisitionInteraction(
           interaction,
           reentry === `abort-self` ? `abort-only` : `retire`,
         )
@@ -1461,6 +1495,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
+      const uncaught = captureMicrotaskErrors()
       let allowRelease = outcome === `return`
       let runReentry = () => {}
 
@@ -1510,12 +1545,17 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       } catch (error) {
         thrown = error
       }
-      observePhysicalInteraction(`active:release`, `retire`)
+      observeAcquisitionInteraction(`active:release`, `retire`)
       if (reentry === `unsubscribe`) {
-        observePhysicalInteraction(`active:unsubscribe`, `retire`)
+        observeAcquisitionInteraction(`active:unsubscribe`, `retire`)
       }
 
-      expect(thrown).toBe(outcome === `throw` ? releaseFailure : undefined)
+      // The release law: the caller never sees the adapter's release error.
+      expect(thrown).toBe(undefined)
+      await Promise.resolve()
+      expect(uncaught.errors).toEqual(
+        outcome === `throw` ? [releaseFailure] : [],
+      )
       expect(oldTargetLoad.signal?.aborted).toBe(true)
       expect(
         unloads.filter((options) => options === oldTargetLoad),
@@ -1523,14 +1563,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(unloads.filter((options) => options === peerLoad)).toHaveLength(
         Number(reentry === `release-peer` || reentry === `unsubscribe`),
       )
-      expect(errors).toEqual(
-        outcome === `throw` && reentry !== `unsubscribe`
-          ? [releaseFailure]
-          : [],
-      )
-      expect(subscription.lastError).toBe(
-        outcome === `throw` ? releaseFailure : undefined,
-      )
+      // A release error is not a load error.
+      expect(errors).toEqual([])
+      expect(subscription.lastError).toBe(undefined)
 
       allowRelease = true
       subscription.unsubscribe()
@@ -1545,12 +1580,18 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       ).toHaveLength(Number(reentry === `reacquire-self`))
       expect(unloads.filter((options) => options === peerLoad)).toHaveLength(1)
       if (outcome === `throw` && reentry === `unsubscribe`) {
-        observePhysicalInteraction(
+        observeAcquisitionInteraction(
           `failed-release:unsubscribe`,
           `no-repeat-on-unsubscribe`,
         )
       }
       await collection.cleanup()
+      await Promise.resolve()
+      // Reported once: neither teardown repeats the attempted release.
+      expect(uncaught.errors).toEqual(
+        outcome === `throw` ? [releaseFailure] : [],
+      )
+      uncaught.restore()
     },
   )
 
@@ -2178,7 +2219,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot()
       reach(`eager:request`)
       subscription.unsubscribe()
-      observePhysicalInteraction(`none:unsubscribe`, `no-acquisition`)
+      observeAcquisitionInteraction(`none:unsubscribe`, `no-acquisition`)
 
       expect(loads).toBe(0)
       expect(unloads).toBe(0)
@@ -2215,7 +2256,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     subscription.requestSnapshot({ where })
     subscription.releaseSnapshot(where)
-    observePhysicalInteraction(`none:release`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:release`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
@@ -2260,7 +2301,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     truncate()
     commit()
     await flushPromises()
-    observePhysicalInteraction(`none:truncate`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:truncate`, `no-acquisition`)
 
     expect.soft(loads).toEqual([])
     expect.soft(unloads).toEqual([])
@@ -2305,7 +2346,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
       reach(`on-demand:request`)
       subscription.unsubscribe()
-      observePhysicalInteraction(`none:unsubscribe`, `no-acquisition`)
+      observeAcquisitionInteraction(`none:unsubscribe`, `no-acquisition`)
 
       expect(loads).toBe(0)
       expect(unloads).toBe(0)
@@ -2349,7 +2390,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
     await flushPromises()
     subscription.releaseSnapshot(where)
-    observePhysicalInteraction(`none:release`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:release`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
@@ -2447,7 +2488,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     subscription.requestSnapshot({ where, signal: controller.signal })
     controller.abort()
     await flushPromises()
-    observePhysicalInteraction(`none:abort`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:abort`, `no-acquisition`)
 
     expect(loads).toEqual([])
     expect(unloads).toEqual([])
@@ -2485,7 +2526,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const acquisition = loads[0]!
     controller.abort()
     await flushPromises()
-    observePhysicalInteraction(`active:abort`, `abort-only`)
+    observeAcquisitionInteraction(`active:abort`, `abort-only`)
 
     expect(loads).toEqual([acquisition])
     expect(acquisition.signal?.aborted).toBe(true)
@@ -2554,6 +2595,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  // Demand created while acquisition is deferred stays logical until an
+  // explicit resumption. That resumption also releases any render start gate;
+  // retirement before it returns no acquisition lease. The phase named
+  // `deferred` here is deferred acquisition, not an already resumed owner
+  // whose provider work is still blocked by an unrelated render.
   acquisitionCase(
     [`deferred:request`, `deferred:resume`],
     `owns deferred-start acquisition only when it reaches the adapter`,
@@ -2581,6 +2627,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(collection._deferSyncStart()).toBe(true)
         const subscription = collection.subscribeChanges(() => {}, {
           includeInitialState: false,
+          deferAcquisition: true,
         })
         subscription.requestSnapshot({ where })
         reach(`deferred:request`)
@@ -2589,7 +2636,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         if (action === `release-before-resume`) {
           subscription.releaseSnapshot(where)
         }
-        collection._resumeSyncStart()
+        subscription.resumeDeferredAcquisition()
         await flushPromises()
         if (action === `resume`) reach(`deferred:resume`)
 
@@ -2626,6 +2673,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
       subscription.requestSnapshot({
         where,
@@ -2635,10 +2683,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (action === `cleanup`) await collection.cleanup()
       else if (action === `release`) subscription.releaseSnapshot(where)
       else if (action === `unsubscribe`) subscription.unsubscribe()
-      else collection._resumeSyncStart()
+      else subscription.resumeDeferredAcquisition()
       await flushPromises()
       if (action === `cleanup`) {
-        observePhysicalInteraction(`none:cleanup`, `no-acquisition`)
+        observeAcquisitionInteraction(`none:cleanup`, `no-acquisition`)
       }
 
       expect(loads).toBe(action === `resume` ? 1 : 0)
@@ -3374,6 +3422,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
       const removeReadyListener = collection.on(`status:${phase}`, () => {
         if (!cancelOnEntry) return
@@ -3389,7 +3438,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       try {
         cancelOnEntry = true
-        collection._resumeSyncStart()
+        subscription.resumeDeferredAcquisition()
         await flushPromises()
 
         expect(collection.status).toBe(
@@ -3401,6 +3450,197 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         await expect(observed[0]).rejects.toMatchObject({ name: `AbortError` })
       } finally {
         removeReadyListener()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // The grammar's independent judgment treats cleanup as retiring this start,
+  // not permission to retry it. This driver crosses no render gate, a held
+  // gate with no request, and a held requested start with both source modes.
+  // It records the complete public status trace at subscribeChanges return
+  // and cleanup settlement. A later ordinary reader is fresh restart demand.
+  it.each(
+    subscriberStartCleanupHistories.flatMap((history) =>
+      ([`none`, `unrequested`, `requested`] as const).flatMap((gate) =>
+        ([`eager`, `on-demand`] as const).map((syncMode) => ({
+          ...history,
+          gate,
+          syncMode,
+        })),
+      ),
+    ),
+  )(
+    `ordinary admission preserves $cleanupAt cleanup (pending=$cleanupPending, $gate start, $syncMode)`,
+    async (history) => {
+      const expected = modelSubscriberStartCleanup(history)
+      const pendingCleanup = createDeferred<void>()
+      let starts = 0
+      let cleanups = 0
+      let cleanupRequested = false
+      let cleanup: Promise<void> | undefined
+      const statuses: Array<string> = []
+      const collection = createCollection({
+        id: `ordinary-admission-cleanup`,
+        startSync: false,
+        syncMode: history.syncMode,
+        getKey: (row: { id: string }) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return {
+              loadSubset: () => true,
+              cleanup: () => {
+                cleanups++
+                return history.cleanupPending
+                  ? pendingCleanup.promise
+                  : undefined
+              },
+            }
+          },
+        },
+      })
+      if (history.gate !== `none`) {
+        expect(collection._deferSyncStart()).toBe(true)
+        if (history.gate === `requested`) collection.startSyncImmediate()
+      }
+      const removeStatusListener = collection.on(
+        `status:change`,
+        ({ status }) => {
+          statuses.push(status)
+          if (!cleanupRequested && status === history.cleanupAt) {
+            cleanupRequested = true
+            cleanup = collection.cleanup()
+          }
+        },
+      )
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let peer: ReturnType<typeof collection.subscribeChanges> | undefined
+      try {
+        subscription = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        expect(starts, `adapter entries at admission return`).toBe(
+          expected.starts,
+        )
+        expect(cleanups).toBe(expected.cleanups)
+        expect(collection.status).toBe(expected.statusOnReturn)
+        expect(statuses).toEqual(expected.statusesOnReturn)
+
+        pendingCleanup.resolve()
+        await cleanup
+        expect(starts, `cleanup settlement must not restart`).toBe(
+          expected.starts,
+        )
+        expect(collection.status).toBe(expected.statusAfterCleanup)
+        expect(statuses).toEqual(expected.statusesAfterCleanup)
+
+        removeStatusListener()
+        peer = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        expect(starts, `later demand may restart a retired run`).toBe(
+          expected.starts + (history.cleanupAt === `none` ? 0 : 1),
+        )
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        removeStatusListener()
+        pendingCleanup.resolve()
+        await cleanup
+        peer?.unsubscribe()
+        subscription?.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // The callback can release this owner before resumption commits, or from
+  // its acquiring notification. Both cuts must leave balanced public counts
+  // and no later acquisition. The no-retirement neighbor must acquire normally.
+  it.each(
+    subscriberResumeRetirementHistories.flatMap((history) =>
+      ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+        [false, true].map((renderGate) => ({
+          ...history,
+          syncMode,
+          renderGate,
+        })),
+      ),
+    ),
+  )(
+    `balances resume at $retireAt (cleanup=$cleanup, $syncMode, gate=$renderGate)`,
+    async (history) => {
+      const expected = modelSubscriberResumeRetirement(history)
+      let starts = 0
+      let loads = 0
+      const counts: Array<number> = []
+      const collection = createCollection<{ id: string }>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        syncMode: history.syncMode,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                return true
+              },
+            }
+          },
+        },
+      })
+      if (history.renderGate) collection._deferSyncStart()
+      const subscription = collection.subscribeChanges(() => {}, {
+        deferAcquisition: true,
+        includeInitialState: true,
+      })
+      let cleanup: Promise<void> | undefined
+      let retired = false
+      const retire = () => {
+        if (retired) return
+        retired = true
+        subscription.unsubscribe()
+        if (history.cleanup) cleanup = collection.cleanup()
+      }
+      const offStatus = collection.on(`status:change`, ({ status }) => {
+        if (status === history.retireAt) retire()
+      })
+      const offCounts = collection.on(
+        `subscribers:change`,
+        ({ subscriberCount }) => {
+          counts.push(subscriberCount)
+          if (history.retireAt === `subscribers` && subscriberCount === 1)
+            retire()
+        },
+      )
+      try {
+        subscription.resumeDeferredAcquisition()
+        expect(starts).toBe(expected.starts)
+        expect(collection.subscriberCount).toBe(expected.acquiring)
+        expect(counts).toEqual(expected.counts)
+        expect(collection._hasSubscriberOrPreload()).toBe(
+          expected.subscriberOrPreload,
+        )
+        await cleanup
+        await flushPromises()
+        expect(collection.subscriberCount).toBe(expected.acquiring)
+        expect(loads).toBe(
+          history.syncMode === `on-demand` && history.retireAt === `none`
+            ? 1
+            : 0,
+        )
+        offStatus()
+        offCounts()
+        subscription.unsubscribe()
+        expect(collection.subscriberCount).toBe(0)
+      } finally {
+        offStatus()
+        offCounts()
         subscription.unsubscribe()
         await collection.cleanup()
       }
@@ -3462,6 +3702,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`retires failed acquisition release with its sync run cleanup`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)
+    const uncaught = captureMicrotaskErrors()
     let unloads = 0
     let sourceCleanups = 0
     const collection = createOnDemandCollection<{ id: string }>({
@@ -3486,7 +3727,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
     subscription.requestSnapshot({ where })
-    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+    expect(() => subscription.releaseSnapshot(where)).not.toThrow()
+    await Promise.resolve()
+    expect(uncaught.errors).toEqual([releaseFailure])
 
     await collection.cleanup()
     expect(unloads).toBe(1)
@@ -3496,8 +3739,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
     expect(unloads).toBe(1)
     expect(sourceCleanups).toBe(1)
-    observePhysicalInteraction(`failed-release:cleanup`, `no-repeat-on-cleanup`)
+    observeAcquisitionInteraction(
+      `failed-release:cleanup`,
+      `no-repeat-on-cleanup`,
+    )
     subscription.unsubscribe()
+    await Promise.resolve()
+    expect(uncaught.errors).toEqual([releaseFailure])
+    uncaught.restore()
   })
 
   it.each(
@@ -3513,6 +3762,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
+      const uncaught = captureMicrotaskErrors()
       let releaseOwner = () => {}
       let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
       const collection = createCollection<{ id: string }, string>({
@@ -3558,8 +3808,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(unloads[0]).toBe(loads[0])
         expect(loads[0]!.signal!.aborted).toBe(true)
         expect(subscription.status).toBe(`ready`)
-        expect(errors).toHaveLength(outcome === `throw` ? 1 : 0)
-        if (outcome === `throw`) expect(errors[0]).toBe(failure)
+        // The release error is reported uncaught, not as a load error.
+        expect(errors).toEqual([])
+        expect(uncaught.errors).toEqual(outcome === `throw` ? [failure] : [])
 
         releaseOwner()
         expect(unloads).toHaveLength(1)
@@ -3567,7 +3818,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(unloads).toHaveLength(1)
         for (const options of unloads) expect(options).toBe(loads[0])
         expect(loads).toHaveLength(1)
+        await Promise.resolve()
+        expect(uncaught.errors).toEqual(outcome === `throw` ? [failure] : [])
       } finally {
+        uncaught.restore()
         subscription.unsubscribe()
         await collection.cleanup()
       }
@@ -3587,6 +3841,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
       const nestedFailures: Array<unknown> = []
+      const uncaught = captureMicrotaskErrors()
       let releaseOwner = () => {}
       const collection = createOnDemandCollection<{ id: string }>({
         id: `release-reentry-${reentry}-${failures}`,
@@ -3631,11 +3886,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         } catch (error) {
           releaseError = error
         }
-        expect(releaseError).toBe(failure)
-        // Both callback paths see a retired acquisition, including after throw.
+        expect(releaseError).toBe(undefined)
+        // Adapter reentry sees a retired acquisition, including after throw.
+        // A release error reaches no error listener, so that listener cannot
+        // reenter teardown.
         expect(unloads).toHaveLength(1)
-        expect(collection.subscriberCount).toBe(0)
-        if (reentry === `error-listener`) expect(errors[0]).toBe(failure)
+        // Only the adapter path reentered and unsubscribed.
+        expect(collection.subscriberCount).toBe(reentry === `adapter` ? 0 : 1)
+        expect(errors).toEqual([])
         expect(nestedFailures).toEqual([])
         expect(() => subscription.unsubscribe()).not.toThrow()
         expect(unloads).toHaveLength(1)
@@ -3643,7 +3901,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(unloads).toHaveLength(1)
         expect(loads).toHaveLength(1)
         for (const options of unloads) expect(options).toBe(loads[0])
+        await Promise.resolve()
+        // One attempt, one report, whatever the adapter would throw later.
+        expect(uncaught.errors).toEqual([failure])
       } finally {
+        uncaught.restore()
         await collection.cleanup()
         subscription.unsubscribe()
       }
@@ -3653,6 +3915,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`keeps failed releases out of truncate replay`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)
+    const uncaught = captureMicrotaskErrors()
     let unloads = 0
     let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
     const collection = createCollection<{ id: string }, string>({
@@ -3677,7 +3940,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
     subscription.requestSnapshot({ where })
-    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+    expect(() => subscription.releaseSnapshot(where)).not.toThrow()
 
     operations.begin()
     operations.truncate()
@@ -3687,11 +3950,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     subscription.unsubscribe()
     expect(unloads).toBe(1)
-    observePhysicalInteraction(
+    observeAcquisitionInteraction(
       `failed-release:truncate`,
       `no-repeat-on-truncate`,
     )
     await collection.cleanup()
+    await Promise.resolve()
+    expect(uncaught.errors).toEqual([releaseFailure])
+    uncaught.restore()
   })
 
   it(`does not repeat failed cleanup through a replacement sync run`, async () => {
@@ -3699,6 +3965,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let nextSyncRunGeneration = 0
     const unloadSyncRunGenerations: Array<number> = []
     const releaseFailure = new Error(`old sync run release failed`)
+    const uncaught = captureMicrotaskErrors()
     const collection = createOnDemandCollection<{ id: string }>({
       id: `cleanup-debt-sync-run`,
       sync: {
@@ -3719,7 +3986,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
     subscription.requestSnapshot({ where })
-    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+    expect(() => subscription.releaseSnapshot(where)).not.toThrow()
 
     await collection.cleanup()
     collection.startSyncImmediate()
@@ -3728,6 +3995,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     expect(unloadSyncRunGenerations).toEqual([0])
     await collection.cleanup()
+    expect(uncaught.errors).toEqual([releaseFailure])
+    uncaught.restore()
   })
 
   it.each(restartScenarios)(
@@ -3811,7 +4080,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       await collection.cleanup()
       expect(sourceCleanups).toEqual([0])
-      observePhysicalInteraction(`active:cleanup`, `retire`)
+      observeAcquisitionInteraction(`active:cleanup`, `retire`)
       collection.startSyncImmediate()
       observeSyncRunBoundary(`restart-installed`)
       await flushPromises()
@@ -4241,7 +4510,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     begin()
     truncate()
     commit()
-    observePhysicalInteraction(`active:truncate`, `retire`)
+    observeAcquisitionInteraction(`active:truncate`, `retire`)
 
     expect(loads).toHaveLength(1)
     expect(subscription.status).toBe(`loadingSubset`)
@@ -4373,4 +4642,161 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
     120_000,
   )
+})
+
+/**
+ * A resumption that transfers ownership before a first-demand notification
+ * fails still retains its logical demand. Cleanup ends acquisition authority;
+ * an explicit replacement sync run supplies the next opportunity to acquire.
+ * This follows cleanup/restart and logical-demand ownership in the glossary.
+ * The notification can run twice only when cleanup cleared its earlier mark.
+ * Without cleanup the first mark occurs before the transfer, so its throw
+ * leaves the subscription deferred. Collection event throws are asynchronous
+ * and therefore cannot skip resumption's next statement.
+ *
+ * These generated histories reach a real synchronous notifyResumed throw,
+ * including while public status stays ready during held cleanup. They check
+ * the transfer at return and acquisition after replacement readiness. They do
+ * not promise recovery from arbitrary programming errors or implicit restart.
+ */
+describe(`resumption notification error and surviving demand`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`acquires retained demand after replacement readiness (${campaign})`, async () => {
+      const reach = createOracleReach(`resume-notification-error`, [
+        `throwing-notification`,
+        `retained-owner`,
+        `held-cleanup`,
+        `replacement-ready`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            pending: fc.boolean(),
+            throws: fc.boolean(),
+            demands: fc.integer({ min: 1, max: 3 }),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const gate = createDeferred<void>()
+            const failure = new Error(`first-demand notification`)
+            let loads = 0
+            const source = createCollection<{ id: string }>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              syncMode: `on-demand`,
+              sync: {
+                sync: ({ markReady }) => {
+                  markReady()
+                  return {
+                    cleanup: () => (history.pending ? gate.promise : undefined),
+                    loadSubset: () => {
+                      loads++
+                      return true
+                    },
+                  }
+                },
+              },
+            })
+            source.startSyncImmediate()
+            const subscription = source.subscribeChanges(() => {}, {
+              deferAcquisition: true,
+            })
+            for (let i = 0; i < history.demands; i++)
+              subscription.requestSnapshot({
+                where: new Func(`eq`, [
+                  new PropRef([`id`]),
+                  new Value(String(i)),
+                ]),
+              })
+            // Drain the initial run's notifications while demand still defers.
+            await flushPromises()
+            expect(loads).toBe(0)
+            let cleanup: Promise<void> | undefined
+            let notifications = 0
+            const off = source._onFirstSubscriberOrPreload(() => {
+              notifications++
+              if (notifications === 1) {
+                cleanup = source.cleanup()
+                if (!history.pending) source.startSyncImmediate()
+              } else if (history.throws) throw failure
+            })
+            try {
+              let result: { threw: boolean; error?: unknown } = { threw: false }
+              try {
+                subscription.resumeDeferredAcquisition()
+              } catch (error) {
+                result = { threw: true, error }
+              }
+              expect(notifications).toBe(2)
+              expect(result.threw).toBe(history.throws)
+              if (history.throws) {
+                expect(result.error).toBe(failure)
+                reach.reach(`throwing-notification`)
+              }
+              expect(subscription.isDeferringAcquisition()).toBe(false)
+              expect(source.subscriberCount).toBe(1)
+              reach.reach(`retained-owner`)
+              if (history.pending) {
+                expect(source.status).toBe(`ready`)
+                reach.reach(`held-cleanup`)
+              }
+              gate.resolve()
+              await cleanup
+              if (history.pending) source.startSyncImmediate()
+              await flushPromises()
+              reach.reach(`replacement-ready`)
+              expect(source.status).toBe(`ready`)
+              expect(loads).toBe(history.demands)
+              expect(subscription.status).toBe(`ready`)
+            } finally {
+              off()
+              subscription.unsubscribe()
+              gate.resolve()
+              await source.cleanup()
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { ...oraclePropertyOptions(60), seed: 2229 }
+          : oraclePropertyOptions(
+              60,
+              `subscription-lifecycle.notification-error`,
+            ),
+      )
+      reach.assertReached()
+      console.info(
+        `resume-notification-error ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+  }
+})
+
+// During ordinary admission, the new owner exists before subscribeChanges
+// returns its handle. Cleanup in the acquiring-count callback must retain that
+// demand even though the subscription has not joined the publication channel.
+// The token judgment is one surviving owner, independent of production's list.
+it(`retains admitted demand during subscriber-change cleanup`, async () => {
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  let cleanup: Promise<void> | undefined
+  let observed: boolean | undefined
+  const off = source.on(`subscribers:change`, ({ subscriberCount }) => {
+    if (subscriberCount !== 1) return
+    cleanup = source.cleanup()
+    observed = source._hasSubscriberOrPreload()
+  })
+  const subscription = source.subscribeChanges(() => {})
+  try {
+    expect(observed).toBe(true)
+    expect(source.subscriberCount).toBe(1)
+    await cleanup
+  } finally {
+    off()
+    subscription.unsubscribe()
+    await source.cleanup()
+  }
 })

@@ -1,0 +1,30 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 1 with 1 worker on 18 cores with 981MB heap and 64MB offheap memory [pid: 95510] (Mac OS X 26.6.2 aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/pr1179-tla/DesignGrammarControl.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/TLC.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Naturals.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Sequences.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module DesignGrammarControl
+Starting... (2026-10-05 22:34:14)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 22:34:14.
+Error: Invariant GenerationIsGrounded is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ reconstructed = FALSE
+/\ phase = "extracted"
+/\ preservationChecked = FALSE
+
+State 2: <PrematureGenerate line 38, col 3 to line 41, col 53 of module DesignGrammarControl>
+/\ reconstructed = FALSE
+/\ phase = "generated"
+/\ preservationChecked = FALSE
+
+4 states generated, 4 distinct states found, 2 states left on queue.
+The depth of the complete state graph search is 2.
+Finished in 00s at (2026-10-05 22:34:14)

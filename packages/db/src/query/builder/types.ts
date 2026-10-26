@@ -17,6 +17,7 @@ import type {
 import type {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
@@ -273,15 +274,14 @@ type SelectValue =
   | ConcatToArrayWrapper // concat(toArray(...)) wrapped subquery
   | CaseWhenWrapper // conditional projection
   | MaterializeWrapper // materialize() wrapped subquery (Array<T> or T | undefined)
-  | QueryBuilder<any> // includes subquery (produces a child Collection)
+  | IncludeWrapper // include() wrapped subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
 // Selection inference accepts both row-root refs (with virtual row fields) and
 // nested object refs (without them).
 type AnyRef<T = any, Nullable extends boolean = false> =
-  | Ref<T, Nullable, true>
-  | Ref<T, Nullable, false>
+  Ref<T, Nullable, true> | Ref<T, Nullable, false>
 export type ScalarSelectValue =
   | BasicExpression
   | Aggregate
@@ -314,10 +314,36 @@ type IsScalarSelectLike<T> = T extends BasicExpression | Aggregate
         ? false
         : true
       : false
+// A select value must not hold a bare subquery: it needs include(), toArray(),
+// or materialize(). The open ref and user-value shapes cannot express this, so
+// both select overloads check it. The check stops at wrappers and expressions,
+// which hold builders of their own, and a few levels deep.
+type ContainsQueryBuilder<
+  T,
+  TDepth extends Array<unknown> = [],
+> = TDepth[`length`] extends 4
+  ? false
+  : IsAny<T> extends true
+    ? false
+    : T extends QueryBuilder<any>
+      ? true
+      : T extends BasicExpression | Aggregate | { readonly __brand: string }
+        ? false
+        : T extends object
+          ? true extends {
+              [K in keyof T]-?: ContainsQueryBuilder<T[K], [...TDepth, 0]>
+            }[keyof T]
+            ? true
+            : false
+          : false
+
+export type WithoutBareSubquery<T> =
+  ContainsQueryBuilder<T> extends true ? never : T
+
 export type NonScalarSelectObject<T> = T extends SelectObject
   ? IsScalarSelectLike<T> extends true
     ? never
-    : T
+    : WithoutBareSubquery<T>
   : never
 
 export type ResultTypeFromSelectValue<TSelectValue> =
@@ -339,7 +365,7 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                       readonly _result?: infer T
                     }
                   ? ResultTypeFromCaseWhen<T>
-                  : TSelectValue extends QueryBuilder<infer TChildContext>
+                  : TSelectValue extends IncludeWrapper<infer TChildContext>
                     ? Collection<GetResult<TChildContext>>
                     : TSelectValue extends AnyRef<infer _T>
                       ? ExtractRef<TSelectValue>
@@ -356,14 +382,11 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                               ? T | null | undefined
                               : T | null
                             : TSelectValue extends
-                                  | AnyRef<infer _T>
-                                  | null
-                                  | undefined
-                              ?
-                                  | ExtractRef<
-                                      Exclude<TSelectValue, null | undefined>
-                                    >
-                                  | Extract<TSelectValue, null | undefined>
+                                  AnyRef<infer _T> | null | undefined
+                              ? | ExtractRef<
+                                    Exclude<TSelectValue, null | undefined>
+                                  >
+                                | Extract<TSelectValue, null | undefined>
                               : TSelectValue extends Aggregate<infer T>
                                 ? T
                                 : TSelectValue extends
@@ -442,8 +465,8 @@ export type ResultTypeFromSelect<TSelectObject> =
                           readonly _result?: infer T
                         }
                       ? ResultTypeFromCaseWhen<T>
-                      : // includes subquery (bare QueryBuilder) — produces a child Collection
-                        TSelectObject[K] extends QueryBuilder<
+                      : // include() subquery — produces a child Collection
+                        TSelectObject[K] extends IncludeWrapper<
                             infer TChildContext
                           >
                         ? Collection<GetResult<TChildContext>>
@@ -457,8 +480,7 @@ export type ResultTypeFromSelect<TSelectObject> =
                               : T
                             : // RefLeaf | undefined (schema-optional field)
                               TSelectObject[K] extends
-                                  | RefLeaf<infer T>
-                                  | undefined
+                                  RefLeaf<infer T> | undefined
                               ? T | undefined
                               : // RefLeaf | null (schema-nullable field)
                                 TSelectObject[K] extends RefLeaf<infer T> | null
@@ -469,20 +491,17 @@ export type ResultTypeFromSelect<TSelectObject> =
                                   : T | null
                                 : // Nullable and/or optional object-type schema field
                                   TSelectObject[K] extends
-                                      | AnyRef<infer _T>
-                                      | null
-                                      | undefined
-                                  ?
-                                      | ExtractRef<
-                                          Exclude<
-                                            TSelectObject[K],
-                                            null | undefined
-                                          >
-                                        >
-                                      | Extract<
+                                      AnyRef<infer _T> | null | undefined
+                                  ? | ExtractRef<
+                                        Exclude<
                                           TSelectObject[K],
                                           null | undefined
                                         >
+                                      >
+                                    | Extract<
+                                        TSelectObject[K],
+                                        null | undefined
+                                      >
                                   : TSelectObject[K] extends Aggregate<infer T>
                                     ? T
                                     : TSelectObject[K] extends
@@ -582,11 +601,7 @@ type ExtractExpressionType<T> =
 
 // Helper type to check if a type needs expression type extraction
 type NeedsExtraction<T> = T extends
-  | PropRef<any>
-  | Value<any>
-  | Func<any>
-  | Aggregate<any>
-  | BasicExpression<any>
+  PropRef<any> | Value<any> | Func<any> | Aggregate<any> | BasicExpression<any>
   ? true
   : false
 
@@ -637,6 +652,17 @@ export type CompareOptions = StringCollationConfig & {
 export type GroupByCallback<TContext extends Context> = (
   refs: RefsForContext<TContext>,
 ) => any
+
+/**
+ * A callback that an operator value receives before the query supplies its
+ * context. Without noImplicitAny, TypeScript skips that inference and the
+ * context is `any`; the callback is then untyped, as other unannotated
+ * callbacks are in that mode.
+ */
+export type OperatorCallback<
+  TContext extends Context,
+  TCallback,
+> = 0 extends 1 & TContext ? (refs: any) => any : TCallback
 
 /**
  * JoinOnCallback - Type for join condition callback functions
@@ -761,8 +787,9 @@ type BranchUnionResultRefs<TContext extends Context> =
 type JoinedRefsForContext<TContext extends Context> =
   TContext[`joinTypes`] extends Record<string, any>
     ? {
-        [K in keyof TContext[`joinTypes`] &
-          keyof TContext[`schema`]]: RefForContextSchemaValue<
+        [
+          K in keyof TContext[`joinTypes`] & keyof TContext[`schema`]
+        ]: RefForContextSchemaValue<
           TContext[`schema`][K],
           IsNullableContextKey<TContext, K>
         >
@@ -770,10 +797,13 @@ type JoinedRefsForContext<TContext extends Context> =
     : object
 
 export type RefsForContext<TContext extends Context> = {
-  [K in Exclude<
-    KeysOfUnion<RefsSchemaForContext<TContext>>,
-    keyof JoinedRefsForContext<TContext> | keyof BranchUnionResultRefs<TContext>
-  >]: RefForContextSchemaValue<
+  [
+    K in Exclude<
+      KeysOfUnion<RefsSchemaForContext<TContext>>,
+      | keyof JoinedRefsForContext<TContext>
+      | keyof BranchUnionResultRefs<TContext>
+    >
+  ]: RefForContextSchemaValue<
     ValueOfUnion<RefsSchemaForContext<TContext>, K>,
     IsNullableContextKey<TContext, K>
   >
@@ -1060,7 +1090,7 @@ export type ApplyJoinOptionalityToMergedSchema<
   // Apply optionality to new schema based on join type
   [K in keyof TNewSchema]: TJoinType extends `left` | `full`
     ? // New table becomes optional for left and full joins
-        TNewSchema[K] | undefined
+      TNewSchema[K] | undefined
     : // New table is required for inner and right joins
       TNewSchema[K]
 }

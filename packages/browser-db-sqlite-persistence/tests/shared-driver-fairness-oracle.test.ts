@@ -14,7 +14,7 @@
  * tail-order variation loses hydrate-before-later-persist histories.
  * The shared fixture holds the first `BEGIN IMMEDIATE` while cold `preload()`
  * calls queue. This file supplies BetterSQLite; the receiving witness in
- * `../e2e/shared-driver-fairness.opfs.spec.ts` uses the same fixture with a
+ * `../e2e/shared-driver-fairness-oracle.opfs.spec.ts` uses the same fixture with a
  * Chromium OPFSCoopSyncVFS worker after release. It checks rows and K=1 cuts.
  * Generated failures record the original and reduced histories with their
  * violated laws and checkpoints; the report says whether shrinking retained
@@ -28,6 +28,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SHARED_DRIVER_FAIRNESS_BOUND,
   createPersistFirstFaultObservation,
+  findSharedDriverFairnessLawViolations,
   findSharedDriverFairnessViolation,
   observeSharedDriverFairness,
 } from './shared-driver-fairness-oracle'
@@ -176,19 +177,6 @@ function createScenario(
   }
 }
 
-function expectedHydratedCollections(scenario: SharedDriverFairnessScenario) {
-  return scenario.work.flatMap((work) =>
-    work.kind === `hydrate`
-      ? [
-          {
-            collectionId: `${scenario.id}-${work.id}`,
-            rows: work.seededRows.map((row) => ({ ...row })),
-          },
-        ]
-      : [],
-  )
-}
-
 async function withNodeScenario(
   scenario: SharedDriverFairnessScenario,
   assertion: (
@@ -232,82 +220,44 @@ async function withNodeScenario(
   if (nodeCleanupFailure !== undefined) throw nodeCleanupFailure
 }
 
+const REACH_LAWS = new Set([
+  `hydrate admission IDs`,
+  `hydrate completion count`,
+  `hydrated public rows`,
+])
+
+// The shared comparison owns every law. This driver turns its first violation
+// into a FairnessOracleFailure that names the law and checkpoint.
+function throwFirstViolation(
+  observation: SharedDriverFairnessObservation,
+  laws: (law: string) => boolean,
+): void {
+  const violation = findSharedDriverFairnessLawViolations(
+    observation,
+    SHARED_DRIVER_FAIRNESS_BOUND,
+  ).find(({ law }) => laws(law))
+  if (!violation) return
+  throw new FairnessOracleFailure(
+    violation.law,
+    violation.checkpoint,
+    new Error(
+      `shared-driver fairness mismatch: expected ${JSON.stringify(violation.expected)}, ` +
+        `got ${JSON.stringify(violation.actual)}; ` +
+        `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+    ),
+  )
+}
+
 function expectObservationReach(
   observation: SharedDriverFairnessObservation,
 ): void {
-  const expectedHydrates = expectedHydratedCollections(observation.scenario)
-  checkAt(`hydrate admission IDs`, `after all preload requests`, () =>
-    expect(observation.admittedHydrateIds).toEqual(
-      expectedHydrates.map(({ collectionId }) => collectionId),
-    ),
-  )
-  checkAt(`hydrate completion count`, `after all preloads`, () =>
-    expect(observation.hydrationCompletions).toHaveLength(
-      expectedHydrates.length,
-    ),
-  )
-  // Actual rows come from the public Collection after preload. The expected
-  // rows above are derived independently from the generated seed history.
-  checkAt(`hydrated public rows`, `after all preloads`, () =>
-    expect(observation.hydratedCollections).toEqual(expectedHydrates),
-  )
+  throwFirstViolation(observation, (law) => REACH_LAWS.has(law))
 }
 
 function expectFairObservation(
   observation: SharedDriverFairnessObservation,
 ): void {
-  expectObservationReach(observation)
-  const expectedPersistIds = observation.scenario.work
-    .filter((work) => work.kind === `persist`)
-    .map((work) => `${observation.scenario.id}-${work.id}`)
-  checkAt(`persist FIFO completion order`, `after all work settled`, () =>
-    expect(
-      observation.logicalCompletionOrder
-        .filter((entry) => entry.startsWith(`persist:`))
-        .map((entry) => entry.slice(`persist:`.length)),
-    ).toEqual(expectedPersistIds),
-  )
-  const violation = findSharedDriverFairnessViolation(
-    observation,
-    SHARED_DRIVER_FAIRNESS_BOUND,
-  )
-  if (violation) {
-    const checkpointIndex = observation.hydrationCompletions.indexOf(
-      violation.checkpoint,
-    )
-    const violatedLaws: Array<string> = []
-    if (violation.checkpoint.collectionId !== violation.expectedCollectionId) {
-      violatedLaws.push(`hydrate FIFO identity`)
-    }
-    if (
-      violation.checkpoint.completedPersistIds.length >
-      violation.expectedMaximumCompletedPersists
-    ) {
-      violatedLaws.push(`K=1 completed-persist bound`)
-    }
-    if (
-      violation.checkpoint.pendingPersistCount <
-      violation.expectedMinimumPendingPersists
-    ) {
-      violatedLaws.push(`K=1 pending-persist backlog`)
-    }
-    if (violation.unexpectedCompletedPersistIds.length > 0) {
-      violatedLaws.push(`completed persist outside permitted prefix`)
-    }
-    throw new FairnessOracleFailure(
-      violatedLaws.join(`; `),
-      `hydrate completion ${checkpointIndex}`,
-      new Error(
-        `shared-driver fairness mismatch at ${violation.checkpoint.collectionId}: ` +
-          `${violation.checkpoint.completedPersistIds.length} persists completed ` +
-          `(maximum ${violation.expectedMaximumCompletedPersists}), ` +
-          `${violation.checkpoint.pendingPersistCount} remained pending ` +
-          `(minimum ${violation.expectedMinimumPendingPersists}); ` +
-          `permitted completed ids: ${JSON.stringify(violation.permittedCompletedPersistIds)}; ` +
-          `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
-      ),
-    )
-  }
+  throwFirstViolation(observation, () => true)
   checkAt(`driver cleanup`, `after observation`, () =>
     expect(observation.cleanupFailures).toEqual([]),
   )
@@ -618,6 +568,34 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
         findSharedDriverFairnessViolation(k2WrongAnswer, 2),
       ).toBeUndefined()
 
+      // A hydrate that preempts the running persist stays under every K=1
+      // ceiling. Only the non-preemptible law rejects it.
+      const firstHydrate = observation.hydrationCompletions[0]!
+      const preemptedWrongAnswer = {
+        ...observation,
+        hydrationCompletions: [
+          {
+            ...firstHydrate,
+            completedPersistIds: [],
+            pendingPersistCount: firstHydrate.pendingPersistCount + 1,
+          },
+          ...observation.hydrationCompletions.slice(1),
+        ],
+      }
+      expect(
+        findSharedDriverFairnessViolation(preemptedWrongAnswer),
+      ).toBeUndefined()
+      expect(
+        findSharedDriverFairnessLawViolations(preemptedWrongAnswer).map(
+          ({ law, checkpoint }) => ({ law, checkpoint }),
+        ),
+      ).toEqual([
+        {
+          law: `non-preemptible running persist`,
+          checkpoint: `hydrate completion 0`,
+        },
+      ])
+
       const swappedPersistOrder = observation.logicalCompletionOrder.map(
         (entry) => {
           if (entry === `persist:${completedPersistIds[1]}`) {
@@ -683,7 +661,108 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
       }
       expect(generatedPropertyExecutions).toBeGreaterThan(executionsBefore)
     },
+    // Each campaign runs 12 SQLite histories; parallel CI adds I/O contention.
+    // The fairness law above measures logical completions, not elapsed time.
+    30_000,
   )
+
+  // An election barrier waits between two queued hydrates while persists are
+  // queued. It waits for the work queued before it (persist-0 and hydrate-0)
+  // and is not logical work, so the K=1 checkpoints and the full interleaving
+  // must equal the same history without it. The scheduler trace shows that it
+  // settled after the hydrate queued before it and before the hydrate queued
+  // after it. An empty hydrate scope used as the barrier is a hydrate
+  // completion for K=1 and lets a second persist through; an empty regular
+  // task takes the persist slot after hydrate-0 and delays persist-1.
+  describe(`election barrier between queued hydrates`, () => {
+    const id = `barrier-between-hydrates`
+    const hydrate = (index: number): SharedDriverFairnessWork => ({
+      kind: `hydrate`,
+      id: `hydrate-${index}`,
+      seededRows: [{ id: `row-${index}`, value: index }],
+    })
+    const persist = (index: number): SharedDriverFairnessWork => ({
+      kind: `persist`,
+      id: `persist-${index}`,
+      mutationsPerPersist: 1,
+    })
+    const withBarrier: SharedDriverFairnessScenario = {
+      id,
+      work: [
+        persist(0),
+        hydrate(0),
+        { kind: `barrier`, id: `barrier-0` },
+        hydrate(1),
+        persist(1),
+        persist(2),
+      ],
+    }
+    const withoutBarrier: SharedDriverFairnessScenario = {
+      id,
+      work: withBarrier.work.filter((work) => work.kind !== `barrier`),
+    }
+
+    it(`keeps the K=1 interleaving and waits only for the hydrate queued before it`, async () => {
+      let baseline: ReadonlyArray<string> | undefined
+      await withNodeScenario(withoutBarrier, (observation) => {
+        expectFairObservation(observation)
+        baseline = observation.logicalCompletionOrder
+      })
+      await withNodeScenario(withBarrier, (observation) => {
+        expectFairObservation(observation)
+        expect(observation.logicalCompletionOrder).toEqual(baseline)
+        const trace = observation.schedulerTrace
+        expect(trace[0]).toBe(`barrier-call:barrier-0@1`)
+        const settled = trace.indexOf(`barrier-settled:barrier-0`)
+        expect(settled).toBeGreaterThan(trace.indexOf(`hydrate-scope-end:1`))
+        expect(settled).toBeLessThan(trace.indexOf(`hydrate-scope-end:2`))
+      })
+    })
+
+    it(`rejects an empty regular task used as the barrier`, async () => {
+      let baseline: ReadonlyArray<string> | undefined
+      await withNodeScenario(withoutBarrier, (observation) => {
+        baseline = observation.logicalCompletionOrder
+      })
+      let observed: ReadonlyArray<string> | undefined
+      let checkerFailure: unknown
+      await withNodeScenario(
+        withBarrier,
+        (observation) => {
+          observed = observation.logicalCompletionOrder
+          try {
+            expectFairObservation(observation)
+          } catch (error) {
+            checkerFailure = error
+          }
+        },
+        { barrierFault: `empty-regular` },
+      )
+      expect({
+        sameInterleaving: JSON.stringify(observed) === JSON.stringify(baseline),
+        checkerFailed: checkerFailure !== undefined,
+      }).not.toEqual({ sameInterleaving: true, checkerFailed: false })
+    })
+
+    it(`rejects an empty hydrate scope used as the barrier`, async () => {
+      let failure: unknown
+      await withNodeScenario(
+        withBarrier,
+        (observation) => {
+          try {
+            expectFairObservation(observation)
+          } catch (error) {
+            failure = error
+          }
+        },
+        { barrierFault: `empty-hydrate` },
+      )
+      expect(failure).toMatchObject({
+        law: `K=1 completed-persist bound; K=1 pending-persist backlog; completed persist outside permitted prefix`,
+        checkpoint: `hydrate completion 1`,
+      })
+    })
+  })
 
   it(`proves tail-order ablation removes a hydrate-before-later-persist history`, () => {
     const sampleOptions = { seed: FIXED_SEED, numRuns: GENERATED_RUNS }

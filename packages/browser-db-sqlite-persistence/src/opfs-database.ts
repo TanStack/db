@@ -1,6 +1,7 @@
 import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
+  SQLiteConnectionClosedError,
 } from '@tanstack/db-sqlite-persistence-core'
 import OPFSWorkerConstructor from './opfs-worker?worker'
 import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
@@ -38,7 +39,7 @@ type BrowserOPFSWorkerLike = Pick<
 
 type PendingWorkerRequest = {
   resolve: (value: unknown) => void
-  reject: (error: Error) => void
+  reject: (reason: unknown) => void
 }
 
 type BrowserOPFSWorkerRequestWithoutId =
@@ -102,7 +103,9 @@ function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
     )
   }
 
-  return new (OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike)()
+  return new (
+    OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike
+  )()
 }
 
 function getOpenAbortError(signal: AbortSignal): Error {
@@ -113,6 +116,19 @@ function getOpenAbortError(signal: AbortSignal): Error {
         `Opening browser OPFS database was aborted`,
         `AbortError`,
       )
+}
+
+async function closeWorkerConnection(
+  closeRequest: Promise<void>,
+  disposeWorker: (reason: unknown) => void,
+): Promise<void> {
+  try {
+    await closeRequest
+  } finally {
+    disposeWorker(
+      new DOMException(`The SQLite connection is closed`, `AbortError`),
+    )
+  }
 }
 
 /**
@@ -156,24 +172,23 @@ export async function openBrowserWASQLiteOPFSDatabase(
   const nextRequestId = createWorkerRequestIdFactory()
   const pendingRequests = new Map<string, PendingWorkerRequest>()
   let disposed = false
+  let closing: Promise<void> | undefined
 
-  const disposeWorker = (): void => {
+  // Every accepted request settles: disposal rejects whatever is still pending.
+  const disposeWorker = (reason: unknown): void => {
     if (disposed) {
       return
     }
+    for (const pendingRequest of pendingRequests.values()) {
+      pendingRequest.reject(reason)
+    }
+    pendingRequests.clear()
     disposed = true
     globalThis.removeEventListener(`pagehide`, onPageHide)
     worker.removeEventListener(`message`, onMessage)
     worker.removeEventListener(`error`, onError)
     worker.removeEventListener(`messageerror`, onMessageError)
     worker.terminate()
-  }
-
-  const rejectAllPendingRequests = (error: Error): void => {
-    for (const pendingRequest of pendingRequests.values()) {
-      pendingRequest.reject(error)
-    }
-    pendingRequests.clear()
   }
 
   const onMessage = (event: Event): void => {
@@ -195,31 +210,28 @@ export async function openBrowserWASQLiteOPFSDatabase(
   }
 
   const onError = (): void => {
-    rejectAllPendingRequests(
+    disposeWorker(
       new PersistenceUnavailableError(`OPFS worker terminated unexpectedly`),
     )
-    disposeWorker()
   }
 
   const onMessageError = (): void => {
-    rejectAllPendingRequests(
+    disposeWorker(
       new PersistenceUnavailableError(
         `OPFS worker message serialization failed`,
       ),
     )
-    disposeWorker()
   }
 
   const onPageHide = (): void => {
     // A document entering the back/forward cache can be frozen before an
     // asynchronous close completes, including while initialization is pending.
-    rejectAllPendingRequests(
+    disposeWorker(
       new DOMException(
         `The page is closing its SQLite connection`,
         `AbortError`,
       ),
     )
-    disposeWorker()
   }
 
   worker.addEventListener(`message`, onMessage)
@@ -230,9 +242,9 @@ export async function openBrowserWASQLiteOPFSDatabase(
   const sendWorkerRequest = <T>(
     request: BrowserOPFSWorkerRequestWithoutId,
   ): Promise<T> => {
-    if (disposed) {
+    if (disposed || closing) {
       return Promise.reject(
-        new InvalidPersistedCollectionConfigError(
+        new SQLiteConnectionClosedError(
           `Browser OPFS worker connection is closed`,
         ),
       )
@@ -266,17 +278,15 @@ export async function openBrowserWASQLiteOPFSDatabase(
   let openTimeout: ReturnType<typeof setTimeout> | undefined
   const onAbort = (): void => {
     if (!signal) return
-    rejectAllPendingRequests(getOpenAbortError(signal))
-    disposeWorker()
+    disposeWorker(getOpenAbortError(signal))
   }
   const onTimeout = (): void => {
-    rejectAllPendingRequests(
+    disposeWorker(
       new DOMException(
         `Opening browser OPFS database timed out after ${timeoutMs} ms`,
         `TimeoutError`,
       ),
     )
-    disposeWorker()
   }
 
   try {
@@ -292,7 +302,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
     }
     await initialization
   } catch (error) {
-    disposeWorker()
+    disposeWorker(error)
     throw error
   } finally {
     if (openTimeout !== undefined) clearTimeout(openTimeout)
@@ -309,25 +319,17 @@ export async function openBrowserWASQLiteOPFSDatabase(
         sql,
         params,
       }),
-    close: async () => {
+    close: () => {
       if (disposed) {
-        return
+        return Promise.resolve()
       }
-
-      let closeError: unknown
-      try {
-        await sendWorkerRequest<void>({
-          type: `close`,
-        })
-      } catch (error) {
-        closeError = error
-      } finally {
-        disposeWorker()
-      }
-
-      if (closeError) {
-        throw closeError
-      }
+      // Concurrent callers share one close request and its outcome. Admission
+      // ends here; work still pending when close settles is aborted.
+      closing ??= closeWorkerConnection(
+        sendWorkerRequest<void>({ type: `close` }),
+        disposeWorker,
+      )
+      return closing
     },
   }
 }

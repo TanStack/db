@@ -130,12 +130,12 @@ describe(`Operators`, () => {
           // Assert only expected keys are affected
           assertOnlyKeysAffected(
             `${joinType} join with multiple batches`,
-            result.messages,
+            result.weightedDeltas,
             expectedKeys,
           )
 
           // Verify that we actually got some results
-          expect(result.messages.length).toBeGreaterThan(0)
+          expect(result.weightedDeltas.length).toBeGreaterThan(0)
         })
       })
     })
@@ -210,7 +210,7 @@ function testJoin(joinType: JoinType) {
       `${joinType} join - initial join with missing rows`,
       result,
       expectedResults[joinType],
-      6, // Max expected messages (generous upper bound)
+      6, // Max expected weighted deltas (generous upper bound)
     )
   })
 
@@ -288,7 +288,7 @@ function testJoin(joinType: JoinType) {
       `${joinType} join - insert left (initial)`,
       initialResult,
       initialExpectedResults[joinType],
-      4, // Max expected messages for initial join
+      4, // Max expected weighted deltas for initial join
     )
 
     // Clear results after initial join
@@ -341,13 +341,13 @@ function testJoin(joinType: JoinType) {
       `${joinType} join - insert left`,
       result,
       expectedResults[joinType],
-      4, // Max expected messages for incremental update
+      4, // Max expected weighted deltas for incremental update
     )
 
-    // Verify only affected keys produced messages
+    // Verify only affected keys produced weighted deltas
     assertOnlyKeysAffected(
       `${joinType} join - insert left`,
-      result.messages,
+      result.weightedDeltas,
       [2], // Only key 2 should be affected
     )
   })

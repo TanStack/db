@@ -1,4 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
@@ -10,6 +11,7 @@ import {
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { captureCreatedTransactions } from './utils'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
@@ -20,9 +22,9 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  *
  * The public change-message contract and issue #1901 require a consumer that
  * applies every delivered insert, update, and delete to agree with the
- * Collection after the corresponding optimistic transactions persist. Each
- * message must also be valid for that consumer's state: an insert names an
- * absent key, and an update or delete names a present one.
+ * Collection after the corresponding write settles. Each message must also be
+ * valid for that consumer's state: an insert names an absent key, and an
+ * update or delete names a present one.
  *
  * A plain Map is the independent reference model. The history grammar inserts
  * only while a key is absent and updates or deletes only while it is present.
@@ -31,21 +33,28 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * presence state. Fixed-seed and seedless campaigns add histories of up to
  * twenty actions across four keys. The production driver applies each history
  * through a local-only Collection, either in one same-turn batch or
- * sequentially. After optimistic-transaction persistence, the public rows
- * and a change-message mirror must equal the reference rows. An eager-index
- * lane additionally builds an index before the history and compares both its
- * equality buckets after each settled prefix and each synchronous operation
- * in the batched lane, plus fresh indexed live queries at the final checkpoint
- * against the same Map model. The indexed field stays
- * stable when a key is reused. Sequential histories check every settled prefix.
- * Every delivered batch records
- * the public rows visible during its callback and the mirror after applying
- * that batch.
+ * sequentially. After all batched writes settle, or after each sequential
+ * write settles, public rows and a change-message mirror must equal the
+ * reference rows. An eager-index lane also builds an index before the history
+ * and compares both equality buckets after each settled prefix in sequential
+ * histories. In batched histories it compares them after each synchronous
+ * operation before settlement, then once after all writes settle. At the
+ * final checkpoint, fresh indexed live queries are compared with the same Map
+ * model. The indexed field stays stable when a key is reused. Every delivered
+ * batch records the public rows visible during its callback and the mirror
+ * after applying it.
  * A maintainer decision permits either order for different keys in one
  * callback. Changes to the same key retain their causal order. A deferred
  * sync history checks this by comparing one ordered trace per key, including
  * repeated changes and complete row values, while leaving cross-key
  * interleaving unconstrained.
+ *
+ * About one generated history in four meets a second subscriber, registered
+ * after the mirror, that throws while one operation publishes. A local-only
+ * direct write stores its rows as it publishes, so the call rethrows, its
+ * transaction is already completed, and the rows and mirror still follow the
+ * model. Whether a throwing subscriber may stop a later subscriber of the same
+ * publication is not decided here; the throwing subscriber is always last.
  *
  * This partial oracle does not cover failed persistence, sync-transaction
  * cancellation, general callback batch shape, callback-time index agreement, or
@@ -84,6 +93,8 @@ type GeneratedHistory = {
   initialKeys: ReadonlyArray<Key>
   sequence: ReadonlyArray<Op>
   mode: `batched` | `sequential`
+  /** The operation whose publication meets a throwing subscriber. */
+  throwOn?: number
 }
 
 type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
@@ -359,6 +370,7 @@ async function runHistory(
   mode: `batched` | `sequential`,
   id: string,
   indexType?: IndexType,
+  throwOn?: number,
 ): Promise<void> {
   const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
     ([, row]) => row,
@@ -436,9 +448,46 @@ async function runHistory(
         ? collection.subscribeChanges(onChanges, { includeInitialState: false })
         : collection.subscribeChanges(onChanges)
 
+    // A second subscriber, after the mirror, throws while one operation
+    // publishes. A local-only direct write stores its rows as it publishes
+    // them, so the throw cannot undo the write: the call rethrows, and its
+    // transaction still settles. The rows and the mirror follow the model.
+    const injected = new Error(`subscriber failed`)
+    let armed = false
+    const throwing =
+      throwOn === undefined
+        ? undefined
+        : collection.subscribeChanges(
+            () => {
+              if (armed) throw injected
+            },
+            { includeInitialState: true },
+          )
+    const { created, restore: restoreCreate } =
+      captureCreatedTransactions(collection)
+    const applyAt = (op: Op, operationIndex: number) => {
+      if (operationIndex !== throwOn) return applyOp(collection, op)
+      armed = true
+      const before = created.length
+      try {
+        applyOp(collection, op)
+      } catch (error) {
+        expect(error, `operation ${operationIndex} rethrows`).toBe(injected)
+        expect(created.length, `one transaction`).toBe(before + 1)
+        expect(
+          created[before]!.state,
+          `operation ${operationIndex} settles`,
+        ).toBe(`completed`)
+        return created[before]!
+      } finally {
+        armed = false
+      }
+      throw new Error(`operation ${operationIndex} did not meet the throw`)
+    }
+
     if (mode === `batched`) {
       const transactions = sequence.map((op, operationIndex) => {
-        const transaction = applyOp(collection, op)
+        const transaction = applyAt(op, operationIndex)
         if (index) {
           const expected = expectedRowsAfter(
             initialKeys,
@@ -455,8 +504,8 @@ async function runHistory(
       if (index) assertIndexAgreement(index, expected)
     } else {
       const settled: Array<Op> = []
-      for (const op of sequence) {
-        await settle(applyOp(collection, op))
+      for (const [operationIndex, op] of sequence.entries()) {
+        await settle(applyAt(op, operationIndex))
         settled.push(op)
         const expected = expectedRowsAfter(initialKeys, settled)
         assertFinalAgreement(collection, mirror, expected)
@@ -473,6 +522,8 @@ async function runHistory(
     for (const publication of publications) {
       expect(publication.mirrorRows).toEqual(publication.publicRows)
     }
+    throwing?.unsubscribe()
+    restoreCreate()
     expect(protocolViolations, `change-message protocol`).toEqual([])
   } catch (error) {
     primaryFailure = error
@@ -509,16 +560,102 @@ async function verifyGeneratedHistory({
   initialKeys,
   sequence,
   mode,
+  throwOn,
 }: GeneratedHistory): Promise<void> {
   await runHistory(
     sequence,
     initialKeys,
     mode,
     `history-oracle-generated-${initialKeys.join(``)}-${mode}-${describeSequence(sequence)}`,
+    undefined,
+    throwOn === undefined ? undefined : throwOn % sequence.length,
   )
 }
 
 describe(`change-event history oracle`, () => {
+  // Published #1519 keeps equivalent Duration forms distinct for query `eq`.
+  // Under #1901's change-message reconstruction law, a source replacement
+  // that changes the Duration's intrinsic fields must reach the consumer's
+  // mirror as well as the public row. This two-step history inserts one second,
+  // then replaces it with 1000 milliseconds. The reference Map applies that
+  // valid write despite the shared display text; at the update commit, both
+  // public observations must reflect the second value.
+  // This witness covers ordinary same-realm Durations, not altered objects or
+  // a requirement to suppress events for a separately allocated equal copy.
+  it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
+    interface DurationRow extends Record<string, unknown> {
+      id: number
+      duration: Temporal.Duration
+    }
+    let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
+    const collection = createCollection<DurationRow, number>({
+      id: `duration-field-change-history`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          sync = actions
+          actions.markReady()
+        },
+      },
+    })
+
+    await runWithCleanup(
+      async () => {
+        await collection.stateWhenReady()
+        const first = {
+          id: 1,
+          duration: Temporal.Duration.from({ seconds: 1 }),
+        }
+        const second = {
+          id: 1,
+          duration: Temporal.Duration.from({ milliseconds: 1000 }),
+        }
+        expect(first.duration.toString()).toBe(second.duration.toString())
+        sync.begin()
+        sync.write({ type: `insert`, value: first })
+        expect(sync.commit()).toBe(true)
+
+        // The model applies each valid source write to a plain keyed Map.
+        // A subscriber maintains an independent mirror from public messages.
+        const expected = new Map<number, DurationRow>([[1, first]])
+        const mirror = new Map(expected)
+        const received: Array<ChangeMessage<DurationRow, number>> = []
+        const subscription = collection.subscribeChanges(
+          (changes) => {
+            received.push(...changes)
+            for (const change of changes) {
+              if (change.type === `delete`) mirror.delete(change.key)
+              else mirror.set(change.key, change.value)
+            }
+          },
+          { includeInitialState: false },
+        )
+        try {
+          expected.set(1, second)
+          sync.begin()
+          sync.write({ type: `update`, value: second })
+          expect(sync.commit()).toBe(true)
+
+          const expectedFields = [0, 1000]
+          const fields = (row: DurationRow | undefined) => [
+            row?.duration.seconds,
+            row?.duration.milliseconds,
+          ]
+          expect(fields(expected.get(1))).toEqual(expectedFields)
+          expect(fields(collection.state.get(1))).toEqual(expectedFields)
+          expect(received.map((message) => message.type)).toEqual([`update`])
+          expect(fields(received[0]?.previousValue)).toEqual([1, 0])
+          expect(fields(received[0]?.value)).toEqual(expectedFields)
+          expect(fields(mirror.get(1))).toEqual(expectedFields)
+        } finally {
+          subscription.unsubscribe()
+        }
+      },
+      () => collection.cleanup(),
+    )
+  })
+
   it(`preserves each key's causal messages within a deferred callback`, async () => {
     const rounds: ReadonlyArray<ReadonlyArray<Op>> = [
       [
@@ -557,7 +694,7 @@ describe(`change-event history oracle`, () => {
       async () => {
         await collection.stateWhenReady()
         for (const round of rounds) {
-          sync.begin({ immediate: true })
+          sync.begin()
           for (const op of round) {
             if (op.kind === `delete`) {
               sync.write({ type: `delete`, key: op.key })
@@ -660,10 +797,13 @@ describe(`change-event history oracle`, () => {
         { minLength: 1, maxLength: 20 },
       ),
       mode: fc.constantFrom(`batched` as const, `sequential` as const),
+      // About two histories in three arm a throwing subscriber; about one in
+      // four reaches the operation it throws on.
+      throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
     })
-    .map(({ initialKeys, steps, mode }) => {
+    .map(({ initialKeys, steps, mode, throwOn }) => {
       const sequence = opsFromPresence(initialKeys, steps, 1)
-      return { initialKeys, sequence, mode }
+      return { initialKeys, sequence, mode, throwOn }
     })
 
   // The fixed prefix forces reused keys through an already-built index.

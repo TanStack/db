@@ -3,7 +3,7 @@ id: InvalidSyncPersistenceCapabilityError
 title: InvalidSyncPersistenceCapabilityError
 ---
 
-Defined in: [packages/db/src/errors.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L78)
+Defined in: [packages/db/src/errors.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L82)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:78](https://github.com/TanStack/db/blob/m
 new InvalidSyncPersistenceCapabilityError(reason): InvalidSyncPersistenceCapabilityError;
 ```
 
-Defined in: [packages/db/src/errors.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L79)
+Defined in: [packages/db/src/errors.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L83)
 
 #### Parameters
 

@@ -4,7 +4,9 @@
  * starts one OPFS tab, then opens a follower on the same database and requests
  * one ID through a filtered live-query Collection. The independent expected
  * result is exactly that ID and its fixture label. After follower preload, we
- * check the public row, the remote route, and the absence of clone failures.
+ * check the public row, the remote route to the claimed physical storage ID,
+ * and the absence of clone failures. The claim is observed at coordinator
+ * registration, rather than guessed from the storage naming scheme.
  * The finite warning window catches the reported 50 ms retry flood, not
  * arbitrary future failures.
  */
@@ -20,6 +22,48 @@ async function observe(page: Page): Promise<RemoteSubsetObservation> {
   )
   return page.evaluate(() => window.__remoteSubsetProbe!.observe())
 }
+
+/**
+ * A follower's load settles only after the leader's rows show in the follower
+ * (ARCHITECTURE.md law 7). Here the follower requests an ID that the leader has
+ * not loaded, so the follower's rows can arrive only through the leader's
+ * committed broadcast. The check reads the rows at the follower live query's
+ * first-ready transition.
+ */
+test(`a follower is first ready with rows the leader fetched for it`, async ({
+  context,
+}) => {
+  const databaseId = `rs-${crypto.randomUUID()}`
+  const pages: Array<Page> = []
+  try {
+    const leader = await context.newPage()
+    pages.push(leader)
+    await leader.goto(
+      `/e2e/remote-subset-two-tab.opfs.html?databaseId=${databaseId}&itemId=leader-item`,
+    )
+    const first = await observe(leader)
+    if (first.phase === `failed`) throw new Error(first.failure)
+    expect(first.isLeader).toBe(true)
+
+    const follower = await context.newPage()
+    pages.push(follower)
+    await follower.goto(
+      `/e2e/remote-subset-two-tab.opfs.html?databaseId=${databaseId}&itemId=follower-item`,
+    )
+    const second = await observe(follower)
+    if (second.phase === `failed`) throw new Error(second.failure)
+    expect(second.isLeader).toBe(false)
+    expect(second.upstreamLoads).toBe(0)
+    expect(second.rowsAtFirstReady).toEqual([
+      { id: `follower-item`, label: `Item follower-item` },
+    ])
+  } finally {
+    for (const page of pages.reverse()) {
+      await page.evaluate(() => window.__remoteSubsetProbe?.cleanup())
+      await page.close()
+    }
+  }
+})
 
 test(`two real OPFS tabs transport a filtered subset without a clone retry`, async ({
   context,
@@ -37,6 +81,8 @@ test(`two real OPFS tabs transport a filtered subset without a clone retry`, asy
     await leader.goto(url)
     const first = await observe(leader)
     if (first.phase === `failed`) throw new Error(first.failure)
+    expect(first.storageCollectionId).toBeTruthy()
+    expect(first.storageCollectionId).not.toBe(`repro-items`)
     expect(first.isLeader).toBe(true)
     expect(first.upstreamLoads).toBeGreaterThan(0)
     expect(first.rows).toHaveLength(1)
@@ -56,9 +102,11 @@ test(`two real OPFS tabs transport a filtered subset without a clone retry`, asy
         `${second.failure}; wire post failures: ${JSON.stringify(second.remoteSubsetPostFailures)}`,
       )
     }
+    expect(second.storageCollectionId).toBe(first.storageCollectionId)
     expect(second.isLeader).toBe(false)
     expect(second.upstreamLoads).toBe(0)
     expect(second.ensureRequests).toContainEqual({
+      collectionId: first.storageCollectionId,
       hasWhere: true,
       hasSignal: true,
       hasSubscriptionCallback: true,

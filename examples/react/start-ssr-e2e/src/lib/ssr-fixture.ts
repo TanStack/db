@@ -61,15 +61,14 @@ export const ssrTodoCollection = collectionOptions(ssrTodoCollectionId, () => ({
           const todos =
             typeof window === `undefined` ? serverTodos : browserTodos
 
-          begin({ immediate: true })
+          begin()
           for (const todo of todos) {
             write({
               type: `insert`,
               value: todo,
             })
           }
-          commit()
-          return true
+          return commit()
         },
       }
     },

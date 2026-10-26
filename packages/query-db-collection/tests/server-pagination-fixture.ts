@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/query-core'
 import { BTreeIndex, createCollection } from '@tanstack/db'
 import { queryCollectionOptions } from '../src/index'
-import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
 import { Func, PropRef, Value } from '../../db/src/query/ir'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { BasicExpression } from '../../db/src/query/ir'

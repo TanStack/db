@@ -1,0 +1,15 @@
+Source log: /tmp/pr1179-core-related.log
+SHA-256 of full source: ef9eab848853d4263d896a7bfb2536e269b7d65c2718b5d9900089ecc85646e1
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/db
+
+
+ Test Files  5 passed (5)
+      Tests  129 passed (129)
+Type Errors  no errors
+   Start at  08:05:52
+   Duration  1.35s (transform 469ms, setup 236ms, collect 2.34s, tests 561ms, environment 1.49s, prepare 334ms)

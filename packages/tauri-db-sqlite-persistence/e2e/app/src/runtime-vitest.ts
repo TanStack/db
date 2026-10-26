@@ -118,10 +118,7 @@ function pushSuite(
 
 function registerHook(
   key:
-    | `beforeAllHooks`
-    | `afterAllHooks`
-    | `beforeEachHooks`
-    | `afterEachHooks`,
+    `beforeAllHooks` | `afterAllHooks` | `beforeEachHooks` | `afterEachHooks`,
   callback: AsyncCallback,
 ): void {
   currentSuite()[key].push(callback)

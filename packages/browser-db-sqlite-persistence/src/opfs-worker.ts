@@ -23,12 +23,7 @@ const SQLITE_ROW = 100
 const SQLITE_DONE = 101
 
 type SQLiteCompatibleBinding =
-  | null
-  | string
-  | number
-  | bigint
-  | Uint8Array
-  | Array<number>
+  null | string | number | bigint | Uint8Array | Array<number>
 
 type WorkerOPFSGlobal = {
   navigator?: {
@@ -309,8 +304,21 @@ async function handleWorkerRequest(
   }
 }
 
+// The worker owns one SQLite connection, so it handles one request at a time.
+// A statement waiting for the OPFS access handle yields to later messages;
+// queuing keeps close from running while that statement is unfinalized.
+let previousRequest = Promise.resolve()
 workerGlobal.addEventListener(`message`, (event) => {
-  void handleWorkerRequest(event.data).then((response) => {
-    workerGlobal.postMessage(response)
-  })
+  previousRequest = previousRequest
+    .then(() => handleWorkerRequest(event.data))
+    .then((response) => {
+      workerGlobal.postMessage(response)
+    })
+    // A failed reply must not stall later requests; surface it as an uncaught
+    // worker error, which the connection treats as terminal.
+    .catch((error: unknown) => {
+      queueMicrotask(() => {
+        throw error
+      })
+    })
 })

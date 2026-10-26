@@ -1,7 +1,10 @@
 import { safeRandomUUID } from '@tanstack/db'
+import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   DuplicateRemoteSubsetOwnerError,
   IndeterminateCommitError,
+  InvalidPersistedCollectionConfigError,
+  InvalidPersistenceAdapterError,
   PersistedCollectionDurabilityError,
   RetryableRemoteSubsetAcquisitionError,
   toPersistedCollectionDurabilityError,
@@ -11,6 +14,7 @@ import {
   toTransportedLoadSubsetOptions,
 } from './remote-subset-wire'
 import { unloadRemoteSubsetOwner } from './remote-subset-owner'
+import { eagerStorageTarget, managedStorageTarget } from './persisted'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { IndeterminateCommitRequestType } from './errors'
 import type { TransportedLoadSubsetOptions } from './remote-subset-wire'
@@ -18,6 +22,7 @@ import type { RemoteSubsetOwner } from './remote-subset-owner'
 import type {
   ApplyCommittedTxResponse,
   ApplyLocalMutationsResponse,
+  CommittedTxAnchor,
   EnsureRemoteSubsetRequest,
   EnsureRemoteSubsetResponse,
   HydrationPersistenceAdapter,
@@ -25,10 +30,12 @@ import type {
   PersistedIndexSpec,
   PersistedMutationEnvelope,
   PersistedRowMetadataMutation,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   ProtocolEnvelope,
   PullSinceResponse,
+  ReconcileCommittedTxResponse,
   ReleaseRemoteSubsetRequest,
   ReleaseRemoteSubsetResponse,
   TxCommitted,
@@ -60,12 +67,14 @@ type RPCRequest =
       rpcId: string
       signature: string
       spec: PersistedIndexSpec
+      cacheGenerationClaimId?: string
     }
   | {
       type: `rpc:applyLocalMutations:req`
       rpcId: string
       envelopeId: string
       mutations: Array<PersistedMutationEnvelope>
+      cacheGenerationClaimId?: string
     }
   | {
       type: `rpc:applyCommittedTx:req`
@@ -74,9 +83,16 @@ type RPCRequest =
       tx: PersistedTx
     }
   | {
+      type: `rpc:reconcileCommittedTx:req`
+      rpcId: string
+      tx: PersistedTx
+      anchor: CommittedTxAnchor
+    }
+  | {
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
+      cacheGenerationClaimId?: string
     }
 
 type RPCResponse =
@@ -90,6 +106,7 @@ type RPCResponse =
     }
   | ApplyLocalMutationsResponse
   | ApplyCommittedTxResponse
+  | ReconcileCommittedTxResponse
   | PullSinceResponse
 
 type PendingRPC = {
@@ -109,17 +126,25 @@ type CollectionState = {
   latestRowVersion: number
   subscribers: Set<(message: ProtocolEnvelope<unknown>) => void>
   routeWaiters?: Set<() => void>
+  // Set while this node holds the leader lock. It ends that election's wait
+  // for queued work before the term write.
+  markElectionNeeded: (() => void) | null
 }
 
 // Adapter capabilities used by coordinator-side operations. Resume snapshots
 // belong to the persisted sync wrapper, not the elected writer transport.
 type CoordinatorAdapter = Pick<
   PersistenceAdapter,
-  `loadSubset` | `applyCommittedTx` | `ensureIndex` | `runInRegularScope`
+  | `loadSubset`
+  | `applyCommittedTx`
+  | `reconcileCommittedTx`
+  | `ensureIndex`
+  | `runInRegularScope`
 > & {
   pullSince?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<
     | {
         latestRowVersion: number
@@ -132,11 +157,38 @@ type CoordinatorAdapter = Pick<
         deletedKeys: Array<string | number>
       }
   >
-  getStreamPosition?: (collectionId: string) => Promise<{
+  getStreamPosition?: (
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
+  ) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }>
+  reserveLeadershipTerm?: (
+    target: PersistedStorageTarget,
+    observedTerm: number,
+    ctx?: { cacheGenerationClaimId?: string },
+  ) => Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }>
+}
+
+function requireDurableElection(adapter: CoordinatorAdapter): void {
+  if (typeof adapter.reserveLeadershipTerm !== `function`) {
+    throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
+  }
+  // An election waits for queued work through this barrier.
+  if (
+    adapter.runInRegularScope &&
+    typeof adapter.runInRegularScope.afterQueuedWork !== `function`
+  ) {
+    throw new InvalidPersistenceAdapterError(
+      `runInRegularScope.afterQueuedWork`,
+    )
+  }
 }
 
 type ActiveRemoteSubsetAcquisition = {
@@ -146,6 +198,7 @@ type ActiveRemoteSubsetAcquisition = {
   owner: RemoteSubsetOwner
   options: TransportedLoadSubsetOptions
   load: Promise<void>
+  admitted: Promise<void>
   transferred: boolean
   released: boolean
   terminalRelease: boolean
@@ -230,6 +283,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private readonly coordinatorName: string
   private defaultAdapter: CoordinatorAdapter | null
   private readonly collectionAdapters = new Map<string, CoordinatorAdapter>()
+  private readonly collectionClaimIds = new Map<string, string>()
   private readonly remoteSubsetOwners = new Map<string, RemoteSubsetOwner>()
   private readonly remoteSubsetIds = new Map<
     string,
@@ -282,6 +336,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   }
 
   constructor(options: BroadcastCollectionCoordinatorOptions) {
+    if (options.adapter) requireDurableElection(options.adapter)
     this.dbName = options.dbName
     this.coordinatorName = options.coordinatorName
     this.defaultAdapter = options.adapter ?? null
@@ -300,6 +355,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
    * Called by a host persistence factory to wire the internally-created adapter.
    */
   setAdapter(adapter: CoordinatorAdapter): void {
+    requireDurableElection(adapter)
     this.defaultAdapter = adapter
   }
 
@@ -307,8 +363,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   setAdapterForCollection(
     collectionId: string,
     adapter: CoordinatorAdapter,
+    cacheGenerationClaimId?: string,
   ): void {
+    requireDurableElection(adapter)
     this.collectionAdapters.set(collectionId, adapter)
+    if (cacheGenerationClaimId) {
+      this.collectionClaimIds.set(collectionId, cacheGenerationClaimId)
+    } else {
+      this.collectionClaimIds.delete(collectionId)
+    }
   }
 
   registerRemoteSubsetOwner(
@@ -365,9 +428,16 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   }
 
   async ensureLeadership(collectionId: string): Promise<void> {
+    // Join without replacing a queued Web Lock request, then wait until this
+    // node holds the route. Waiting marks leadership as needed.
     const state = this.ensureCollectionState(collectionId)
-    if (state.isLeader) return
-    await this.acquireLeadership(collectionId, state)
+    await this.waitForLeadershipRoute(
+      collectionId,
+      state,
+      undefined,
+      undefined,
+      true,
+    )
   }
 
   async requestEnsureRemoteSubset(
@@ -491,9 +561,36 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
     try {
       await acquisition.release
+    } catch (error) {
+      this.scheduleRemoteSubsetReleaseRetry(acquisition, options)
+      throw error
     } finally {
       acquisition.release = null
     }
+  }
+
+  private scheduleRemoteSubsetReleaseRetry(
+    acquisition: OutboundRemoteSubsetAcquisition,
+    options: LoadSubsetOptions,
+  ): void {
+    const key = remoteSubsetAcquisitionKey(
+      acquisition.collectionId,
+      acquisition.acquisitionId,
+    )
+    if (
+      this.isDisposed() ||
+      this.outboundRemoteSubsetAcquisitions.get(key) !== acquisition ||
+      acquisition.retryTimer !== null
+    ) {
+      return
+    }
+    acquisition.retryTimer = setTimeout(() => {
+      acquisition.retryTimer = null
+      void this.requestReleaseRemoteSubset(
+        acquisition.collectionId,
+        options,
+      ).catch(() => undefined)
+    }, RPC_RETRY_DELAY_MS)
   }
 
   private async acquireRemoteSubset(
@@ -571,7 +668,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     try {
       await work
       acquired = true
-      this.cancelRemoteSubsetReplayRetry(acquisition)
+      // Release may have failed while this acquisition was in flight. In that
+      // case the shared timer carries release retry debt, not replay work.
+      if (!acquisition.releaseRequested) {
+        this.cancelRemoteSubsetReplayRetry(acquisition)
+      }
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
       const current = this.collections.get(acquisition.collectionId)
@@ -604,14 +705,27 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     spec: PersistedIndexSpec,
     scopedAdapter?: HydrationPersistenceAdapter,
     localEnsureCompleted = false,
+    cacheGenerationClaimId?: string,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
       if (localEnsureCompleted) return
-      await (scopedAdapter ?? this.requireAdapter(collectionId)).ensureIndex(
-        collectionId,
-        signature,
-        spec,
-      )
+      const adapter = scopedAdapter ?? this.requireAdapter(collectionId)
+      if (cacheGenerationClaimId) {
+        await adapter.ensureIndex(
+          managedStorageTarget(collectionId, cacheGenerationClaimId),
+          signature,
+          spec,
+          {
+            cacheGenerationClaimId,
+          },
+        )
+      } else {
+        await adapter.ensureIndex(
+          eagerStorageTarget(collectionId),
+          signature,
+          spec,
+        )
+      }
       return
     }
 
@@ -625,6 +739,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: safeRandomUUID(),
       signature,
       spec,
+      cacheGenerationClaimId,
     })
 
     if (!response.ok) {
@@ -637,6 +752,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   async requestApplyLocalMutations(
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
+    cacheGenerationClaimId?: string,
   ): Promise<ApplyLocalMutationsResponse> {
     const initialRoute = this.waitForInitialRoute(collectionId)
     if (initialRoute) await initialRoute
@@ -646,6 +762,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         rpcId: safeRandomUUID(),
         envelopeId: safeRandomUUID(),
         mutations,
+        cacheGenerationClaimId,
       })
     }
 
@@ -654,6 +771,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: safeRandomUUID(),
       envelopeId: safeRandomUUID(),
       mutations,
+      cacheGenerationClaimId,
     })
   }
 
@@ -677,10 +795,48 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     return this.sendRPC<ApplyCommittedTxResponse>(collectionId, request)
   }
 
+  async reconcileCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<ReconcileCommittedTxResponse> {
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
+    // Each attempt checks the exact txId under the elected writer lock, so a
+    // stale NOT_LEADER reply can follow the replacement route safely.
+    let response: ReconcileCommittedTxResponse | undefined
+    for (let attempt = 0; attempt <= RPC_RETRY_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(RPC_RETRY_DELAY_MS * attempt)
+      const request: Extract<
+        RPCRequest,
+        { type: `rpc:reconcileCommittedTx:req` }
+      > = {
+        type: `rpc:reconcileCommittedTx:req`,
+        rpcId: safeRandomUUID(),
+        tx,
+        anchor,
+      }
+      response = this.isLeader(collectionId)
+        ? await this.handleReconcileCommittedTx(
+            collectionId,
+            request,
+            scopedAdapter,
+          )
+        : await this.sendRPC<ReconcileCommittedTxResponse>(
+            collectionId,
+            request,
+          )
+      if (response.ok || response.code !== `NOT_LEADER`) return response
+    }
+    return response!
+  }
+
   async pullSince(
     collectionId: string,
     fromRowVersion: number,
     scopedAdapter?: HydrationPersistenceAdapter,
+    cacheGenerationClaimId?: string,
   ): Promise<PullSinceResponse> {
     if (this.isLeader(collectionId)) {
       return this.handlePullSince(
@@ -689,6 +845,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           type: `rpc:pullSince:req`,
           rpcId: safeRandomUUID(),
           fromRowVersion,
+          cacheGenerationClaimId,
         },
         scopedAdapter,
       )
@@ -698,6 +855,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       type: `rpc:pullSince:req`,
       rpcId: safeRandomUUID(),
       fromRowVersion,
+      cacheGenerationClaimId,
     })
   }
 
@@ -736,6 +894,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.channel.close()
     this.collections.clear()
     this.collectionAdapters.clear()
+    this.collectionClaimIds.clear()
     for (const collectionId of this.remoteSubsetOwners.keys()) {
       this.releaseInboundRemoteSubsetAcquisitions(collectionId)
     }
@@ -754,6 +913,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     let state = this.collections.get(collectionId)
     if (!state) {
       state = {
+        markElectionNeeded: null,
         participatesInLeadership: false,
         isLeader: false,
         leaderId: null,
@@ -800,20 +960,64 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           if (
             this.isDisposed() ||
             !this.participatesInLeadership(state) ||
-            this.collections.get(collectionId) !== state
+            this.collections.get(collectionId) !== state ||
+            state.lockAbortController !== abortController
           ) {
             return
           }
 
+          // The lock is exclusive, so a route that another node advertised
+          // is gone. A need belongs to this election: one that still waits
+          // for a route now, or one that arrives before the term.
+          state.leaderId = null
+          const needed = new Promise<void>((resolve) => {
+            state.markElectionNeeded = resolve
+          })
+          if (state.routeWaiters?.size) state.markElectionNeeded!()
           try {
-            // Restore stream position from DB before claiming leadership
+            // Reserve an election term durably before advertising this route.
+            // Election bypasses the shared scheduler because a hydrate may be
+            // waiting for its first writer route. The writer Web Lock orders
+            // reservation after any old owner's in-flight durable write.
             const adapter = this.requireAdapter(collectionId)
-            if (adapter.getStreamPosition) {
-              const pos = await adapter.getStreamPosition(collectionId)
-              state.latestTerm = pos.latestTerm
-              state.latestSeq = pos.latestSeq
-              state.latestRowVersion = pos.latestRowVersion
+            const reserveTerm = adapter.reserveLeadershipTerm
+            if (!reserveTerm)
+              throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
+            // Let hydrates already queued on the shared scheduler run before
+            // the durable term write. A leadership need skips the wait,
+            // because a scheduled hydrate may be waiting for this route.
+            await Promise.race([
+              adapter.runInRegularScope?.afterQueuedWork(),
+              needed,
+              new Promise((resolve) => {
+                abortController.signal.addEventListener(`abort`, resolve, {
+                  once: true,
+                })
+              }),
+            ])
+            // Every abort also replaces or clears the controller.
+            if (
+              this.isDisposed() ||
+              !this.participatesInLeadership(state) ||
+              this.collections.get(collectionId) !== state ||
+              state.lockAbortController !== abortController
+            ) {
+              return
             }
+            const pos = await this.withWriterLock(() => {
+              const claimId = this.collectionClaimIds.get(collectionId)
+              return reserveTerm.call(
+                adapter,
+                claimId
+                  ? managedStorageTarget(collectionId, claimId)
+                  : eagerStorageTarget(collectionId),
+                state.latestTerm,
+                { cacheGenerationClaimId: claimId },
+              )
+            })
+            state.latestTerm = pos.latestTerm
+            state.latestSeq = pos.latestSeq
+            state.latestRowVersion = pos.latestRowVersion
 
             if (
               this.isDisposed() ||
@@ -825,7 +1029,6 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
               return
             }
 
-            state.latestTerm++
             state.isLeader = true
             state.leaderId = this.nodeId
             this.notifyRouteWaiters(state)
@@ -850,6 +1053,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             })
           } finally {
             this.releaseInboundRemoteSubsetAcquisitions(collectionId)
+            state.markElectionNeeded = null
             state.isLeader = false
             state.leaderId = null
             if (state.heartbeatTimer) {
@@ -895,14 +1099,6 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       !state.isLeader &&
       state.leaderId === null
     ) {
-      this.channel.postMessage({
-        v: 1,
-        dbName: this.dbName,
-        collectionId,
-        senderId: this.nodeId,
-        ts: Date.now(),
-        payload: { type: `leader:routeRequest` },
-      } satisfies ProtocolEnvelope<{ type: `leader:routeRequest` }>)
       return this.waitForLeadershipRoute(
         collectionId,
         state,
@@ -918,8 +1114,22 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     state: CollectionState,
     signal?: AbortSignal,
     timeoutMs?: number,
+    requireLocalLeadership = false,
   ): Promise<void> {
-    if (state.isLeader || state.leaderId !== null) return Promise.resolve()
+    const routed = () =>
+      state.isLeader || (!requireLocalLeadership && state.leaderId !== null)
+    if (routed()) return Promise.resolve()
+    // A local or remote lock holder may be waiting for this need before it
+    // reserves its term.
+    state.markElectionNeeded?.()
+    this.channel.postMessage({
+      v: 1,
+      dbName: this.dbName,
+      collectionId,
+      senderId: this.nodeId,
+      ts: Date.now(),
+      payload: { type: `leader:routeRequest` },
+    } satisfies ProtocolEnvelope<{ type: `leader:routeRequest` }>)
 
     return new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -944,7 +1154,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           )
           return
         }
-        if (state.isLeader || state.leaderId !== null) {
+        if (routed()) {
           finish()
           resolve()
         }
@@ -1005,6 +1215,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.releaseLeadership(collectionId, state)
     this.collections.delete(collectionId)
     this.collectionAdapters.delete(collectionId)
+    this.collectionClaimIds.delete(collectionId)
     const prefix = `${JSON.stringify([collectionId]).slice(0, -1)},`
     for (const key of this.appliedEnvelopes.keys()) {
       if (key.startsWith(prefix)) this.appliedEnvelopes.delete(key)
@@ -1155,6 +1366,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
 
     const type = (payload as Record<string, unknown>).type as string | undefined
 
+    if (type === `leader:routeRequest` || type?.endsWith(`:req`)) {
+      const state = this.collections.get(envelope.collectionId)
+      state?.markElectionNeeded?.()
+    }
+
     if (type === `leader:routeRequest`) {
       const state = this.collections.get(envelope.collectionId)
       if (state?.isLeader) this.emitHeartbeat(envelope.collectionId, state)
@@ -1175,6 +1391,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         typeof heartbeat.latestRowVersion === `number`
       ) {
         const state = this.getOrCreateCollectionState(envelope.collectionId)
+        // While this node holds the leader lock, no other node leads, so a
+        // heartbeat that arrives is older.
+        if (state.markElectionNeeded) return
         if (heartbeat.term < state.latestTerm) return
         const changedLeader = state.leaderId !== heartbeat.leaderId
         state.leaderId = heartbeat.leaderId
@@ -1231,6 +1450,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     request: RPCRequest,
   ): Promise<T> {
     if (this.isDisposed()) throw new Error(`coordinator disposed`)
+    // A lock holder may still be waiting to reserve its term. Ask for the
+    // route first instead of spending a full RPC timeout on no receiver. If
+    // no route comes, the retries below still run. A known route adds no
+    // tick, so the request is posted in this turn.
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute.catch(() => undefined)
     let lastError: Error | undefined
     let firstTransportCause: unknown
     const mutationRequestType = isMutatingRPCRequest(request)
@@ -1415,6 +1640,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         return this.handleApplyLocalMutations(collectionId, request)
       case `rpc:applyCommittedTx:req`:
         return this.handleApplyCommittedTx(collectionId, request)
+      case `rpc:reconcileCommittedTx:req`:
+        return this.handleReconcileCommittedTx(collectionId, request)
       case `rpc:pullSince:req`:
         return this.handlePullSince(collectionId, request)
     }
@@ -1546,12 +1773,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     acquisition.released = true
     acquisition.release = (async () => {
       try {
-        await acquisition.load
-      } catch {
-        // A returned promise transfers the lease even when initial loading fails.
-      }
-      try {
+        await acquisition.admitted
         if (acquisition.transferred) {
+          // The owner may require unload to settle its load. Invocation of the
+          // owner already transferred this lease; source settlement is not a
+          // prerequisite for giving it the cancellation opportunity.
           await unloadRemoteSubsetOwner(acquisition.owner, acquisition.options)
         }
       } finally {
@@ -1711,6 +1937,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       owner: options.owner,
       options: options.options,
       load: Promise.resolve(),
+      admitted: Promise.resolve(),
       transferred: false,
       released: false,
       terminalRelease: false,
@@ -1718,6 +1945,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
     this.releasedRemoteSubsetAcquisitionTimes.delete(key)
     this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
+    let resolveAdmission!: () => void
+    acquisition.admitted = new Promise<void>((resolve) => {
+      resolveAdmission = resolve
+    })
     let resolveLoad!: () => void
     let rejectLoad!: (error: unknown) => void
     acquisition.load = new Promise<void>((resolve, reject) => {
@@ -1730,6 +1961,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       void Promise.resolve(load).then(resolveLoad, rejectLoad)
     } catch (error) {
       rejectLoad(error)
+    } finally {
+      resolveAdmission()
     }
 
     try {
@@ -1765,11 +1998,26 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: string
       signature: string
       spec: PersistedIndexSpec
+      cacheGenerationClaimId?: string
     },
   ): Promise<RPCResponse> {
-    await this.withScheduledWriterLock(collectionId, (adapter) =>
-      adapter.ensureIndex(collectionId, request.signature, request.spec),
-    )
+    await this.withScheduledWriterLock(collectionId, (adapter) => {
+      if (request.cacheGenerationClaimId) {
+        return adapter.ensureIndex(
+          managedStorageTarget(collectionId, request.cacheGenerationClaimId),
+          request.signature,
+          request.spec,
+          {
+            cacheGenerationClaimId: request.cacheGenerationClaimId,
+          },
+        )
+      }
+      return adapter.ensureIndex(
+        eagerStorageTarget(collectionId),
+        request.signature,
+        request.spec,
+      )
+    })
     return {
       type: `rpc:ensurePersistedIndex:res`,
       rpcId: request.rpcId,
@@ -1784,6 +2032,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: string
       envelopeId: string
       mutations: Array<PersistedMutationEnvelope>
+      cacheGenerationClaimId?: string
     },
   ): Promise<ApplyLocalMutationsResponse> {
     const envelopeKey = appliedEnvelopeKey(collectionId, request.envelopeId)
@@ -1817,6 +2066,14 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     request: Extract<RPCRequest, { type: `rpc:applyLocalMutations:req` }>,
   ): Promise<ApplyLocalMutationsResponse> {
+    if (
+      this.collectionClaimIds.has(collectionId) &&
+      !request.cacheGenerationClaimId
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `A managed local mutation requires a persisted cache claim`,
+      )
+    }
     const state = this.collections.get(collectionId)
     if (!state || !state.isLeader) {
       return {
@@ -1846,6 +2103,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
     const pendingTx = {
       txId: safeRandomUUID(),
+      cacheGenerationClaimId: request.cacheGenerationClaimId,
       mutations: request.mutations.map((m) => ({
         type: m.type,
         key: m.key,
@@ -2056,6 +2314,17 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     )
     this.pruneAppliedEnvelopes()
 
+    this.publishCommittedTx(collectionId, state, tx)
+
+    return response
+  }
+
+  private publishCommittedTx(
+    collectionId: string,
+    state: CollectionState,
+    tx: PersistedTx,
+    forceReload = false,
+  ): void {
     const committedBase = {
       type: `tx:committed` as const,
       term: tx.term,
@@ -2063,26 +2332,28 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       txId: tx.txId,
       latestRowVersion: tx.rowVersion,
     }
-    const committedPayload: TxCommitted = tx.truncate
-      ? {
-          ...committedBase,
-          requiresFullReload: true,
-        }
-      : {
-          ...committedBase,
-          requiresFullReload: false,
-          changedRows: tx.mutations
-            .filter((mutation) => mutation.type !== `delete`)
-            .map((mutation) => ({
-              key: mutation.key,
-              value: mutation.value,
-            })),
-          deletedKeys: tx.mutations
-            .filter((mutation) => mutation.type === `delete`)
-            .map((mutation) => mutation.key),
-          rowMetadataMutations: tx.rowMetadataMutations,
-          collectionMetadataMutations: tx.collectionMetadataMutations,
-        }
+    const committedPayload: TxCommitted =
+      tx.truncate || forceReload
+        ? {
+            ...committedBase,
+            requiresFullReload: true,
+            ...(forceReload ? { reconciliationReload: true as const } : {}),
+          }
+        : {
+            ...committedBase,
+            requiresFullReload: false,
+            changedRows: tx.mutations
+              .filter((mutation) => mutation.type !== `delete`)
+              .map((mutation) => ({
+                key: mutation.key,
+                value: mutation.value,
+              })),
+            deletedKeys: tx.mutations
+              .filter((mutation) => mutation.type === `delete`)
+              .map((mutation) => mutation.key),
+            rowMetadataMutations: tx.rowMetadataMutations,
+            collectionMetadataMutations: tx.collectionMetadataMutations,
+          }
     const committed: ProtocolEnvelope<TxCommitted> = {
       v: 1,
       dbName: this.dbName,
@@ -2095,8 +2366,131 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     for (const subscriber of state.subscribers) {
       subscriber(committed)
     }
+  }
 
+  private async handleReconcileCommittedTx(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:reconcileCommittedTx:req` }>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<ReconcileCommittedTxResponse> {
+    const state = this.collections.get(collectionId)
+    const notLeader = (): ReconcileCommittedTxResponse => ({
+      type: `rpc:reconcileCommittedTx:res`,
+      rpcId: request.rpcId,
+      ok: false,
+      code: `NOT_LEADER`,
+      error: `not the leader for ${collectionId}`,
+    })
+    if (!state?.isLeader) return notLeader()
+    if (
+      !isValidCommittedTxAnchor(request.anchor) ||
+      !hasReconciliationTxPayload(request.tx)
+    ) {
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `UNDETERMINED`,
+        error: `the source transaction has no valid durable proof`,
+      }
+    }
+
+    const expectedTerm = state.latestTerm
+    const result = await this.withScheduledWriterLock(
+      collectionId,
+      async (adapter) => {
+        const candidate = this.nextPersistedTxIfLeader(
+          collectionId,
+          state,
+          expectedTerm,
+          request.tx,
+        )
+        if (candidate === null) return null
+        if (!adapter.reconcileCommittedTx) return { kind: `unknown` as const }
+        try {
+          const reconciled = await adapter.reconcileCommittedTx(
+            candidate.cacheGenerationClaimId
+              ? managedStorageTarget(
+                  collectionId,
+                  candidate.cacheGenerationClaimId,
+                )
+              : eagerStorageTarget(collectionId),
+            candidate,
+            request.anchor,
+          )
+          if (reconciled.kind !== `unknown`) {
+            state.latestRowVersion = Math.max(
+              state.latestRowVersion,
+              reconciled.latestRowVersion,
+            )
+            if (reconciled.kind === `applied-now`) {
+              state.latestSeq = reconciled.committed.seq
+            }
+          }
+          return reconciled
+        } catch (error) {
+          throw toPersistedCollectionDurabilityError(collectionId, error)
+        }
+      },
+      scopedAdapter,
+    )
+    if (result === null) return notLeader()
+    if (result.kind === `unknown`) {
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `UNDETERMINED`,
+        error: `the durable outcome cannot be certified`,
+      }
+    }
+
+    const current = {
+      term: state.latestTerm,
+      seq: state.latestSeq,
+      rowVersion: state.latestRowVersion,
+    }
+    const response: ReconcileCommittedTxResponse = {
+      type: `rpc:reconcileCommittedTx:res`,
+      rpcId: request.rpcId,
+      ok: true,
+      alreadyApplied: result.kind === `already-applied`,
+      committed: result.committed,
+    }
+    if (!this.isDisposed() && this.collections.get(collectionId) === state) {
+      this.publishCommittedTx(
+        collectionId,
+        state,
+        result.kind === `already-applied`
+          ? { ...request.tx, ...current }
+          : { ...request.tx, ...result.committed },
+        result.kind === `already-applied`,
+      )
+    }
     return response
+  }
+
+  private nextPersistedTxIfLeader(
+    collectionId: string,
+    state: CollectionState,
+    expectedTerm: number,
+    pendingTx: Omit<PersistedTx, `term` | `seq` | `rowVersion`>,
+  ): PersistedTx | null {
+    if (
+      this.isDisposed() ||
+      this.collections.get(collectionId) !== state ||
+      !state.isLeader ||
+      state.leaderId !== this.nodeId ||
+      state.latestTerm !== expectedTerm
+    ) {
+      return null
+    }
+    return {
+      ...pendingTx,
+      term: state.latestTerm,
+      seq: state.latestSeq + 1,
+      rowVersion: state.latestRowVersion + 1,
+    }
   }
 
   private async applyDurablyAtNextStreamPosition(
@@ -2109,23 +2503,20 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     return this.withScheduledWriterLock(
       collectionId,
       async (adapter) => {
-        if (
-          this.isDisposed() ||
-          this.collections.get(collectionId) !== state ||
-          !state.isLeader ||
-          state.leaderId !== this.nodeId ||
-          state.latestTerm !== expectedTerm
-        ) {
-          return null
-        }
-        const tx: PersistedTx = {
-          ...pendingTx,
-          term: state.latestTerm,
-          seq: state.latestSeq + 1,
-          rowVersion: state.latestRowVersion + 1,
-        }
+        const tx = this.nextPersistedTxIfLeader(
+          collectionId,
+          state,
+          expectedTerm,
+          pendingTx,
+        )
+        if (tx === null) return null
         try {
-          await adapter.applyCommittedTx(collectionId, tx)
+          await adapter.applyCommittedTx(
+            tx.cacheGenerationClaimId
+              ? managedStorageTarget(collectionId, tx.cacheGenerationClaimId)
+              : eagerStorageTarget(collectionId),
+            tx,
+          )
         } catch (error) {
           throw toPersistedCollectionDurabilityError(collectionId, error)
         }
@@ -2143,6 +2534,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
+      cacheGenerationClaimId?: string
     },
     scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<PullSinceResponse> {
@@ -2161,7 +2553,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
     }
 
-    const result = await adapter.pullSince(collectionId, request.fromRowVersion)
+    const result = await adapter.pullSince(
+      request.cacheGenerationClaimId
+        ? managedStorageTarget(collectionId, request.cacheGenerationClaimId)
+        : eagerStorageTarget(collectionId),
+      request.fromRowVersion,
+      {
+        cacheGenerationClaimId: request.cacheGenerationClaimId,
+      },
+    )
 
     if (result.requiresFullReload) {
       return {
@@ -2315,11 +2715,18 @@ function isRPCRequest(payload: unknown): payload is RPCRequest {
     case `rpc:ensurePersistedIndex:req`:
     case `rpc:applyLocalMutations:req`:
     case `rpc:applyCommittedTx:req`:
+    case `rpc:reconcileCommittedTx:req`:
     case `rpc:pullSince:req`:
       return true
     default:
       return false
   }
+}
+
+function hasReconciliationTxPayload(value: unknown): boolean {
+  if (!value || typeof value !== `object`) return false
+  const tx = value as Record<string, unknown>
+  return typeof tx.txId === `string` && Array.isArray(tx.mutations)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -2410,6 +2817,20 @@ function createRPCErrorResponse(
         ok: false,
         code: `CONFLICT`,
         error,
+      }
+    case `rpc:reconcileCommittedTx:req`:
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code:
+          cause instanceof PersistedCollectionDurabilityError
+            ? `PERSISTENCE_ERROR`
+            : `UNDETERMINED`,
+        error,
+        ...(cause instanceof PersistedCollectionDurabilityError
+          ? toSafeDurabilityDetails(cause)
+          : {}),
       }
     case `rpc:pullSince:req`:
       return {

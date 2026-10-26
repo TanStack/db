@@ -8,11 +8,69 @@ import { registeredOracleProperties } from './oracle-config.js'
  * promoted to assertion evidence merely because a process exited cleanly.
  */
 const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
-  [`db/tests/cleanup-queue.property.test.ts`, `cleanup-queue`, `history`],
-  [`db/tests/SortedMap.test.ts`, `sorted-map`, `key ascending descending`],
+  [
+    `db/tests/ssr-stream-record-wait-oracle.test.ts`,
+    `ssr`,
+    `stream-record-lifetime`,
+  ],
+  [
+    `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
+    `live-query`,
+    `start-handoff`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
+    `pooled-live-query`,
+    `late-cleanup bootstrap-ownership cleanup-peers`,
+  ],
+  [
+    `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
+    `react`,
+    `descriptor-error-surface descriptor-ownership ssr-ordinary ssr-infinite ssr-stream-cut`,
+  ],
+  [
+    `react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx`,
+    `react`,
+    `ssr-runtime-ordinary ssr-runtime-infinite`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-snapshot`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-handoff ssr-receiving-reader`,
+  ],
+  [
+    `svelte-db/tests/ssr-runtime-error-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-runtime-errors`,
+  ],
+  [
+    `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
+    `live-query-observer`,
+    `retained-snapshot`,
+  ],
+  [
+    `db/tests/cleanup-queue-oracle.property.test.ts`,
+    `cleanup-queue`,
+    `history`,
+  ],
+  [
+    `db/tests/SortedMap-oracle.test.ts`,
+    `sorted-map`,
+    `key ascending descending`,
+  ],
   [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
   [
-    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `db-ivm/tests/structural-identity-oracle.property.test.ts`,
+    `structural-identity`,
+    `equal-representations independent-values`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `sqlite-persistence`,
     `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
   ],
@@ -22,17 +80,17 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `mixed-transaction same-key`,
   ],
   [
-    `db/tests/index-update.property.test.ts`,
+    `db/tests/index-update-oracle.property.test.ts`,
     `index-update`,
-    `reference-model exact-identity custom-comparator`,
+    `reference-model nullish-membership exact-identity custom-comparator`,
   ],
   [
-    `db/tests/cursor.property.test.ts`,
+    `db/tests/cursor-oracle.property.test.ts`,
     `cursor`,
     `scalar-continuation exact-width exact-local-order partial-width partial-local-order repeat-construction`,
   ],
   [
-    `db/tests/optimistic-history-outcomes.test.ts`,
+    `db/tests/optimistic-history-outcomes-oracle.test.ts`,
     `collection-state`,
     `optimistic-outcomes`,
   ],
@@ -47,7 +105,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `lifecycle`,
   ],
   [
-    `electric-db-collection/tests/electric-descriptor-isolation.test.ts`,
+    `electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     `electric`,
     `persisted-tag-history bound-descriptor-history`,
   ],
@@ -62,19 +120,19 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `publication-stream-convergence`,
   ],
   [
-    `electric-db-collection/tests/electric-sdk-delivery.property.test.ts`,
+    `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     `electric`,
     `sdk-snapshot-delivery sdk-dnf-membership`,
   ],
   [
-    `db/tests/collection-sync-reentrancy.test.ts`,
+    `db/tests/collection-sync-reentrancy-oracle.test.ts`,
     `collection-sync`,
     `reentrant-drain`,
   ],
   [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
-    `retention optimistic-history accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
+    `retention optimistic-history optimistic-history-partial accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
   ],
   [
     `db/tests/change-event-history-oracle.test.ts`,
@@ -87,19 +145,19 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `metadata-only metadata-cancellation`,
   ],
   [
-    `db/tests/collection-subscription-lifecycle-publication.property.test.ts`,
+    `db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
     `subscription-lifecycle`,
     `publication-history`,
   ],
   [
-    `db/tests/collection-subscription-lifecycle-history.property.test.ts`,
+    `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
     `subscription-lifecycle`,
     `history-statistics async-history sync-history`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
     `subscription-lifecycle`,
-    `async-statistics async-restart`,
+    `async-statistics async-restart notification-error`,
   ],
   [
     `db/tests/collection-subscription-replay-oracle.property.test.ts`,
@@ -114,20 +172,20 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/cold-join-reconciliation-oracle.test.ts`,
     `cold-join`,
-    `reconciliation`,
+    `reconciliation compound`,
   ],
   [
-    `db/tests/live-query-observer-history.property.test.ts`,
+    `db/tests/live-query-observer-history-oracle.property.test.ts`,
     `live-query-observer`,
-    `granular-history wholesale-history`,
+    `granular-history wholesale-history partial-attach release-failure hydration-error-timing`,
   ],
   [
-    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot.test.ts`,
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
     `startup-generation`,
   ],
   [
-    `db/tests/query/derived-delete-reconciliation.test.ts`,
+    `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
     `derived-publication`,
     `membership-work`,
   ],
@@ -184,7 +242,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity`,
+    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -192,7 +250,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
   ],
   [
-    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `retained-demand`,
   ],
@@ -253,10 +311,85 @@ export type OracleReplayManifestEntry = {
 // These patterns name the random/replay lane, never its fixed-seed sibling.
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
-const indexReplayTestNames = new Map([
+const replayTestNames = new Map([
+  [
+    `ssr.stream-record-lifetime`,
+    `settles each record demand at its transport checkpoint.*random`,
+  ],
+  [
+    `live-query-observer.hydration-error-timing`,
+    `publishes errors at their ownership checkpoint.*random`,
+  ],
+  [
+    `live-query-observer.retained-snapshot`,
+    `first reads match the capture-time rows.*random`,
+  ],
+  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
+  [
+    `pooled-live-query.late-cleanup`,
+    `releases late cleanup registration channels.*random`,
+  ],
+  [
+    `pooled-live-query.bootstrap-ownership`,
+    `bootstrap ownership after callback failure.*random`,
+  ],
+  [
+    `pooled-live-query.cleanup-peers`,
+    `cleanup status reaches every observer.*random`,
+  ],
+  [
+    `live-query-observer.partial-attach`,
+    `releases every acquired channel before retry.*random`,
+  ],
+  [
+    `subscription-lifecycle.notification-error`,
+    `acquires retained demand after replacement readiness.*random`,
+  ],
+  [
+    `react.descriptor-error-surface`,
+    `error-surface after descriptor failure.*random`,
+  ],
+  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
+  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
+  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
+  [`react.ssr-stream-cut`, `transports the rendered view.*random`],
+  [
+    `react.ssr-runtime-ordinary`,
+    `ordinary preserves runtime error hydration views.*random`,
+  ],
+  [
+    `react.ssr-runtime-infinite`,
+    `infinite preserves runtime error hydration views.*random`,
+  ],
+  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
+  [`svelte.ssr-handoff`, `matches the actual browser initialization.*random`],
+  [
+    `svelte.ssr-receiving-reader`,
+    `preserves each receiving reader view.*random`,
+  ],
+  [
+    `svelte.ssr-runtime-errors`,
+    `keeps runtime failures on their ordinary error surface.*random`,
+  ],
+  [
+    `live-query-observer.release-failure`,
+    `reattaches after reporting a release failure.*random`,
+  ],
+  [
+    `structural-identity.equal-representations`,
+    `agrees with D2 value identity for equal representations`,
+  ],
+  [
+    `structural-identity.independent-values`,
+    `agrees with D2 value identity for independent values`,
+  ],
   [
     `index-update.reference-model`,
     `matches a reference model across valid operation sequences \\(seed undefined\\)`,
+  ],
+  [
+    `index-update.nullish-membership`,
+    `refines nullish membership histories \\(seed undefined\\)`,
   ],
   [
     `index-update.exact-identity`,
@@ -269,11 +402,13 @@ const indexReplayTestNames = new Map([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property === `cold-join.compound`)
+    return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))
     return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
-  return indexReplayTestNames.get(property)
+  return replayTestNames.get(property)
 }
 
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [

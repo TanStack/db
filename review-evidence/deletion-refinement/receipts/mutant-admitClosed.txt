@@ -1,0 +1,35 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/admitClosed.log
+SHA-256 of full source: a15dcfce4e5991878c9f3dbd02d5af1e67ff32f9710b34f30fdd34038fa41333
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > does not admit a resolved handler after explicit closure 8ms
+   → expected 'fulfilled' to be 'rejected' // Object.is equality
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:02
+   Duration  893ms (transform 340ms, setup 17ms, collect 483ms, tests 10ms, environment 182ms, prepare 56ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > does not admit a resolved handler after explicit closure
+AssertionError: expected 'fulfilled' to be 'rejected' // Object.is equality
+
+Expected: "rejected"
+Received: "fulfilled"
+
+ ❯ tests/retirement-oracle.test.ts:295:37
+    293|         else decisionGate.reject(failure)
+    294|         await caller.done
+    295|         expect(caller.result.state).toBe('rejected')
+       |                                     ^
+    296|         if (decision === 'reject') expect(caller.result.reason).toBe(f…
+    297|         expect(native.entries).toHaveLength(0)
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:278:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

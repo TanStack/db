@@ -13,6 +13,33 @@ import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
 
 describe(`Transactions`, () => {
+  // A transaction with no mutations is tracked by no Collection, so nothing
+  // else observes its receipt. Its rollback must still not escape as an
+  // unhandled rejection; a caller who reads the receipt sees the outcome.
+  // Focused witness: the generated ownership oracle observes every receipt.
+  for (const reason of [undefined, new Error(`cancelled`)]) {
+    it(`does not leak an unhandled rejection when an empty transaction rolls back (${reason ? `with` : `without`} an error)`, async () => {
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, onUnhandled)
+      try {
+        const tx = createTransaction({
+          autoCommit: false,
+          mutationFn: () => Promise.resolve(),
+        })
+        tx.mutate(() => {})
+        tx.rollback(reason ? { error: reason } : undefined)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(unhandled, `unhandled rejections`).toEqual([])
+        expect(tx.state).toBe(`failed`)
+        if (reason) await expect(tx.when(`settled`)).rejects.toBe(reason)
+        else await expect(tx.when(`settled`)).rejects.toBeUndefined()
+      } finally {
+        process.off(`unhandledRejection`, onUnhandled)
+      }
+    })
+  }
+
   it(`settles persistence and reports a listener error while draining its parked echo`, async () => {
     type Row = { id: number; value: string }
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
@@ -204,6 +231,26 @@ describe(`Transactions`, () => {
     expect(() => transaction.mutate(() => {})).toThrow(
       TransactionNotPendingMutateError,
     )
+  })
+  it(`keeps a settled transaction's error when rollback is called again with another error`, async () => {
+    const first = new Error(`first`)
+    const failed = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
+    failed.rollback({ error: first })
+    await expect(failed.isPersisted.promise).rejects.toBe(first)
+    failed.rollback({ error: new Error(`second`) })
+    expect(failed.error?.error).toBe(first)
+
+    const completed = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+    })
+    await completed.commit()
+    expect(() => completed.rollback({ error: new Error(`late`) })).toThrow(
+      TransactionAlreadyCompletedRollbackError,
+    )
+    expect(completed.error).toBeUndefined()
   })
   it(`should allow manually controlling the transaction lifecycle`, () => {
     const transaction = createTransaction({

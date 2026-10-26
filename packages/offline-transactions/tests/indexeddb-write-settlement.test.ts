@@ -48,12 +48,12 @@ function controlledWrite(issueError?: Error) {
             ? adapter.delete(`key`)
             : adapter.clear()
       const outcome: {
-        state: `pending` | `resolved` | `rejected`
+        state: `pending` | `fulfilled` | `rejected`
         error?: unknown
       } = { state: `pending` }
       const observed = promise.then(
         () => {
-          outcome.state = `resolved`
+          outcome.state = `fulfilled`
         },
         (error: unknown) => {
           outcome.state = `rejected`
@@ -92,7 +92,7 @@ it.each(writes)(
     expect(outcome.state).toBe(`pending`)
     storage.commit()
     await observed
-    expect(outcome.state).toBe(`resolved`)
+    expect(outcome.state).toBe(`fulfilled`)
   },
 )
 

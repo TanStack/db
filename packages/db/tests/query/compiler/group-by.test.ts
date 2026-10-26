@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { grouping } from '../../../src/query/compiler/grouping.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 
 // Import the validation function that we want to test directly
@@ -21,7 +22,7 @@ function validateSelectAgainstGroupBy(
 
     if (groupIndex === -1) {
       throw new Error(
-        `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`,
+        `Non-aggregate expression '${alias}' must also appear in GROUP BY clause`,
       )
     }
   }
@@ -65,7 +66,7 @@ describe(`group-by compiler`, () => {
         expect(() => {
           validateSelectAgainstGroupBy(groupByClause, selectClause)
         }).toThrow(
-          `Non-aggregate expression 'invalidField' in SELECT must also appear in GROUP BY clause`,
+          `Non-aggregate expression 'invalidField' must also appear in GROUP BY clause`,
         )
       })
 
@@ -73,8 +74,16 @@ describe(`group-by compiler`, () => {
         const groupByClause = [new PropRef([`users`, `department`])]
         const selectClause = {
           department: new PropRef([`users`, `department`]),
-          count: new Aggregate(`count`, [new PropRef([`users`, `id`])]),
-          avg_salary: new Aggregate(`avg`, [new PropRef([`users`, `salary`])]),
+          count: new Aggregate(
+            `count`,
+            [new PropRef([`users`, `id`])],
+            grouping,
+          ),
+          avg_salary: new Aggregate(
+            `avg`,
+            [new PropRef([`users`, `salary`])],
+            grouping,
+          ),
         }
 
         // Should not throw

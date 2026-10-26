@@ -18,13 +18,10 @@ import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 export type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 
 type BrowserSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type BrowserWASQLiteSchemaMismatchPolicy =
-  | BrowserSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  BrowserSQLiteCoreSchemaMismatchPolicy | `throw`
 
 export type BrowserWASQLitePersistenceOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -86,6 +83,8 @@ function resolveAdapterBaseOptions(
       options.appliedTxPruneMaxAgeSeconds ??
       DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+    cacheGenerationClaimTtlMs: options.cacheGenerationClaimTtlMs,
+    now: options.now,
   }
 }
 

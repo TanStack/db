@@ -90,8 +90,7 @@ export function toPersistedCollectionDurabilityError(
 }
 
 export type IndeterminateCommitRequestType =
-  | `rpc:applyLocalMutations:req`
-  | `rpc:applyCommittedTx:req`
+  `rpc:applyLocalMutations:req` | `rpc:applyCommittedTx:req`
 
 export type IndeterminateCommitErrorOptions = {
   collectionId: string
@@ -178,6 +177,13 @@ export class SQLiteBigIntOutOfRangeError extends PersistedCollectionCoreError {
       `SQLite BigInt value ${value} is outside the signed 64-bit range [${minimum}, ${maximum}]`,
     )
     this.name = `SQLiteBigIntOutOfRangeError`
+  }
+}
+
+export class SQLiteConnectionClosedError extends PersistedCollectionCoreError {
+  constructor(message: string) {
+    super(message)
+    this.name = `SQLiteConnectionClosedError`
   }
 }
 

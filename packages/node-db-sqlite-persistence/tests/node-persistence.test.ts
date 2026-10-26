@@ -2,12 +2,18 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
+import {
+  createCollection,
+  createTransaction,
+  whenSyncAccepted,
+} from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 import type { SQLitePullSinceResult } from '../../db-sqlite-persistence-core/src'
+import type { SyncConfig } from '@tanstack/db'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
@@ -53,6 +59,78 @@ runRuntimePersistenceContractSuite(`node runtime persistence helpers`, {
 })
 
 describe(`node persistence helpers`, () => {
+  // Ported from TanStack/db#2002. A handler awaits the acceptance of its own
+  // source write, which queues behind an earlier source write. Both are
+  // stored in commit order, and the later row is visible once it settles.
+  it(`stores an awaited handler write behind a pending source write`, async () => {
+    const database = new BetterSqlite3(`:memory:`)
+    const id = `awaited-handler-source`
+    const persistence = createNodeSQLitePersistence({ database })
+    type Row = { id: string; title: string }
+    let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence,
+      }),
+    )
+    let releaseHandler!: () => void
+    const handlerGate = new Promise<void>((resolve) => {
+      releaseHandler = resolve
+    })
+    let handlerEntered!: () => void
+    const entered = new Promise<void>((resolve) => {
+      handlerEntered = resolve
+    })
+    const mutation = createTransaction({
+      mutationFn: async () => {
+        handlerEntered()
+        await handlerGate
+        source.begin()
+        source.write({ type: `update`, value: { id: `row`, title: `three` } })
+        await whenSyncAccepted(source.commit())
+      },
+    })
+    try {
+      await collection.stateWhenReady()
+      source.begin()
+      source.write({ type: `insert`, value: { id: `row`, title: `one` } })
+      await source.commit()
+
+      mutation.mutate(() => {
+        collection.insert({ id: `local`, title: `optimistic` })
+      })
+      await entered
+      source.begin()
+      source.write({ type: `update`, value: { id: `row`, title: `two` } })
+      const predecessor = Promise.resolve(source.commit())
+      releaseHandler()
+      await mutation.isPersisted.promise
+      await predecessor
+
+      expect(collection.get(`row`)?.title).toBe(`three`)
+      expect(
+        (
+          await persistence.adapter.loadSubset(
+            { kind: `eager`, collectionId: id },
+            {},
+          )
+        ).find(({ key }) => key === `row`)?.value,
+      ).toEqual({ id: `row`, title: `three` })
+    } finally {
+      releaseHandler()
+      await collection.cleanup()
+      database.close()
+    }
+  })
+
   it(`defaults coordinator to SingleProcessCoordinator`, () => {
     const runtimeHarness = createRuntimeDatabaseHarness()
     const driver = runtimeHarness.createDriver()
@@ -93,25 +171,31 @@ describe(`node persistence helpers`, () => {
         database,
       })
 
-      await persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `tx-direct-db-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `from raw database`,
-              score: 1,
+      await persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-direct-db-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `from raw database`,
+                score: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const rows = await persistence.adapter.loadSubset(collectionId, {})
+      const rows = await persistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(rows).toEqual([
         {
           key: `1`,
@@ -137,19 +221,22 @@ describe(`node persistence helpers`, () => {
     try {
       const persistence = createNodeSQLitePersistence({ database })
 
-      await persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: { id: `1`, title: `old`, score: 1 },
-          },
-        ],
-      })
+      await persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: { id: `1`, title: `old`, score: 1 },
+            },
+          ],
+        },
+      )
 
       // Backdate the first row well beyond the 24h default age backstop.
       database
@@ -158,19 +245,22 @@ describe(`node persistence helpers`, () => {
         )
         .run(collectionId)
 
-      await persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `tx-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          {
-            type: `insert`,
-            key: `2`,
-            value: { id: `2`, title: `new`, score: 2 },
-          },
-        ],
-      })
+      await persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `2`,
+              value: { id: `2`, title: `new`, score: 2 },
+            },
+          ],
+        },
+      )
 
       const appliedRows = database
         .prepare(
@@ -200,28 +290,31 @@ describe(`node persistence helpers`, () => {
       })
 
       for (const seq of [1, 2, 3]) {
-        await persistence.adapter.applyCommittedTx(collectionId, {
-          txId: `tx-${seq}`,
-          term: 1,
-          seq,
-          rowVersion: seq,
-          mutations: [
-            {
-              type: `insert`,
-              key: String(seq),
-              value: { id: String(seq), title: `todo-${seq}`, score: seq },
-            },
-          ],
-        })
+        await persistence.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `tx-${seq}`,
+            term: 1,
+            seq,
+            rowVersion: seq,
+            mutations: [
+              {
+                type: `insert`,
+                key: String(seq),
+                value: { id: String(seq), title: `todo-${seq}`, score: seq },
+              },
+            ],
+          },
+        )
       }
 
       const adapter = persistence.adapter as typeof persistence.adapter & {
         pullSince: (
-          collectionId: string,
+          target: { kind: `eager`; collectionId: string },
           fromRowVersion: number,
         ) => Promise<SQLitePullSinceResult<string | number>>
       }
-      const result = await adapter.pullSince(collectionId, 0)
+      const result = await adapter.pullSince({ kind: `eager`, collectionId }, 0)
 
       expect(result.requiresFullReload).toBe(true)
     } finally {
@@ -244,19 +337,22 @@ describe(`node persistence helpers`, () => {
       })
 
       for (const seq of [1, 2, 3]) {
-        await persistence.adapter.applyCommittedTx(collectionId, {
-          txId: `tx-${seq}`,
-          term: 1,
-          seq,
-          rowVersion: seq,
-          mutations: [
-            {
-              type: `insert`,
-              key: String(seq),
-              value: { id: String(seq), title: `todo-${seq}`, score: seq },
-            },
-          ],
-        })
+        await persistence.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `tx-${seq}`,
+            term: 1,
+            seq,
+            rowVersion: seq,
+            mutations: [
+              {
+                type: `insert`,
+                key: String(seq),
+                value: { id: String(seq), title: `todo-${seq}`, score: seq },
+              },
+            ],
+          },
+        )
       }
 
       const appliedRows = database
@@ -284,19 +380,22 @@ describe(`node persistence helpers`, () => {
         appliedTxPruneMaxAgeSeconds: 0,
       })
 
-      await persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: { id: `1`, title: `old`, score: 1 },
-          },
-        ],
-      })
+      await persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: { id: `1`, title: `old`, score: 1 },
+            },
+          ],
+        },
+      )
 
       database
         .prepare(
@@ -304,19 +403,22 @@ describe(`node persistence helpers`, () => {
         )
         .run(collectionId)
 
-      await persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `tx-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          {
-            type: `insert`,
-            key: `2`,
-            value: { id: `2`, title: `new`, score: 2 },
-          },
-        ],
-      })
+      await persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `2`,
+              value: { id: `2`, title: `new`, score: 2 },
+            },
+          ],
+        },
+      )
 
       const appliedRows = database
         .prepare(
@@ -351,7 +453,7 @@ describe(`node persistence helpers`, () => {
       })
 
       await firstCollectionOptions.persistence.adapter.applyCommittedTx(
-        collectionId,
+        { kind: `eager`, collectionId: collectionId },
         {
           txId: `tx-1`,
           term: 1,
@@ -389,7 +491,10 @@ describe(`node persistence helpers`, () => {
         persistence: secondPersistence,
       })
       await expect(
-        syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
+        syncAbsentOptions.persistence.adapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
       ).rejects.toThrow(`Schema version mismatch`)
 
       const syncPresentOptions = persistedCollectionOptions<
@@ -407,7 +512,7 @@ describe(`node persistence helpers`, () => {
         persistence: secondPersistence,
       })
       const rows = await syncPresentOptions.persistence.adapter.loadSubset(
-        collectionId,
+        { kind: `eager`, collectionId: collectionId },
         {},
       )
       expect(rows).toEqual([])

@@ -1,0 +1,57 @@
+{
+  "target": "4c8a40b80",
+  "receipts": [
+    {
+      "source": "/tmp/pr1179-listener-red.log",
+      "sha256": "174957bad14f0cf02859c9062e4729d6e288f935e4ec32f757ab535c40ee90f1",
+      "receipt": "pr1179-listener-red.txt"
+    },
+    {
+      "source": "/tmp/pr1179-listener-green.log",
+      "sha256": "7e4ec9980bddd06d2b7e232e7d19101941be9d6f35c692f46a797fa21cb7b48f",
+      "receipt": "pr1179-listener-green.txt"
+    },
+    {
+      "source": "/tmp/pr1179-request-error-mutant.log",
+      "sha256": "d9c26943d21ccc8b96c28317660a4b90939a53039f78921164aa76df7d8f97e5",
+      "receipt": "pr1179-request-error-mutant.txt"
+    },
+    {
+      "source": "/tmp/pr1179-donors/wrapper-listener-probe.log",
+      "sha256": "4bf5b32310c90479ba2e8e2975ae4c1a55c9beabd5662d84c12c89487ac8918a",
+      "receipt": "wrapper-listener-probe.txt"
+    },
+    {
+      "source": "/tmp/pr1179-donors/keyval-atomicity-probe.log",
+      "sha256": "4eef760cfc0d13f7876e9dc00ccc0c2a490162452673bc3d80f815881a5af62e",
+      "receipt": "keyval-atomicity-probe.txt"
+    }
+  ],
+  "finalChecks": [
+    {
+      "name": "adapter",
+      "cases": 2428,
+      "result": "passed",
+      "receipt": "adapter-green.txt",
+      "sourceSha256": "4b9e8bde2b58d21351baf754daca9bca28fc07e252c4fb1b506f29434b287e75"
+    },
+    {
+      "name": "browser",
+      "cases": 156,
+      "result": "passed",
+      "receipt": "browser-green.txt",
+      "sourceSha256": "a14d1bb77d7778ae9a34023af1c7f81c6544369ed4944efb33d22ca648e191c8"
+    },
+    {
+      "name": "lint",
+      "cases": null,
+      "result": "passed",
+      "receipt": "lint-green.txt",
+      "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sourceSha256": {
+    "packages/indexeddb-db-collection/src/wrapper.ts": "c9d3521cd1dd051d0f609ecf7805135a4a66639e39bbb9803202361d0cbbce8c",
+    "packages/indexeddb-db-collection/tests/wrapper-settlement-oracle.test.ts": "cb3abf04f1ec154def3b425432ce8e2cb7e8a8aeb2dc68a96e7ef9362d31753c"
+  }
+}

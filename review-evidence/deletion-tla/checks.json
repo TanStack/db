@@ -1,0 +1,103 @@
+[
+  {
+    "name": "tool-control-safe",
+    "module": "DesignGrammarControl"
+  },
+  {
+    "name": "tool-control-weakened",
+    "module": "DesignGrammarControl",
+    "violation": "GenerationIsGrounded"
+  },
+  {
+    "name": "retirement-finish",
+    "module": "retirement_oracle"
+  },
+  {
+    "name": "retirement-suppress",
+    "module": "retirement_oracle"
+  },
+  {
+    "name": "retirement-fair",
+    "module": "retirement_oracle"
+  },
+  {
+    "name": "fault-lateRead",
+    "module": "retirement_oracle",
+    "violation": "ReadAuthority"
+  },
+  {
+    "name": "fault-truncateReady",
+    "module": "retirement_oracle",
+    "violation": "ClosedConnectionsDoNotBecomeReady"
+  },
+  {
+    "name": "fault-explicitClose",
+    "module": "retirement_oracle",
+    "violation": "ClosedConnectionsDoNotBecomeReady"
+  },
+  {
+    "name": "fault-lateReady",
+    "module": "retirement_oracle",
+    "violation": "ClosedConnectionsDoNotBecomeReady"
+  },
+  {
+    "name": "fault-admitClosed",
+    "module": "retirement_oracle",
+    "violation": "AdmissionAuthority"
+  },
+  {
+    "name": "fault-dropAccepted",
+    "module": "retirement_oracle",
+    "violation": "AcceptedWorkIsAccountedFor"
+  },
+  {
+    "name": "fault-rejectCommitted",
+    "module": "retirement_oracle",
+    "violation": "TruthfulSettlement"
+  },
+  {
+    "name": "fault-prematureSuccess",
+    "module": "retirement_oracle",
+    "violation": "TruthfulSettlement"
+  },
+  {
+    "name": "challenge-stop-all-publication",
+    "module": "retirement_oracle",
+    "violation": "StrictPublicationSilence"
+  },
+  {
+    "name": "deletion-safe",
+    "module": "deletion_queue_oracle"
+  },
+  {
+    "name": "fault-old-receipt",
+    "module": "deletion_queue_oracle",
+    "violation": "RecreatedRowsSurviveOldReceipt"
+  },
+  {
+    "name": "fault-delete-while-blocked",
+    "module": "deletion_queue_oracle",
+    "violation": "NativeDeletionWaits"
+  },
+  {
+    "name": "fault-premature-delete-receipt",
+    "module": "deletion_queue_oracle",
+    "violation": "CallerWaitsForNative"
+  },
+  {
+    "name": "challenge-instance-bound-delete",
+    "module": "deletion_queue_oracle",
+    "violation": "DeletionIsBoundToOriginalDescriptor"
+  },
+  {
+    "name": "challenge-unconditional-progress",
+    "module": "retirement_oracle",
+    "violation": "CallersEventuallySettle",
+    "temporal": true
+  },
+  {
+    "name": "challenge-suppression-keeps-confirmation",
+    "module": "retirement_oracle",
+    "violation": "EverySuccessIsConfirmed"
+  }
+]

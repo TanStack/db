@@ -2,6 +2,7 @@ import { SortedMap } from '../SortedMap.js'
 import { CleanupQueue } from '../collection/cleanup-queue.js'
 import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
 import { makeComparator } from '../utils/comparison.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
@@ -9,9 +10,11 @@ import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
 import { buildCompareOptions } from './compiler/order-by.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
+import { registerPooledSource } from './pooled-source.js'
 import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { CollectionSubscription } from '../collection/subscription.js'
 import type { ChangeMessage, CollectionStatus } from '../types.js'
 import type {
   CollectionEventHandler,
@@ -64,7 +67,7 @@ class Partition {
   private readonly groups = new Map<string, PartitionGroup>()
   // Revisions for every group, so a recreated group never repeats one.
   private clock = 0
-  private subscription: { unsubscribe: () => void } | undefined
+  private subscription: CollectionSubscription | undefined
   private stopStatusEvents: (() => void) | undefined
   // One source status listener serves every view of this partition.
   readonly statusListeners = new Set<StatusListener>()
@@ -140,24 +143,23 @@ class Partition {
       this.gcTime = Math.max(this.gcTime, delay)
     }
     if (this.terminated) return
-    this.subscribe()
+    // Building a view reads the rows the source already holds; it starts no
+    // provider work until a view has a subscriber or a preload.
+    this.subscribe(true)
     // Like a Collection that synced before anything subscribed, a view built
     // during a render gets a grace period to subscribe when it commits.
     this.scheduleRelease(UNSUBSCRIBED_GC_FLOOR_MS)
   }
 
-  subscribe(): void {
+  subscribe(deferAcquisition = false): void {
+    if (!deferAcquisition) this.subscription?.resumeDeferredAcquisition()
     if (!this.terminated && !this.subscription) {
       // A released partition that subscribes again serves new mounts too.
       this.registry.add()
-      this.subscription = this.source.subscribeChanges(
-        (changes) =>
-          this.apply(changes as Array<ChangeMessage<Row, string | number>>),
-        { includeInitialState: true },
-      )
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)
       })
+      this.stopStatusEvents = stopStatus
       // Like a live query, a pooled view fails for good when its source
       // starts cleanup, before the adapter's cleanup settles; queries
       // mounted later get a new partition.
@@ -171,9 +173,27 @@ class Partition {
           status: `error`,
         })
       })
+      // Late registration can terminate before either release handle exists.
+      if (this.terminated as boolean) {
+        stopCleanupStart()
+        return
+      }
       this.stopStatusEvents = () => {
         stopStatus()
         stopCleanupStart()
+      }
+      try {
+        const subscription = this.source.subscribeChanges(
+          (changes) =>
+            this.apply(changes as Array<ChangeMessage<Row, string | number>>),
+          { includeInitialState: true, deferAcquisition },
+        )
+        // Cleanup can re-enter while source sync starts, before assignment.
+        if (this.terminated as boolean) subscription.unsubscribe()
+        else this.subscription = subscription
+      } catch (error) {
+        this.terminate()
+        throw error
       }
     }
   }
@@ -182,11 +202,9 @@ class Partition {
     const delivered = this.terminated
       ? { ...event, status: `error` as const }
       : event
-    for (const listener of [...this.statusListeners]) listener(delivered)
-    if (this.terminated) {
-      this.stopStatusEvents?.()
-      this.stopStatusEvents = undefined
-    }
+    runAllCallbacks(
+      [...this.statusListeners].map((listener) => () => listener(delivered)),
+    )
   }
 
   addListener(group: PartitionGroup, listener: Listener): void {
@@ -209,6 +227,8 @@ class Partition {
   }
 
   private release(): void {
+    this.stopStatusEvents?.()
+    this.stopStatusEvents = undefined
     this.subscription?.unsubscribe()
     this.subscription = undefined
     this.registry.remove()
@@ -224,8 +244,6 @@ class Partition {
 
   private readonly releaseIfUnused = (): void => {
     if (this.listenerCount > 0) return
-    this.stopStatusEvents?.()
-    this.stopStatusEvents = undefined
     // Views read groups by key, so a later subscription refills new ones.
     this.groups.clear()
     this.release()
@@ -483,7 +501,7 @@ class PooledLiveQuery {
   private collectionHold: { unsubscribe: () => void } | undefined = undefined
 
   constructor(
-    private readonly source: CollectionImpl<any, any, any, any, any>,
+    readonly source: CollectionImpl<any, any, any, any, any>,
     private readonly query: BaseQueryBuilder,
     private readonly partition: Partition,
     private readonly groupKey: string,
@@ -492,6 +510,7 @@ class PooledLiveQuery {
     private readonly passes: ((row: Row) => boolean) | undefined,
   ) {
     partition.retain(gcTime)
+    registerPooledSource(this, source)
   }
 
   get status(): CollectionStatus {
@@ -527,28 +546,33 @@ class PooledLiveQuery {
     const group = this.partition.group(this.groupKey)
     this.partition.addListener(group, listener)
     this.listenerCount++
-    this.holdCollection()
-    if (options.includeInitialState) {
-      callback(
-        Array.from(this.entries(), ([key, value]) => ({
-          type: `insert`,
-          key,
-          value,
-        })),
-      )
-    }
     let subscribed = true
-    return {
-      unsubscribe: () => {
-        if (!subscribed) return
-        subscribed = false
-        this.partition.removeListener(group, listener)
-        if (--this.listenerCount === 0) {
-          this.collectionHold?.unsubscribe()
-          this.collectionHold = undefined
-        }
-      },
+    const unsubscribe = () => {
+      if (!subscribed) return
+      subscribed = false
+      this.partition.removeListener(group, listener)
+      if (--this.listenerCount === 0) {
+        this.collectionHold?.unsubscribe()
+        this.collectionHold = undefined
+      }
     }
+    try {
+      this.holdCollection()
+      if (options.includeInitialState) {
+        callback(
+          Array.from(this.entries(), ([key, value]) => ({
+            type: `insert`,
+            key,
+            value,
+          })),
+        )
+      }
+    } catch (error) {
+      // A failed bootstrap returned no handle; retire its listener now.
+      unsubscribe()
+      throw error
+    }
+    return { unsubscribe }
   }
 
   // While the view is observed, its built Collection stays subscribed, as
@@ -713,3 +737,15 @@ export function createPooledLiveQuery(
       : undefined,
   ) as unknown as Collection<any, any, any>
 }
+
+/**
+ * Pooled live queries for framework hooks. Pass it as `pool` in a hook's
+ * query config to serve equality-filtered queries of one shape from a shared
+ * partition. Apps that do not pass it do not bundle pooling.
+ */
+export const pooledLiveQueries = {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+}
+
+export type PooledLiveQueries = typeof pooledLiveQueries

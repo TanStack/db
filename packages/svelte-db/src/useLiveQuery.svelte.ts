@@ -3,19 +3,22 @@ import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from 'svelte/reactivity'
 import {
-  BaseQueryBuilder,
   UnhashableQueryIRError,
-  createLiveQueryCollection,
   createLiveQueryObserver,
+  createLiveQuerySourceIdClaims,
   getLiveQueryHash,
   getPublicCollection,
   getStableValueHash,
+  identifyLiveQuery,
   isCollection,
   isSingleResultCollection,
   prepareLiveQueryValue,
+  rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
   resolveLiveQueryValue,
+  resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
-import { useOptionalDbClient } from './db-context.js'
+import { useDbContext } from './db-context.js'
 import type {
   ChangeMessage,
   Collection,
@@ -26,7 +29,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
@@ -34,6 +37,14 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+const DEFAULT_GC_TIME_MS = 1
+
+/** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
+function snapshotRows(data: unknown): Array<any> {
+  if (Array.isArray(data)) return [...data]
+  return data === undefined ? [] : [data]
+}
 
 /**
  * Return type for useLiveQuery hook
@@ -98,7 +109,7 @@ export interface UseLiveQueryReturnWithCollection<
 type MaybeGetter<T> = T | (() => T)
 
 export type UseLiveQueryConfig<TContext extends Context> =
-  LiveQueryCollectionConfig<TContext> & {
+  LiveQueryHookConfig<TContext> & {
     queryKey?: MaybeGetter<LiveQueryKey>
     client?: DbClient
   }
@@ -328,7 +339,11 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const contextDbClient = useOptionalDbClient()
+  const context = useDbContext()
+  const contextDbClient = context?.client
+  // Source Collection IDs this hook's client-backed queries read, kept until
+  // it unmounts.
+  const sourceIdClaims = createLiveQuerySourceIdClaims()
 
   const resolved = $derived.by(() => {
     // First check if the original parameter might be a getter
@@ -385,57 +400,92 @@ export function useLiveQuery(
     // Reference deps to make computed reactive to them
     const dependencyValues = deps.map((dep) => toValue(dep))
     const deferredCollections: DeferredLiveQueryCollections = new Set()
-    const preparedValue = prepareLiveQueryValue(
-      unwrappedParam,
-      dbClient,
-      deferredCollections,
-    )
-    const configuredQueryKey = (
-      unwrappedParam as { queryKey?: MaybeGetter<LiveQueryKey> } | null
-    )?.queryKey
-    const queryKey = configuredQueryKey
-      ? toValue(configuredQueryKey)
-      : undefined
-
-    let queryHash: string | undefined
+    // The compile boundary: a query rejected anywhere after preparation
+    // releases the sync starts it deferred, so a later reader can start them.
     try {
-      queryHash =
-        deps.length > 0 && !queryKey
-          ? getStableValueHash(
-              [`deps`, dependencyValues, getLiveQueryHash(preparedValue)],
-              `queryKey`,
+      const preparedValue = prepareLiveQueryValue(
+        unwrappedParam,
+        dbClient,
+        deferredCollections,
+      )
+      const configuredQueryKey = (
+        unwrappedParam as { queryKey?: MaybeGetter<LiveQueryKey> } | null
+      )?.queryKey
+      const queryKey = configuredQueryKey
+        ? toValue(configuredQueryKey)
+        : undefined
+
+      // A DbClient matches preloaded and hydrated queries by identity hash, so
+      // a client-backed query without queryKey needs a stable IR identity and
+      // keeps each source Collection ID's object while the hook is mounted.
+      const derivedHash =
+        dbClient && !queryKey?.length
+          ? identifyLiveQuery(
+              preparedValue,
+              {
+                claims: sourceIdClaims,
+                client: dbClient,
+                bindingName: `useLiveQuery`,
+              },
+              getLiveQueryHash,
             )
-          : getLiveQueryHash(preparedValue, queryKey)
+          : undefined
+
+      let queryHash: string | undefined
+      try {
+        queryHash =
+          deps.length > 0 && !queryKey?.length
+            ? getStableValueHash(
+                [
+                  `deps`,
+                  dependencyValues,
+                  derivedHash ?? getLiveQueryHash(preparedValue),
+                ],
+                `queryKey`,
+              )
+            : (derivedHash ?? getLiveQueryHash(preparedValue, queryKey))
+      } catch (error) {
+        // A dependency value or a client-free query that cannot be hashed
+        // leaves hydration without a key; it does not reject the query. An
+        // empty key counts as none; a nonempty one must hash.
+        if (!(error instanceof UnhashableQueryIRError)) throw error
+        if (queryKey?.length) throw error
+      }
+
+      let collection: Collection<any, any, any> | null
+      if (preparedValue === undefined || preparedValue === null) {
+        collection = null
+      } else if (isCollection(preparedValue)) {
+        collection = preparedValue
+      } else {
+        // Hydration keys the live-query Collection by identity, so it never
+        // pools, even when the config passes a pool.
+        collection = resolveLiveQueryValue(preparedValue, {
+          gcTime: DEFAULT_GC_TIME_MS,
+          pool: dbClient ? false : undefined,
+        })
+      }
+
+      // A setup that never subscribes releases its deferred sync starts when
+      // garbage collection reclaims the live query it built. A Collection
+      // the input supplied is not this setup's to reclaim.
+      const cancelReclaimRelease =
+        collection && !isCollection(preparedValue)
+          ? releaseDeferredOnReclaim(collection, deferredCollections)
+          : undefined
+      return {
+        collection,
+        client: dbClient,
+        queryHash,
+        // The subscribing effect releases the starts, so it drops the
+        // reclaim release.
+        resumeDeferredCollections: () => {
+          cancelReclaimRelease?.()
+          resumeDeferredLiveQueryCollections(deferredCollections)
+        },
+      }
     } catch (error) {
-      if (!(error instanceof UnhashableQueryIRError)) throw error
-      if (queryKey !== undefined) throw error
-    }
-
-    let collection: Collection<any, any, any> | null
-    if (preparedValue === undefined || preparedValue === null) {
-      collection = null
-    } else if (isCollection(preparedValue)) {
-      collection = preparedValue
-    } else if (preparedValue instanceof BaseQueryBuilder) {
-      // Hydration keys the live-query Collection by identity.
-      collection = resolveLiveQueryValue(preparedValue, { pool: !dbClient })
-    } else {
-      collection = createLiveQueryCollection({
-        ...(preparedValue as LiveQueryCollectionConfig<any>),
-        startSync: true,
-      })
-    }
-
-    return {
-      collection,
-      client: dbClient,
-      queryHash,
-      resumeDeferredCollections: () => {
-        for (const deferredCollection of deferredCollections) {
-          deferredCollection._resumeSyncStart()
-        }
-        deferredCollections.clear()
-      },
+      return rejectLiveQueryInput(deferredCollections, error)
     }
   })
 
@@ -445,15 +495,16 @@ export function useLiveQuery(
     queryHash: currentResolved.queryHash,
     onPreload: currentResolved.resumeDeferredCollections,
   })
-  const initialSnapshot = currentObserver.getServerSnapshot()
+  const initialSnapshot =
+    typeof window === `undefined` || context?.hydrating
+      ? currentObserver.getServerSnapshot()
+      : currentObserver.getSnapshot()
 
   // Reactive state that gets updated granularly through change events
   const state = new SvelteMap<string | number, any>(initialSnapshot.state ?? [])
 
   // Reactive data array that maintains sorted order
-  let internalData = $state<Array<any>>(
-    Array.from(initialSnapshot.state?.values() ?? []),
-  )
+  let internalData = $state<Array<any>>(snapshotRows(initialSnapshot.data))
 
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
@@ -487,7 +538,7 @@ export function useLiveQuery(
           state.set(key, value)
         }
       }
-      internalData = Array.from(snapshot.state?.values() ?? [])
+      internalData = snapshotRows(snapshot.data)
     })
   }
 
@@ -513,8 +564,14 @@ export function useLiveQuery(
         syncFromObserver(observer, changes)
       },
     )
-    currentResolved.resumeDeferredCollections()
-    syncFromObserver(observer)
+    try {
+      currentResolved.resumeDeferredCollections()
+      syncFromObserver(observer)
+    } catch (error) {
+      unsubscribe()
+      observer.dispose()
+      throw error
+    }
 
     // Cleanup when effect is invalidated
     return () => {
@@ -523,8 +580,13 @@ export function useLiveQuery(
     }
   })
 
+  // Every read goes through the compiled query, so a query the hook rejected
+  // throws on each read instead of serving the previous query's state.
+  const readResolved = () => resolved
+
   return {
     get state() {
+      readResolved()
       return state
     },
     get data() {
@@ -538,30 +600,39 @@ export function useLiveQuery(
       return getPublicCollection(resolved.collection)
     },
     get status() {
+      readResolved()
       return status as CollectionStatus
     },
     get isLoading() {
+      readResolved()
       return status === `loading`
     },
     get isReady() {
+      readResolved()
       return status === `ready` || status === `disabled`
     },
     get persistedStatus() {
+      readResolved()
       return persistedStatus
     },
     get isPersistedReady() {
+      readResolved()
       return persistedStatus === `ready`
     },
     get persistedError() {
+      readResolved()
       return persistedError
     },
     get isIdle() {
+      readResolved()
       return status === `idle`
     },
     get isError() {
+      readResolved()
       return status === `error`
     },
     get isCleanedUp() {
+      readResolved()
       return status === `cleaned-up`
     },
   }

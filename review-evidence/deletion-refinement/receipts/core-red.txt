@@ -1,0 +1,130 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/core-red.log
+SHA-256 of full source: 9e034d30683953616f5835afe44249120f619b235c8092d7c1af6fc9ab653055
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/db
+
+··x··x··x··x··x··x····················x··x··x··x··x··x
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"first":false,"last":false}
+AssertionError: expected 'ready' to be 'loading' // Object.is equality
+
+Expected: "loading"
+Received: "ready"
+
+ ❯ tests/truncate-readiness-oracle.test.ts:57:27
+     55|     const receipt = sync.commit()
+     56|     const expectedStatus = last === false ? status : 'ready'
+     57|     expect.soft(c.status).toBe(expectedStatus)
+       |                           ^
+     58|     expect.soft(observed.every(value => value === expectedStatus), 'st…
+     59|     expect([...c.base.values()].map(row => ({ id: row.id, value: row.v…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/36]⎯
+
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"first":false,"last":false}
+AssertionError: status at publication: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/truncate-readiness-oracle.test.ts:58:93
+     56|     const expectedStatus = last === false ? status : 'ready'
+     57|     expect.soft(c.status).toBe(expectedStatus)
+     58|     expect.soft(observed.every(value => value === expectedStatus), 'st…
+       |                                                                                             ^
+     59|     expect([...c.base.values()].map(row => ({ id: row.id, value: row.v…
+     60|     await receipt
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/36]⎯
+
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":false,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"loading","held":true,"first":false,"last":false}
+AssertionError: expected 'ready' to be 'loading' // Object.is equality
+
+Expected: "loading"
+Received: "ready"
+
+ ❯ tests/truncate-readiness-oracle.test.ts:64:27
+     62|     finish.resolve()
+     63|     await optimistic?.isPersisted.promise
+     64|     expect.soft(c.status).toBe(expectedStatus)
+       |                           ^
+     65|     // A later independent ordinary replacement still recovers normall…
+     66|     sync.begin(); sync.truncate(); sync.commit()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/36]⎯
+
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"first":false,"last":false}
+AssertionError: expected 'ready' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "ready"
+
+ ❯ tests/truncate-readiness-oracle.test.ts:57:27
+     55|     const receipt = sync.commit()
+     56|     const expectedStatus = last === false ? status : 'ready'
+     57|     expect.soft(c.status).toBe(expectedStatus)
+       |                           ^
+     58|     expect.soft(observed.every(value => value === expectedStatus), 'st…
+     59|     expect([...c.base.values()].map(row => ({ id: row.id, value: row.v…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/36]⎯
+
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":false,"first":false,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"first":true,"last":false}
+ FAIL  |@tanstack/db| tests/truncate-readiness-oracle.test.ts > replacement readiness follows the final authored intent: {"status":"error","held":true,"first":false,"last":false}
+AssertionError: expected 'ready' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "ready"
+
+ ❯ tests/truncate-readiness-oracle.test.ts:64:27
+     62|     finish.resolve()
+     63|     await optimistic?.isPersisted.promise
+     64|     expect.soft(c.status).toBe(expectedStatus)
+       |                           ^
+     65|     // A later independent ordinary replacement still recovers normall…
+     66|     sync.begin(); sync.truncate(); sync.commit()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/36]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  12 failed | 42 passed (54)
+   Start at  07:45:03
+   Duration  823ms (transform 227ms, setup 58ms, collect 306ms, tests 19ms, environment 218ms, prepare 64ms)

@@ -1,0 +1,154 @@
+Source log: /tmp/pr1179-refinement-green.log
+SHA-256 of full source: ae5f9b5c08ac428b233c936adec58a6cccf3d2870f3d97f6b946392643974f0e
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+xxxxx·························xxxxxxxxxxxx··················xxxxxxxxxxxx··················xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx··················································································································································································································································································································································································································································································································································································································································································································································
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 101 ⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"before-recreate"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"after-recreate"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"second-blocked"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"second-native"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"after-second"}
+AssertionError: active transaction prevents native success: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ tests/deletion-queue-oracle.test.ts:89:80
+     87|       await new Promise(resolve => setTimeout(resolve, 0))
+     88|       expect(gateComplete).toBe(false)
+     89|       expect(nativeSucceeded[0], 'active transaction prevents native s…
+       |                                                                                ^
+     90|       await gate.release()
+     91|     }
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/deletion-queue-oracle.test.ts:25:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/101]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"clear","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"clear","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"clear","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"clear","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"clear","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"clear","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"import","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"import","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"import","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"import","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"import","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"import","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"clear","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"clear","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"clear","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"clear","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"clear","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"clear","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"import","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"import","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"import","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"import","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"import","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"update","second":"import","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"clear","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"clear","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"clear","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"clear","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"clear","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"clear","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"import","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"import","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"import","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"import","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"import","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"delete","second":"import","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"insert","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"insert","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"insert","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"insert","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"insert","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"insert","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"update","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"update","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"update","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"update","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"update","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"update","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"delete","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"delete","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"delete","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"delete","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"delete","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"delete","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"clear","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"clear","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"clear","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"clear","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"clear","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"clear","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"import","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"import","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"import","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"import","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"import","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"clear","second":"import","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"insert","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"insert","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"insert","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"insert","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"insert","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"insert","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"update","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"update","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"update","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"update","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"update","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"update","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"delete","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"delete","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"delete","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"delete","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"delete","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"delete","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"clear","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"clear","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"clear","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"clear","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"clear","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"clear","reason":"delete","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"import","reason":"explicit","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"import","reason":"explicit","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"import","reason":"upgrade","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"import","reason":"upgrade","reverse":true}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"import","reason":"delete","reverse":false}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"import","second":"import","reason":"delete","reverse":true}
+AssertionError: native outcome at caller settlement: expected 'pending' to be 'abort' // Object.is equality
+
+Expected: "abort"
+Received: "pending"
+
+ ❯ tests/retirement-oracle.test.ts:135:79
+    133|           const expected = outcomes[slot] ? apply(initial, operations[…
+    134|           expect(callers[slot]!.result.state, 'caller follows native c…
+    135|           expect(nativeAtCaller[slot], 'native outcome at caller settl…
+       |                                                                               ^
+    136|           expect(native.entries[order.indexOf(slot)]!.status).toBe(out…
+    137|           assertRows(callers[slot]!.snapshot()!, expected, 'source at …
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:101:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/101]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  101 failed | 783 passed (884)
+   Start at  07:57:08
+   Duration  42.78s (transform 382ms, setup 40ms, collect 1.04s, tests 41.84s, environment 416ms, prepare 129ms)

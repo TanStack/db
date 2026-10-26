@@ -6,14 +6,16 @@ import {
   getLiveQueryStatusFlags,
   isCollection,
   isSingleResultCollection,
-} from './live-query-adapter.js'
+} from './live-query-primitives.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { deepEquals } from './utils.js'
+import { codedMessage, devBuild } from './error-message.js'
 import type {
   LiveQueryObserver,
   LiveQuerySnapshot,
 } from './live-query-observer.js'
+import type { DbClient } from './client.js'
 import type { Collection } from './collection/index.js'
 import type { CollectionStatus } from './types.js'
 import type {
@@ -44,8 +46,10 @@ export function getLiveQueryWindowInputKind(
   if (isCollection(input)) return `collection`
   if (typeof input === `function`) return `query`
   throw new Error(
-    `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
-      `Received: ${typeof input}`,
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
+          `Received: ${typeof input}`
+      : codedMessage(103, { type: typeof input }),
   )
 }
 
@@ -79,11 +83,38 @@ export function resolveLiveQueryWindowInput<TContext extends Context>(
     typeof (value as { offset?: unknown }).offset !== `function`
   ) {
     throw new Error(
-      `useLiveInfiniteQuery: Query function must return a query builder. ` +
-        `Disabled null or undefined queries are not supported.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `useLiveInfiniteQuery: Query function must return a query builder. ` +
+            `Disabled null or undefined queries are not supported.`
+        : codedMessage(104),
     )
   }
   return { kind: `query`, query: value as QueryBuilder<TContext> }
+}
+
+/**
+ * Whether a window collection may start from its current window. An adapter
+ * may then start the collection, or reuse one it started, during render, as
+ * useLiveQuery does. That holds for exactly the requested rows from offset 0,
+ * whose first published rows are already correct. It also holds for an
+ * unbounded window, which the controller cannot narrow before its source
+ * request anyway. Any other window waits for the controller to adjust it when
+ * the subscription commits: a shifted or narrower window would publish the
+ * wrong rows first, and a wider finite one would request rows from an
+ * on-demand source that the hook does not need.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function liveQueryWindowMatches(
+  collection: Collection<any, any, any>,
+  requiredLimit: number,
+): boolean {
+  const window = (collection as WindowTarget).utils?.getWindow?.()
+  return (
+    window !== undefined &&
+    window.offset === 0 &&
+    (window.limit === requiredLimit || window.limit === Infinity)
+  )
 }
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
@@ -380,7 +411,9 @@ export function assertLiveQueryWindowManyResult(
 ): void {
   if (isSingleResultCollection(collection)) {
     throw new Error(
-      `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`
+        : codedMessage(105),
     )
   }
 }
@@ -408,8 +441,10 @@ export function getLiveQueryWindowCollectionWarning(
   assertLiveQueryWindowManyResult(collection)
   if (!isLiveQueryWindowCollection(collection)) {
     throw new Error(
-      `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
-        `Please add .orderBy() to your createLiveQueryCollection query.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
+            `Please add .orderBy() to your createLiveQueryCollection query.`
+        : codedMessage(106),
     )
   }
 
@@ -422,6 +457,8 @@ export function getLiveQueryWindowCollectionWarning(
     return undefined
   }
 
+  // A developer hint: production adapters get no warning to print.
+  if (!(devBuild() && process.env.NODE_ENV !== `production`)) return undefined
   return (
     `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
     `but the hook expects {offset: 0, limit: ${expectedLimit}}. Adjusting window now.`
@@ -505,6 +542,8 @@ export interface LiveQueryWindowSnapshot<
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
 export interface CreateLiveQueryWindowControllerOptions {
+  client?: DbClient
+  queryHash?: string
   /** Rows per page (default 20). Invalid values use the default. */
   pageSize?: number
   /** Value of the first page's `pageParam` (default 0). */
@@ -519,6 +558,7 @@ export interface LiveQueryWindowController<
   TKey extends string | number,
 > {
   getSnapshot: () => LiveQueryWindowSnapshot<T, TKey>
+  getServerSnapshot: () => LiveQueryWindowSnapshot<T, TKey>
   subscribe: (listener: () => void) => () => void
   /** Load one more page, resolving only after that page is committed. */
   fetchNextPage: () => Promise<void>
@@ -615,11 +655,22 @@ class LiveQueryWindowControllerImpl<
     // only coherent observer contract and guarantees non-reentrant subscribe.
     this.observer = createLiveQueryObserver<T, TKey>(collection, {
       mode: `wholesale`,
+      client: options.client,
+      queryHash: options.queryHash,
     })
   }
 
   getSnapshot(): LiveQueryWindowSnapshot<T, TKey> {
-    const observerSnapshot = this.observer.getSnapshot()
+    return this.snapshotFrom(this.observer.getSnapshot())
+  }
+
+  getServerSnapshot(): LiveQueryWindowSnapshot<T, TKey> {
+    return this.snapshotFrom(this.observer.getServerSnapshot())
+  }
+
+  private snapshotFrom(
+    observerSnapshot: LiveQuerySnapshot<T, TKey>,
+  ): LiveQueryWindowSnapshot<T, TKey> {
     if (this.hasPaginationError && observerSnapshot.status === `ready`) {
       this.failedHasNextPage = this.getComputedHasNextPage(observerSnapshot)
     }
@@ -667,7 +718,9 @@ class LiveQueryWindowControllerImpl<
       hasNextPage,
       isFetchingNextPage: this.isFetchingNextPage,
       error: this.hasPaginationError ? this.paginationError : undefined,
-      state: observerSnapshot.state,
+      get state() {
+        return observerSnapshot.state
+      },
       collection: observerSnapshot.collection,
       status,
       isLoading: statusFlags.isLoading,

@@ -10,7 +10,7 @@ function trackQuery(
    executionTimeMs): void;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L96)
+Defined in: [packages/db/src/indexes/index-registry.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L121)
 
 Track a query for dev mode analysis
 

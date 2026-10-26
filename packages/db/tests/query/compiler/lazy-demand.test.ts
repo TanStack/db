@@ -2,13 +2,16 @@ import { D2, output } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../../src/collection/index.js'
 import { compileQuery } from '../../../src/query/compiler/index.js'
-import { CollectionRef, PropRef } from '../../../src/query/ir.js'
+import { CollectionRef, Func, PropRef } from '../../../src/query/ir.js'
 import type { LazyCollectionCallbacks } from '../../../src/query/compiler/joins.js'
 
-type Row = { id: number; key: unknown }
+type Row = { id: number; key: unknown; other?: unknown; third?: unknown }
 type Change = [[number, Row], number]
 
-function createDemandHarness(joinType: `left` | `right` | `full` = `left`) {
+function createDemandHarness(
+  joinType: `left` | `right` | `full` = `left`,
+  fields: Array<keyof Row> = [`key`],
+) {
   const source = (id: string) =>
     createCollection<Record<string, unknown>>({
       id,
@@ -29,8 +32,22 @@ function createDemandHarness(joinType: `left` | `right` | `full` = `left`) {
         {
           type: joinType,
           from: new CollectionRef(right, `right`),
-          left: new PropRef([`left`, `key`]),
-          right: new PropRef([`right`, `key`]),
+          on:
+            fields.length === 1
+              ? new Func(`eq`, [
+                  new PropRef([`left`, fields[0]!]),
+                  new PropRef([`right`, fields[0]!]),
+                ])
+              : new Func(
+                  `and`,
+                  fields.map(
+                    (field) =>
+                      new Func(`eq`, [
+                        new PropRef([`left`, field]),
+                        new PropRef([`right`, field]),
+                      ]),
+                  ),
+                ),
         },
       ],
     },
@@ -171,4 +188,79 @@ describe(`compiled lazy demand presence`, () => {
       }
     }
   })
+})
+
+/**
+ * Compound demand refines the current active rows. A row with any nullish
+ * component cannot match and contributes no demand. Every satisfiable row
+ * contributes its first operand until its last equal contributor leaves.
+ *
+ * This compiler-boundary model is a plain keyed table. It recomputes the
+ * first-field set from all nonnull tuples, independently of encoded join keys
+ * or incremental weights. The finite history grammar crosses LEFT/RIGHT,
+ * two/three fields, both orders, distinct primary keys sharing null components,
+ * shared primary keys with different later values, null/undefined, and
+ * put/remove/restore. Each graph.run is a checkpoint for demand and unmatched
+ * outer-row weight. Adapter requests and public events have a separate owner.
+ */
+describe(`compound lazy demand oracle`, () => {
+  for (const joinType of [`left`, `right`] as const) {
+    for (const width of [2, 3]) {
+      for (const reverse of [false, true]) {
+        it(`retains exactly the satisfiable contributors: ${joinType}, width=${width}, reverse=${reverse}`, async () => {
+          const fields: Array<keyof Row> =
+            width === 2 ? [`key`, `other`] : [`key`, `other`, `third`]
+          if (reverse) fields.reverse()
+          const h = createDemandHarness(joinType, fields)
+          const model = new Map<number, Row>()
+          const rows: Array<Row> = [
+            { id: 1, key: 1, other: null, third: 7 },
+            { id: 2, key: 2, other: null, third: 7 },
+            { id: 3, key: 1, other: 9, third: null },
+            { id: 4, key: 2, other: 8, third: 7 },
+            { id: 5, key: 2, other: 9, third: 7 },
+            { id: 6, key: null, other: 9, third: 7 },
+            { id: 7, key: 3, other: undefined, third: 7 },
+          ]
+          const step = (row: Row, remove = false) => {
+            const previous = model.get(row.id)
+            const changes: Array<Change> = []
+            if (previous) changes.push([[previous.id, previous], -1])
+            if (remove) model.delete(row.id)
+            else {
+              model.set(row.id, row)
+              changes.push([[row.id, row], 1])
+            }
+            h.input.sendData(changes)
+            h.graph.run()
+            const expected = new Set(
+              [...model.values()]
+                .filter((value) =>
+                  fields.every((field) => value[field] != null),
+                )
+                .map((value) => value[fields[0]!]),
+            )
+            expect(
+              new Set(h.transitions.at(-1) ?? []),
+              `satisfiable demand`,
+            ).toEqual(expected)
+            expect(h.resultWeight(), `unmatched outer rows`).toBe(model.size)
+          }
+          try {
+            for (const row of rows) step(row)
+            step(rows[0]!, true)
+            step({ ...rows[1]!, other: 9 })
+            step(rows[3]!, true)
+            step(rows[4]!, true)
+            step(rows[1]!)
+            for (const row of [...rows].reverse()) step(row, true)
+            for (const row of rows) step({ ...row, key: 2, other: 9, third: 7 })
+            for (const row of rows) step(row, true)
+          } finally {
+            await h.cleanup()
+          }
+        })
+      }
+    }
+  }
 })

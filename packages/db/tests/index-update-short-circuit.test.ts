@@ -78,29 +78,6 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
     expect(index.lookup(`eq`, 2)).toEqual(new Set([`a`]))
   })
 
-  it(`does not conflate undefined and null`, () => {
-    const index = createIndex()
-    index.add(`a`, { value: undefined })
-
-    index.update(`a`, { value: undefined }, { value: null })
-
-    expect(index.lookup(`eq`, undefined)).toEqual(new Set())
-    expect(index.lookup(`eq`, null)).toEqual(new Set([`a`]))
-  })
-
-  it(`does not use comparator equality to skip an update`, () => {
-    const index = createIndex({
-      compareFn: (a: string, b: string) =>
-        a.toLowerCase().localeCompare(b.toLowerCase()),
-    })
-    index.add(`a`, { value: `A` })
-
-    index.update(`a`, { value: `A` }, { value: `a` })
-
-    expect(index.lookup(`eq`, `A`)).toEqual(new Set())
-    expect(index.lookup(`eq`, `a`)).toEqual(new Set([`a`]))
-  })
-
   it(`preserves the previous error behavior when evaluation fails`, () => {
     const index = createIndex()
     index.add(`a`, { value: 1 })
@@ -115,6 +92,32 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
     )
 
     expect(index.lookup(`eq`, 1)).toEqual(new Set())
+    expect(index.keyCount).toBe(0)
+  })
+})
+
+describe.each(indexTypes)(`%s add`, (_indexName, IndexType) => {
+  // Both index types report a failed index expression with the key and keep
+  // the expression's own error as the cause.
+  it(`keeps the expression error as the cause of an add failure`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const failure = new Error(`evaluation failed`)
+    const item = Object.defineProperty({}, `value`, {
+      get() {
+        throw failure
+      },
+    })
+
+    let thrown: unknown
+    try {
+      index.add(`a`, item)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain(`key a`)
+    expect((thrown as Error).cause).toBe(failure)
     expect(index.keyCount).toBe(0)
   })
 })

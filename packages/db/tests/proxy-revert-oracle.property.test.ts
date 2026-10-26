@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { createChangeProxy } from '../src/proxy'
+import { createChangeProxy, withChangeTracking } from '../src/proxy'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
  *
  * A draft records the changes a callback makes to a row. A write that makes a
- * value structurally equal to its original again is a revert, and a fully
- * reverted draft reports no change. `getChanges()` returns:
- *
- * - `{}` when every value equals its original;
- * - otherwise each own enumerable string key whose final value differs from
- *   its original, with that final value, and each deleted key as `undefined`.
+ * value structurally equal to its original again is a revert. `getChanges()`
+ * reports each own enumerable string key whose final value differs from its
+ * original, with that final value, and each deleted key as `undefined`. It
+ * may also report a key the callback wrote whose final value equals its
+ * original, with that value. A missed change (a false negative) breaks the
+ * row; an extra report of an equal value (a false positive) only repeats the
+ * stored value, so the law permits it. A direct write back to the original
+ * value still reports nothing.
  *
  * "Equal" here is draft equality, which is stricter than `deepEquals`:
  *
@@ -30,26 +32,36 @@ import { createChangeProxy } from '../src/proxy'
  *    instances as plain objects. A class instance without enumerable keys
  *    (here, one with only a private field) equals only itself.
  *
- * Laws checked at one checkpoint: after the last write of a history, before
- * the draft publishes. The driver writes through `createChangeProxy`'s draft
+ * Laws checked at one checkpoint: after the last write of a history.
+ * The driver writes through `createChangeProxy`'s draft
  * (its `set`, `deleteProperty`, and `get` traps, and the array iterator), and
  * the check reads `getChanges()` and the draft.
  *
- * - `getChanges()` equals the model's changes.
+ * - `getChanges()` reports every change in the model, with its final value.
+ *   Any other key it reports is one the history wrote, with its final value.
  * - Reading the draft gives the model's final value.
  * - The original row is unchanged.
  *
  * Authority: rules 1 to 6 and the laws come from the `createChangeProxy` and
  * `getChanges` implementation comments in `src/proxy.ts` and the revert
- * examples in `tests/proxy.test.ts`, as of `18abceee`. Rules 7 to 9 are design
+ * examples in `tests/proxy-oracle.test.ts`, as of `18abceee`. Rules 7 to 9 are design
  * decisions recorded in
- * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`.
+ * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`. The
+ * false-positive permission is a maintainer decision (2026-10-09), recorded in
+ * `docs/contributing/oracle-reviews/proxy-revert-replaced-object.md`.
  *
  * Limits:
- * - Writes are assignments, deletes, nested property writes, and nested writes
- *   through `for...of` on an array. Map, Set, and array mutator methods
- *   (`set`, `add`, `push`) mark a value changed without a revert check; the
- *   native-operation tests in `proxy.test.ts` own them.
+ * - The main histories write by assignment, delete, nested property write,
+ *   and nested write through `for...of` on an array. A native mutator
+ *   (`push`, `set`, `add`, ...) marks a value changed without a revert check,
+ *   so a mutator that leaves the value equal may still report it. The last
+ *   block mixes array mutators with assignments, a nested object, and a
+ *   retained handle, and checks when that permission ends. Map and Set
+ *   mutators are not mixed with assignments. Each mutator's own result
+ *   belongs to `proxy-native-methods-oracle.property.test.ts`.
+ * - An assignment of a value draft-equal to the current one is a no-op, so a
+ *   handle retained before it stays attached. Native JavaScript would detach
+ *   it; no law here decides that case.
  * - Top-level symbol keys are not written. `getChanges()` does not report
  *   them; the coverage map lists symbol writes as unsupported. Symbol keys
  *   inside nested objects are written.
@@ -445,17 +457,15 @@ const classWriteArb: fc.Arbitrary<History> = fc
     between: fc.array(opArb, { maxLength: 2 }),
     revert: fc.boolean(),
   })
-  .map(
-    ({ f, g, first, second, between, revert }): History => ({
-      original: { f, g },
-      ops: [
-        { op: `set`, field: `f`, value: first },
-        ...between,
-        { op: `set`, field: `f`, value: second },
-        ...(revert ? [{ op: `revert` as const, field: `f` as const }] : []),
-      ],
-    }),
-  )
+  .map(({ f, g, first, second, between, revert }): History => ({
+    original: { f, g },
+    ops: [
+      { op: `set`, field: `f`, value: first },
+      ...between,
+      { op: `set`, field: `f`, value: second },
+      ...(revert ? [{ op: `revert` as const, field: `f` as const }] : []),
+    ],
+  }))
 
 // Nested round trips. Either add a key the original object lacks and later
 // delete it, or change an existing key and later write its original value
@@ -466,16 +476,26 @@ const nestedRoundTripArb: fc.Arbitrary<History> = fc
     a: primArb,
     sym: fc.option(primArb, { nil: undefined }),
     g: specArb,
-    mode: fc.constantFrom(`delete` as const, `restore` as const),
+    mode: fc.constantFrom(
+      `delete` as const,
+      `restore` as const,
+      `replace` as const,
+    ),
     value: primArb,
     between: fc.array(opArb, { maxLength: 2 }),
   })
   .map(({ a, sym, g, mode, value, between }): History => {
     const f: Spec = sym === undefined ? { k: `obj`, a } : { k: `obj`, a, sym }
+    // `replace` assigns a new object without `a`; the nested write that
+    // restores `a` makes the field equal its original again.
+    const replacement: Spec =
+      sym === undefined ? { k: `obj` } : { k: `obj`, sym }
     const first: GeneratedOp =
       mode === `delete`
         ? { op: `nested`, field: `f`, key: `b`, value }
-        : { op: `nested`, field: `f`, key: `a`, value }
+        : mode === `replace`
+          ? { op: `set`, field: `f`, value: replacement }
+          : { op: `nested`, field: `f`, key: `a`, value }
     const last: GeneratedOp =
       mode === `delete`
         ? { op: `nestedDelete`, field: `f`, key: `b` }
@@ -698,9 +718,11 @@ function expectHistory({ original, ops }: History): void {
   const before = realizeRoot(original)
   const { proxy, getChanges } = createChangeProxy(row)
   let state: Root = { ...original }
+  const written = new Set<Field>()
   for (const generated of ops) {
     const op = resolve(state, original, generated)
     if (op === undefined || !applicable(state, original, op)) continue
+    written.add(op.field)
     if (op.op === `revert`) {
       if (original[op.field] === undefined) delete proxy[op.field]
       else
@@ -715,9 +737,27 @@ function expectHistory({ original, ops }: History): void {
     original: Object.fromEntries(FIELDS.map((f) => [f, canon(original[f])])),
     ops,
   })
-  expect(Object.keys(changes).sort(), `changed keys, ${context}`).toEqual(
-    [...expected.keys()].sort(),
-  )
+  for (const field of expected.keys())
+    expect(field in changes, `change of ${field} reported, ${context}`).toBe(
+      true,
+    )
+  // An extra report is permitted only for a written key, with its final value.
+  expect(
+    Object.keys(changes).filter(
+      (key) => !(FIELDS as ReadonlyArray<string>).includes(key),
+    ),
+    `keys outside the row reported, ${context}`,
+  ).toEqual([])
+  for (const field of FIELDS) {
+    if (!(field in changes) || expected.has(field)) continue
+    expect(written.has(field), `unwritten ${field} reported, ${context}`).toBe(
+      true,
+    )
+    expect(
+      readSpec(changes[field], state[field]),
+      `extra report of ${field}, ${context}`,
+    ).toBe(encode(state[field]))
+  }
   for (const [field, spec] of expected) {
     if (spec === undefined)
       expect(changes[field], `deleted ${field}, ${context}`).toBeUndefined()
@@ -955,6 +995,37 @@ describe(`draft revert oracle`, () => {
       },
     ],
     [
+      `a replaced object restored to its original by a nested write reports at most its original value`,
+      {
+        original: { f: { k: `obj`, a: 0 } },
+        ops: [
+          { op: `set`, field: `f`, value: { k: `obj` } },
+          { op: `nested`, field: `f`, key: `a`, value: 0 },
+        ],
+      },
+    ],
+    [
+      `a replaced object restored with its symbol key kept reports at most its original value`,
+      {
+        original: {
+          f: { k: `obj`, a: 0, sym: 1 },
+          g: { k: `map`, entries: [] },
+        },
+        ops: [
+          { op: `nested`, field: `f`, key: `a`, value: 0 },
+          { op: `set`, field: `f`, value: { k: `obj`, sym: 1 } },
+          { op: `nested`, field: `f`, key: `a`, value: 0 },
+        ],
+      },
+    ],
+    [
+      `an array replaced by an empty Set is a change`,
+      {
+        original: { g: { k: `array`, items: [] } },
+        ops: [{ op: `set`, field: `g`, value: { k: `set`, values: [] } }],
+      },
+    ],
+    [
       `a key added with the value undefined stays a change after a sibling revert`,
       {
         original: { f: { k: `obj`, a: 0 } },
@@ -1126,4 +1197,404 @@ describe(`draft revert oracle`, () => {
       },
     ],
   ])(`%s`, (_name, history) => expectHistory(history))
+})
+
+// ---------------------------------------------------------------------------
+// Native mutators mixed with assignments.
+//
+// The histories above write only through assignment and delete, so they
+// cannot reach a key whose value a native mutator changed. A native mutator
+// (`push`, `pop`, `reverse`) counts as a change without a revert check, so
+// when the value ends equal to the original, `getChanges()` may still report
+// it, as for any written key. A mutator called through a handle the callback
+// has since replaced changes nothing in the row.
+//
+// Model: plain JavaScript values. A row is `{ x, f: { arr, g: { a } } }`. Each
+// step runs on a native copy. A retained handle is the array object it was
+// taken from; once `f.arr` holds another array, the handle is detached. An assignment of a value equal to the current one changes
+// nothing, as the set trap documents: the draft keeps its array, so the handle
+// and any native write stay attached. Native JavaScript would detach the
+// handle there; that difference is an open question, not a law of this block.
+//
+// Law, checked after the last step:
+// - `x` is reported exactly when it differs from the original.
+// - `f` is reported, with its final value, when it differs from the original.
+//   When it equals the original, `f` may be reported only if the history wrote
+//   the live `f` value, and then only with its final value.
+// - Reading the draft gives the model's final row.
+
+type NativeRow = { x: number; f: { arr: Array<number>; g: { a?: number } } }
+type NativeOp =
+  | { op: `push`; v: number }
+  | { op: `pop` }
+  | { op: `reverse` }
+  | { op: `assignArr`; items: Array<number> }
+  | { op: `restoreArr` }
+  | { op: `replaceG` }
+  | { op: `setGa`; v: number }
+  | { op: `retain` }
+  | { op: `pushHandle`; v: number }
+  | { op: `setX`; v: number }
+
+const smallInt = fc.integer({ min: 0, max: 2 })
+const nativeOpArb: fc.Arbitrary<NativeOp> = fc.oneof(
+  smallInt.map((v): NativeOp => ({ op: `push`, v })),
+  fc.constant<NativeOp>({ op: `pop` }),
+  fc.constant<NativeOp>({ op: `reverse` }),
+  fc
+    .array(smallInt, { maxLength: 3 })
+    .map((items): NativeOp => ({ op: `assignArr`, items })),
+  { weight: 2, arbitrary: fc.constant<NativeOp>({ op: `restoreArr` }) },
+  fc.constant<NativeOp>({ op: `replaceG` }),
+  { weight: 2, arbitrary: smallInt.map((v): NativeOp => ({ op: `setGa`, v })) },
+  fc.constant<NativeOp>({ op: `retain` }),
+  smallInt.map((v): NativeOp => ({ op: `pushHandle`, v })),
+  smallInt.map((v): NativeOp => ({ op: `setX`, v })),
+)
+type NativeHistory = { original: NativeRow; ops: Array<NativeOp> }
+const nativeHistoryArb: fc.Arbitrary<NativeHistory> = fc.record({
+  original: fc.record({
+    x: smallInt,
+    f: fc.record({
+      arr: fc.array(smallInt, { maxLength: 3 }),
+      g: fc.record({ a: smallInt }),
+    }),
+  }),
+  ops: fc.array(nativeOpArb, { minLength: 1, maxLength: 8 }),
+})
+
+const cloneRow = (row: NativeRow): NativeRow => ({
+  x: row.x,
+  f: { arr: [...row.f.arr], g: { ...row.f.g } },
+})
+const sameRowPart = (left: unknown, right: unknown) =>
+  JSON.stringify(left) === JSON.stringify(right)
+
+function nativeModel(history: NativeHistory): {
+  row: NativeRow
+  wroteF: boolean
+} {
+  const row = cloneRow(history.original)
+  let handle: Array<number> | undefined
+  let wroteF = false
+  for (const action of history.ops) {
+    switch (action.op) {
+      case `push`:
+        wroteF = true
+        row.f.arr.push(action.v)
+        break
+      case `pop`:
+        wroteF = true
+        row.f.arr.pop()
+        break
+      case `reverse`:
+        wroteF = true
+        row.f.arr.reverse()
+        break
+      case `assignArr`:
+      case `restoreArr`: {
+        const next =
+          action.op === `assignArr` ? action.items : history.original.f.arr
+        // An assignment of an equal value is a no-op: the draft keeps its
+        // array, so a retained handle stays attached.
+        if (sameRowPart(next, row.f.arr)) break
+        wroteF = true
+        row.f.arr = [...next]
+        break
+      }
+      case `replaceG`:
+        wroteF = true
+        row.f.g = {}
+        break
+      case `setGa`:
+        if (row.f.g.a !== action.v) wroteF = true
+        row.f.g.a = action.v
+        break
+      case `retain`:
+        handle = row.f.arr
+        break
+      case `pushHandle`:
+        if (handle === undefined) break
+        if (handle === row.f.arr) wroteF = true
+        handle.push(action.v)
+        break
+      case `setX`:
+        row.x = action.v
+        break
+    }
+  }
+  return { row, wroteF }
+}
+
+function driveNative(history: NativeHistory): {
+  changes: Record<string, unknown>
+  read: unknown
+} {
+  const { proxy, getChanges } = createChangeProxy(
+    cloneRow(history.original) as unknown as Record<string, unknown>,
+  )
+  const draft = proxy as unknown as NativeRow
+  let handle: Array<number> | undefined
+  for (const action of history.ops) {
+    switch (action.op) {
+      case `push`:
+        draft.f.arr.push(action.v)
+        break
+      case `pop`:
+        draft.f.arr.pop()
+        break
+      case `reverse`:
+        draft.f.arr.reverse()
+        break
+      case `assignArr`:
+        draft.f.arr = [...action.items]
+        break
+      case `restoreArr`:
+        draft.f.arr = [...history.original.f.arr]
+        break
+      case `replaceG`:
+        draft.f.g = {}
+        break
+      case `setGa`:
+        draft.f.g.a = action.v
+        break
+      case `retain`:
+        handle = draft.f.arr
+        break
+      case `pushHandle`:
+        handle?.push(action.v)
+        break
+      case `setX`:
+        draft.x = action.v
+        break
+    }
+  }
+  return {
+    changes: getChanges(),
+    read: { x: draft.x, f: { arr: [...draft.f.arr], g: { ...draft.f.g } } },
+  }
+}
+
+function expectNativeResult(
+  history: NativeHistory,
+  { changes, read }: ReturnType<typeof driveNative>,
+): void {
+  const { row: final, wroteF } = nativeModel(history)
+  const context = JSON.stringify(history)
+  expect(read, `draft reads the final row, ${context}`).toEqual(final)
+  const xChanged = final.x !== history.original.x
+  expect(`x` in changes, `x reported, ${context}`).toBe(xChanged)
+  if (xChanged) expect(changes.x, `x value, ${context}`).toBe(final.x)
+  const fChanged = !sameRowPart(final.f, history.original.f)
+  if (fChanged) expect(`f` in changes, `f reported, ${context}`).toBe(true)
+  else if (!wroteF)
+    expect(`f` in changes, `unwritten f absent, ${context}`).toBe(false)
+  // An equal f may be reported only after a write to the live value.
+  if (`f` in changes) expect(changes.f, `f value, ${context}`).toEqual(final.f)
+  expect(Object.keys(changes).sort(), `only x and f, ${context}`).toEqual(
+    Object.keys(changes)
+      .filter((key) => key === `x` || key === `f`)
+      .sort(),
+  )
+}
+
+function expectNativeHistory(history: NativeHistory): void {
+  expectNativeResult(history, driveNative(history))
+}
+
+describe(`draft revert oracle: native mutators mixed with assignments`, () => {
+  it(`rejects an unwritten field in the change report`, () => {
+    const histories: Array<NativeHistory> = [
+      {
+        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+        ops: [{ op: `setX`, v: 1 }],
+      },
+      {
+        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+        ops: [{ op: `setGa`, v: 0 }],
+      },
+    ]
+    for (const history of histories) {
+      const observed = driveNative(history)
+      expect(() =>
+        expectNativeResult(history, {
+          ...observed,
+          changes: { ...observed.changes, f: history.original.f },
+        }),
+      ).toThrow()
+      expectNativeResult(history, observed)
+    }
+  })
+
+  for (const { name, seed } of campaigns) {
+    it(`matches the model across generated native histories (${name})`, () => {
+      fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
+        numRuns: 400,
+        ...(seed === undefined ? {} : { seed }),
+      })
+    })
+  }
+
+  // Positive execution witness: the fixed campaign reaches a native write
+  // that an assignment then replaces, and a mutator through a detached handle.
+  it(`reaches replaced native writes and detached handles in the fixed campaign`, () => {
+    const sample = fc.sample(nativeHistoryArb, {
+      seed: FIXED_SEED,
+      numRuns: 400,
+    })
+    const replaced = sample.filter((h) => {
+      const first = h.ops.findIndex((o) =>
+        [`push`, `pop`, `reverse`].includes(o.op),
+      )
+      return (
+        first >= 0 &&
+        h.ops
+          .slice(first)
+          .some((o) => o.op === `assignArr` || o.op === `restoreArr`)
+      )
+    })
+    const detached = sample.filter((h) => {
+      const retain = h.ops.findIndex((o) => o.op === `retain`)
+      if (retain < 0) return false
+      const after = h.ops.slice(retain + 1)
+      const replace = after.findIndex(
+        (o) => o.op === `assignArr` || o.op === `restoreArr`,
+      )
+      return (
+        replace >= 0 &&
+        after.slice(replace + 1).some((o) => o.op === `pushHandle`)
+      )
+    })
+    expect(replaced.length).toBeGreaterThan(20)
+    expect(detached.length).toBeGreaterThan(3)
+  })
+
+  it.each<[string, NativeHistory]>([
+    [
+      `a native write that an assignment then restores reports at most its original value`,
+      {
+        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+        ops: [
+          { op: `setX`, v: 1 },
+          { op: `push`, v: 2 },
+          { op: `restoreArr` },
+          { op: `replaceG` },
+          { op: `setGa`, v: 0 },
+        ],
+      },
+    ],
+    [
+      `a mutator through a detached handle changes nothing in the row`,
+      {
+        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+        ops: [
+          { op: `retain` },
+          { op: `assignArr`, items: [1, 2] },
+          { op: `restoreArr` },
+          { op: `pushHandle`, v: 0 },
+        ],
+      },
+    ],
+    [
+      `restoring the last native write reports at most the original value`,
+      {
+        original: { x: 0, f: { arr: [0], g: { a: 0 } } },
+        ops: [
+          { op: `pop` },
+          { op: `replaceG` },
+          { op: `restoreArr` },
+          { op: `setGa`, v: 0 },
+        ],
+      },
+    ],
+  ])(`%s`, (_name, history) => expectNativeHistory(history))
+
+  // The generated row nests the native site two levels deep. One level more
+  // checks that a report three levels up still carries the final value.
+  it(`restoring a native write three levels deep reports at most the original value`, () => {
+    const row = { f: { h: { arr: [0] }, g: { a: 0 } } }
+    const changes = withChangeTracking(structuredClone(row), (draft) => {
+      draft.f.h.arr.pop()
+      draft.f.g = {} as { a: number }
+      draft.f.h.arr = [0]
+      draft.f.g.a = 0
+    })
+    expect(Object.keys(changes).every((key) => key === `f`)).toBe(true)
+    if (`f` in changes) expect(changes.f).toEqual(row.f)
+  })
+
+  // A native write through any handle that reaches the row's value is a
+  // change, and a missed change is the error that matters. These handles share
+  // their parent's value: a Map or Set value, a typed-array view, and a value
+  // read through a frozen draft.
+  it.each<[string, Record<string, unknown>, (draft: any) => void, string]>([
+    [
+      `a Map value`,
+      { m: new Map([[`k`, [1]]]) },
+      (draft) => draft.m.get(`k`).push(2),
+      `m`,
+    ],
+    [
+      `a Map value from iteration`,
+      { m: new Map([[`k`, [1]]]) },
+      (draft) => {
+        for (const value of draft.m.values()) value.push(2)
+      },
+      `m`,
+    ],
+    [
+      `a Set value from iteration`,
+      { s: new Set([[1]]) },
+      (draft) => {
+        for (const value of draft.s) value.push(2)
+      },
+      `s`,
+    ],
+    [
+      `a typed-array view`,
+      { t: new Float64Array([1, 2, 3]) },
+      (draft) => draft.t.subarray(1).fill(9),
+      `t`,
+    ],
+    [
+      `a value read through a frozen draft`,
+      { f: { arr: [1] } },
+      (draft) => Object.freeze(draft).f.arr.push(2),
+      `f`,
+    ],
+  ])(`reports a native write through %s`, (_name, row, write, key) => {
+    const changes = withChangeTracking(row, write)
+    expect(key in changes).toBe(true)
+  })
+
+  // A nested revert inside a Map or Set value must not hide another write to
+  // the same container.
+  it.each<[string, Record<string, unknown>, (draft: any) => void, string]>([
+    [
+      `a Map`,
+      { m: new Map<string, unknown>([[`k`, { a: 0 }]]) },
+      (draft) => {
+        draft.m.set(`j`, 1)
+        draft.m.get(`k`).a = 1
+        draft.m.get(`k`).a = 0
+      },
+      `m`,
+    ],
+    [
+      `a Set`,
+      { s: new Set<unknown>([{ a: 0 }]) },
+      (draft) => {
+        draft.s.add(1)
+        for (const value of draft.s) if (typeof value === `object`) value.a = 1
+        for (const value of draft.s) if (typeof value === `object`) value.a = 0
+      },
+      `s`,
+    ],
+  ])(
+    `a nested revert in %s keeps its other write`,
+    (_name, row, write, key) => {
+      const changes = withChangeTracking(row, write)
+      expect(key in changes).toBe(true)
+    },
+  )
 })

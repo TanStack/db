@@ -1,9 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { Func, PropRef, Value } from '../../src/query/ir.js'
-import { createCollection } from '../../src/collection/index.js'
-import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
   and,
   count,
@@ -15,6 +12,9 @@ import {
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { createCollection } from '../../src/collection/index.js'
+import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
   oraclePropertyOptions,
   oracleRuns,

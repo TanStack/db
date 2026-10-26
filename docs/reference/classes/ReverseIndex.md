@@ -3,7 +3,7 @@ id: ReverseIndex
 title: ReverseIndex
 ---
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:4](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L4)
+Defined in: [packages/db/src/indexes/reverse-index.ts:5](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L5)
 
 ## Type Parameters
 
@@ -20,16 +20,25 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:4](https://github.com/TanS
 ### Constructor
 
 ```ts
-new ReverseIndex<TKey>(index): ReverseIndex<TKey>;
+new ReverseIndex<TKey>(index, nullsFirst?): ReverseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:9](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L9)
+Defined in: [packages/db/src/indexes/reverse-index.ts:16](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L16)
 
 #### Parameters
 
 ##### index
 
 [`IndexInterface`](../interfaces/IndexInterface.md)\<`TKey`\>
+
+##### nullsFirst?
+
+`boolean`
+
+Whether nullish values come first in the reversed
+order. The original index keeps them at the opposite end, so reversing
+it alone would move them; ordered reads put them back. Omit it to read
+the original index's plain reversed walk, as earlier releases did.
 
 #### Returns
 
@@ -45,7 +54,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:9](https://github.com/TanS
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L55)
+Defined in: [packages/db/src/indexes/reverse-index.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L114)
 
 ##### Returns
 
@@ -59,6 +68,30 @@ IndexReader.keyCount
 
 ***
 
+### supportsOrderOptimization
+
+#### Get Signature
+
+```ts
+get supportsOrderOptimization(): boolean;
+```
+
+Defined in: [packages/db/src/indexes/reverse-index.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L106)
+
+Whether a query can use this index for its declared ordered prefix.
+
+##### Returns
+
+`boolean`
+
+#### Implementation of
+
+```ts
+IndexReader.supportsOrderOptimization
+```
+
+***
+
 ### supportsRangeOptimization
 
 #### Get Signature
@@ -67,7 +100,7 @@ IndexReader.keyCount
 get supportsRangeOptimization(): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L47)
+Defined in: [packages/db/src/indexes/reverse-index.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L102)
 
 Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
 return every matching key. Range traversal relies on the index ordering, so
@@ -93,7 +126,7 @@ IndexReader.supportsRangeOptimization
 canOptimizeRangeFor(value): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L51)
+Defined in: [packages/db/src/indexes/reverse-index.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L110)
 
 Whether the live values in this index share the predicate operand's
 relational domain. Mixed domains can sort differently in the index and
@@ -123,7 +156,7 @@ IndexReader.canOptimizeRangeFor
 lookup(operation, value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L15)
+Defined in: [packages/db/src/indexes/reverse-index.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L25)
 
 #### Parameters
 
@@ -153,13 +186,13 @@ IndexReader.lookup
 rangeQuery(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L29)
+Defined in: [packages/db/src/indexes/reverse-index.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L39)
 
 #### Parameters
 
 ##### options
 
-[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md) = `{}`
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -179,7 +212,7 @@ IndexReader.rangeQuery
 supports(operation): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L43)
+Defined in: [packages/db/src/indexes/reverse-index.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L98)
 
 #### Parameters
 
@@ -208,7 +241,7 @@ take(
    filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L33)
+Defined in: [packages/db/src/indexes/reverse-index.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L49)
 
 #### Parameters
 
@@ -242,7 +275,7 @@ IndexReader.take
 takeFromStart(n, filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L37)
+Defined in: [packages/db/src/indexes/reverse-index.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L56)
 
 #### Parameters
 

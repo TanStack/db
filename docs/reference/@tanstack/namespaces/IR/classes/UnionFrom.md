@@ -3,7 +3,7 @@ id: UnionFrom
 title: UnionFrom
 ---
 
-Defined in: [packages/db/src/query/ir.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L116)
+Defined in: [packages/db/src/query/ir.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L177)
 
 ## Extends
 
@@ -17,13 +17,15 @@ Defined in: [packages/db/src/query/ir.ts:116](https://github.com/TanStack/db/blo
 new UnionFrom(sources): UnionFrom;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L118)
+Defined in: [packages/db/src/query/ir.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L179)
 
 #### Parameters
 
 ##### sources
 
-([`CollectionRef`](CollectionRef.md) \| [`QueryRef`](QueryRef.md))[]
+(
+  \| [`CollectionSourceRef`](../type-aliases/CollectionSourceRef.md)
+  \| [`QueryRef`](QueryRef.md))[]
 
 #### Returns
 
@@ -43,7 +45,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 **`Internal`**
 
@@ -60,10 +62,12 @@ BaseExpression.__returnType
 ### sources
 
 ```ts
-sources: (CollectionRef | QueryRef)[];
+sources: (
+  | CollectionSourceRef
+  | QueryRef)[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L118)
+Defined in: [packages/db/src/query/ir.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L179)
 
 ***
 
@@ -73,7 +77,7 @@ Defined in: [packages/db/src/query/ir.ts:118](https://github.com/TanStack/db/blo
 type: "unionFrom";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L117)
+Defined in: [packages/db/src/query/ir.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L178)
 
 #### Overrides
 
@@ -91,7 +95,7 @@ BaseExpression.type
 get alias(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L122)
+Defined in: [packages/db/src/query/ir.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L183)
 
 ##### Returns
 

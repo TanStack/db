@@ -1,0 +1,330 @@
+Source log: /tmp/pr1179-merge-declarations.log
+SHA-256 of full source: c316735e0b3a1143fe5140f7935e5b4eca2a9f2183d82f98f3f62f05d10a6713
+Progress dot lines omitted; trailing whitespace normalized.
+
+[WARN] Your node_modules are out of sync with your lockfile. The workspace structure has changed since last install
+$ pnpm --filter @tanstack/indexeddb-db-collection... build && vitest run --config vitest.package.config.ts
+Scope: 3 of 42 workspace projects
+../db-ivm build$ vite build
+../db-ivm build: vite v7.3.6 building client environment for production...
+../db-ivm build: transforming...
+../db-ivm build: ✓ 35 modules transformed.
+../db-ivm build: rendering chunks...
+../db-ivm build: [vite:dts] Start generate declaration files...
+../db-ivm build: [vite:dts] Start generate declaration files...
+../db-ivm build: computing gzip size...
+../db-ivm build: dist/esm/operators/pipe.js                             0.15 kB │ gzip: 0.13 kB │ map:  8.93 kB
+../db-ivm build: dist/esm/operators/keying.js                           0.32 kB │ gzip: 0.19 kB │ map:  1.32 kB
+../db-ivm build: dist/esm/operators/filterBy.js                         0.44 kB │ gzip: 0.25 kB │ map:  1.50 kB
+../db-ivm build: dist/esm/hashing/temporal.js                           0.51 kB │ gzip: 0.28 kB │ map:  1.09 kB
+../db-ivm build: dist/esm/operators/negate.js                           0.65 kB │ gzip: 0.32 kB │ map:  1.43 kB
+../db-ivm build: dist/esm/operators/map.js                              0.74 kB │ gzip: 0.36 kB │ map:  1.92 kB
+../db-ivm build: dist/esm/operators/tap.js                              0.75 kB │ gzip: 0.36 kB │ map:  2.09 kB
+../db-ivm build: dist/esm/operators/filter.js                           0.76 kB │ gzip: 0.36 kB │ map:  1.91 kB
+../db-ivm build: dist/esm/operators/output.js                           0.85 kB │ gzip: 0.39 kB │ map:  2.06 kB
+../db-ivm build: dist/esm/operators/count.js                            0.86 kB │ gzip: 0.40 kB │ map:  2.20 kB
+../db-ivm build: dist/esm/operators/concat.js                           0.93 kB │ gzip: 0.41 kB │ map:  1.93 kB
+../db-ivm build: dist/esm/operators/groupedOrderBy.js                   0.96 kB │ gzip: 0.39 kB │ map:  3.98 kB
+../db-ivm build: dist/esm/operators/debug.js                            0.97 kB │ gzip: 0.45 kB │ map:  2.29 kB
+../db-ivm build: dist/esm/operators/consolidate.js                      1.02 kB │ gzip: 0.43 kB │ map:  2.05 kB
+../db-ivm build: dist/esm/operators/topK.js                             1.20 kB │ gzip: 0.40 kB │ map:  4.57 kB
+../db-ivm build: dist/esm/graph.js                                      1.66 kB │ gzip: 0.56 kB │ map:  4.84 kB
+../db-ivm build: dist/esm/d2.js                                         1.87 kB │ gzip: 0.61 kB │ map: 12.33 kB
+../db-ivm build: dist/esm/operators/distinct.js                         2.11 kB │ gzip: 0.75 kB │ map:  4.83 kB
+../db-ivm build: dist/esm/operators/topKWithFractionalIndex.js          2.46 kB │ gzip: 0.88 kB │ map:  6.29 kB
+../db-ivm build: dist/esm/index.js                                      2.70 kB │ gzip: 0.70 kB │ map:  0.11 kB
+../db-ivm build: dist/esm/operators/orderBy.js                          2.70 kB │ gzip: 0.60 kB │ map:  8.57 kB
+../db-ivm build: dist/esm/operators/reduce.js                           2.75 kB │ gzip: 0.81 kB │ map:  6.35 kB
+../db-ivm build: dist/esm/operators/topKState.js                        3.07 kB │ gzip: 1.03 kB │ map:  7.66 kB
+../db-ivm build: dist/esm/hashing/murmur.js                             3.63 kB │ gzip: 1.17 kB │ map:  7.93 kB
+../db-ivm build: dist/esm/operators/groupedTopKWithFractionalIndex.js   3.70 kB │ gzip: 1.24 kB │ map:  8.91 kB
+../db-ivm build: dist/esm/multiset.js                                   4.26 kB │ gzip: 1.51 kB │ map:  8.36 kB
+../db-ivm build: dist/esm/operators/topKArray.js                        4.65 kB │ gzip: 1.37 kB │ map: 12.65 kB
+../db-ivm build: dist/esm/operators/join.js                             5.09 kB │ gzip: 1.16 kB │ map: 16.22 kB
+../db-ivm build: dist/esm/operators/groupBy.js                          6.15 kB │ gzip: 1.48 kB │ map: 16.43 kB
+../db-ivm build: dist/esm/utils.js                                      6.23 kB │ gzip: 1.86 kB │ map: 14.94 kB
+../db-ivm build: dist/esm/hashing/hash.js                               6.45 kB │ gzip: 2.02 kB │ map: 14.70 kB
+../db-ivm build: dist/esm/indexes.js                                   12.13 kB │ gzip: 2.78 kB │ map: 24.21 kB
+../db-ivm build: [vite:dts] Declaration files built in 1929ms.
+../db-ivm build: [vite:dts] Declaration files built in 866ms.
+../db-ivm build: dist/cjs/operators/pipe.cjs                             0.24 kB │ gzip: 0.19 kB │ map:  8.93 kB
+../db-ivm build: dist/cjs/operators/keying.cjs                           0.45 kB │ gzip: 0.27 kB │ map:  1.35 kB
+../db-ivm build: dist/cjs/operators/filterBy.cjs                         0.56 kB │ gzip: 0.31 kB │ map:  1.55 kB
+../db-ivm build: dist/cjs/hashing/temporal.cjs                           0.61 kB │ gzip: 0.33 kB │ map:  1.09 kB
+../db-ivm build: dist/cjs/operators/negate.cjs                           0.73 kB │ gzip: 0.39 kB │ map:  1.52 kB
+../db-ivm build: dist/cjs/operators/map.cjs                              0.82 kB │ gzip: 0.43 kB │ map:  2.01 kB
+../db-ivm build: dist/cjs/operators/tap.cjs                              0.83 kB │ gzip: 0.43 kB │ map:  2.18 kB
+../db-ivm build: dist/cjs/operators/filter.cjs                           0.85 kB │ gzip: 0.43 kB │ map:  2.00 kB
+../db-ivm build: dist/cjs/operators/output.cjs                           0.95 kB │ gzip: 0.46 kB │ map:  2.14 kB
+../db-ivm build: dist/cjs/operators/count.cjs                            0.96 kB │ gzip: 0.47 kB │ map:  2.29 kB
+../db-ivm build: dist/cjs/operators/concat.cjs                           1.02 kB │ gzip: 0.47 kB │ map:  2.01 kB
+../db-ivm build: dist/cjs/operators/debug.cjs                            1.06 kB │ gzip: 0.51 kB │ map:  2.37 kB
+../db-ivm build: dist/cjs/operators/groupedOrderBy.cjs                   1.13 kB │ gzip: 0.45 kB │ map:  4.04 kB
+../db-ivm build: dist/cjs/operators/consolidate.cjs                      1.13 kB │ gzip: 0.50 kB │ map:  2.15 kB
+../db-ivm build: dist/cjs/operators/topK.cjs                             1.35 kB │ gzip: 0.47 kB │ map:  4.62 kB
+../db-ivm build: dist/cjs/graph.cjs                                      1.91 kB │ gzip: 0.64 kB │ map:  4.87 kB
+../db-ivm build: dist/cjs/d2.cjs                                         2.00 kB │ gzip: 0.68 kB │ map: 12.37 kB
+../db-ivm build: dist/cjs/operators/distinct.cjs                         2.23 kB │ gzip: 0.82 kB │ map:  4.96 kB
+../db-ivm build: dist/cjs/operators/topKWithFractionalIndex.cjs          2.63 kB │ gzip: 0.95 kB │ map:  6.52 kB
+../db-ivm build: dist/cjs/operators/reduce.cjs                           2.87 kB │ gzip: 0.88 kB │ map:  6.47 kB
+../db-ivm build: dist/cjs/operators/orderBy.cjs                          2.99 kB │ gzip: 0.68 kB │ map:  8.75 kB
+../db-ivm build: dist/cjs/operators/topKState.cjs                        3.23 kB │ gzip: 1.12 kB │ map:  7.71 kB
+../db-ivm build: dist/cjs/hashing/murmur.cjs                             3.78 kB │ gzip: 1.24 kB │ map:  7.93 kB
+../db-ivm build: dist/cjs/operators/groupedTopKWithFractionalIndex.cjs   3.88 kB │ gzip: 1.30 kB │ map:  9.15 kB
+../db-ivm build: dist/cjs/index.cjs                                      3.88 kB │ gzip: 0.89 kB │ map:  0.17 kB
+../db-ivm build: dist/cjs/multiset.cjs                                   4.38 kB │ gzip: 1.57 kB │ map:  8.44 kB
+../db-ivm build: dist/cjs/operators/topKArray.cjs                        4.83 kB │ gzip: 1.44 kB │ map: 12.75 kB
+../db-ivm build: dist/cjs/operators/join.cjs                             5.31 kB │ gzip: 1.25 kB │ map: 16.36 kB
+../db-ivm build: dist/cjs/operators/groupBy.cjs                          6.37 kB │ gzip: 1.58 kB │ map: 16.50 kB
+../db-ivm build: dist/cjs/utils.cjs                                      6.45 kB │ gzip: 1.93 kB │ map: 14.97 kB
+../db-ivm build: dist/cjs/hashing/hash.cjs                               6.69 kB │ gzip: 2.07 kB │ map: 14.89 kB
+../db-ivm build: dist/cjs/indexes.cjs                                   12.29 kB │ gzip: 2.84 kB │ map: 24.29 kB
+../db-ivm build: ✓ built in 2.25s
+../db-ivm build: Done
+../db build$ vite build
+../db build: vite v7.3.6 building client environment for production...
+../db build: transforming...
+../db build: ✓ 102 modules transformed.
+../db build: rendering chunks...
+../db build: [vite:dts] Start generate declaration files...
+../db build: [vite:dts] Start generate declaration files...
+../db build: computing gzip size...
+../db build: dist/esm/query/builder/query-ir.js                 0.13 kB │ gzip:  0.12 kB │ map:   0.58 kB
+../db build: dist/esm/query/live/internal.js                    0.14 kB │ gzip:  0.14 kB │ map:   0.65 kB
+../db build: dist/esm/utils/source-record.js                    0.16 kB │ gzip:  0.14 kB │ map:   0.58 kB
+../db build: dist/esm/utils/get-or-create.js                    0.24 kB │ gzip:  0.18 kB │ map:   0.67 kB
+../db build: dist/esm/utils/error.js                            0.25 kB │ gzip:  0.17 kB │ map:   0.49 kB
+../db build: dist/esm/persisted-readiness.js                    0.29 kB │ gzip:  0.20 kB │ map:   1.30 kB
+../db build: dist/esm/utils/callbacks.js                        0.31 kB │ gzip:  0.19 kB │ map:   0.68 kB
+../db build: dist/esm/query/builder/wrapper-identity.js         0.36 kB │ gzip:  0.24 kB │ map:   0.67 kB
+../db build: dist/esm/sync-receipt.js                           0.38 kB │ gzip:  0.24 kB │ map:   1.65 kB
+../db build: dist/esm/deferred.js                               0.44 kB │ gzip:  0.23 kB │ map:   1.64 kB
+../db build: dist/esm/utils/type-guards.js                      0.45 kB │ gzip:  0.24 kB │ map:   1.07 kB
+../db build: dist/esm/collection-options.js                     0.49 kB │ gzip:  0.24 kB │ map:   1.41 kB
+../db build: dist/esm/query/builder/ref-proxy-identity.js       0.54 kB │ gzip:  0.31 kB │ map:   1.33 kB
+../db build: dist/esm/query/join-conditions.js                  0.55 kB │ gzip:  0.27 kB │ map:   1.13 kB
+../db build: dist/esm/query/live/collection-registry.js         0.57 kB │ gzip:  0.28 kB │ map:   2.07 kB
+../db build: dist/esm/utils/array-utils.js                      0.58 kB │ gzip:  0.32 kB │ map:   1.50 kB
+../db build: dist/esm/query/live/graph-scheduler.js             0.61 kB │ gzip:  0.31 kB │ map:   1.28 kB
+../db build: dist/esm/strategies/debounceStrategy.js            0.72 kB │ gzip:  0.36 kB │ map:   2.34 kB
+../db build: dist/esm/live-query-adapter.js                     0.80 kB │ gzip:  0.36 kB │ map:   3.18 kB
+../db build: dist/esm/optimistic-action.js                      0.83 kB │ gzip:  0.38 kB │ map:   3.45 kB
+../db build: dist/esm/query/query-once.js                       0.86 kB │ gzip:  0.41 kB │ map:   4.75 kB
+../db build: dist/esm/utils/uuid.js                             0.88 kB │ gzip:  0.46 kB │ map:   2.29 kB
+../db build: dist/esm/query/compiler/parent-routes.js           0.89 kB │ gzip:  0.41 kB │ map:   2.16 kB
+../db build: dist/esm/utils/browser-polyfills.js                0.90 kB │ gzip:  0.37 kB │ map:   1.98 kB
+../db build: dist/esm/indexes/reverse-index.js                  1.03 kB │ gzip:  0.40 kB │ map:   2.57 kB
+../db build: dist/esm/virtual-props.js                          1.04 kB │ gzip:  0.47 kB │ map:   9.52 kB
+../db build: dist/esm/strategies/queueStrategy.js               1.09 kB │ gzip:  0.51 kB │ map:   4.72 kB
+../db build: dist/esm/strategies/throttleStrategy.js            1.12 kB │ gzip:  0.44 kB │ map:   3.55 kB
+../db build: dist/esm/query/equality-conjunct.js                1.24 kB │ gzip:  0.54 kB │ map:   2.81 kB
+../db build: dist/esm/query/live-query-collection.js            1.31 kB │ gzip:  0.44 kB │ map:   8.45 kB
+../db build: dist/esm/query/compiler/query-equivalence.js       1.36 kB │ gzip:  0.48 kB │ map:   2.76 kB
+../db build: dist/esm/collection/events.js                      1.53 kB │ gzip:  0.50 kB │ map:   6.27 kB
+../db build: dist/esm/query/subset-dedupe.js                    1.60 kB │ gzip:  0.54 kB │ map:   3.46 kB
+../db build: dist/esm/sync-persistence.js                       1.81 kB │ gzip:  0.59 kB │ map:   3.62 kB
+../db build: dist/esm/utils/cursor.js                           2.04 kB │ gzip:  0.72 kB │ map:   4.40 kB
+../db build: dist/esm/collection/config-errors.js               2.06 kB │ gzip:  0.56 kB │ map:   3.42 kB
+../db build: dist/esm/query/equality-value-identity.js          2.15 kB │ gzip:  0.66 kB │ map:   4.44 kB
+../db build: dist/esm/query/compiler/expressions.js             2.17 kB │ gzip:  0.71 kB │ map:   5.00 kB
+../db build: dist/esm/collection/cleanup-queue.js               2.24 kB │ gzip:  0.86 kB │ map:   4.91 kB
+../db build: dist/esm/query/runtime-reference-identity.js       2.33 kB │ gzip:  0.77 kB │ map:   4.96 kB
+../db build: dist/esm/paced-mutations.js                        2.40 kB │ gzip:  0.76 kB │ map:   8.17 kB
+../db build: dist/esm/indexes/index-registry.js                 2.61 kB │ gzip:  0.88 kB │ map:   6.19 kB
+../db build: dist/esm/indexes/auto-index.js                     2.77 kB │ gzip:  0.97 kB │ map:   6.33 kB
+../db build: dist/esm/query/builder/clone-query.js              2.99 kB │ gzip:  0.88 kB │ map:   6.14 kB
+../db build: dist/esm/event-emitter.js                          3.57 kB │ gzip:  1.06 kB │ map:   6.71 kB
+../db build: dist/esm/live-query-options.js                     3.91 kB │ gzip:  1.17 kB │ map:   8.64 kB
+../db build: dist/esm/local-only.js                             3.93 kB │ gzip:  1.22 kB │ map:  15.64 kB
+../db build: dist/esm/scheduler.js                              4.10 kB │ gzip:  1.25 kB │ map:   9.16 kB
+../db build: dist/esm/query/live/utils.js                       4.46 kB │ gzip:  1.36 kB │ map:  10.31 kB
+../db build: dist/esm/collection/validate-config.js             4.53 kB │ gzip:  1.26 kB │ map:   8.73 kB
+../db build: dist/esm/indexes/base-index.js                     4.59 kB │ gzip:  1.42 kB │ map:  13.66 kB
+../db build: dist/esm/query/compiler/route-metadata.js          5.30 kB │ gzip:  1.47 kB │ map:  10.07 kB
+../db build: dist/esm/query/compiler/lazy-targets.js            5.30 kB │ gzip:  1.37 kB │ map:  11.34 kB
+../db build: dist/esm/utils/comparison.js                       5.94 kB │ gzip:  1.82 kB │ map:  16.50 kB
+../db build: dist/esm/SortedMap.js                              6.30 kB │ gzip:  1.69 kB │ map:  11.77 kB
+../db build: dist/esm/query/live/subset-demand-controller.js    6.38 kB │ gzip:  1.93 kB │ map:  13.45 kB
+../db build: dist/esm/query/builder/functions.js                6.42 kB │ gzip:  1.57 kB │ map:  30.11 kB
+../db build: dist/esm/utils.js                                  6.50 kB │ gzip:  1.75 kB │ map:  17.05 kB
+../db build: dist/esm/query/expression-helpers.js               6.52 kB │ gzip:  1.56 kB │ map:  20.20 kB
+../db build: dist/esm/collection/change-events.js               7.40 kB │ gzip:  1.94 kB │ map:  19.14 kB
+../db build: dist/esm/query/ir.js                               7.44 kB │ gzip:  2.00 kB │ map:  17.85 kB
+../db build: dist/esm/query/compiler/select.js                  7.71 kB │ gzip:  1.92 kB │ map:  17.20 kB
+../db build: dist/esm/query/builder/ref-proxy.js                7.92 kB │ gzip:  1.47 kB │ map:  18.74 kB
+../db build: dist/esm/collection/indexes.js                     8.64 kB │ gzip:  2.39 kB │ map:  17.31 kB
+../db build: dist/esm/query/live/collection-subscriber.js       8.71 kB │ gzip:  2.32 kB │ map:  22.26 kB
+../db build: dist/esm/collection/changes.js                     8.73 kB │ gzip:  2.54 kB │ map:  19.92 kB
+../db build: dist/esm/query/compiler/order-by.js                8.76 kB │ gzip:  2.37 kB │ map:  20.46 kB
+../db build: dist/esm/indexes/basic-index.js                    9.29 kB │ gzip:  2.20 kB │ map:  19.36 kB
+../db build: dist/esm/indexes/btree-index.js                    9.61 kB │ gzip:  2.52 kB │ map:  19.31 kB
+../db build: dist/esm/local-storage.js                          9.94 kB │ gzip:  2.56 kB │ map:  32.68 kB
+../db build: dist/esm/collection/lifecycle.js                  10.12 kB │ gzip:  3.09 kB │ map:  24.11 kB
+../db build: dist/esm/query/live/materialized-pipeline.js      10.76 kB │ gzip:  2.78 kB │ map:  22.79 kB
+../db build: dist/esm/utils/btree.js                           12.25 kB │ gzip:  3.22 kB │ map:  27.23 kB
+../db build: dist/esm/index.js                                 12.31 kB │ gzip:  3.03 kB │ map:   0.13 kB
+../db build: dist/esm/query/live/bucket-facade-adapter.js      12.36 kB │ gzip:  3.01 kB │ map:  24.69 kB
+../db build: dist/esm/utils/index-optimization.js              13.13 kB │ gzip:  2.84 kB │ map:  35.42 kB
+../db build: dist/esm/collection/mutations.js                  14.37 kB │ gzip:  3.25 kB │ map:  31.78 kB
+../db build: dist/esm/query/compiler/evaluators.js             14.92 kB │ gzip:  2.69 kB │ map:  31.50 kB
+../db build: dist/esm/query/pooled-live-query.js               16.15 kB │ gzip:  4.65 kB │ map:  36.26 kB
+../db build: dist/esm/client.js                                16.48 kB │ gzip:  4.13 kB │ map:  39.20 kB
+../db build: dist/esm/transactions.js                          16.51 kB │ gzip:  4.26 kB │ map:  32.06 kB
+../db build: dist/esm/proxy.js                                 16.70 kB │ gzip:  3.96 kB │ map:  40.78 kB
+../db build: dist/esm/query/compiler/joins.js                  17.58 kB │ gzip:  4.23 kB │ map:  39.69 kB
+../db build: dist/esm/collection/index.js                      17.80 kB │ gzip:  4.87 kB │ map:  49.23 kB
+../db build: dist/esm/query/optimizer.js                       18.08 kB │ gzip:  3.84 kB │ map:  55.99 kB
+../db build: dist/esm/query/effect.js                          20.84 kB │ gzip:  5.41 kB │ map:  54.89 kB
+../db build: dist/esm/live-query-window-controller.js          21.17 kB │ gzip:  4.72 kB │ map:  49.63 kB
+../db build: dist/esm/live-query-observer.js                   22.27 kB │ gzip:  5.30 kB │ map:  58.62 kB
+../db build: dist/esm/query/ir-stable-identity.js              23.34 kB │ gzip:  4.82 kB │ map:  46.64 kB
+../db build: dist/esm/query/compiler/group-by.js               23.36 kB │ gzip:  5.27 kB │ map:  48.98 kB
+../db build: dist/esm/query/live/ordered-source-loader.js      24.17 kB │ gzip:  4.70 kB │ map:  55.99 kB
+../db build: dist/esm/collection/sync.js                       25.38 kB │ gzip:  5.82 kB │ map:  52.55 kB
+../db build: dist/esm/errors.js                                25.64 kB │ gzip:  5.99 kB │ map:  37.95 kB
+../db build: dist/esm/query/live/collection-config-builder.js  28.89 kB │ gzip:  7.21 kB │ map:  67.19 kB
+../db build: dist/esm/query/builder/index.js                   36.51 kB │ gzip:  7.59 kB │ map:  72.65 kB
+../db build: dist/esm/collection/state.js                      37.10 kB │ gzip:  7.69 kB │ map:  81.24 kB
+../db build: dist/esm/collection/subscription.js               39.57 kB │ gzip:  9.31 kB │ map:  90.55 kB
+../db build: dist/esm/query/compiler/index.js                  55.29 kB │ gzip: 11.69 kB │ map: 118.17 kB
+../db build: [vite:dts] Declaration files built in 4852ms.
+../db build: [vite:dts] Declaration files built in 2385ms.
+../db build: dist/cjs/query/builder/query-ir.cjs                 0.22 kB │ gzip:  0.19 kB │ map:   0.58 kB
+../db build: dist/cjs/query/live/internal.cjs                    0.25 kB │ gzip:  0.20 kB │ map:   0.65 kB
+../db build: dist/cjs/utils/source-record.cjs                    0.26 kB │ gzip:  0.20 kB │ map:   0.59 kB
+../db build: dist/cjs/utils/get-or-create.cjs                    0.34 kB │ gzip:  0.24 kB │ map:   0.67 kB
+../db build: dist/cjs/utils/error.cjs                            0.35 kB │ gzip:  0.23 kB │ map:   0.50 kB
+../db build: dist/cjs/utils/callbacks.cjs                        0.41 kB │ gzip:  0.26 kB │ map:   0.69 kB
+../db build: dist/cjs/persisted-readiness.cjs                    0.43 kB │ gzip:  0.27 kB │ map:   1.31 kB
+../db build: dist/cjs/query/builder/wrapper-identity.cjs         0.50 kB │ gzip:  0.30 kB │ map:   0.67 kB
+../db build: dist/cjs/sync-receipt.cjs                           0.51 kB │ gzip:  0.30 kB │ map:   1.65 kB
+../db build: dist/cjs/deferred.cjs                               0.54 kB │ gzip:  0.29 kB │ map:   1.64 kB
+../db build: dist/cjs/utils/type-guards.cjs                      0.57 kB │ gzip:  0.30 kB │ map:   1.08 kB
+../db build: dist/cjs/query/join-conditions.cjs                  0.64 kB │ gzip:  0.34 kB │ map:   1.17 kB
+../db build: dist/cjs/collection-options.cjs                     0.66 kB │ gzip:  0.30 kB │ map:   1.42 kB
+../db build: dist/cjs/query/builder/ref-proxy-identity.cjs       0.68 kB │ gzip:  0.36 kB │ map:   1.33 kB
+../db build: dist/cjs/query/live/graph-scheduler.cjs             0.70 kB │ gzip:  0.37 kB │ map:   1.38 kB
+../db build: dist/cjs/utils/array-utils.cjs                      0.72 kB │ gzip:  0.39 kB │ map:   1.52 kB
+../db build: dist/cjs/query/live/collection-registry.cjs         0.74 kB │ gzip:  0.35 kB │ map:   2.11 kB
+../db build: dist/cjs/strategies/debounceStrategy.cjs            0.84 kB │ gzip:  0.42 kB │ map:   2.37 kB
+../db build: dist/cjs/optimistic-action.cjs                      0.94 kB │ gzip:  0.45 kB │ map:   3.55 kB
+../db build: dist/cjs/query/query-once.cjs                       0.97 kB │ gzip:  0.47 kB │ map:   4.79 kB
+../db build: dist/cjs/utils/uuid.cjs                             0.98 kB │ gzip:  0.52 kB │ map:   2.29 kB
+../db build: dist/cjs/live-query-adapter.cjs                     1.00 kB │ gzip:  0.43 kB │ map:   3.19 kB
+../db build: dist/cjs/query/compiler/parent-routes.cjs           1.02 kB │ gzip:  0.47 kB │ map:   2.20 kB
+../db build: dist/cjs/utils/browser-polyfills.cjs                1.04 kB │ gzip:  0.43 kB │ map:   1.98 kB
+../db build: dist/cjs/indexes/reverse-index.cjs                  1.12 kB │ gzip:  0.46 kB │ map:   2.57 kB
+../db build: dist/cjs/strategies/queueStrategy.cjs               1.19 kB │ gzip:  0.58 kB │ map:   4.77 kB
+../db build: dist/cjs/strategies/throttleStrategy.cjs            1.22 kB │ gzip:  0.51 kB │ map:   3.55 kB
+../db build: dist/cjs/virtual-props.cjs                          1.26 kB │ gzip:  0.54 kB │ map:   9.52 kB
+../db build: dist/cjs/query/equality-conjunct.cjs                1.40 kB │ gzip:  0.60 kB │ map:   2.86 kB
+../db build: dist/cjs/query/compiler/query-equivalence.cjs       1.47 kB │ gzip:  0.55 kB │ map:   2.78 kB
+../db build: dist/cjs/query/live-query-collection.cjs            1.50 kB │ gzip:  0.50 kB │ map:   8.61 kB
+../db build: dist/cjs/collection/events.cjs                      1.65 kB │ gzip:  0.57 kB │ map:   6.29 kB
+../db build: dist/cjs/query/subset-dedupe.cjs                    1.72 kB │ gzip:  0.61 kB │ map:   3.50 kB
+../db build: dist/cjs/sync-persistence.cjs                       2.00 kB │ gzip:  0.65 kB │ map:   3.70 kB
+../db build: dist/cjs/utils/cursor.cjs                           2.28 kB │ gzip:  0.77 kB │ map:   4.57 kB
+../db build: dist/cjs/query/compiler/expressions.cjs             2.31 kB │ gzip:  0.77 kB │ map:   5.15 kB
+../db build: dist/cjs/collection/cleanup-queue.cjs               2.34 kB │ gzip:  0.92 kB │ map:   4.91 kB
+../db build: dist/cjs/collection/config-errors.cjs               2.35 kB │ gzip:  0.64 kB │ map:   3.51 kB
+../db build: dist/cjs/query/equality-value-identity.cjs          2.39 kB │ gzip:  0.74 kB │ map:   4.57 kB
+../db build: dist/cjs/paced-mutations.cjs                        2.46 kB │ gzip:  0.82 kB │ map:   8.32 kB
+../db build: dist/cjs/query/runtime-reference-identity.cjs       2.52 kB │ gzip:  0.83 kB │ map:   4.96 kB
+../db build: dist/cjs/indexes/index-registry.cjs                 2.90 kB │ gzip:  0.97 kB │ map:   6.20 kB
+../db build: dist/cjs/indexes/auto-index.cjs                     2.92 kB │ gzip:  1.03 kB │ map:   6.46 kB
+../db build: dist/cjs/query/builder/clone-query.cjs              3.06 kB │ gzip:  0.93 kB │ map:   6.34 kB
+../db build: dist/cjs/event-emitter.cjs                          3.67 kB │ gzip:  1.12 kB │ map:   6.72 kB
+../db build: dist/cjs/local-only.cjs                             4.02 kB │ gzip:  1.28 kB │ map:  15.70 kB
+../db build: dist/cjs/live-query-options.cjs                     4.29 kB │ gzip:  1.25 kB │ map:   8.96 kB
+../db build: dist/cjs/scheduler.cjs                              4.33 kB │ gzip:  1.32 kB │ map:   9.17 kB
+../db build: dist/cjs/collection/validate-config.cjs             4.61 kB │ gzip:  1.30 kB │ map:   9.05 kB
+../db build: dist/cjs/indexes/base-index.cjs                     4.70 kB │ gzip:  1.47 kB │ map:  13.82 kB
+../db build: dist/cjs/query/live/utils.cjs                       4.76 kB │ gzip:  1.46 kB │ map:  10.51 kB
+../db build: dist/cjs/query/compiler/lazy-targets.cjs            5.42 kB │ gzip:  1.44 kB │ map:  11.42 kB
+../db build: dist/cjs/query/compiler/route-metadata.cjs          5.74 kB │ gzip:  1.56 kB │ map:  10.12 kB
+../db build: dist/cjs/SortedMap.cjs                              6.41 kB │ gzip:  1.75 kB │ map:  11.81 kB
+../db build: dist/cjs/utils/comparison.cjs                       6.47 kB │ gzip:  1.92 kB │ map:  16.60 kB
+../db build: dist/cjs/query/live/subset-demand-controller.cjs    6.57 kB │ gzip:  2.00 kB │ map:  13.51 kB
+../db build: dist/cjs/utils.cjs                                  6.71 kB │ gzip:  1.81 kB │ map:  17.06 kB
+../db build: dist/cjs/query/expression-helpers.cjs               6.79 kB │ gzip:  1.64 kB │ map:  20.21 kB
+../db build: dist/cjs/query/builder/functions.cjs                7.54 kB │ gzip:  1.75 kB │ map:  30.70 kB
+../db build: dist/cjs/collection/change-events.cjs               7.66 kB │ gzip:  2.02 kB │ map:  19.47 kB
+../db build: dist/cjs/query/compiler/select.cjs                  7.85 kB │ gzip:  1.99 kB │ map:  17.48 kB
+../db build: dist/cjs/query/ir.cjs                               8.07 kB │ gzip:  2.14 kB │ map:  17.90 kB
+../db build: dist/cjs/query/builder/ref-proxy.cjs                8.15 kB │ gzip:  1.52 kB │ map:  18.94 kB
+../db build: dist/cjs/collection/indexes.cjs                     8.73 kB │ gzip:  2.44 kB │ map:  17.44 kB
+../db build: dist/cjs/query/live/collection-subscriber.cjs       8.81 kB │ gzip:  2.37 kB │ map:  22.48 kB
+../db build: dist/cjs/query/compiler/order-by.cjs                8.85 kB │ gzip:  2.43 kB │ map:  20.92 kB
+../db build: dist/cjs/collection/changes.cjs                     8.88 kB │ gzip:  2.62 kB │ map:  20.22 kB
+../db build: dist/cjs/indexes/basic-index.cjs                    9.54 kB │ gzip:  2.27 kB │ map:  19.68 kB
+../db build: dist/cjs/indexes/btree-index.cjs                    9.83 kB │ gzip:  2.59 kB │ map:  19.59 kB
+../db build: dist/cjs/local-storage.cjs                          9.97 kB │ gzip:  2.61 kB │ map:  32.88 kB
+../db build: dist/cjs/collection/lifecycle.cjs                  10.30 kB │ gzip:  3.14 kB │ map:  24.43 kB
+../db build: dist/cjs/query/live/materialized-pipeline.cjs      11.04 kB │ gzip:  2.84 kB │ map:  23.11 kB
+../db build: dist/cjs/utils/btree.cjs                           12.35 kB │ gzip:  3.28 kB │ map:  27.23 kB
+../db build: dist/cjs/query/live/bucket-facade-adapter.cjs      12.59 kB │ gzip:  3.09 kB │ map:  24.95 kB
+../db build: dist/cjs/utils/index-optimization.cjs              13.35 kB │ gzip:  2.91 kB │ map:  35.55 kB
+../db build: dist/cjs/collection/mutations.cjs                  14.21 kB │ gzip:  3.25 kB │ map:  32.46 kB
+../db build: dist/cjs/query/compiler/evaluators.cjs             15.25 kB │ gzip:  2.73 kB │ map:  31.91 kB
+../db build: dist/cjs/query/pooled-live-query.cjs               16.48 kB │ gzip:  4.73 kB │ map:  36.71 kB
+../db build: dist/cjs/transactions.cjs                          16.60 kB │ gzip:  4.31 kB │ map:  32.38 kB
+../db build: dist/cjs/client.cjs                                16.78 kB │ gzip:  4.20 kB │ map:  39.54 kB
+../db build: dist/cjs/proxy.cjs                                 16.92 kB │ gzip:  4.01 kB │ map:  40.85 kB
+../db build: dist/cjs/index.cjs                                 16.93 kB │ gzip:  3.24 kB │ map:   0.36 kB
+../db build: dist/cjs/query/compiler/joins.cjs                  17.67 kB │ gzip:  4.27 kB │ map:  40.75 kB
+../db build: dist/cjs/collection/index.cjs                      17.92 kB │ gzip:  4.96 kB │ map:  49.72 kB
+../db build: dist/cjs/query/optimizer.cjs                       18.16 kB │ gzip:  3.88 kB │ map:  56.42 kB
+../db build: dist/cjs/query/effect.cjs                          21.00 kB │ gzip:  5.51 kB │ map:  55.52 kB
+../db build: dist/cjs/live-query-window-controller.cjs          21.68 kB │ gzip:  4.81 kB │ map:  49.92 kB
+../db build: dist/cjs/live-query-observer.cjs                   22.43 kB │ gzip:  5.36 kB │ map:  58.86 kB
+../db build: dist/cjs/query/compiler/group-by.cjs               23.49 kB │ gzip:  5.30 kB │ map:  49.84 kB
+../db build: dist/cjs/query/ir-stable-identity.cjs              23.79 kB │ gzip:  4.92 kB │ map:  46.95 kB
+../db build: dist/cjs/query/live/ordered-source-loader.cjs      24.38 kB │ gzip:  4.78 kB │ map:  56.22 kB
+../db build: dist/cjs/collection/sync.cjs                       25.34 kB │ gzip:  5.87 kB │ map:  53.24 kB
+../db build: dist/cjs/query/live/collection-config-builder.cjs  29.12 kB │ gzip:  7.29 kB │ map:  67.94 kB
+../db build: dist/cjs/errors.cjs                                29.22 kB │ gzip:  6.45 kB │ map:  38.06 kB
+../db build: dist/cjs/query/builder/index.cjs                   36.78 kB │ gzip:  7.59 kB │ map:  73.71 kB
+../db build: dist/cjs/collection/state.cjs                      37.27 kB │ gzip:  7.75 kB │ map:  81.45 kB
+../db build: dist/cjs/collection/subscription.cjs               39.82 kB │ gzip:  9.38 kB │ map:  91.13 kB
+../db build: dist/cjs/query/compiler/index.cjs                  56.07 kB │ gzip: 11.66 kB │ map: 120.57 kB
+../db build: ✓ built in 6.08s
+../db build: Done
+. build$ vite build
+. build: vite v7.3.6 building client environment for production...
+. build: transforming...
+. build: ✓ 3 modules transformed.
+. build: rendering chunks...
+. build: [vite:dts] Start generate declaration files...
+. build: [vite:dts] Start generate declaration files...
+. build: computing gzip size...
+. build: dist/esm/index.js       0.66 kB │ gzip: 0.29 kB │ map:  0.09 kB
+. build: dist/esm/wrapper.js     7.15 kB │ gzip: 1.61 kB │ map: 21.72 kB
+. build: dist/esm/indexeddb.js  15.18 kB │ gzip: 3.95 kB │ map: 37.75 kB
+. build: [vite:dts] Declaration files built in 1066ms.
+. build: [vite:dts] Declaration files built in 449ms.
+. build: dist/cjs/index.cjs       1.01 kB │ gzip: 0.36 kB │ map:  0.11 kB
+. build: dist/cjs/wrapper.cjs     7.42 kB │ gzip: 1.70 kB │ map: 21.73 kB
+. build: dist/cjs/indexeddb.cjs  15.40 kB │ gzip: 4.01 kB │ map: 38.04 kB
+. build: ✓ built in 1.14s
+. build: Done
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ ✓ |@tanstack/indexeddb-db-collection (package)| tests/portable-declarations.test.ts (12 tests) 5379ms
+   ✓ resolves public package types for Node16 ESM consumers  657ms
+   ✓ resolves public package types for Node16 CommonJS consumers  598ms
+   ✓ resolves public package types for NodeNext ESM consumers  550ms
+   ✓ resolves public package types for NodeNext CommonJS consumers  516ms
+   ✓ resolves public package types for Bundler consumers  553ms
+   ✓ preserves consumer types when rewriting import type arguments  305ms
+   ✓ preserves consumer types when rewriting package import type arguments  330ms
+   ✓ preserves consumer types when rewriting literal types  334ms
+   ✓ preserves consumer types when rewriting static imports  418ms
+   ✓ preserves consumer types when rewriting re-exports  347ms
+   ✓ preserves consumer types when rewriting import equals  405ms
+   ✓ preserves consumer types when rewriting module augmentation  363ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  08:34:03
+   Duration  5.87s (transform 28ms, setup 0ms, collect 214ms, tests 5.38s, environment 0ms, prepare 90ms)

@@ -310,8 +310,11 @@ export type CursorExpressions = {
    */
   whereCurrent: BasicExpression<boolean>
   /**
-   * The key of the last item that was loaded.
-   * Can be used by sync layers for tracking or deduplication.
+   * Optional key of a provider-established continuation boundary. External
+   * loadSubset callers may supply it after establishing provider coverage.
+   * A local snapshot selection does not establish that coverage, so
+   * CollectionSubscription never sets it. Adapters must also handle requests
+   * without it.
    */
   lastKey?: string | number
 }
@@ -324,6 +327,13 @@ export type CursorExpressions = {
  * Use stable data properties, not stateful getters, for request data.
  * Signal and subscription references stay fixed, but their lifecycle remains
  * live: aborting the signal or releasing the subscription is supported.
+ *
+ * An ordered request with `orderBy` serves a prefix: every matching row from
+ * the start of the order through its boundary, the leading order value of the
+ * last row the request returned, ties included. A request that returned no
+ * rows served no prefix. The ordered loader treats every row in a served
+ * prefix as loaded. See `LoadSubsetFn` for what a sync adapter owes after it
+ * refetches.
  */
 export type LoadSubsetOptions = {
   /**
@@ -375,20 +385,24 @@ export type LoadSubsetRequestResult = true | Promise<void>
  * Loads one subset and transfers its ongoing resource ownership only after
  * returning `true` or a promise. An implementation that throws synchronously
  * must release any partially acquired resource before throwing. A successful
- * implementation must await or return every applied receipt from the sync
+ * implementation must await or return every receipt from the sync
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
+ *
+ * When a sync adapter refetches loaded subsets without a new `loadSubset`
+ * call, it either keeps each served ordered prefix whole (see
+ * `LoadSubsetOptions`), or calls `invalidateLoadedSubsets()` once the
+ * refetched rows apply. Refetching each ordered page alone keeps neither
+ * promise: a row that now sorts between two served pages is in neither
+ * result, and the loader receives no change that would request it.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 /**
- * Confirms whether a committed sync transaction is visible or is waiting for
- * its turn in the collection's causal queue. A pending receipt rejects with an
- * error named `AbortError` if its own cancellation wins before application or
- * cancellation removes a row required by one of its partial updates. It
- * rejects with `DuplicateKeySyncError` if cancellation of earlier queued work
- * invalidates an insert admission. Once the writes are visible, later
- * cancellation has no effect.
+ * Confirms that a committed sync transaction is visible, or resolves when it
+ * becomes visible. An accepted transaction always applies in commit order. A
+ * receipt rejects with an error named `AbortError` only if its signal aborted
+ * before acceptance, or if cleanup abandons the transaction.
  */
 export type SyncAppliedReceipt = true | Promise<void>
 
@@ -418,6 +432,15 @@ export type SyncConfigRes = {
   cleanup?: CleanupFn
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
+  /**
+   * Optional provider-controlled restart for a lost managed cache claim.
+   * Retire old provider callbacks synchronously and start the replacement only
+   * after `cacheRotated` fulfills; it rejects if scoped recovery fails. When
+   * absent, the persistence wrapper cleans up and reenters `sync` itself.
+   */
+  restartAfterScopedRecovery?: (
+    cacheRotated: Promise<void>,
+  ) => void | Promise<void>
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
@@ -425,25 +448,18 @@ export interface SyncConfig<
 > {
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
-    /**
-     * Begin a new sync transaction.
-     * @param options.immediate - When true, the transaction will be processed immediately
-     *   even if there are persisting user transactions. Used by manual write operations.
-     */
-    begin: (options?: { immediate?: boolean }) => void
+    /** Begin a new sync transaction. */
+    begin: () => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
-     * Commit the active sync transaction in FIFO order.
-     * Returns `true` when the writes and events are already visible. Otherwise
-     * returns a receipt that resolves after they become visible. If collection
-     * cleanup or an optional request abort abandons the transaction first, the
-     * receipt rejects with an error named `AbortError`. If cancellation of an
-     * earlier transaction invalidates this transaction's insert admission, the
-     * receipt rejects with `DuplicateKeySyncError`.
-     * If cancellation removes a row required by this transaction's partial
-     * update, its receipt rejects with an error named `AbortError`.
-     * Pass a signal only for request-scoped work that must not publish after
-     * cancellation. Aborting after application has no effect.
+     * Commit the active sync transaction in FIFO order. Core accepts it at
+     * once, and an accepted transaction always applies. Returns `true` when
+     * its writes are visible, or a receipt that resolves when they become
+     * visible. While an optimistic transaction is persisting, it becomes
+     * visible when that transaction settles, together with the drop of its
+     * optimistic state. A signal that is already aborted abandons the
+     * transaction before acceptance, and the receipt rejects with an error
+     * named `AbortError`. Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
     /** Signal that a usable initial or recovered snapshot is available. */
@@ -453,7 +469,21 @@ export interface SyncConfig<
      * When supplied, `error` is preserved as the rejection reason from `preload()`.
      */
     markError: (error?: unknown) => void
-    truncate: () => void
+    /**
+     * Replace the synced rows. By default the replacement also marks the
+     * Collection ready. Set markReady:false to publish without changing status,
+     * for example when confirming a committed write from a closed source.
+     * The last truncate in a transaction supplies its readiness intent.
+     */
+    truncate: (options?: { markReady?: boolean }) => void
+    /**
+     * Report that rows this adapter serves for loaded subsets may have shifted
+     * between served pages, after a refetch that the adapter started on its
+     * own has applied. Each ordered live query then re-establishes its window
+     * with a bounded repair from the start of its order. Calls in one turn are
+     * coalesced. Do not call it for results that answer a `loadSubset` call.
+     */
+    invalidateLoadedSubsets: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
 
@@ -542,7 +572,21 @@ export type SyncPersistenceCapabilityV1<
 > = {
   readonly protocol: `@tanstack/db/sync-persistence`
   readonly version: 1
+  /** This run owns a claimed on-demand cache generation. */
+  readonly managedCacheGeneration?: boolean
+  /** The on-demand cache generation rotated before the source sync run entered. */
+  readonly startupCacheGenerationRotated?: boolean
   readonly hydrateBaseline: () => Promise<void>
+  /** Retire untrusted on-demand rows and retain the provider's reset metadata. */
+  readonly startScopedRecovery?: (resetMetadata?: {
+    key: string
+    value: unknown
+  }) => Promise<void>
+  /**
+   * Reserve the open sync transaction's FIFO turn, so a subset hydration
+   * that starts before it commits waits for that commit.
+   */
+  readonly reserveCommitTurn: () => void
   readonly scanPersistedRows: (
     options?: SyncPersistenceScanOptions,
   ) => Promise<Array<SyncPersistenceScannedRow<TKey>>>
@@ -1092,6 +1136,15 @@ export interface SubscribeChangesOptions<
   where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>, TKey, true>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
+  /**
+   * Whether this subscription defers provider work. It keeps the Collection
+   * alive and reads its local rows, but starts no idle source sync run and no
+   * acquisition attempt until `subscription.resumeDeferredAcquisition()`. A
+   * live-query Collection defers its source subscriptions until it has a
+   * subscriber or a preload in its current sync run.
+   * @internal
+   */
+  deferAcquisition?: boolean
   /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.

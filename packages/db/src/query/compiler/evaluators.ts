@@ -11,6 +11,12 @@ import {
   normalizeValue,
 } from '../../utils/comparison.js'
 import { getPropRefPropertyPath, getPropRefSourceAlias } from '../ir.js'
+import { codedMessage, devBuild } from '../../error-message.js'
+import {
+  PARENT_PROJECTION_NOT_FOUND,
+  getParentContextProjectedValue,
+} from '../equality-value-identity.js'
+import { getNamespacedRouteMetadata } from './route-metadata.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -152,10 +158,20 @@ function compileRef(ref: PropRef): CompiledExpression {
     explicitAlias === undefined
       ? legacyPropertyPath
       : getPropRefPropertyPath(ref)
-
   if (!namespace) {
     throw new EmptyReferencePathError()
   }
+
+  const projectedBindingKey = ref.bindingId
+    ? JSON.stringify([ref.bindingId, propertyPath])
+    : undefined
+  const projectedParentValue = projectedBindingKey
+    ? (row: NamespacedRow) =>
+        getParentContextProjectedValue(
+          getNamespacedRouteMetadata(row, namespace)?.parentContext,
+          projectedBindingKey,
+        )
+    : undefined
 
   // Handle $selected namespace - references SELECT result fields
   if (namespace === `$selected`) {
@@ -196,17 +212,28 @@ function compileRef(ref: PropRef): CompiledExpression {
   // Pre-compile the property path navigation
   if (propertyPath.length === 0) {
     // Simple table reference
-    return (namespacedRow) => namespacedRow[tableAlias]
+    return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow)
+      return projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND
+        ? projected
+        : namespacedRow[tableAlias]
+    }
   } else if (propertyPath.length === 1) {
     // Single property access - most common case
     const prop = propertyPath[0]!
     return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow)
+      if (projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND)
+        return projected
       const tableData = namespacedRow[tableAlias]
       return tableData?.[prop]
     }
   } else {
     // Multiple property navigation
     return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow)
+      if (projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND)
+        return projected
       const tableData = namespacedRow[tableAlias]
       if (tableData === undefined) {
         return undefined
@@ -417,6 +444,26 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     case `in`: {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
+      const list = func.args[1]!
+      if (list.type === `val` && Array.isArray(list.value)) {
+        // A constant list, such as join demand's key list, becomes a Set of
+        // normalized keys. Set membership uses SameValueZero, which matches
+        // `valuesEqual` on normalized operands: NaN equals NaN and -0 equals
+        // 0. Byte arrays stay out of the Set and compare by content, so no
+        // byte array is encoded as a string.
+        const items = list.value.filter((item) => !isUnknown(item))
+        const bytes = items.filter(isUint8Array)
+        const keys = new Set(
+          items.filter((item) => !isUint8Array(item)).map(normalizeValue),
+        )
+        return (data) => {
+          const value = valueEvaluator(data)
+          if (isUnknown(value)) return null
+          return isUint8Array(value)
+            ? bytes.some((item) => areValuesEqual(item, value))
+            : keys.has(normalizeValue(value))
+        }
+      }
       return (data) => {
         const value = normalizeEqualityOperand(valueEvaluator(data))
         const array = arrayEvaluator(data)
@@ -521,7 +568,11 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const pairCount = Math.floor(compiledArgs.length / 2)
 
       if (compiledArgs.length < 2) {
-        throw new Error(`caseWhen() requires at least two arguments`)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `caseWhen() requires at least two arguments`
+            : codedMessage(127),
+        )
       }
 
       return (data) => {

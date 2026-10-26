@@ -8,8 +8,8 @@ import {
 } from '../../db/tests/oracle-config.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
-import { expectedRows } from './cursor-pagination/model.js'
-import type { Row } from './cursor-pagination/model.js'
+import { expectedRows } from './cursor-pagination/model-oracle.js'
+import type { Row } from './cursor-pagination/model-oracle.js'
 
 /**
  * # Which cursor sequence may become the next public result?
@@ -164,8 +164,7 @@ describe(`cursor cache publication`, () => {
             const reader = () =>
               sharedPager ? retained : createCursorPager(options)
             let refreshEntered:
-              | ReturnType<typeof createDeferred<void>>
-              | undefined
+              ReturnType<typeof createDeferred<void>> | undefined
             const outer = new QueryObserver(client, {
               queryKey: [`posts`, `rows`],
               queryFn: () => {
@@ -195,7 +194,7 @@ describe(`cursor cache publication`, () => {
                   return result
                 })
               // Follow the guide's force-refresh recipe through a real active
-              // outer query. Observe its acquisition before releasing old data.
+              // outer query. Observe its Query fetch before releasing old data.
               if (cancel) await client.cancelQueries({ queryKey: [`posts`] })
               refreshEntered = createDeferred<void>()
               const refresh = client.invalidateQueries({ queryKey: [`posts`] })
@@ -343,7 +342,7 @@ describe(`cursor cache publication`, () => {
                 }
                 expect(
                   published,
-                  `invalid acquisition must not publish success`,
+                  `invalid Query fetch must not publish success`,
                 ).toEqual([])
                 expect(client.getQueryData(key)).toBe(previous)
               } finally {

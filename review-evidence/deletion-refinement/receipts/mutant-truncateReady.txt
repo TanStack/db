@@ -1,0 +1,59 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/truncateReady.log
+SHA-256 of full source: e507fdbc6026b3f2b6bf4c914cd042dd11be1ef00338dddd1da9d4fafb25b552
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > confirms native-committed import if explicit close precedes its continuation 10ms
+   → closed connection status: expected 'ready' to be 'error' // Object.is equality
+   → retired status stays error: expected false to be true // Object.is equality
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:16:59
+   Duration  881ms (transform 336ms, setup 15ms, collect 482ms, tests 12ms, environment 181ms, prepare 54ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > confirms native-committed import if explicit close precedes its continuation
+AssertionError: closed connection status: expected 'ready' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "ready"
+
+ ❯ closed tests/retirement-oracle.test.ts:99:53
+     97| }
+     98| function closed(c: Subject, statuses: Array<string>) {
+     99|   expect.soft(c.status, 'closed connection status').toBe('error')
+       |                                                     ^
+    100|   const firstError = statuses.indexOf('error')
+    101|   expect.soft(firstError, 'retirement is observable').toBeGreaterThanO…
+ ❯ tests/retirement-oracle.test.ts:459:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:439:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > confirms native-committed import if explicit close precedes its continuation
+AssertionError: retired status stays error: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ closed tests/retirement-oracle.test.ts:107:6
+    105|       'retired status stays error',
+    106|     )
+    107|     .toBe(true)
+       |      ^
+    108| }
+    109|
+ ❯ tests/retirement-oracle.test.ts:459:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:439:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯

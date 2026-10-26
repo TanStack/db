@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { runInfiniteQuerySuite } from './conformance/infinite-suite'
+import { runInfiniteQuerySuite } from './conformance/infinite-suite-oracle'
 import type { InfiniteQueryDriver } from './conformance/infinite-contract'
 import type * as Vitest from 'vitest'
 

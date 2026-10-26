@@ -5,12 +5,23 @@ import { Index } from '../indexes.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
+/** The key identity of a Map: SameValueZero, so NaN equals NaN. */
+function sameOutput(left: unknown, right: unknown): boolean {
+  return left === right || (left !== left && right !== right)
+}
+
+/** The value a Map stores as a key: -0 becomes 0. */
+function asMapKey<T>(value: T): T {
+  return (value === 0 ? 0 : value) as T
+}
+
 /**
  * Base operator for reduction operations (version-free)
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
-  #index = new Index<K, V1>()
-  #indexOut = new Index<K, V2>()
+  // Reduce never reads presence, so its indexes skip that bookkeeping.
+  #index: Index<K, V1>
+  #indexOut = new Index<K, V2>({ trackPresence: false })
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
@@ -18,8 +29,10 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     inputA: DifferenceStreamReader<[K, V1]>,
     output: DifferenceStreamWriter<[K, V2]>,
     f: (values: Array<[V1, number]>) => Array<[V2, number]>,
+    options?: ReduceOptions,
   ) {
     super(id, inputA, output)
+    this.#index = new Index<K, V1>({ ...options, trackPresence: false })
     this.#f = f
   }
 
@@ -40,6 +53,36 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
       const out = this.#f(curr)
+
+      // Most keys have at most one output before and after. Compare the two
+      // directly, by the SameValueZero identity the maps below use.
+      if (out.length <= 1 && currOut.length <= 1) {
+        // Earlier outputs were stored as Map keys, so only the new one needs it.
+        const before = currOut[0]
+        const after = out[0]
+        const value = after === undefined ? undefined : asMapKey(after[0])
+        if (
+          before !== undefined &&
+          after !== undefined &&
+          sameOutput(before[0], value)
+        ) {
+          const delta = after[1] - before[1]
+          if (delta !== 0) {
+            result.push([[key, before[0]], delta])
+            this.#indexOut.addValue(key, [before[0], delta])
+          }
+          continue
+        }
+        if (before !== undefined) {
+          result.push([[key, before[0]], -before[1]])
+          this.#indexOut.addValue(key, [before[0], -before[1]])
+        }
+        if (after !== undefined && after[1] !== 0) {
+          result.push([[key, value as V2], after[1]])
+          this.#indexOut.addValue(key, [value as V2, after[1]])
+        }
+        continue
+      }
 
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()
@@ -97,15 +140,28 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   }
 }
 
+/** @internal groupBy's option; its producer must keep the identity exact. */
+export type ReduceOptions = {
+  /**
+   * Input values are `[identity, value]` with a string or number identity
+   * that determines the value: two inputs under one key with an equal
+   * identity are equal. They merge without a structural hash.
+   */
+  prefixIdentity?: boolean
+}
+
 /**
  * Reduces the elements in the stream by key (version-free)
  */
 export function reduce<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
+  KType extends (T extends KeyValue<infer K, infer _V> ? K : never),
+  V1Type extends (T extends KeyValue<KType, infer V> ? V : never),
   R,
   T,
->(f: (values: Array<[V1Type, number]>) => Array<[R, number]>) {
+>(
+  f: (values: Array<[V1Type, number]>) => Array<[R, number]>,
+  options?: ReduceOptions,
+) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<KType, R>> => {
     const output = new StreamBuilder<KeyValue<KType, R>>(
       stream.graph,
@@ -116,6 +172,7 @@ export function reduce<
       stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
       output.writer,
       f,
+      options,
     )
     stream.graph.addOperator(operator)
     return output

@@ -1,18 +1,5 @@
 import { isTemporal } from './hashing/temporal.js'
 
-/**
- * Simple assertion function for runtime checks.
- * Throws an error if the condition is false.
- */
-export function assert(
-  condition: unknown,
-  message?: string,
-): asserts condition {
-  if (!condition) {
-    throw new Error(message || `Assertion failed`)
-  }
-}
-
 // JS engines have various limits on how many args can be passed to a function
 // with a spread operator, so we need to split the operation into chunks
 // 32767 is the max for Chrome 14, all others are higher
@@ -68,23 +55,6 @@ export function getStringId(
     return `ref_${id}`
   }
   return `${type}_${String(value)}`
-}
-
-export function* concatIterable<T>(
-  ...iterables: Array<Iterable<T>>
-): Iterable<T> {
-  for (const iterable of iterables) {
-    yield* iterable
-  }
-}
-
-export function* mapIterable<T, U>(
-  it: Iterable<T>,
-  fn: (t: T) => U,
-): Iterable<U> {
-  for (const t of it) {
-    yield fn(t)
-  }
 }
 
 export type HRange = [number, number] // half-open [start, end[ i.e. end is exclusive

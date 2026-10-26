@@ -3,7 +3,7 @@ id: ElectricCollectionUtils
 title: ElectricCollectionUtils
 ---
 
-Defined in: [packages/electric-db-collection/src/electric.ts:823](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L823)
+Defined in: [packages/electric-db-collection/src/electric.ts:906](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L906)
 
 Electric collection utilities type
 
@@ -21,7 +21,7 @@ Electric collection utilities type
 awaitMatch: AwaitMatchFn<T>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:829](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L829)
+Defined in: [packages/electric-db-collection/src/electric.ts:912](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L912)
 
 ***
 
@@ -31,4 +31,4 @@ Defined in: [packages/electric-db-collection/src/electric.ts:829](https://github
 awaitTxId: AwaitTxIdFn;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:828](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L828)
+Defined in: [packages/electric-db-collection/src/electric.ts:911](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L911)

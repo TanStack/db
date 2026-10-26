@@ -2,23 +2,23 @@
 
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
-  assertLiveQueryWindowManyResult,
-  compareLiveQueryWindowDependencies,
-  createLiveQueryCollection,
-  createLiveQueryWindowController,
+  bindLiveQueryWindow,
+  createLiveQuerySourceIdClaims,
   fetchNextLiveQueryWindowPage,
-  getLiveQueryWindowCollectionWarning,
-  getLiveQueryWindowInputKind,
-  normalizeLiveQueryWindowPageSize,
-  resolveLiveQueryWindowInput,
-  shouldPreserveLiveQueryWindowPageCount,
+  getLiveQueryKey,
+  identifyLiveQuery,
+  isCollection,
+  readLiveQueryWindowPageShape,
+  rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
+  resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import {
+  getIdentityScope,
   prepareDerivedQuery,
   prepareQueryValue,
   warnDeprecatedDepsArray,
-  warnUnhashableDerivedIdentity,
 } from './useLiveQuery'
 import type {
   DerivedIdentityProfiler,
@@ -34,13 +34,12 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryPersistedStatus,
-  LiveQueryWindowController,
+  LiveQuerySourceIdClaims,
+  LiveQueryWindowBinding,
   NonSingleResult,
   QueryBuilder,
 } from '@tanstack/db'
 
-// Live queries created here are cleaned up immediately (0 disables GC).
-const DEFAULT_GC_TIME_MS = 1
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
 // Keep the generic parameter for existing typed config wrappers.
@@ -101,22 +100,17 @@ type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
   typeof useLiveQuery<TContext>
 >
 
-type InfiniteQueryRenderState = {
-  inputKind: `collection` | `query`
-  inputCollection: Collection<any, any, any> | null
-  inputQuery: unknown
-  client: DbClient | undefined
-  identityMode: `collection` | `queryKey` | `legacyDeps` | `derived`
-  dependencies: Array<unknown> | null
-  pageSize: number
-  initialPageParam: number
-  collection: Collection<any, any, any>
-  controller: LiveQueryWindowController<any, any>
-  warning: string | null
-  warned: boolean
+/** One render's window binding and what its commit still owes. */
+type InfiniteQueryRender = {
+  binding: LiveQueryWindowBinding
+  /** The query callback whose identity this render derived, if any. */
+  derivedQuery: unknown
   deferredCollections: Set<
     CollectionImplType<any, string | number, any, any, any>
   >
+  /** Drops the reclaim release when this render commits. */
+  cancelReclaimRelease: (() => void) | undefined
+  warned: boolean
 }
 
 /**
@@ -154,199 +148,168 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext> {
-  if (`getNextPageParam` in config) {
-    throw new Error(
-      `getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.`,
-    )
-  }
-  const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
-  const initialPageParam = config.initialPageParam ?? 0
+  const pageShape = readLiveQueryWindowPageShape(config)
   const contextDbClient = useOptionalDbClient()
   const dbClient = config.client ?? contextDbClient
+  const inputIsCollection = isCollection(queryFnOrCollection)
 
-  const inputIsCollection =
-    getLiveQueryWindowInputKind(queryFnOrCollection) === `collection`
-
-  const committedRef = useRef<InfiniteQueryRenderState | null>(null)
+  const committedRef = useRef<InfiniteQueryRender | null>(null)
   const committed = committedRef.current
-  const inputKind = inputIsCollection ? `collection` : `query`
+  // Like useLiveQuery's instance memo, keep the latest render whose binding
+  // built a window collection. A second render before commit, such as a
+  // StrictMode double render, reuses that collection instead of starting
+  // another. Each render still builds its own controller and page count from
+  // the committed binding, which an uncommitted render never changes.
+  const renderedRef = useRef<InfiniteQueryRender | null>(null)
+  const sourceIdsRef = useRef<LiveQuerySourceIdClaims | null>(null)
   const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
     renderCount: 0,
     totalMs: 0,
     maxMs: 0,
     warned: false,
   })
-  const legacyUnhashableIdentityRef = useRef<Array<unknown>>([
-    `legacy-unhashable`,
-  ])
   const deferredCollections = new Set<
     CollectionImplType<any, string | number, any, any, any>
   >()
+  const identityScope = () =>
+    getIdentityScope(
+      (sourceIdsRef.current ??= createLiveQuerySourceIdClaims()),
+      dbClient,
+      `useLiveInfiniteQuery`,
+    )
 
+  const queryKey = getLiveQueryKey(config)
+  const usesLegacyDeps =
+    !inputIsCollection && queryKey === undefined && deps !== undefined
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
     unpreparedQueryValue
-  let identityDeps: ReadonlyArray<unknown> = []
-  let identityMode: InfiniteQueryRenderState[`identityMode`] = `collection`
+  let dependencies: ReadonlyArray<unknown> | undefined
+  let derivedQuery: unknown = undefined
 
-  if (!inputIsCollection) {
-    if (config.queryKey !== undefined) {
-      identityMode = `queryKey`
-      identityDeps = config.queryKey
-    } else if (deps !== undefined) {
-      identityMode = `legacyDeps`
-      identityDeps = deps
-      warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
-    } else if (
-      committed?.identityMode === `derived` &&
-      committed.inputQuery === queryFnOrCollection &&
-      committed.client === dbClient
-    ) {
-      identityMode = `derived`
-      identityDeps = committed.dependencies ?? []
-    } else {
-      identityMode = `derived`
-      const preparation = prepareDerivedQuery(
-        queryFnOrCollection,
-        dbClient,
-        derivedIdentityProfilerRef.current,
-        deferredCollections,
-      )
-      preparedQueryValue = preparation.value
-      if (preparation.status === `hashable`) {
-        identityDeps = preparation.identityDeps
+  const rendered = renderedRef.current
+  let binding: LiveQueryWindowBinding
+  // The render boundary: a render that throws anywhere after preparation,
+  // such as an unhashable, single-result, or uncompilable query, never
+  // commits, so it releases the sync starts it deferred here.
+  try {
+    if (!inputIsCollection) {
+      if (queryKey !== undefined) {
+        dependencies = queryKey
+      } else if (usesLegacyDeps) {
+        dependencies = deps
+        warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
+      } else if (
+        committed !== null &&
+        committed.derivedQuery === queryFnOrCollection &&
+        committed.binding.scope === dbClient
+      ) {
+        // The same callback in the same client scope keeps its identity.
+        derivedQuery = queryFnOrCollection
+        dependencies = committed.binding.dependencies
       } else {
-        warnUnhashableDerivedIdentity(preparation.error)
-        identityDeps = legacyUnhashableIdentityRef.current
+        const preparation = prepareDerivedQuery(
+          queryFnOrCollection,
+          derivedIdentityProfilerRef.current,
+          identityScope(),
+          deferredCollections,
+        )
+        preparedQueryValue = preparation.value
+        derivedQuery = queryFnOrCollection
+        dependencies = preparation.identityDeps
       }
     }
-  }
 
-  const usesLegacyDeps =
-    !inputIsCollection && config.queryKey === undefined && deps !== undefined
-  const dependencyComparison = compareLiveQueryWindowDependencies(
-    committed?.dependencies,
-    identityDeps,
-  )
-  const sameClient = committed?.client === dbClient
-  const dependenciesChanged =
-    !inputIsCollection &&
-    (!sameClient ||
-      (usesLegacyDeps
-        ? dependencyComparison.changed
-        : !dependencyComparison.structurallyEqual))
-  const dependenciesStructurallyEqual =
-    usesLegacyDeps && sameClient && dependencyComparison.structurallyEqual
-  const needsNewCollection =
-    committed === null ||
-    committed.inputKind !== inputKind ||
-    (inputIsCollection && committed.inputCollection !== queryFnOrCollection) ||
-    dependenciesChanged
-  const pageShapeChanged =
-    committed === null ||
-    committed.pageSize !== pageSize ||
-    committed.initialPageParam !== initialPageParam
-  const needsNewController =
-    committed === null || needsNewCollection || pageShapeChanged
-
-  let renderState = committed
-  if (needsNewController) {
-    let collection = committed?.collection
-    let warning: string | null = null
-
-    if (needsNewCollection) {
-      let inputValue = queryFnOrCollection
-      if (!inputIsCollection) {
-        if (preparedQueryValue === unpreparedQueryValue) {
-          preparedQueryValue = prepareQueryValue(
-            queryFnOrCollection,
-            dbClient,
-            deferredCollections,
-          )
+    // The binding calls this only when it compiles a new window collection.
+    const compileQuery = () => {
+      if (preparedQueryValue === unpreparedQueryValue) {
+        preparedQueryValue = prepareQueryValue(
+          queryFnOrCollection,
+          dbClient,
+          deferredCollections,
+        )
+        if (usesLegacyDeps) {
+          // A dependency list decides reuse, so check the query when it
+          // compiles: it needs a stable identity and keeps its sources' IDs.
+          identifyLiveQuery(preparedQueryValue, identityScope())
         }
-        inputValue = () => preparedQueryValue
       }
-      const input = resolveLiveQueryWindowInput<TContext>(inputValue)
-      if (input.kind === `collection`) {
-        collection = input.collection
-      } else {
-        // Wrap the query with the first page's peek-ahead window; the controller
-        // grows the limit from here via setWindow.
-        collection = createLiveQueryCollection({
-          query: input.query.limit(pageSize + 1).offset(0),
-          // Construction happens during render. Synchronization starts only when
-          // useSyncExternalStore commits the controller subscription.
-          startSync: false,
-          gcTime: DEFAULT_GC_TIME_MS,
-        })
+      return preparedQueryValue
+    }
+
+    binding = bindLiveQueryWindow(
+      committed?.binding ?? null,
+      {
+        ...pageShape,
+        input:
+          typeof queryFnOrCollection === `function`
+            ? compileQuery
+            : queryFnOrCollection,
+        dependencies,
+        scope: dbClient,
+        client: dbClient,
+        queryKey,
+        recompile: usesLegacyDeps ? `dependencies` : `identity`,
+      },
+      rendered?.binding,
+    )
+  } catch (error) {
+    rejectLiveQueryInput(deferredCollections, error)
+  }
+
+  let currentRenderState = committed
+  if (binding !== committed?.binding) {
+    const newCollection = binding.collection !== committed?.binding.collection
+    if (newCollection && binding.collection === rendered?.binding.collection) {
+      // Sources the earlier render deferred still resume at this commit.
+      for (const deferred of rendered.deferredCollections) {
+        deferredCollections.add(deferred)
       }
     }
-
-    if (!collection) {
-      throw new Error(`useLiveInfiniteQuery: Failed to create a collection.`)
-    }
-
-    if (inputIsCollection) {
-      warning =
-        getLiveQueryWindowCollectionWarning(collection, pageSize + 1) ?? null
-    } else {
-      assertLiveQueryWindowManyResult(collection)
-    }
-
-    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
-      hasPreviousController: committed !== null,
-      previousInputKind: committed?.inputKind,
-      inputKind,
-      sameCollection:
-        inputIsCollection && committed?.inputCollection === collection,
-      dependenciesChanged,
-      dependenciesStructurallyEqual,
-      pageShapeChanged,
-    })
-    const previousPageCount = committed
-      ? Math.max(1, committed.controller.getSnapshot().pages.length)
-      : 1
-    const initialPageCount = canPreservePageCount ? previousPageCount : 1
-    renderState = {
-      inputKind,
-      inputCollection: inputIsCollection ? collection : null,
-      inputQuery: inputIsCollection ? null : queryFnOrCollection,
-      client: dbClient,
-      identityMode,
-      dependencies: inputIsCollection ? null : [...identityDeps],
-      pageSize,
-      initialPageParam,
-      collection,
-      controller: createLiveQueryWindowController(collection, {
-        pageSize,
-        initialPageParam,
-        initialPageCount,
-      }),
-      warning,
-      warned: false,
+    const reusesRendered =
+      newCollection && binding.collection === rendered?.binding.collection
+    currentRenderState = {
+      binding,
+      derivedQuery,
       deferredCollections,
+      // A render that never commits releases its deferred sync starts when
+      // garbage collection reclaims the window collection it built. A reused
+      // collection keeps the release its first render registered.
+      cancelReclaimRelease: reusesRendered
+        ? rendered.cancelReclaimRelease
+        : newCollection && binding.ownsCollection
+          ? releaseDeferredOnReclaim(binding.collection, deferredCollections)
+          : undefined,
+      warned: false,
+    }
+    // Keep a created collection for the next render only once it validated
+    // and started, so a retry after a startup error builds a new one.
+    if (binding.supplied) renderedRef.current = null
+    else if (newCollection && binding.ownsCollection) {
+      renderedRef.current = currentRenderState
     }
   }
-  const currentRenderState = renderState!
-  const controller = currentRenderState.controller
+  const renderState = currentRenderState!
+  const controller = renderState.binding.controller
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
       const unsubscribe = controller.subscribe(onStoreChange)
-      committedRef.current = currentRenderState
-      if (currentRenderState.warning && !currentRenderState.warned) {
-        currentRenderState.warned = true
-        console.warn(currentRenderState.warning)
+      committedRef.current = renderState
+      if (renderState.binding.warning && !renderState.warned) {
+        renderState.warned = true
+        console.warn(renderState.binding.warning)
       }
-      for (const collection of currentRenderState.deferredCollections) {
-        collection._resumeSyncStart()
-      }
-      currentRenderState.deferredCollections.clear()
+      // A commit releases the starts itself, so it drops the reclaim release.
+      renderState.cancelReclaimRelease?.()
+      resumeDeferredLiveQueryCollections(renderState.deferredCollections)
       return unsubscribe
     },
-    [controller, currentRenderState],
+    [controller, renderState],
   )
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () =>
+    controller.getServerSnapshot(),
+  )
 
   const fetchNextPage = useCallback(
     () => fetchNextLiveQueryWindowPage(controller),
@@ -355,7 +318,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   return {
     data: snapshot.data as InferResultType<TContext>,
-    state: snapshot.state as EnabledLiveQueryReturn<TContext>[`state`],
+    get state() {
+      return snapshot.state as EnabledLiveQueryReturn<TContext>[`state`]
+    },
     status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,

@@ -1,0 +1,21 @@
+import { IDBFactory } from '/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/node_modules/fake-indexeddb/build/esm/index.js'
+import { openDatabase, executeTransaction } from '/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts'
+const factory = new IDBFactory()
+const db = await openDatabase('listener-composition', 1, db => db.createObjectStore('rows'), factory)
+for (const outcome of ['complete', 'abort']) for (const mode of ['addEventListener', 'property']) {
+  let nativeComplete
+  const completed = new Promise(resolve => nativeComplete = resolve)
+  let caller = 'pending', observed = 0
+  const operation = executeTransaction(db, 'rows', 'readwrite', (tx, stores) => {
+    tx.addEventListener(outcome, nativeComplete)
+    if (mode === 'addEventListener') tx.addEventListener(outcome, () => observed++)
+    else tx['on' + outcome] = () => observed++
+    stores.rows.put({ name: mode }, mode)
+    if (outcome === 'abort') tx.abort()
+    return 42
+  }).then(value => caller = 'fulfilled:' + value, error => caller = 'rejected:' + error)
+  await completed
+  await new Promise(resolve => setImmediate(resolve))
+  console.log(JSON.stringify({ mode, observed, caller, native: outcome }))
+}
+db.close()

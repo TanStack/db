@@ -1,0 +1,117 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/adapter-red.log
+SHA-256 of full source: 853337da53ad3da780d17bc5da658c80508ce5bb2044a4595b8bc78062ee3d68
+Receipt transformation: red; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 884 ⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"before-recreate"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"after-recreate"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"second-blocked"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"second-native"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":false,"receiptCut":"after-second"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":true,"receiptCut":"before-recreate"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":true,"receiptCut":"after-recreate"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":true,"receiptCut":"second-blocked"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":true,"receiptCut":"second-native"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts > administrative deletion has no row authority: {"transactionFirst":true,"receiptCut":"after-second"}
+AssertionError: expected 'ready' to be 'error' // Object.is equality
+[... middle of original RED log omitted; hash below identifies full local log ...]
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"delete","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"delete","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"clear","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"clear","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"clear","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"clear","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"import","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"import","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"import","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"active"},"b":{"kind":"import","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"deciding"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"deciding"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"deciding"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"deciding"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"accepted"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"accepted"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"accepted"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"accepted"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"insert","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"deciding"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"deciding"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"deciding"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"deciding"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"accepted"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"accepted"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"accepted"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"accepted"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"update","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"deciding"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"deciding"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"deciding"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"deciding"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"accepted"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"accepted"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"accepted"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"accepted"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"delete","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"clear","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"active"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"active"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"settled"},"reason":"upgrade"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"settled"},"reason":"delete"}
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > retains independent operation prefixes at closure: {"a":{"kind":"import","prefix":"settled"},"b":{"kind":"import","prefix":"settled"},"reason":"delete"}
+AssertionError: retirement is observable: expected -1 to be greater than or equal to 0
+ ❯ closed tests/retirement-oracle.test.ts:71:55
+     69|   expect.soft(c.status, 'closed connection status').toBe('error')
+     70|   const firstError = statuses.indexOf('error')
+     71|   expect.soft(firstError, 'retirement is observable').toBeGreaterThanO…
+       |                                                       ^
+     72|   expect.soft(statuses.slice(firstError).every(status => status === 'e…
+     73| }
+ ❯ tests/retirement-oracle.test.ts:354:35
+ ❯ tests/retirement-oracle.test.ts:354:14
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:298:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/9058]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  884 failed (884)
+   Start at  07:53:30
+   Duration  43.48s (transform 410ms, setup 50ms, collect 1.10s, tests 42.35s, environment 727ms, prepare 130ms)

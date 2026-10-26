@@ -20,9 +20,14 @@ import {
   getParentContextValue,
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { getFromSources } from '../ir.js'
+import { validateJoinConditions } from '../join-conditions.js'
+import {
+  collectPropRefs,
+  getFromSources,
+  getPropRefSourceAlias,
+  requireCollectionSource,
+} from '../ir.js'
 import { compileExpression } from './evaluators.js'
-import { getSourceAliasesFromExpression } from './expressions.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
@@ -40,8 +45,10 @@ import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
-  CollectionRef,
+  CollectionSourceRef,
+  From,
   JoinClause,
+  PropRef,
   QueryIR,
   QueryRef,
 } from '../ir.js'
@@ -108,18 +115,13 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
   if (scalar) {
     const namespaced = attachRouteMetadata(
       {
+        ...getParentContextValue(scalar.parentContext),
         [alias]: scalar.value,
         [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
       },
       scalar.correlationKey,
       scalar.parentContext,
     ) as unknown as NamespacedRow
-    if (
-      scalar.parentContext != null &&
-      typeof scalar.parentContext === `object`
-    ) {
-      Object.assign(namespaced, getParentContextValue(scalar.parentContext))
-    }
     return namespaced
   }
 
@@ -129,9 +131,9 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
 
   const route = getRouteMetadata(row)
   const cleanRow = route ? stripRouteMetadata(row) : row
-  const namespaced: NamespacedRow = { [alias]: cleanRow }
-  if (route?.parentContext != null) {
-    Object.assign(namespaced, getParentContextValue(route.parentContext))
+  const namespaced: NamespacedRow = {
+    ...getParentContextValue(route?.parentContext),
+    [alias]: cleanRow,
   }
   if (route) {
     attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
@@ -142,33 +144,51 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
 function getRouteJoinKey(
   row: NamespacedRow,
   source: string,
-  value: unknown,
+  equalityKey: unknown,
   valueIdentity: ValueIdentity,
 ): string {
   const route = getNamespacedRouteMetadata(row, source)
   return serializeValue([
     valueIdentity.equality(route?.correlationKey),
     getParentContextIdentity(route?.parentContext ?? null),
-    valueIdentity.equality(value),
+    equalityKey,
   ])
 }
 
-function getJoinKey(
+function keyJoinInput(
+  originalKey: unknown,
   row: NamespacedRow,
   source: string,
   side: `main` | `joined`,
-  value: unknown,
+  expressions: Array<(row: NamespacedRow) => unknown>,
   routeJoinedSource: boolean,
   valueIdentity: ValueIdentity,
-): string {
-  if (value == null) {
-    // Serialized equality and route keys are JSON or `~`-prefixed, so these
-    // side-local sentinels cannot collide with a satisfiable join operand.
-    return side === `main` ? `\0m` : `\0j`
+): [string, JoinInputValue] {
+  const value = expressions[0]!(row)
+  const input: JoinInputValue = [originalKey, row, undefined]
+  // NUL-prefixed side-local keys cannot collide with serializeValue output.
+  // Unsatisfiable tuples retain their row but contribute no lazy demand.
+  const unmatchedKey = side === `main` ? `\0m` : `\0j`
+  if (value == null) return [unmatchedKey, input]
+  let key = valueIdentity.equality(value)
+  // Keep the single-equality path free of temporary operand arrays.
+  if (expressions.length > 1) {
+    const values = [key]
+    for (let index = 1; index < expressions.length; index++) {
+      const component = expressions[index]!(row)
+      if (component == null) return [unmatchedKey, input]
+      values.push(valueIdentity.equality(component))
+    }
+    key = values
   }
-  return routeJoinedSource
-    ? getRouteJoinKey(row, source, value, valueIdentity)
-    : valueIdentity.serializeEquality(value)
+  // Demand uses the raw value, while matching uses graph-local equality.
+  input[2] = value
+  return [
+    routeJoinedSource
+      ? getRouteJoinKey(row, source, key, valueIdentity)
+      : serializeValue(key),
+    input,
+  ]
 }
 
 export function registerLazyDemandPlan(
@@ -207,6 +227,7 @@ export function processJoins(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   rawQuery: QueryIR,
+  localFrom: From,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
@@ -216,6 +237,9 @@ export function processJoins(
   parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
+  const localBindings = new Set(
+    getFromSources(localFrom).map((source) => source.bindingId),
+  )
 
   for (const joinClause of joinClauses) {
     resultPipeline = processJoin(
@@ -240,8 +264,10 @@ export function processJoins(
       sourceWhereClauses,
       mainSourceIsParentFiltered,
       valueIdentity,
+      localBindings,
       parentKeyStream,
     )
+    localBindings.add(joinClause.from.bindingId)
   }
 
   return resultPipeline
@@ -273,26 +299,45 @@ function processJoin(
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   mainSourceIsParentFiltered: boolean,
   valueIdentity: ValueIdentity,
+  localBindings: ReadonlySet<string>,
   parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
   const joinedSource = joinClause.from.alias
-  const availableSources = [...Object.keys(sources), joinedSource]
-  const { mainExpr, joinedExpr } = analyzeJoinExpressions(
-    joinClause.left,
-    joinClause.right,
-    availableSources,
-    joinedSource,
-    rawQuery.from.type === `unionAll`,
+  const mainAliases = Object.keys(sources)
+  const role = (ref: PropRef): JoinRefRole => {
+    const alias = getJoinRefAlias(ref)
+    if (ref.bindingId !== undefined) {
+      if (ref.bindingId === joinClause.from.bindingId) return `joined`
+      return localBindings.has(ref.bindingId) ? `main` : `ancestor`
+    }
+    if (alias === joinedSource) return `joined`
+    if (
+      alias &&
+      (mainAliases.includes(alias) || rawQuery.from.type === `unionAll`)
+    )
+      return `main`
+    return `unknown`
+  }
+  const conditions = validateJoinConditions(joinClause.on).map(
+    ([left, right]) => analyzeJoinExpressions(left, right, joinedSource, role),
   )
-  const joinedExpressionAliases = getSourceAliasesFromExpression(joinedExpr)
-  const joinedExpressionUsesParent = [...joinedExpressionAliases].some(
-    (alias) => alias !== joinedSource && !sources[alias],
+  // The first equality supplies candidate demand; the full tuple decides matches.
+  const { mainExpr, joinedExpr } = conditions[0]!
+  const joinedExpressionUsesParent = conditions.some(
+    ({ joinedExpr: expression }) =>
+      collectPropRefs(expression).some((ref) => {
+        const sourceRole = role(ref)
+        return sourceRole === `ancestor` || sourceRole === `unknown`
+      }),
   )
   const routeJoinedSource =
     parentKeyStream !== undefined &&
-    (joinClause.from.type === `queryRef` || joinedExpressionUsesParent)
+    (joinClause.from.type === `queryRef` ||
+      ((joinClause.type === `right` || joinClause.type === `full`) &&
+        !mainSourceIsParentFiltered) ||
+      joinedExpressionUsesParent)
 
   // Get the joined source alias and input stream
   const {
@@ -353,54 +398,40 @@ function processJoin(
   const lazySource = sourceActivity.lazySource
 
   // Pre-compile the join expressions
-  const compiledMainExpr = compileExpression(mainExpr)
-  const compiledJoinedExpr = compileExpression(joinedExpr)
+  const compiledMainExpressions = conditions.map((condition) =>
+    compileExpression(condition.mainExpr),
+  )
+  const compiledJoinedExpressions = conditions.map((condition) =>
+    compileExpression(condition.joinedExpr),
+  )
 
-  // Prepare the main pipeline for joining
+  // Prepare both sides with the same key and raw-demand rules.
   let mainPipeline = pipeline.pipe(
-    map(([currentKey, namespacedRow]) => {
-      // Extract the join key from the main source expression
-      const value = compiledMainExpr(namespacedRow)
-      const mainKey = getJoinKey(
+    map(([currentKey, namespacedRow]) =>
+      keyJoinInput(
+        currentKey,
         namespacedRow,
         mainSource,
         `main`,
-        value,
+        compiledMainExpressions,
         routeJoinedSource,
         valueIdentity,
-      )
-
-      // Keep the raw value for lazy demand; the equality key is graph-local.
-      return [mainKey, [currentKey, namespacedRow, value]] as [
-        string,
-        JoinInputValue,
-      ]
-    }),
+      ),
+    ),
   )
 
-  // Prepare the joined pipeline
   let joinedPipeline = joinedInput.pipe(
-    map(([currentKey, row]) => {
-      // Wrap the row in a namespaced structure
-      const namespacedRow = wrapJoinedInputRow(joinedSource, row)
-
-      // Extract the join key from the joined source expression
-      const value = compiledJoinedExpr(namespacedRow)
-      const joinedKey = getJoinKey(
-        namespacedRow,
+    map(([currentKey, row]) =>
+      keyJoinInput(
+        currentKey,
+        wrapJoinedInputRow(joinedSource, row),
         joinedSource,
         `joined`,
-        value,
+        compiledJoinedExpressions,
         routeJoinedSource,
         valueIdentity,
-      )
-
-      // Keep the raw value for lazy demand; the equality key is graph-local.
-      return [joinedKey, [currentKey, namespacedRow, value]] as [
-        string,
-        JoinInputValue,
-      ]
-    }),
+      ),
+    ),
   )
 
   // Apply the join operation
@@ -505,8 +536,14 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    processJoinResults,
+    processJoinResults(joinedSource, mainAliases),
   )
+}
+
+type JoinRefRole = `joined` | `main` | `ancestor` | `unknown`
+
+function getJoinRefAlias(ref: PropRef): string | undefined {
+  return getPropRefSourceAlias(ref) ?? ref.path[0]
 }
 
 /**
@@ -516,73 +553,58 @@ function processJoin(
 function analyzeJoinExpressions(
   left: BasicExpression,
   right: BasicExpression,
-  allAvailableSourceAliases: Array<string>,
   joinedSource: string,
-  allowResultFields: boolean = false,
+  role: (ref: PropRef) => JoinRefRole,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
-  // Filter out the joined source alias from the available source aliases
-  const availableSources = allAvailableSourceAliases.filter(
-    (alias) => alias !== joinedSource,
-  )
-
-  const leftSourceAliases = getSourceAliasesFromExpression(left)
-  const rightSourceAliases = getSourceAliasesFromExpression(right)
-  const leftReferencesJoined = leftSourceAliases.has(joinedSource)
-  const rightReferencesJoined = rightSourceAliases.has(joinedSource)
-  const leftAvailableAliases = [...leftSourceAliases].filter(
-    (alias) =>
-      availableSources.includes(alias) ||
-      (allowResultFields && alias !== joinedSource),
-  )
-  const rightAvailableAliases = [...rightSourceAliases].filter(
-    (alias) =>
-      availableSources.includes(alias) ||
-      (allowResultFields && alias !== joinedSource),
-  )
+  const leftRefs = collectPropRefs(left)
+  const rightRefs = collectPropRefs(right)
+  const leftRoles = new Set(leftRefs.map(role))
+  const rightRoles = new Set(rightRefs.map(role))
+  const leftMain = leftRoles.has(`main`) || leftRoles.has(`ancestor`)
+  const rightMain = rightRoles.has(`main`) || rightRoles.has(`ancestor`)
+  const leftJoined = leftRoles.has(`joined`)
+  const rightJoined = rightRoles.has(`joined`)
 
   // If left expression refers to an available source and right refers to joined source, keep as is
-  if (
-    leftAvailableAliases.length > 0 &&
-    !leftReferencesJoined &&
-    rightReferencesJoined &&
-    rightAvailableAliases.length === 0
-  ) {
+  if (leftMain && !leftJoined && rightJoined && !rightRoles.has(`main`)) {
     return { mainExpr: left, joinedExpr: right }
   }
 
   // If left expression refers to joined source and right refers to an available source, swap them
-  if (
-    leftReferencesJoined &&
-    leftAvailableAliases.length === 0 &&
-    rightAvailableAliases.length > 0 &&
-    !rightReferencesJoined
-  ) {
+  if (leftJoined && !leftRoles.has(`main`) && rightMain && !rightJoined) {
     return { mainExpr: right, joinedExpr: left }
   }
 
   // If one expression doesn't refer to any source, this is an invalid join
-  if (leftSourceAliases.size === 0 || rightSourceAliases.size === 0) {
+  if (leftRefs.length === 0 || rightRefs.length === 0) {
     throw new InvalidJoinConditionSourceMismatchError()
   }
 
   // If both expressions refer to the same alias, this is an invalid join
   if (
-    leftSourceAliases.size === 1 &&
-    rightSourceAliases.size === 1 &&
-    [...leftSourceAliases][0] === [...rightSourceAliases][0]
+    leftRefs.length === 1 &&
+    rightRefs.length === 1 &&
+    (leftRefs[0]!.bindingId !== undefined &&
+    rightRefs[0]!.bindingId !== undefined
+      ? leftRefs[0]!.bindingId === rightRefs[0]!.bindingId
+      : getJoinRefAlias(leftRefs[0]!) === getJoinRefAlias(rightRefs[0]!))
   ) {
-    throw new InvalidJoinConditionSameSourceError([...leftSourceAliases][0]!)
+    throw new InvalidJoinConditionSameSourceError(
+      getJoinRefAlias(leftRefs[0]!)!,
+    )
   }
 
   // Left side must refer to an available source
   // This cannot happen with the query builder as there is no way to build a ref
   // to an unavailable source, but just in case, but could happen with the IR
-  if (leftAvailableAliases.length === 0) {
-    throw new InvalidJoinConditionLeftSourceError([...leftSourceAliases][0]!)
+  if (!leftMain) {
+    throw new InvalidJoinConditionLeftSourceError(
+      getJoinRefAlias(leftRefs[0]!)!,
+    )
   }
 
   // Right side must refer to the joined source
-  if (!rightReferencesJoined) {
+  if (!rightJoined) {
     throw new InvalidJoinConditionRightSourceError(joinedSource)
   }
 
@@ -594,7 +616,7 @@ function analyzeJoinExpressions(
  * Processes the join source (collection or sub-query)
  */
 function processJoinSource(
-  from: CollectionRef | QueryRef,
+  from: CollectionSourceRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -612,6 +634,8 @@ function processJoinSource(
   parentKeyStream?: KeyedStream,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from)
     case `collectionRef`: {
       const input = allInputs[from.sourceId]
       if (!input) {
@@ -755,42 +779,51 @@ function getFirstFromAlias(query: QueryIR): string | undefined {
 }
 
 function processJoinResults(
+  joinedSource: string,
+  mainAliases: ReadonlyArray<string>,
+): (
   pipeline: IStreamBuilder<
     [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
   >,
-): NamespacedAndKeyedStream {
-  return pipeline.pipe(
-    map((result) => {
-      const [_key, [main, joined]] = result
-      const mainKey = main?.[0]
-      const mainNamespacedRow = main?.[1]
-      const joinedKey = joined?.[0]
-      const joinedNamespacedRow = joined?.[1]
+) => NamespacedAndKeyedStream {
+  return (pipeline) =>
+    pipeline.pipe(
+      map((result) => {
+        const [_key, [main, joined]] = result
+        const mainKey = main?.[0]
+        const mainNamespacedRow = main?.[1]
+        const joinedKey = joined?.[0]
+        const joinedNamespacedRow = joined?.[1]
 
-      // Merge the namespaced rows
-      const mergedNamespacedRow: NamespacedRow = {}
+        // A joined row carries inherited parent aliases. When the main row is
+        // present it owns that scope; copy only the joined source from its row.
+        const mergedNamespacedRow: NamespacedRow = Object.assign(
+          {},
+          mainNamespacedRow ?? joinedNamespacedRow,
+        )
+        if (main == null) {
+          // The joined row may carry parent context with a local main alias.
+          // An absent main side must not turn that ancestor into a child row.
+          for (const alias of mainAliases) delete mergedNamespacedRow[alias]
+        }
+        if (joinedNamespacedRow) {
+          mergedNamespacedRow[joinedSource] = joinedNamespacedRow[joinedSource]!
+        } else {
+          // A missing joined side cannot inherit a same-named parent source.
+          delete mergedNamespacedRow[joinedSource]
+        }
 
-      // Add main row data if it exists
-      if (mainNamespacedRow) {
-        Object.assign(mergedNamespacedRow, mainNamespacedRow)
-      }
+        // Combine the main and joined keys without ambiguity: keys may contain
+        // delimiters, numbers and strings may print alike, and a missing outer
+        // side encodes as null, which no source key can be.
+        const resultKey = JSON.stringify(
+          [mainKey ?? null, joinedKey ?? null],
+          encodeNonFiniteKey,
+        )
 
-      // Add joined row data if it exists
-      if (joinedNamespacedRow) {
-        Object.assign(mergedNamespacedRow, joinedNamespacedRow)
-      }
-
-      // Combine the main and joined keys without ambiguity: keys may contain
-      // delimiters, numbers and strings may print alike, and a missing outer
-      // side encodes as null, which no source key can be.
-      const resultKey = JSON.stringify(
-        [mainKey ?? null, joinedKey ?? null],
-        encodeNonFiniteKey,
-      )
-
-      return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
-    }),
-  )
+        return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
+      }),
+    )
 }
 
 /**

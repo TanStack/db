@@ -17,13 +17,10 @@ import type { TauriSQLiteDatabaseLike } from './tauri-sql-driver'
 export type { TauriSQLiteDatabaseLike } from './tauri-sql-driver'
 
 type TauriSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type TauriSQLiteSchemaMismatchPolicy =
-  | TauriSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  TauriSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type TauriSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -99,6 +96,8 @@ function resolveAdapterBaseOptions(
       options.appliedTxPruneMaxAgeSeconds ??
       DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+    cacheGenerationClaimTtlMs: options.cacheGenerationClaimTtlMs,
+    now: options.now,
   }
 }
 

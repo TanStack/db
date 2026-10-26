@@ -24,7 +24,8 @@ export type HydrationStraddleReach = {
   rowCommitParked: boolean
   hydrationScopeExited: boolean
   rowCommitApplied: boolean
-  subsetDemandSettled: boolean
+  // Fixture-only cut after the load, success-path unload, and error handling.
+  subsetLoadAndReleaseChainSettled: boolean
 }
 
 export type HydrationStraddleObservation = {
@@ -101,7 +102,7 @@ const reach: HydrationStraddleReach = {
   rowCommitParked: false,
   hydrationScopeExited: false,
   rowCommitApplied: false,
-  subsetDemandSettled: false,
+  subsetLoadAndReleaseChainSettled: false,
 }
 const events: Array<string> = []
 let phase: HydrationStraddleObservation[`phase`] = `starting`
@@ -111,6 +112,8 @@ let status = () => `unavailable`
 let isLeader = () => false
 let publicRows = (): Array<Item> => []
 let durableRows = (): Promise<Array<Item>> => Promise.resolve([])
+let storageCollectionId = collectionId
+let cacheClaimId: string | undefined
 let startHydration: () => void = () => {
   throw new Error(`Collection is not ready for controlled hydration`)
 }
@@ -166,6 +169,17 @@ try {
   cleanupTasks.unshift(async () => database.close?.())
   const coordinator = new BrowserCollectionCoordinator({ dbName: databaseId })
   cleanupTasks.unshift(() => coordinator.dispose())
+  // The coordinator exposes the claimed storage identity used by this
+  // on-demand run. PostgreSQL still supplies the expected row independently.
+  const setAdapterForCollection =
+    coordinator.setAdapterForCollection.bind(coordinator)
+  coordinator.setAdapterForCollection = (id, adapter, claimId) => {
+    if (claimId) {
+      storageCollectionId = id
+      cacheClaimId = claimId
+    }
+    setAdapterForCollection(id, adapter, claimId)
+  }
   const persistence = createBrowserWASQLitePersistence({
     database,
     coordinator,
@@ -240,9 +254,9 @@ try {
     persistence,
     schemaVersion: 1,
   })
+  const adapter = options.persistence.adapter
 
   if (mode === `controlled`) {
-    const adapter = options.persistence.adapter
     const originalScope = adapter.runInHydrationScope?.bind(adapter)
     if (!originalScope) {
       throw new Error(`Persistence adapter has no hydration scope`)
@@ -261,7 +275,9 @@ try {
             if (
               controlArmed &&
               !reach.hydrationLoadReturned &&
-              args[0] === collectionId
+              (args[0].kind === `managed`
+                ? args[0].storageCollectionId
+                : args[0].collectionId) === storageCollectionId
             ) {
               heldThisScope.value = true
               reach.hydrationLoadReturned = true
@@ -285,11 +301,23 @@ try {
   const collection = createCollection(options)
   cleanupTasks.unshift(() => collection.cleanup())
   status = () => collection.status
-  isLeader = () => coordinator.isLeader(collectionId)
+  isLeader = () => coordinator.isLeader(storageCollectionId)
   publicRows = () => sortedRows(collection.values())
   durableRows = async () => {
-    const snapshot =
-      await options.persistence.adapter.loadResumeSnapshot(collectionId)
+    if (!cacheClaimId && phase !== `ready`) return []
+    if (!cacheClaimId || storageCollectionId === collectionId) {
+      throw new Error(`On-demand Electric has no claimed storage Collection`)
+    }
+    const snapshot = await adapter.loadResumeSnapshot(
+      {
+        kind: `managed`,
+        storageCollectionId: storageCollectionId,
+        claimId: cacheClaimId,
+      },
+      {
+        cacheGenerationClaimId: cacheClaimId,
+      },
+    )
     return sortedRows(snapshot.rows.map(({ value }) => value as Item))
   }
   stage = `preloading collection`
@@ -321,7 +349,7 @@ try {
         phase = `failed`
       })
       .finally(() => {
-        reach.subsetDemandSettled = true
+        reach.subsetLoadAndReleaseChainSettled = true
       })
   }
 } catch (error) {

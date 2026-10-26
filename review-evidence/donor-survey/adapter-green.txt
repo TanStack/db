@@ -1,0 +1,36 @@
+Source: /tmp/pr1179-donor-adapter-green.log
+SHA-256: 4b9e8bde2b58d21351baf754daca9bca28fc07e252c4fb1b506f29434b287e75
+Progress dots omitted; trailing whitespace normalized.
+
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+······························································································································································stderr | tests/transport-oracle.test.ts > reports connection closure immediately and supports fresh Collections
+[Live Query Error] Source collection 'indexeddb-collection:0ba72860-3d00-4e4f-be9a-b10f96800dba:items' entered error state
+
+································································stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through fixed histories
+indexeddb.persistence campaign fixed { numRuns: 30, seed: 1179001 }
+
+························································stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through fixed histories
+indexeddb.persistence completed { mode: 'fixed', seed: 1179001, path: null, runs: 30, failed: false }
+
+······stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through random histories
+indexeddb.persistence campaign random { numRuns: 30 }
+
+····························································stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through random histories
+indexeddb.persistence completed {
+  mode: 'random',
+  seed: -224701510,
+  path: null,
+  runs: 30,
+  failed: false
+}
+
+
+ Test Files  14 passed (14)
+      Tests  2428 passed (2428)
+Type Errors  no errors
+   Start at  08:42:08
+   Duration  66.20s (transform 924ms, setup 475ms, collect 9.82s, tests 69.13s, environment 7.01s, prepare 967ms, typecheck 765ms)

@@ -1,0 +1,79 @@
+Source: /tmp/pr1179-listener-red.log
+SHA-256: 174957bad14f0cf02859c9062e4729d6e288f935e4ec32f757ab535c40ee90f1
+Trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+····xxxxxx····xxxxxx
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves complete settlement with property observers and held callback false
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves complete settlement with replace-property observers and held callback false
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves complete settlement with clear-property observers and held callback false
+AssertionError: native terminal checkpoint: expected 'pending' to be 'fulfilled' // Object.is equality
+
+Expected: "fulfilled"
+Received: "pending"
+
+ ❯ tests/wrapper-settlement-oracle.test.ts:98:64
+     96|               native === 'complete' ? [row] : [],
+     97|             )
+     98|             expect(caller.state, 'native terminal checkpoint').toBe(
+       |                                                                ^
+     99|               expectedCaller(native, !heldCallback),
+    100|             )
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/wrapper-settlement-oracle.test.ts:49:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves complete settlement with property observers and held callback true
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves complete settlement with replace-property observers and held callback true
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves complete settlement with clear-property observers and held callback true
+AssertionError: both obligations settled checkpoint: expected 'pending' to be 'fulfilled' // Object.is equality
+
+Expected: "fulfilled"
+Received: "pending"
+
+ ❯ tests/wrapper-settlement-oracle.test.ts:112:73
+    110|             callback.resolve('callback result')
+    111|             await readStore(h.db, 'items')
+    112|             expect(caller.state, 'both obligations settled checkpoint'…
+       |                                                                         ^
+    113|               expectedCaller(native, true),
+    114|             )
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/wrapper-settlement-oracle.test.ts:49:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves abort settlement with property observers and held callback false
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves abort settlement with property observers and held callback true
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves abort settlement with replace-property observers and held callback false
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves abort settlement with replace-property observers and held callback true
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves abort settlement with clear-property observers and held callback false
+ FAIL  |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts > preserves abort settlement with clear-property observers and held callback true
+AssertionError: native terminal checkpoint: expected 'pending' to be 'rejected' // Object.is equality
+
+Expected: "rejected"
+Received: "pending"
+
+ ❯ tests/wrapper-settlement-oracle.test.ts:98:64
+     96|               native === 'complete' ? [row] : [],
+     97|             )
+     98|             expect(caller.state, 'native terminal checkpoint').toBe(
+       |                                                                ^
+     99|               expectedCaller(native, !heldCallback),
+    100|             )
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/wrapper-settlement-oracle.test.ts:49:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  12 failed | 8 passed (20)
+   Start at  08:39:32
+   Duration  1.61s (transform 608ms, setup 35ms, collect 862ms, tests 25ms, environment 434ms, prepare 82ms)

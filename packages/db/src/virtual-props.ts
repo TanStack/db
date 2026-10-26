@@ -9,15 +9,31 @@
  */
 
 /**
- * Origin of the last confirmed change to a row, from the current client's perspective.
+ * Collection attribution for a row's current value.
  *
- * - `'local'`: The change originated from this client (e.g., a mutation made here)
- * - `'remote'`: The change was received via sync from another client/server
+ * - `'local'`: An optimistic row, or a source write attributed through a
+ *   same-key local mutation
+ * - `'remote'`: A source write without that local attribution
  *
- * Note: This reflects the client's perspective, not the original creator.
- * User A creates order → $origin = 'local' on User A's client
- * Order syncs to server
- * User B receives order → $origin = 'remote' on User B's client
+ * Synced Collections infer attribution from key and timing, without a source
+ * client ID. With one persisting local mutation and no truncate, the first queued
+ * same-key source transaction published at successful mutation settlement
+ * consumes local attribution. Its surviving row is `'local'`; later source
+ * transactions are `'remote'`. A failed mutation gives those queued
+ * writes no local attribution. A truncate can publish while a mutation remains
+ * active, leaving its same-key row `'local'` even if the mutation later fails.
+ * An unconsumed active mutation on a key omitted by the truncate retains
+ * attribution for its first later same-key source transaction, even in that
+ * drain. A truncate's write consumes attribution for its key, so a later
+ * same-key transaction in that drain is `'remote'` without a new local owner.
+ * A source write on a still-pending manual mutation's key applies immediately
+ * and can keep `'local'` attribution if that mutation rolls back.
+ * When two same-key mutations both persist before a source transaction is
+ * queued, with no truncate, a successful one retains one local attribution
+ * for the key even if its sibling fails; two failures retain none.
+ * An independent peer write can be labeled `'local'`, and a later confirmation
+ * from this client can be labeled `'remote'`. Local-only Collections always use
+ * `'local'`.
  */
 export type VirtualOrigin = 'local' | 'remote'
 
@@ -43,7 +59,7 @@ export type VirtualOrigin = 'local' | 'remote'
  *   console.log('No pending local optimistic writes for this row')
  * }
  * if (user.$origin === 'local') {
- *   console.log('Created/modified locally')
+ *   console.log('Row has local attribution')
  * }
  * ```
  *
@@ -90,10 +106,10 @@ export interface VirtualRowProps<
   readonly $synced: boolean
 
   /**
-   * Origin of the last confirmed change to this row, from the current client's perspective.
-   *
-   * - `'local'`: The change originated from this client
-   * - `'remote'`: The change was received via sync
+   * Collection attribution for this row's current value. `'local'` covers
+   * optimistic rows and attributed source writes; `'remote'` covers source
+   * writes without local attribution. See {@link VirtualOrigin} for the
+   * key-and-timing rules, including truncate and overlapping mutations.
    *
    * For local-only collections, this is always `'local'`.
    * For live query collections, this is passed through from the source collection.

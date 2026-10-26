@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PropRef } from '../src/query/ir.js'
 import { buildCursor, canExpressCursorOrder } from '../src/utils/cursor.js'
-import { evaluateReferenceExpression } from './reference-expression.js'
+import { evaluateReferenceExpression } from './reference-expression-oracle.js'
 import type { OrderBy } from '../src/query/ir.js'
 
 function orderBy(

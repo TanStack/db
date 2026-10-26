@@ -9,28 +9,24 @@ import type { MultiSet } from '../../src/multiset.js'
  * A negative weight retracts one matching entry. The oracle adds these weights
  * across all messages and keeps nonzero residue.
  *
- * A valid visible result has weight one for every live entry. Numeric indexes
- * must equal the requested offset and position. Fractional string indexes are
- * opaque, so the oracle checks only their strict order.
+ * This checker requires weight one for every live entry. Fractional string
+ * indexes are opaque, so the oracle checks only their strict order.
  *
- * This model covers finite scalar keys, scalar indexes, and rows with numeric
+ * This model covers finite scalar keys, string indexes, and rows with numeric
  * IDs and string values. It does not define identity for rich or cyclic values.
  */
 
 type Row = { id: number; value: string }
-type Entry<K, I> = [K, [Row, I]]
+type Entry<K> = [K, [Row, string]]
 type Expected<K> = Array<[K, number, string]>
 
 // Identity includes every scalar field that can distinguish two modeled
 // entries. A zero weight removes an entry. Every other weight stays visible to
 // the checker, including negative and duplicate residue.
-export class TopKRelation<
-  K extends string | number | null,
-  I extends number | string,
-> {
-  private entries = new Map<string, { entry: Entry<K, I>; weight: number }>()
+export class TopKRelation<K extends string | number | null> {
+  private entries = new Map<string, { entry: Entry<K>; weight: number }>()
 
-  add(messages: Array<[Entry<K, I>, number]>) {
+  add(messages: Array<[Entry<K>, number]>) {
     for (const [[key, [row, index]], weight] of messages) {
       expect(Number.isInteger(weight)).toBe(true)
       // JSON encodes NaN as null, so reject it outside the model's domain.
@@ -46,7 +42,7 @@ export class TopKRelation<
     }
   }
 
-  expectRows(expected: Expected<K>, numericOffset?: number) {
+  expectRows(expected: Expected<K>) {
     const rows = [...this.entries.values()]
     for (const row of rows) expect(row.weight).toBe(1)
     rows.sort((a, b) =>
@@ -60,25 +56,20 @@ export class TopKRelation<
       rows.map(({ entry: [key, [row]] }) => [key, row.id, row.value]),
     ).toEqual(expected)
     const indices = rows.map(({ entry }) => entry[1][1])
-    if (numericOffset !== undefined) {
-      expect(indices).toEqual(expected.map((_, index) => numericOffset + index))
-    } else {
-      for (const index of indices) expect(typeof index).toBe(`string`)
-      for (let i = 1; i < indices.length; i++)
-        expect(indices[i - 1]! < indices[i]!).toBe(true)
-    }
+    for (const index of indices) expect(typeof index).toBe(`string`)
+    for (let i = 1; i < indices.length; i++)
+      expect(indices[i - 1]! < indices[i]!).toBe(true)
   }
 }
 
-// MessageTracker measures transfer work and can reset. The semantic relation
-// must persist across that reset so later checks still include earlier changes.
+// MessageTracker counts transferred weighted deltas and can reset. The semantic
+// relation must persist across that reset so later checks include earlier changes.
 export class TopKMessageTracker<
   K extends string | number | null,
-  I extends number | string,
-> extends MessageTracker<Entry<K, I>> {
-  readonly relation = new TopKRelation<K, I>()
+> extends MessageTracker<Entry<K>> {
+  readonly relation = new TopKRelation<K>()
 
-  override addMessage(message: MultiSet<Entry<K, I>>) {
+  override addMessage(message: MultiSet<Entry<K>>) {
     this.relation.add(message.getInner())
     super.addMessage(message)
   }

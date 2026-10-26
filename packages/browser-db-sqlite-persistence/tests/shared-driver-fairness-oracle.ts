@@ -3,7 +3,7 @@
  *
  * Contract and source: RFC #1659 accepts K=1 complete-logical-cold-hydrate
  * scheduling. The persist already executing when the storm begins is
- * non-preemptible. After that, at most one additional persist may complete
+ * non-preemptible, so it completes before the first hydrate. After that, at most one additional persist may complete
  * between consecutive hydrate completions, with FIFO identity preserved
  * inside the hydrate and persist lanes.
  *
@@ -28,10 +28,27 @@
  *
  * Observed public facts: admitted and completed logical IDs, completed and
  * pending persists at every hydrate checkpoint, independently seeded public
- * collection rows, raw SQL dequeue reach, and cleanup diagnostics. Known
+ * collection rows, raw SQL dequeue reach, and cleanup diagnostics.
+ * `findSharedDriverFairnessLawViolations` is the comparison that the Node and
+ * Chromium production drivers both apply. It checks hydrate admission and
+ * completion, public rows, persist FIFO order, the non-preemptible running
+ * persist, and the K=1 cut at each hydrate. Known
  * omissions: the oracle does not establish elapsed-time latency, unbounded
  * eventuality, multi-process coordination, or a browser matrix; the Chromium
  * OPFS fixture separately refines the provider boundary.
+ *
+ * Election barrier: a `barrier` work item calls the scheduler's
+ * `runInRegularScope.afterQueuedWork()` after every earlier work item has
+ * entered the scheduler. A coordinator uses it to hold a durable election term
+ * behind work already queued on the shared scheduler, in either lane. The
+ * barrier is not logical work: the K=1 reference ignores it, so it must not
+ * let an additional persist through or change the interleaving. The scheduler
+ * trace records hydrate scope ends and barrier settlement, so a test can
+ * check that the barrier waited for the work queued before it and not for
+ * later work. Two hostile controls take a scheduler turn instead:
+ * `empty-hydrate` enqueues an empty hydrate scope, which K=1 counts as a
+ * hydrate, and `empty-regular` enqueues an empty regular task, which K=1
+ * counts as the persist slot after a hydrate.
  *
  * Challenge and replay: the named persist-first FIFO wrong answer must violate
  * the same K=1 checker while using the public/core/driver path. The generated
@@ -76,6 +93,10 @@ export type SharedDriverFairnessWork =
       id: string
       mutationsPerPersist: number
     }
+  | {
+      kind: `barrier`
+      id: string
+    }
 
 export type SharedDriverFairnessScenario = {
   id: string
@@ -118,6 +139,8 @@ export type SharedDriverFairnessObservation = {
   driverAdmissions: ReadonlyArray<RawDriverAdmission>
   rawDequeues: ReadonlyArray<RawDriverDequeue>
   hydratedCollections: ReadonlyArray<HydratedCollectionRows>
+  /** Hydrate scope ends and barrier calls/settlements, in scheduler order. */
+  schedulerTrace: ReadonlyArray<string>
   cleanupFailures: ReadonlyArray<string>
 }
 
@@ -133,6 +156,8 @@ export type SharedDriverFairnessViolation = {
 export type SharedDriverFairnessOptions = {
   /** Test-only hostile control that preserves the current global FIFO fault. */
   schedulingFault?: `persist-first-fifo`
+  /** Test-only hostile barriers that take a scheduler turn K=1 counts. */
+  barrierFault?: `empty-hydrate` | `empty-regular`
 }
 
 type Deferred = {
@@ -155,8 +180,7 @@ type FairnessReferenceCheckpoint = {
 }
 
 export type BrowserWASQLiteDatabaseFactory = () =>
-  | BrowserWASQLiteDatabase
-  | Promise<BrowserWASQLiteDatabase>
+  BrowserWASQLiteDatabase | Promise<BrowserWASQLiteDatabase>
 
 function createDeferred(): Deferred {
   let resolve!: () => void
@@ -505,6 +529,135 @@ export function findSharedDriverFairnessViolation(
   return undefined
 }
 
+export type SharedDriverFairnessLawViolation = {
+  law: string
+  checkpoint: string
+  expected: unknown
+  actual: unknown
+}
+
+/** Public rows each cold hydrate must expose, rebuilt from the scenario seeds. */
+export function expectedHydratedCollections(
+  scenario: SharedDriverFairnessScenario,
+): Array<HydratedCollectionRows> {
+  return scenario.work.flatMap((work) =>
+    work.kind === `hydrate`
+      ? [
+          {
+            collectionId: collectionIdFor(scenario, work),
+            rows: work.seededRows.map((row) => ({ ...row })),
+          },
+        ]
+      : [],
+  )
+}
+
+/**
+ * The complete refinement check that every driver applies. Expected values
+ * come from the scenario and the K=1 reference, never from production. Reach
+ * laws come first so that a missing hydrate is not reported as a K=1 cut.
+ */
+export function findSharedDriverFairnessLawViolations(
+  observation: SharedDriverFairnessObservation,
+  fairnessBound = SHARED_DRIVER_FAIRNESS_BOUND,
+): Array<SharedDriverFairnessLawViolation> {
+  const { scenario } = observation
+  const expectedHydrates = expectedHydratedCollections(scenario)
+  const expectedPersistIds = scenario.work
+    .filter((work) => work.kind === `persist`)
+    .map((work) => collectionIdFor(scenario, work))
+  const violations: Array<SharedDriverFairnessLawViolation> = []
+  const compare = (
+    law: string,
+    checkpoint: string,
+    expected: unknown,
+    actual: unknown,
+  ) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      violations.push({ law, checkpoint, expected, actual })
+    }
+  }
+
+  compare(
+    `hydrate admission IDs`,
+    `after all preload requests`,
+    expectedHydrates.map(({ collectionId }) => collectionId),
+    observation.admittedHydrateIds,
+  )
+  compare(
+    `hydrate completion count`,
+    `after all preloads`,
+    expectedHydrates.length,
+    observation.hydrationCompletions.length,
+  )
+  compare(
+    `hydrated public rows`,
+    `after all preloads`,
+    expectedHydrates,
+    observation.hydratedCollections,
+  )
+  compare(
+    `persist FIFO completion order`,
+    `after all work settled`,
+    expectedPersistIds,
+    observation.logicalCompletionOrder
+      .filter((entry) => entry.startsWith(`persist:`))
+      .map((entry) => entry.slice(`persist:`.length)),
+  )
+
+  // The persist already running when the storm begins is non-preemptible, so
+  // it completes before the first hydrate. The K=1 reference bounds completed
+  // persists only from above, so it cannot see a preempted running persist.
+  const runningPersistId = expectedPersistIds[0]
+  const firstHydrate = observation.hydrationCompletions[0]
+  if (
+    runningPersistId !== undefined &&
+    firstHydrate !== undefined &&
+    !firstHydrate.completedPersistIds.includes(runningPersistId)
+  ) {
+    violations.push({
+      law: `non-preemptible running persist`,
+      checkpoint: `hydrate completion 0`,
+      expected: [runningPersistId],
+      actual: firstHydrate.completedPersistIds,
+    })
+  }
+
+  const cut = findSharedDriverFairnessViolation(observation, fairnessBound)
+  if (cut) {
+    const laws: Array<string> = []
+    if (cut.checkpoint.collectionId !== cut.expectedCollectionId) {
+      laws.push(`hydrate FIFO identity`)
+    }
+    if (
+      cut.checkpoint.completedPersistIds.length >
+      cut.expectedMaximumCompletedPersists
+    ) {
+      laws.push(`K=1 completed-persist bound`)
+    }
+    if (
+      cut.checkpoint.pendingPersistCount < cut.expectedMinimumPendingPersists
+    ) {
+      laws.push(`K=1 pending-persist backlog`)
+    }
+    if (cut.unexpectedCompletedPersistIds.length > 0) {
+      laws.push(`completed persist outside permitted prefix`)
+    }
+    violations.push({
+      law: laws.join(`; `),
+      checkpoint: `hydrate completion ${observation.hydrationCompletions.indexOf(cut.checkpoint)}`,
+      expected: {
+        collectionId: cut.expectedCollectionId,
+        maximumCompletedPersists: cut.expectedMaximumCompletedPersists,
+        minimumPendingPersists: cut.expectedMinimumPendingPersists,
+        permittedCompletedPersistIds: cut.permittedCompletedPersistIds,
+      },
+      actual: cut.checkpoint,
+    })
+  }
+  return violations
+}
+
 /** Checker calibration only; the executable hostile control uses the fixture. */
 export function createPersistFirstFaultObservation(
   scenario: SharedDriverFairnessScenario,
@@ -534,6 +687,7 @@ export function createPersistFirstFaultObservation(
     rawDequeues: [],
     driverAdmissions: [],
     hydratedCollections: [],
+    schedulerTrace: [],
     cleanupFailures: [],
   }
 }
@@ -565,20 +719,26 @@ export async function observeSharedDriverFairness(
   try {
     for (const work of hydrateWork) {
       const collectionId = collectionIdFor(scenario, work)
-      await seed.persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `${collectionId}-seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: work.seededRows.map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: { ...row },
-        })),
-      })
+      await seed.persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `${collectionId}-seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: work.seededRows.map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: { ...row },
+          })),
+        },
+      )
     }
     for (const collectionId of persistIds) {
-      await seed.persistence.adapter.loadSubset(collectionId, {})
+      await seed.persistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
     }
   } catch (error) {
     seedPrimaryFailure = error
@@ -605,6 +765,19 @@ export async function observeSharedDriverFairness(
     undefined,
     options.schedulingFault,
   )
+  const schedulerTrace: Array<string> = []
+  const barrierPromises: Array<Promise<void>> = []
+  const adapter = persistence.adapter
+  const runInHydrationScope = adapter.runInHydrationScope!.bind(adapter)
+  let queuedHydrateScopes = 0
+  let endedHydrateScopes = 0
+  adapter.runInHydrationScope = (task) => {
+    queuedHydrateScopes++
+    return runInHydrationScope(task).finally(() => {
+      endedHydrateScopes++
+      schedulerTrace.push(`hydrate-scope-end:${endedHydrateScopes}`)
+    })
+  }
 
   const collections: Array<Collection<FairnessRow, string>> = []
   const persistPromises: Array<Promise<void>> = []
@@ -623,7 +796,10 @@ export async function observeSharedDriverFairness(
   try {
     // Cache only the unrelated persist tables. Hydrate tables remain cold.
     for (const collectionId of persistIds) {
-      await persistence.adapter.loadSubset(collectionId, {})
+      await persistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
     }
 
     observedDatabase.clearTrace()
@@ -640,12 +816,39 @@ export async function observeSharedDriverFairness(
     // is therefore observable at the same deterministic release checkpoint.
     for (const work of scenario.work) {
       const collectionId = collectionIdFor(scenario, work)
+      if (work.kind === `barrier`) {
+        // Wait until every earlier preload has entered the scheduler, so the
+        // barrier sits between hydrates that are both really queued.
+        for (
+          let turn = 0;
+          queuedHydrateScopes < admittedHydrateIds.length && turn < 100;
+          turn++
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+        if (queuedHydrateScopes < admittedHydrateIds.length) {
+          throw new Error(`earlier hydrates never entered the scheduler`)
+        }
+        schedulerTrace.push(`barrier-call:${work.id}@${queuedHydrateScopes}`)
+        const barrier =
+          options.barrierFault === `empty-hydrate`
+            ? runInHydrationScope(async () => {})
+            : options.barrierFault === `empty-regular`
+              ? adapter.runInRegularScope!(async () => {})
+              : adapter.runInRegularScope!.afterQueuedWork()
+        barrierPromises.push(
+          barrier.then(() => {
+            schedulerTrace.push(`barrier-settled:${work.id}`)
+          }),
+        )
+        continue
+      }
       if (work.kind === `persist`) {
         persistSequence += 1
         const sequence = persistSequence
         const persist = persistence.adapter
           .applyCommittedTx(
-            collectionId,
+            { kind: `eager`, collectionId: collectionId },
             createPersistedTx(collectionId, sequence, work.mutationsPerPersist),
           )
           .then(() => {
@@ -694,7 +897,11 @@ export async function observeSharedDriverFairness(
     releaseHeldBegin?.()
     releaseHeldBegin = undefined
 
-    await Promise.all([...persistPromises, ...preloadPromises])
+    await Promise.all([
+      ...persistPromises,
+      ...preloadPromises,
+      ...barrierPromises,
+    ])
 
     observation = {
       scenario,
@@ -717,13 +924,18 @@ export async function observeSharedDriverFairness(
             observedRows.get(collectionId)?.map((row) => ({ ...row })) ?? [],
         }
       }),
+      schedulerTrace: [...schedulerTrace],
       cleanupFailures,
     }
   } catch (error) {
     primaryFailure = error
   } finally {
     releaseHeldBegin?.()
-    await Promise.allSettled([...persistPromises, ...preloadPromises])
+    await Promise.allSettled([
+      ...persistPromises,
+      ...preloadPromises,
+      ...barrierPromises,
+    ])
     for (const collection of collections) {
       try {
         await collection.cleanup()

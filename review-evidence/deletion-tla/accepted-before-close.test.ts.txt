@@ -1,0 +1,73 @@
+/**
+ * Refinement witness for TLC's Confirm -> Close -> FinishHandler trace.
+ * A public manual transaction may await acceptMutations, then remain persisting
+ * in application code. This establishes a real adapter path for the modeled
+ * interval; it does not assume a browser task interleaves adjacent microtasks.
+ * The only candidate seam reports error on versionchange. Fake-IDB supplies
+ * native-shaped upgrade/transaction events; this is not browser execution.
+ */
+import { createCollection, createTransaction } from '@tanstack/db'
+import { IDBFactory } from 'fake-indexeddb'
+import { expect, test } from 'vitest'
+import { createIndexedDB, indexedDBCollectionOptions } from '/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb'
+
+type Row = { id: number; value: string }
+function gate() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { resolve, promise }
+}
+function request<T>(r: IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result)
+    r.onerror = () => reject(r.error)
+  })
+}
+
+test('accepted manual confirmation publishes after connection closure without restoring readiness', async () => {
+  const factory = new IDBFactory()
+  const db = await createIndexedDB({ name: 'tla-receipt-witness', version: 1, stores: ['items'], idbFactory: factory })
+  const options = indexedDBCollectionOptions<Row>({ db, name: 'items', getKey: row => row.id, gcTime: Infinity })
+  const originalSync = options.sync.sync
+  const closed = gate()
+  options.sync = { ...options.sync, sync: params => {
+    db.db.addEventListener('versionchange', () => {
+      params.markError(new Error('connection retired'))
+      closed.resolve()
+    })
+    return originalSync(params)
+  } }
+  const c = createCollection(options)
+  const accepted = gate()
+  const finish = gate()
+  let upgraded: IDBDatabase | undefined
+  try {
+    await c.preload()
+    await c.insert({ id: 1, value: 'before' }).isPersisted.promise
+    const tx = createTransaction({ mutationFn: async ({ transaction }) => {
+      await c.utils.acceptMutations(transaction)
+      accepted.resolve()
+      await finish.promise
+    } })
+    tx.mutate(() => c.update(1, row => { row.value = 'after' }))
+    await accepted.promise
+    expect(c.base.get(1)?.value).toBe('before')
+    const opening = request(factory.open(db.name, 2))
+    await closed.promise
+    upgraded = await opening
+    const durable = await request(upgraded.transaction('items').objectStore('items').getAll())
+    expect(durable).toEqual([{ id: 1, value: 'after' }])
+    expect(c.status).toBe('error')
+    expect(c.base.get(1)?.value).toBe('before')
+    finish.resolve()
+    await tx.isPersisted.promise
+    const result = { status: c.status, caller: tx.state, base: c.base.get(1)?.value, durable }
+    expect(result).toEqual({ status: 'error', caller: 'completed', base: 'after', durable: [{ id: 1, value: 'after' }] })
+    console.log('accepted-before-close', JSON.stringify(result))
+  } finally {
+    finish.resolve()
+    await c.cleanup()
+    upgraded?.close()
+    db.close()
+  }
+})

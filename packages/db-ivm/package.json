@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-ivm",
-  "version": "0.1.25",
+  "version": "0.2.0",
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
   "author": "Sam Willis",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:incrementalization": "vitest --run tests/incrementalization-law.property.test.ts",
+    "test:incrementalization": "vitest --run tests/incrementalization-law-oracle.property.test.ts",
     "typecheck": "tsc --noEmit",
     "bench:hash": "vitest bench --run tests/hash.bench.ts --coverage.enabled=false"
   },
@@ -50,14 +50,12 @@
     "src"
   ],
   "dependencies": {
-    "fractional-indexing": "^3.2.0",
-    "sorted-btree": "^1.8.1"
+    "fractional-indexing": "^3.2.0"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4",
     "temporal-polyfill": "^0.3.0"
   }

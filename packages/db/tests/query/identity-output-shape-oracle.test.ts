@@ -3,12 +3,19 @@ import { D2, MultiSet, output, serializeValue } from '@tanstack/db-ivm'
 import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
+import {
+  Query,
+  and,
+  createLiveQueryCollection,
+  eq,
+} from '../../src/query/index.js'
+import { getQueryIR } from '../../src/query/builder/query-ir.js'
 import { createCollection } from '../../src/collection/index.js'
 import { count as countRows } from '../../src/query/builder/functions.js'
 import { compileExpression } from '../../src/query/compiler/evaluators.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { getEqualityValueIdentity } from '../../src/query/equality-value-identity.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
+import { queriesMatchForCaching } from '../../src/query/compiler/query-equivalence.js'
 import {
   getLoadSubsetDemandKey,
   getQueryIdentity,
@@ -37,7 +44,7 @@ import type { QueryIR } from '../../src/query/ir.js'
  * only when complete output bags—including lexical keys and multiplicity—match;
  * output-sensitive aliases remain part of identity.
  *
- * Fault drivers remove peers, collapse identity, corrupt aliases or weights,
+ * Result mutants remove peers, collapse identity, corrupt aliases or weights,
  * and require the checker to fail. This calibrates the implication that matters:
  * equal QueryIdentity implies equal compiled results, not merely equal hashes.
  *
@@ -57,7 +64,7 @@ type Form =
   | 'implicit-join'
   | 'implicit-union'
   | 'empty-group'
-type Fault =
+type ResultMutant =
   | 'alias'
   | 'missing-peer'
   | 'constant-identity'
@@ -93,7 +100,7 @@ async function runShapes(
   form: Form,
   aliases: [string, string, string, string],
   label: string,
-  fault?: Fault,
+  mutant?: ResultMutant,
 ) {
   const users = createCollection<User>({
     getKey: (row) => row.id,
@@ -150,8 +157,10 @@ async function runShapes(
                   {
                     type: 'inner',
                     from: post,
-                    left: new PropRef([userAlias, 'id']),
-                    right: new PropRef([postAlias, 'userId']),
+                    on: new Func('eq', [
+                      new PropRef([userAlias, 'id']),
+                      new PropRef([postAlias, 'userId']),
+                    ]),
                   },
                 ],
                 ...(form === 'explicit-join'
@@ -192,7 +201,7 @@ async function runShapes(
             entry = { row, count: 0 }
             bag.push(entry)
           }
-          entry.count += fault === 'fractional-weight' ? weight * 1.25 : weight
+          entry.count += mutant === 'fractional-weight' ? weight * 1.25 : weight
         }
       }),
     )
@@ -240,7 +249,7 @@ async function runShapes(
         getQueryIdentity(left.query),
         getQueryIdentity(right.query),
       ]
-      if (fault === 'constant-identity') identities[1] = identities[0]!
+      if (mutant === 'constant-identity') identities[1] = identities[0]!
       expect(
         identities[0] === identities[1],
         'output-sensitive identity law',
@@ -269,9 +278,9 @@ async function runShapes(
         )
       }
       const check = (outputs: Array<Array<unknown>>, rows: Array<User>) => {
-        if (fault === 'alias') outputs[1]![0] = { wrongAlias: outputs[1]![0] }
-        if (fault === 'missing-peer') outputs[1]!.pop()
-        if (fault === 'shared-wrong-output') {
+        if (mutant === 'alias') outputs[1]![0] = { wrongAlias: outputs[1]![0] }
+        if (mutant === 'missing-peer') outputs[1]!.pop()
+        if (mutant === 'shared-wrong-output') {
           outputs[0] = [{ wrong: true }]
           outputs[1] = [{ wrong: true }]
         }
@@ -329,15 +338,15 @@ describe('query identity agrees with compiled lexical output shape', () => {
     'fractional-weight',
   ] as const)(
     'rejects captured %s against independent results',
-    async (fault) => {
-      const form = fault === 'missing-peer' ? 'explicit-join' : 'implicit-join'
+    async (mutant) => {
+      const form = mutant === 'missing-peer' ? 'explicit-join' : 'implicit-join'
       await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
       await expect(
         runShapes(
           form,
           ['user', 'post', 'account', 'article'],
           'author',
-          fault,
+          mutant,
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
     },
@@ -606,4 +615,137 @@ describe(`equality-value and IR operand identity agree`, () => {
       )
     },
   )
+})
+
+/**
+ * AND is commutative, associative and idempotent, but changing an operand can
+ * change the output. The feature request extends the existing identity law to
+ * compound joins. This finite grammar varies syntax and direct/from/joined
+ * QueryRef boundaries. The independent model is a nested loop over numeric
+ * rows; fresh public Collections must match it before identity is compared.
+ * These are initial-publication witnesses, not arbitrary cache histories.
+ */
+describe(`compound join identity and output`, () => {
+  for (const boundary of [`direct`, `from`, `joined`] as const) {
+    it(`retains every equality across ${boundary}`, async () => {
+      const leftRows = [
+        { id: 1, a: 1, b: 2, c: 9 },
+        { id: 2, a: 1, b: 3, c: 8 },
+      ]
+      const rightRows = [
+        { id: 10, a: 1, b: 2, c: 3 },
+        { id: 11, a: 1, b: 3, c: 7 },
+      ]
+      const left = createCollection(
+        mockSyncCollectionOptions({
+          id: `compound-identity-left`,
+          getKey: (row: (typeof leftRows)[number]) => row.id,
+          initialData: leftRows,
+        }),
+      )
+      const right = createCollection(
+        mockSyncCollectionOptions({
+          id: `compound-identity-right`,
+          getKey: (row: (typeof rightRows)[number]) => row.id,
+          initialData: rightRows,
+        }),
+      )
+      const cleanups: Array<() => Promise<void>> = [
+        () => left.cleanup(),
+        () => right.cleanup(),
+      ]
+      await withHistoryCleanup(
+        async () => {
+          const own = <T extends { cleanup: () => Promise<void> }>(
+            live: T,
+          ): T => {
+            cleanups.unshift(() => live.cleanup())
+            return live
+          }
+          const makeQuery = (
+            variant: `base` | `reordered` | `nested` | `different`,
+          ) => {
+            const joined = new Query()
+              .from({ left })
+              .innerJoin({ right }, ({ left: l, right: r }) => {
+                const a = eq(l.a, r.a)
+                const b = eq(l.b, variant === `different` ? r.c : r.b)
+                if (variant === `reordered`)
+                  return and(eq(r.b, l.b), eq(r.a, l.a))
+                if (variant === `nested`) return and(b, and(a, b))
+                return and(a, b)
+              })
+              .select(({ left: l, right: r }) => ({
+                leftId: l.id,
+                rightId: r.id,
+              }))
+            if (boundary === `direct`)
+              return {
+                ir: getQueryIR(joined),
+                live: own(createLiveQueryCollection({ query: joined })),
+              }
+            if (boundary === `from`) {
+              const query = new Query()
+                .from({ result: joined })
+                .select(({ result }) => ({
+                  leftId: result.leftId,
+                  rightId: result.rightId,
+                }))
+              return {
+                ir: getQueryIR(query),
+                live: own(createLiveQueryCollection({ query })),
+              }
+            }
+            const query = new Query()
+              .from({ anchor: left })
+              .innerJoin({ result: joined }, ({ anchor, result }) =>
+                eq(anchor.id, result.leftId),
+              )
+              .select(({ result }) => ({
+                leftId: result.leftId,
+                rightId: result.rightId,
+              }))
+            return {
+              ir: getQueryIR(query),
+              live: own(createLiveQueryCollection({ query })),
+            }
+          }
+          const queries = {
+            base: makeQuery(`base`),
+            reordered: makeQuery(`reordered`),
+            nested: makeQuery(`nested`),
+            different: makeQuery(`different`),
+          }
+          for (const [variant, { live }] of Object.entries(queries)) {
+            await live.preload()
+            const expected = leftRows.flatMap((l) =>
+              rightRows
+                .filter(
+                  (r) =>
+                    l.a === r.a &&
+                    l.b === (variant === `different` ? r.c : r.b),
+                )
+                .map((r) => ({ leftId: l.id, rightId: r.id })),
+            )
+            expectBag(
+              live.toArray.map(({ leftId, rightId }) => ({ leftId, rightId })),
+              expected,
+            )
+          }
+          const { base, reordered, nested, different } = queries
+          expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(reordered.ir))
+          expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(nested.ir))
+          expect(
+            getQueryIdentity(base.ir),
+            `different later operand changes identity`,
+          ).not.toBe(getQueryIdentity(different.ir))
+          expect(
+            queriesMatchForCaching(base.ir, different.ir),
+            `different later operand cannot reuse a subquery`,
+          ).toBe(false)
+        },
+        () => cleanups,
+      )
+    })
+  }
 })

@@ -172,9 +172,22 @@ semantics.
 After a mutating RPC transport failure, replay is allowed only while the
 requester can prove the same non-null leader id and term still own the route.
 If either value was unknown for the first attempt, or either value changes,
-the request rejects with `IndeterminateCommitError` and requires application
-reconciliation. Coordinators never retry an indeterminate mutation against an
+the direct request rejects with `IndeterminateCommitError` and requires
+application reconciliation. Coordinators never retry that mutation against an
 unknown or replacement leader.
+
+A source sync transaction has a separate exact-ID reconciliation path. The
+persisted wrapper holds its applied receipt while an elected coordinator and
+SQLite adapter check the transaction under the writer lock. An existing ID
+acknowledges the original durable position. An absent ID permits one application
+only if the durable row version and reset epoch equal the wrapper's pre-send
+snapshot; another durable write may carry newer row values or an opaque source
+cursor and cannot be overwritten safely. On a certified result the wrapper
+fulfills the receipt in the same sync run and the coordinator invalidates peers,
+including a peer that missed the original notification. An uncertified result
+retains `IndeterminateCommitError` and terminal source failure. Custom adapters
+and coordinators without this optional operation keep that terminal behavior.
+One generated `txId` identifies one immutable source transaction payload.
 
 `SingleProcessCoordinator` also implements the complete route. It is always
 leader and has no cross-process transport, but it applies the transaction to
@@ -260,22 +273,39 @@ source publication and its durable suffix. A source may mark a transaction
 optimistic layer. The wrapper still gives that transaction one FIFO turn and
 writes its durable suffix before admitting the next source turn.
 
-The wrapper deliberately rejects schedules that would require a second
-ordering mechanism. An `immediate` source transaction cannot enter while an
-earlier normal source publication is waiting, and a source transaction cannot
-cross a hydration cycle. These cases throw
-`InvalidPersistedCollectionConfigError` instead of reordering data or waiting
-in a dependency cycle.
+Persisted rows establish a baseline for newer changes from the sync adapter.
+Once an ordinary sync transaction is accepted at `commit()`, queued reads of
+that baseline cannot revoke acceptance. This includes subset reads and rereads
+requested by coordinator reset or full-reload notifications. This rule assumes
+a compatible baseline; it does not authorize using an invalidated resume point.
+A truncate replay replaces earlier source rows in the same sync run. Sync
+transactions ordered after that replacement apply to the replacement.
+
+An `immediate` sync transaction cannot enter while an earlier normal source
+publication is waiting. The wrapper also currently rejects a sync transaction
+that remains open across another persistence read. These admission restrictions
+throw `InvalidPersistedCollectionConfigError`; an internal wait after accepted
+`commit()` is not an admission failure. The open-transaction restriction is
+separate from the accepted-transaction precedence rule.
 
 ### Atomic resume snapshots
 
 Persistence adapters implement
-`loadResumeSnapshot(collectionId, options)` to let a sync source certify a
+`loadResumeSnapshot(target, options)` to let a sync source certify a
 persisted resume baseline. One call must read rows, collection metadata, stream
 position, reset epoch, and key-set evidence from the same atomic database
 snapshot. `includeRows: false` requests the same certification data without
 materializing rows; `requiredIndexSignatures` carries the indexes needed by a
 row-bearing snapshot.
+
+The adapter's data methods require an explicit `PersistedStorageTarget`. Use
+`{ kind: 'eager', collectionId }` for an eager Collection, or
+`{ kind: 'managed', storageCollectionId, claimId }` for a claimed on-demand
+persisted cache generation. A bare string ID is rejected. The managed target
+checks the claim even after its generation has been collected from SQLite;
+choosing an eager target explicitly may reuse the same ID. Claim and
+rotation methods take the logical Collection ID; renewal takes the physical
+storage ID and release takes the claim ID.
 
 `PersistedKeySetEvidence.status` has three states:
 
@@ -285,6 +315,13 @@ row-bearing snapshot.
   the saved resume baseline unsafe.
 - `unknown`: the adapter has no authoritative pre-migration key set and does
   not claim completeness.
+
+A no-write election can reserve a greater durable term and reset its sequence
+to zero without changing persisted rows or the source resume cursor. The
+persisted wrapper keeps an already certified resume baseline across that
+transition only when the atomic snapshot has the same row version and reset
+epoch. A committed write or schema reset requires fresh certification and
+cannot inherit the earlier baseline merely because the key set still matches.
 
 The method is required because the versioned `metadata.persistence` capability
 always carries hydration, durable row scanning, certification, evidence, and

@@ -7,13 +7,7 @@ import {
 } from '../ir.js'
 import { UnsafeAliasPathError } from '../../errors.js'
 import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
-import { containsAggregate } from './group-by.js'
-import type {
-  Aggregate,
-  BasicExpression,
-  Select,
-  SelectValueExpression,
-} from '../ir.js'
+import type { BasicExpression, Select, SelectValueExpression } from '../ir.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -198,10 +192,6 @@ function compileSelectValue(
   }
 
   if (isConditionalSelectValue(value)) {
-    if (containsAggregate(value)) {
-      return () => null
-    }
-
     return compileConditionalSelect(value)
   }
 
@@ -215,13 +205,6 @@ function compileSelectValue(
 
   if (isNestedSelectObject(value)) {
     return compileSelectObject(value)
-  }
-
-  if (
-    isAggregateExpression(value as BasicExpression | Aggregate) ||
-    containsAggregate(value as BasicExpression | Aggregate)
-  ) {
-    return () => null
   }
 
   if (!isExpressionLike(value)) {
@@ -252,15 +235,6 @@ function compileConditionalSelect(
 
     return defaultFn !== undefined ? defaultFn(row) : null
   }
-}
-
-/**
- * Helper function to check if an expression is an aggregate
- */
-function isAggregateExpression(
-  expr: BasicExpression | Aggregate,
-): expr is Aggregate {
-  return expr.type === `agg`
 }
 
 /**
@@ -323,15 +297,6 @@ function addFromObject(
 
     const expression = value as any
     if (isConditionalSelectValue(expression)) {
-      if (containsAggregate(expression)) {
-        ops.push({
-          kind: `field`,
-          alias: [...prefixPath, key].join(`.`),
-          compiled: () => null,
-        })
-        continue
-      }
-
       ops.push({
         kind: `field`,
         alias: [...prefixPath, key].join(`.`),
@@ -355,39 +320,28 @@ function addFromObject(
       continue
     }
 
-    if (isAggregateExpression(expression) || containsAggregate(expression)) {
-      // Placeholder for group-by processing later.
-      // Both plain aggregates (count(...)) and expressions wrapping
-      // aggregates (coalesce(count(...), 0)) are deferred to processGroupBy.
+    if (expression === undefined || !isExpressionLike(expression)) {
       ops.push({
         kind: `field`,
         alias: [...prefixPath, key].join(`.`),
-        compiled: () => null,
+        compiled: () => expression,
+      })
+      continue
+    }
+    // If the expression is a Value wrapper, embed the literal to avoid re-compilation mishaps
+    if (expression instanceof ValClass) {
+      const val = expression.value
+      ops.push({
+        kind: `field`,
+        alias: [...prefixPath, key].join(`.`),
+        compiled: () => val,
       })
     } else {
-      if (expression === undefined || !isExpressionLike(expression)) {
-        ops.push({
-          kind: `field`,
-          alias: [...prefixPath, key].join(`.`),
-          compiled: () => expression,
-        })
-        continue
-      }
-      // If the expression is a Value wrapper, embed the literal to avoid re-compilation mishaps
-      if (expression instanceof ValClass) {
-        const val = expression.value
-        ops.push({
-          kind: `field`,
-          alias: [...prefixPath, key].join(`.`),
-          compiled: () => val,
-        })
-      } else {
-        ops.push({
-          kind: `field`,
-          alias: [...prefixPath, key].join(`.`),
-          compiled: compileExpression(expression as BasicExpression),
-        })
-      }
+      ops.push({
+        kind: `field`,
+        alias: [...prefixPath, key].join(`.`),
+        compiled: compileExpression(expression as BasicExpression),
+      })
     }
   }
 }

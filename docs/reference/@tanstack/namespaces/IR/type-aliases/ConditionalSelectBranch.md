@@ -7,7 +7,7 @@ title: ConditionalSelectBranch
 type ConditionalSelectBranch = object;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:221](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L221)
+Defined in: [packages/db/src/query/ir.ts:305](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L305)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:221](https://github.com/TanStack/db/blo
 condition: BasicExpression;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:222](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L222)
+Defined in: [packages/db/src/query/ir.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L306)
 
 ***
 
@@ -27,4 +27,4 @@ Defined in: [packages/db/src/query/ir.ts:222](https://github.com/TanStack/db/blo
 value: SelectValueExpression;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L223)
+Defined in: [packages/db/src/query/ir.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L307)

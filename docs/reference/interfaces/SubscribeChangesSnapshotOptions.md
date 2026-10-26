@@ -3,7 +3,7 @@ id: SubscribeChangesSnapshotOptions
 title: SubscribeChangesSnapshotOptions
 ---
 
-Defined in: [packages/db/src/types.ts:1126](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1126)
+Defined in: [packages/db/src/types.ts:1179](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1179)
 
 ## Extends
 
@@ -21,13 +21,35 @@ Defined in: [packages/db/src/types.ts:1126](https://github.com/TanStack/db/blob/
 
 ## Properties
 
+### deferAcquisition?
+
+```ts
+optional deferAcquisition: boolean;
+```
+
+Defined in: [packages/db/src/types.ts:1147](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1147)
+
+**`Internal`**
+
+Whether this subscription defers provider work. It keeps the Collection
+alive and reads its local rows, but starts no idle source sync run and no
+acquisition attempt until `subscription.resumeDeferredAcquisition()`. A
+live-query Collection defers its source subscriptions until it has a
+subscriber or a preload in its current sync run.
+
+#### Inherited from
+
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`deferAcquisition`](SubscribeChangesOptions.md#deferacquisition)
+
+***
+
 ### limit?
 
 ```ts
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:1131](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1131)
+Defined in: [packages/db/src/types.ts:1184](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1184)
 
 **`Internal`**
 
@@ -45,7 +67,7 @@ Optional limit to include in loadSubset for query-specific cache keys.
 optional onLoadSubsetError: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1118](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1118)
+Defined in: [packages/db/src/types.ts:1171](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1171)
 
 **`Internal`**
 
@@ -75,7 +97,7 @@ Omit.onLoadSubsetError
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1116](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1116)
+Defined in: [packages/db/src/types.ts:1169](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1169)
 
 **`Internal`**
 
@@ -106,7 +128,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1100](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1100)
+Defined in: [packages/db/src/types.ts:1153](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1153)
 
 **`Internal`**
 
@@ -137,7 +159,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:1130](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1130)
+Defined in: [packages/db/src/types.ts:1183](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1183)
 
 **`Internal`**
 
@@ -155,7 +177,7 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 optional truncateReplayPublication: object;
 ```
 
-Defined in: [packages/db/src/types.ts:1120](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1120)
+Defined in: [packages/db/src/types.ts:1173](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1173)
 
 **`Internal`**
 
@@ -195,7 +217,7 @@ Omit.truncateReplayPublication
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:1092](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1092)
+Defined in: [packages/db/src/types.ts:1136](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1136)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -235,7 +257,7 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:1094](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1094)
+Defined in: [packages/db/src/types.ts:1138](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1138)
 
 Pre-compiled expression for filtering changes
 

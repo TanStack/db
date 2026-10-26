@@ -1,22 +1,8 @@
-import { isTemporal } from '../utils'
+import { durationFields, isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
+import { codedMessage, devBuild } from '../error-message'
+import type { DurationFields } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
-
-// WeakMap to store stable IDs for objects
-const objectIds = new WeakMap<object, number>()
-let nextObjectId = 1
-
-/**
- * Get or create a stable ID for an object
- */
-function getObjectId(obj: object): number {
-  if (objectIds.has(obj)) {
-    return objectIds.get(obj)!
-  }
-  const id = nextObjectId++
-  objectIds.set(obj, id)
-  return id
-}
 
 /**
  * Whether a value has no IEEE-754 natural order: `NaN`, or an invalid Date
@@ -106,10 +92,10 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   const bIsObject = typeof b === `object`
 
   if (aIsObject || bIsObject) {
-    // If both are objects, compare their stable IDs
+    // Symbols and objects share the runtime's reference-identity sequence.
     if (aIsObject && bIsObject) {
-      const aId = getObjectId(a)
-      const bId = getObjectId(b)
+      const aId = getRuntimeReferenceIdentity(a)[2]
+      const bId = getRuntimeReferenceIdentity(b)[2]
       return aId - bId
     }
 
@@ -133,21 +119,60 @@ export const descComparator = (
   b: unknown,
   opts: CompareOptions,
 ): number => {
-  return ascComparator(b, a, {
-    ...opts,
-    nulls: opts.nulls === `first` ? `last` : `first`,
-  })
+  return a == null || b == null
+    ? ascComparator(a, b, opts)
+    : ascComparator(b, a, opts)
+}
+
+export function indexObjectKind(value: any): string {
+  if (isUint8Array(value)) return `Binary`
+  if (isTemporal(value)) {
+    const tag = value[Symbol.toStringTag]
+    const fields = value as unknown as DurationFields
+    return tag === `Temporal.Duration` &&
+      (fields.years || fields.months || fields.weeks)
+      ? `Temporal.Duration.calendar`
+      : tag
+  }
+  if (Array.isArray(value)) return `Array`
+  return `Object`
 }
 
 export function makeComparator(
   opts: CompareOptions,
+  scope: `values` | `index` = `values`,
 ): (a: any, b: any) => number {
+  const compare = opts.direction === `asc` ? ascComparator : descComparator
+  if (scope !== `index`) return (a, b) => compare(a, b, opts)
+
+  const direction = opts.direction === `asc` ? 1 : -1
   return (a, b) => {
-    if (opts.direction === `asc`) {
-      return ascComparator(a, b, opts)
-    } else {
-      return descComparator(a, b, opts)
+    // An index needs one stable domain for each native comparison law. In
+    // particular, Date order cannot be mixed with reference-object order.
+    if (a != null && b != null) {
+      if (a instanceof Date) a = a.getTime()
+      if (b instanceof Date) b = b.getTime()
+      const aType = typeof a
+      const bType = typeof b
+      if (aType !== bType) return (aType < bType ? -1 : 1) * direction
+      if (aType === `object`) {
+        const aKind = indexObjectKind(a)
+        const bKind = indexObjectKind(b)
+        if (aKind !== bKind) return (aKind < bKind ? -1 : 1) * direction
+        // Binary content and unordered Temporal values use their exact keys
+        // for stable storage order.
+        if (
+          aKind === `Binary` ||
+          aKind === `Temporal.Duration.calendar` ||
+          aKind === `Temporal.PlainMonthDay`
+        ) {
+          const left = normalizeValue(a)
+          const right = normalizeValue(b)
+          return (left < right ? -1 : left > right ? 1 : 0) * direction
+        }
+      }
     }
+    return compare(a, b, opts)
   }
 }
 
@@ -162,7 +187,9 @@ export function makeCheckedComparator(
     const result: unknown = compareFn(a, b)
     if (typeof result !== `number` || Number.isNaN(result))
       throw new TypeError(
-        `Index comparator must return a number, but returned ${String(result)}`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Index comparator must return a number, but returned ${String(result)}`
+          : codedMessage(166, { result }),
       )
     return result
   }
@@ -197,33 +224,39 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
-
 function normalizedKey(kind: string, value: string): string {
   return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
 }
 
-function normalizeBinary(value: Uint8Array): string {
-  let bytes = ``
-  for (let index = 0; index < value.byteLength; index++) {
-    bytes += String.fromCharCode(value[index]!)
-  }
-  return normalizedKey(`binary`, bytes)
-}
+const binaryKeys = new WeakMap<Uint8Array, string>()
 
-/**
- * Sentinel value representing undefined in normalized form.
- * This allows distinguishing between "start from beginning" (undefined parameter)
- * and "start from the key undefined" (actual undefined value in the tree).
- */
-export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
+function normalizeBinary(value: Uint8Array): string {
+  const cached = binaryKeys.get(value)
+  if (cached) return cached
+  let bytes: string
+  if (value.byteLength <= 8192) {
+    bytes = String.fromCharCode.apply(null, value as unknown as Array<number>)
+  } else {
+    const chunks: Array<string> = []
+    for (let index = 0; index < value.byteLength; index += 8192) {
+      chunks.push(
+        String.fromCharCode.apply(
+          null,
+          value.subarray(index, index + 8192) as unknown as Array<number>,
+        ),
+      )
+    }
+    bytes = chunks.join(``)
+  }
+  const key = normalizedKey(`binary`, bytes)
+  binaryKeys.set(value, key)
+  return key
+}
 
 /**
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
- *
- * Note: This does NOT convert undefined to a sentinel. Use normalizeForBTree
- * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
   if (typeof value === `string`) {
@@ -241,10 +274,15 @@ export function normalizeValue(value: any): any {
   }
 
   if (isTemporal(value)) {
-    return normalizedKey(
-      `temporal`,
-      `${value[Symbol.toStringTag]}:${value.toString()}`,
-    )
+    const tag = value[Symbol.toStringTag]
+    if (tag === 'Temporal.Duration') {
+      const fields = value as unknown as DurationFields
+      return normalizedKey(
+        tag,
+        durationFields.map((field) => fields[field]).join(','),
+      )
+    }
+    return normalizedKey(tag, value.toString())
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -257,19 +295,6 @@ export function normalizeValue(value: any): any {
 }
 
 /**
- * Normalize a value for BTree index usage.
- * Extends normalizeValue to also convert undefined to a sentinel value.
- * This is needed because the BTree does not properly support `undefined` as a key
- * (it interprets undefined as "start from beginning" in nextHigherPair/nextLowerPair).
- */
-export function normalizeForBTree(value: any): any {
-  if (value === undefined) {
-    return UNDEFINED_SENTINEL
-  }
-  return normalizeValue(value)
-}
-
-/**
  * Compare values using the equality semantics used by Map keys.
  */
 export function areSameValueZeroEqual(a: unknown, b: unknown): boolean {
@@ -277,56 +302,32 @@ export function areSameValueZeroEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Converts the `UNDEFINED_SENTINEL` back to `undefined`.
- * Needed such that the sentinel is converted back to `undefined` before comparison.
- */
-export function denormalizeUndefined(value: any): any {
-  if (value === UNDEFINED_SENTINEL) {
-    return undefined
-  }
-  return value
-}
-
-// Cached map from Symbol.toStringTag → static compare function (null = none defined).
-// Populated lazily on first encounter of each Temporal type so we never access
-// `.constructor` more than once per type, and dispatch is keyed on the already-
-// computed brand tag rather than on the constructor itself.
-const temporalCompareByTag = new Map<
-  string,
-  ((a: unknown, b: unknown) => number) | null
->()
-
-/**
  * Compare two Temporal values of the same type, returning -1, 0, or 1.
  *
- * Dispatch is keyed on `Symbol.toStringTag` (the brand already checked by
- * `isTemporal`) rather than `a.constructor`, making it robust across realms
- * and resistant to a shadowed `constructor` property. Types without a static
- * `.compare` (e.g. `PlainMonthDay`) throw rather than fall back to string
- * comparison, matching Temporal's design intent.
+ * The tags check type agreement. Types without a static `.compare` (e.g.
+ * `PlainMonthDay`) throw instead of using text order.
  *
  * Callers must ensure both arguments are Temporal objects; mixed types throw.
  */
 export function compareTemporalValues(a: unknown, b: unknown): number {
-  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag] as string
-  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag] as string
+  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
+  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag]
   if (aTag !== bTag) {
     throw new TypeError(
-      `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`
+        : codedMessage(167, { aTag, bTag }),
     )
   }
-  let compare = temporalCompareByTag.get(aTag)
-  if (compare === undefined) {
-    const fn = (
-      (a as { constructor: unknown }).constructor as {
-        compare?: (x: unknown, y: unknown) => number
-      }
-    ).compare
-    compare = typeof fn === `function` ? fn : null
-    temporalCompareByTag.set(aTag, compare)
-  }
-  if (compare === null) {
-    throw new TypeError(`${aTag} has no defined ordering`)
+  const compare = (
+    a as { constructor: { compare?: (x: unknown, y: unknown) => number } }
+  ).constructor.compare
+  if (typeof compare !== `function`) {
+    throw new TypeError(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${aTag} has no defined ordering`
+        : codedMessage(168, { aTag }),
+    )
   }
   return compare(a, b)
 }

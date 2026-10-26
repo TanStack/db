@@ -10,6 +10,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import {
@@ -19,10 +20,11 @@ import {
   reactive,
   ref,
   shallowRef,
+  watch,
 } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite'
+import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
@@ -30,6 +32,7 @@ import type {
   InfiniteQueryConfig,
   InfiniteQueryDriver,
   InfiniteQueryHandle,
+  InfiniteQueryObservation,
 } from '../../db/tests/conformance/infinite-contract'
 import type {
   QueryBuild,
@@ -40,11 +43,12 @@ let sourceSequence = 0
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
-      id: `infinite-conformance-vue-${sourceSequence++}`,
+      id: collectionId ?? `infinite-conformance-vue-${sourceSequence++}`,
       getKey: (row) => row.id,
       initialData: [...initialData],
     }),
@@ -86,11 +90,41 @@ function runInScope<R>(fn: () => R) {
   return { result, scope }
 }
 
+type Observations = Array<InfiniteQueryObservation>
+
+function observe(result: any): InfiniteQueryObservation {
+  return {
+    status: result.status.value,
+    ids: result.data.value.map((row: { id: string }) => row.id),
+    pages: result.pages.value.map((page: Array<{ id: string }>) =>
+      page.map((row) => row.id),
+    ),
+    hasNextPage: result.hasNextPage.value,
+  }
+}
+
+// Vue renders the value present after setup, then at each pre-flush. A
+// pre-flush watcher sees what a component would render, not each synchronous
+// intermediate write that the same tick overwrites.
+function recordPublications<R>(result: R, log: Observations): R {
+  log.push(observe(result))
+  watch(
+    () => observe(result),
+    (observation) => {
+      log.push(observation)
+    },
+    { flush: `pre` },
+  )
+  return result
+}
+
 function makeHandle(
   result: any,
   scope: ReturnType<typeof effectScope>,
+  log: Observations,
 ): InfiniteQueryHandle {
   return {
+    observations: () => log,
     current() {
       return {
         data: result.data.value,
@@ -116,10 +150,11 @@ function makeHandle(
 }
 
 function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(build as any, config as any),
+    recordPublications(useLiveInfiniteQuery(build as any, config as any), log),
   )
-  return makeHandle(result, scope)
+  return makeHandle(result, scope, log)
 }
 
 function mountControllable<P>(
@@ -128,12 +163,16 @@ function mountControllable<P>(
   config: InfiniteQueryConfig = {},
 ) {
   const param = ref(initial) as { value: P }
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery((q: any) => build(q, param.value), config as any, [
-      param,
-    ]),
+    recordPublications(
+      useLiveInfiniteQuery((q: any) => build(q, param.value), config as any, [
+        param,
+      ]),
+      log,
+    ),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     setParamSync(next: P) {
@@ -143,10 +182,11 @@ function mountControllable<P>(
 }
 
 function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(collection, config as any),
+    recordPublications(useLiveInfiniteQuery(collection, config as any), log),
   )
-  return makeHandle(result, scope)
+  return makeHandle(result, scope, log)
 }
 
 function mountCollectionControllable(
@@ -154,10 +194,11 @@ function mountCollectionControllable(
   config: InfiniteQueryConfig = {},
 ) {
   const collection = shallowRef(initial)
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(collection, config as any),
+    recordPublications(useLiveInfiniteQuery(collection, config as any), log),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     replaceCollectionSync(next: any) {
@@ -171,10 +212,11 @@ function mountConfigControllable(
   initial: InfiniteQueryConfig,
 ) {
   const config = reactive({ ...initial })
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(build as any, config as any),
+    recordPublications(useLiveInfiniteQuery(build as any, config as any), log),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     setConfigSync(next: InfiniteQueryConfig) {
@@ -191,14 +233,18 @@ function mountInputControllable(
   config: InfiniteQueryConfig = {},
 ) {
   const kind = ref<`collection` | `query`>(`collection`)
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(
-      (q: any) => (kind.value === `collection` ? collection : build(q)),
-      config as any,
-      [kind],
+    recordPublications(
+      useLiveInfiniteQuery(
+        (q: any) => (kind.value === `collection` ? collection : build(q)),
+        config as any,
+        [kind],
+      ),
+      log,
     ),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     setInputKindSync(next: `collection` | `query`) {
@@ -209,10 +255,20 @@ function mountInputControllable(
 
 const vueInfiniteDriver: InfiniteQueryDriver = {
   name: `vue`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
+  makeLaggingOnDemandSource: (data) =>
+    makeInfiniteOnDemandSource(
+      { createCollection, BTreeIndex },
+      data,
+      undefined,
+      `lagging`,
+    ),
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,

@@ -1,0 +1,13 @@
+Source: /tmp/pr1179-listener-green.log
+SHA-256: 7e4ec9980bddd06d2b7e232e7d19101941be9d6f35c692f46a797fa21cb7b48f
+Trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+·············································
+
+ Test Files  2 passed (2)
+      Tests  45 passed (45)
+   Start at  08:40:53
+   Duration  1.44s (transform 533ms, setup 59ms, collect 1.46s, tests 37ms, environment 830ms, prepare 157ms)

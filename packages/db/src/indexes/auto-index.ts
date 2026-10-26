@@ -1,9 +1,13 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
+import { indexableOperations } from '../query/builder/functions.js'
 import { hasVirtualPropPath } from '../virtual-props'
+import { findIndexForField } from '../utils/index-optimization.js'
+import { codedWarning, devBuild } from '../error-message.js'
 import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
+import type { IndexReader } from './base-index.js'
 
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
@@ -20,7 +24,7 @@ export function ensureIndexForField<
   fieldPath: Array<string>,
   collection: CollectionImpl<T, TKey, any, any, any>,
   compareOptions?: CompareOptions,
-  compareFn?: (a: any, b: any) => number,
+  canUse?: (index: IndexReader<TKey>) => boolean,
 ) {
   if (hasVirtualPropPath(fieldPath)) {
     return
@@ -36,9 +40,11 @@ export function ensureIndexForField<
   }
 
   // Check if we already have an index for this field
-  const existingIndex = Array.from(collection.indexes.values()).find(
-    (index) =>
-      index.matchesField(fieldPath) && index.matchesCompareOptions(compareOpts),
+  const existingIndex = findIndexForField(
+    collection,
+    fieldPath,
+    compareOpts,
+    canUse,
   )
 
   if (existingIndex) {
@@ -68,12 +74,14 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        options: { compareFn, compareOptions: compareOpts },
+        options: { compareOptions: compareOpts },
       },
     )
   } catch (error) {
     console.warn(
-      `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`
+        : codedWarning(215, { id: collection.id, value: fieldPath.join(`.`) }),
       error,
     )
   }
@@ -120,8 +128,7 @@ function extractIndexableExpressions(
     }
 
     // Check if this is a supported operation
-    const supportedOperations = [`eq`, `gt`, `gte`, `lt`, `lte`, `in`]
-    if (!supportedOperations.includes(func.name)) {
+    if (!indexableOperations.includes(func.name)) {
       return
     }
 

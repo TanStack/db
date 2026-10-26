@@ -254,7 +254,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
  */
 export function join<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
@@ -281,94 +281,4 @@ export function join<
     stream.graph.addOperator(operator)
     return output
   }
-}
-
-/**
- * Joins two input streams (inner join)
- * @param other - The other stream to join with
- */
-export function innerJoin<
-  K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
-  V2,
-  T,
->(
-  other: IStreamBuilder<KeyValue<K, V2>>,
-): PipedOperator<T, KeyValue<K, [V1, V2]>> {
-  return join(other, `inner`) as unknown as PipedOperator<
-    T,
-    KeyValue<K, [V1, V2]>
-  >
-}
-
-/**
- * Joins two input streams (anti join)
- * @param other - The other stream to join with
- */
-export function antiJoin<
-  K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
-  V2,
-  T,
->(
-  other: IStreamBuilder<KeyValue<K, V2>>,
-): PipedOperator<T, KeyValue<K, [V1, null]>> {
-  return join(other, `anti`) as unknown as PipedOperator<
-    T,
-    KeyValue<K, [V1, null]>
-  >
-}
-
-/**
- * Joins two input streams (left join)
- * @param other - The other stream to join with
- */
-export function leftJoin<
-  K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
-  V2,
-  T,
->(
-  other: IStreamBuilder<KeyValue<K, V2>>,
-): PipedOperator<T, KeyValue<K, [V1, V2 | null]>> {
-  return join(other, `left`) as unknown as PipedOperator<
-    T,
-    KeyValue<K, [V1, V2 | null]>
-  >
-}
-
-/**
- * Joins two input streams (right join)
- * @param other - The other stream to join with
- */
-export function rightJoin<
-  K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
-  V2,
-  T,
->(
-  other: IStreamBuilder<KeyValue<K, V2>>,
-): PipedOperator<T, KeyValue<K, [V1 | null, V2]>> {
-  return join(other, `right`) as unknown as PipedOperator<
-    T,
-    KeyValue<K, [V1 | null, V2]>
-  >
-}
-
-/**
- * Joins two input streams (full join)
- * @param other - The other stream to join with
- */
-export function fullJoin<
-  K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
-  V2,
-  T,
->(
-  other: IStreamBuilder<KeyValue<K, V2>>,
-): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
-  return join(other, `full`) as unknown as PipedOperator<
-    T,
-    KeyValue<K, [V1 | null, V2 | null]>
-  >
 }

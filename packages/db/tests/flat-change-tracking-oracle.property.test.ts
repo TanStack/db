@@ -335,21 +335,19 @@ const excursionArbitrary: fc.Arbitrary<Array<Operation>> = fc
 // rarely forms: a hidden field written then deleted, an equal object written
 // over a hidden object field, and a getter-only field assigned its own value.
 const descriptorRunArbitrary: fc.Arbitrary<Array<Operation>> = fc.oneof(
-  valueArbitrary.map(
-    (value): Array<Operation> => [
-      { kind: `set`, field: `h`, value },
-      { kind: `delete`, field: `h` },
-    ],
-  ),
+  valueArbitrary.map((value): Array<Operation> => [
+    { kind: `set`, field: `h`, value },
+    { kind: `delete`, field: `h` },
+  ]),
   fc.constant<Array<Operation>>([
     { kind: `set`, field: `h`, value: FRESH_OBJECT },
   ]),
-  fc.tuple(fc.constantFrom(...fields), valueArbitrary, fc.boolean()).map(
-    ([field, value, enumerable]): Array<Operation> => [
+  fc
+    .tuple(fc.constantFrom(...fields), valueArbitrary, fc.boolean())
+    .map(([field, value, enumerable]): Array<Operation> => [
       { kind: `define-getter`, field, value, enumerable },
       { kind: `set`, field, value },
-    ],
-  ),
+    ]),
 )
 const operationsArbitrary: fc.Arbitrary<Array<Operation>> = fc
   .array(

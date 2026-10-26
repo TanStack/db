@@ -23,13 +23,10 @@ export type {
 } from './op-sqlite-driver'
 
 type MobileSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type MobileSQLiteSchemaMismatchPolicy =
-  | MobileSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  MobileSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type MobileSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -95,6 +92,8 @@ function resolveAdapterBaseOptions(
       options.appliedTxPruneMaxAgeSeconds ??
       DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+    cacheGenerationClaimTtlMs: options.cacheGenerationClaimTtlMs,
+    now: options.now,
   }
 }
 

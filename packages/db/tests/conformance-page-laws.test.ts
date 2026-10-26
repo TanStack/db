@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import fc from 'fast-check'
-import { expectPageRows } from './conformance/page-laws'
+import { expectPageRows } from './conformance/page-laws-oracle'
 
 const rows = [1, 2, 3].map((id) => ({ id: `${id}`, name: `row${id}` }))
 

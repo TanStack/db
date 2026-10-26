@@ -1,0 +1,775 @@
+Source log: /tmp/pr1179-browser-green.log
+SHA-256 of full source: 3320a850b5a968afbd54d53f31eb916acf2b57e34b88dd2087cc019615ce0ff3
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+[2m[WebServer] [22m(node:52552) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 156 tests using 1 worker
+
+(node:52564) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52564) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓    1 [chromium] › e2e/cross-tab-oracle.spec.ts:256:1 › native overlapping reads publish whole snapshots and retain evidence across page close (322ms)
+  ✓    2 [chromium] › e2e/cross-tab-oracle.spec.ts:263:1 › replays the same schedule-dependent publication violation after evidence survives page close (595ms)
+  ✓    3 [chromium] › e2e/cross-tab-oracle.spec.ts:405:3 › native authored histories preserve every publication (fixed) (2.5s)
+  ✓    4 [chromium] › e2e/cross-tab-oracle.spec.ts:405:3 › native authored histories preserve every publication (fresh) (2.3s)
+  ✓    5 [chromium] › e2e/cross-tab-oracle.spec.ts:447:1 › native ordered delete and reinsert removes omitted fields through an ordinary update (186ms)
+  ✓    6 [chromium] › e2e/cross-tab-oracle.spec.ts:491:3 › managed versionchange retains in-flight native work during upgrade (273ms)
+  ✓    7 [chromium] › e2e/cross-tab-oracle.spec.ts:491:3 › managed versionchange retains in-flight native work during delete (269ms)
+  ✓    8 [chromium] › e2e/cross-tab-oracle.spec.ts:546:3 › native receiver abort reports active Collection status (176ms)
+  ✓    9 [chromium] › e2e/cross-tab-oracle.spec.ts:546:3 › native receiver abort reports obsolete Collection status (184ms)
+  ✓   10 [chromium] › e2e/cross-tab-oracle.spec.ts:588:1 › subscriptions acquired before and during native startup observe peer progress (275ms)
+  ✓   11 [chromium] › e2e/cross-tab-oracle.spec.ts:649:1 › an unmanaged native blocker preserves pending deletion until it closes (177ms)
+  ✓   12 [chromium] › e2e/cross-tab-oracle.spec.ts:676:1 › native write abort after request progress rejects without durable rows or versions (273ms)
+  ✓   13 [chromium] › e2e/cross-tab-oracle.spec.ts:728:3 › a held native insert rolls back after ordered peer persistence (264ms)
+  ✓   14 [chromium] › e2e/cross-tab-oracle.spec.ts:728:3 › a held native insert confirms after ordered peer persistence (266ms)
+  ✓   15 [chromium] › e2e/cross-tab-oracle.spec.ts:777:1 › native reload readiness waits for its establishing storage read (126ms)
+  ✓   16 [chromium] › e2e/cross-tab-oracle.spec.ts:810:1 › cleanup retains a primary mismatch and closes every page after an injected cleanup failure (176ms)
+  ✓   17 [chromium] › e2e/cross-tab-oracle.spec.ts:831:1 › late administrative deletion receipt preserves a recreated database snapshot (267ms)
+  ✓   18 [chromium] › e2e/cross-tab-oracle.spec.ts:862:1 › persists a later local update after a held insert in mutation order (179ms)
+  ✓   19 [chromium] › e2e/cross-tab-oracle.spec.ts:903:1 › native invalidation reconciles rows without version metadata (266ms)
+  ✓   20 [chromium] › e2e/cross-tab-oracle.spec.ts:948:1 › an old native deletion receipt cannot complete a newer blocked deletion (267ms)
+  ✓   21 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after explicit closure (190ms)
+  ✓   22 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after explicit closure (210ms)
+  ✓   23 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after explicit closure (184ms)
+  ✓   24 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after explicit closure (182ms)
+  ✓   25 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after explicit closure (172ms)
+  ✓   26 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after explicit closure (176ms)
+  ✓   27 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after explicit closure (186ms)
+  ✘   28 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure (194ms)
+(node:52915) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52915) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   29 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after explicit closure (235ms)
+  ✘   30 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure (195ms)
+(node:52991) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52991) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   31 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after upgrade closure (279ms)
+  ✓   32 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after upgrade closure (196ms)
+  ✓   33 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after upgrade closure (190ms)
+  ✓   34 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after upgrade closure (201ms)
+  ✓   35 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after upgrade closure (205ms)
+  ✓   36 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after upgrade closure (199ms)
+  ✓   37 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after upgrade closure (198ms)
+  ✘   38 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure (200ms)
+(node:53049) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53049) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   39 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after upgrade closure (255ms)
+  ✘   40 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure (205ms)
+(node:53103) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53103) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   41 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after delete closure (237ms)
+  ✓   42 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after delete closure (215ms)
+  ✓   43 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after delete closure (203ms)
+  ✓   44 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after delete closure (204ms)
+  ✓   45 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after delete closure (195ms)
+  ✓   46 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after delete closure (184ms)
+  ✓   47 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after delete closure (186ms)
+  ✘   48 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure (195ms)
+(node:53167) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53167) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   49 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after delete closure (248ms)
+  ✘   50 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure (200ms)
+(node:53209) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53209) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   51 [chromium] › e2e/cross-tab-oracle.spec.ts:1081:3 › native deletion waits for both obligations, transaction first false (221ms)
+  ✓   52 [chromium] › e2e/cross-tab-oracle.spec.ts:1081:3 › native deletion waits for both obligations, transaction first true (194ms)
+(node:53220) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53220) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   53 [firefox] › e2e/cross-tab-oracle.spec.ts:256:1 › native overlapping reads publish whole snapshots and retain evidence across page close (1.2s)
+  ✓   54 [firefox] › e2e/cross-tab-oracle.spec.ts:263:1 › replays the same schedule-dependent publication violation after evidence survives page close (1.5s)
+  ✓   55 [firefox] › e2e/cross-tab-oracle.spec.ts:405:3 › native authored histories preserve every publication (fixed) (7.5s)
+  ✓   56 [firefox] › e2e/cross-tab-oracle.spec.ts:405:3 › native authored histories preserve every publication (fresh) (6.1s)
+  ✓   57 [firefox] › e2e/cross-tab-oracle.spec.ts:447:1 › native ordered delete and reinsert removes omitted fields through an ordinary update (515ms)
+  ✓   58 [firefox] › e2e/cross-tab-oracle.spec.ts:491:3 › managed versionchange retains in-flight native work during upgrade (724ms)
+  ✓   59 [firefox] › e2e/cross-tab-oracle.spec.ts:491:3 › managed versionchange retains in-flight native work during delete (654ms)
+  ✓   60 [firefox] › e2e/cross-tab-oracle.spec.ts:546:3 › native receiver abort reports active Collection status (439ms)
+  ✓   61 [firefox] › e2e/cross-tab-oracle.spec.ts:546:3 › native receiver abort reports obsolete Collection status (435ms)
+  ✓   62 [firefox] › e2e/cross-tab-oracle.spec.ts:588:1 › subscriptions acquired before and during native startup observe peer progress (628ms)
+  ✓   63 [firefox] › e2e/cross-tab-oracle.spec.ts:649:1 › an unmanaged native blocker preserves pending deletion until it closes (468ms)
+  ✓   64 [firefox] › e2e/cross-tab-oracle.spec.ts:676:1 › native write abort after request progress rejects without durable rows or versions (762ms)
+  ✓   65 [firefox] › e2e/cross-tab-oracle.spec.ts:728:3 › a held native insert rolls back after ordered peer persistence (1.3s)
+  ✓   66 [firefox] › e2e/cross-tab-oracle.spec.ts:728:3 › a held native insert confirms after ordered peer persistence (1.2s)
+  ✓   67 [firefox] › e2e/cross-tab-oracle.spec.ts:777:1 › native reload readiness waits for its establishing storage read (466ms)
+  ✓   68 [firefox] › e2e/cross-tab-oracle.spec.ts:810:1 › cleanup retains a primary mismatch and closes every page after an injected cleanup failure (631ms)
+  ✓   69 [firefox] › e2e/cross-tab-oracle.spec.ts:831:1 › late administrative deletion receipt preserves a recreated database snapshot (1.1s)
+  ✓   70 [firefox] › e2e/cross-tab-oracle.spec.ts:862:1 › persists a later local update after a held insert in mutation order (698ms)
+  ✓   71 [firefox] › e2e/cross-tab-oracle.spec.ts:903:1 › native invalidation reconciles rows without version metadata (1.2s)
+  ✓   72 [firefox] › e2e/cross-tab-oracle.spec.ts:948:1 › an old native deletion receipt cannot complete a newer blocked deletion (1.4s)
+  ✓   73 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after explicit closure (970ms)
+  ✓   74 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after explicit closure (856ms)
+  ✓   75 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after explicit closure (824ms)
+  ✓   76 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after explicit closure (774ms)
+  ✓   77 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after explicit closure (810ms)
+  ✓   78 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after explicit closure (917ms)
+  ✓   79 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after explicit closure (852ms)
+  ✘   80 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure (1.2s)
+(node:54207) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54207) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   81 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after explicit closure (1.6s)
+  ✘   82 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure (852ms)
+(node:54346) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54346) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   83 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after upgrade closure (1.6s)
+  ✓   84 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after upgrade closure (832ms)
+  ✓   85 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after upgrade closure (775ms)
+  ✓   86 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after upgrade closure (964ms)
+  ✓   87 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after upgrade closure (1.0s)
+  ✓   88 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after upgrade closure (841ms)
+  ✓   89 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after upgrade closure (799ms)
+  ✘   90 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure (873ms)
+(node:54607) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54607) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   91 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after upgrade closure (970ms)
+  ✘   92 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure (503ms)
+(node:54679) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54679) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   93 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after delete closure (994ms)
+  ✓   94 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after delete closure (494ms)
+  ✓   95 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after delete closure (471ms)
+  ✓   96 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after delete closure (555ms)
+  ✓   97 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after delete closure (589ms)
+  ✓   98 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after delete closure (488ms)
+  ✓   99 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after delete closure (481ms)
+  ✘  100 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure (480ms)
+(node:54739) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54739) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  101 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after delete closure (958ms)
+  ✘  102 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure (499ms)
+(node:54767) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54767) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  103 [firefox] › e2e/cross-tab-oracle.spec.ts:1081:3 › native deletion waits for both obligations, transaction first false (971ms)
+  ✓  104 [firefox] › e2e/cross-tab-oracle.spec.ts:1081:3 › native deletion waits for both obligations, transaction first true (474ms)
+(node:54799) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54799) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  105 [webkit] › e2e/cross-tab-oracle.spec.ts:256:1 › native overlapping reads publish whole snapshots and retain evidence across page close (1.4s)
+  ✓  106 [webkit] › e2e/cross-tab-oracle.spec.ts:263:1 › replays the same schedule-dependent publication violation after evidence survives page close (1.7s)
+  ✓  107 [webkit] › e2e/cross-tab-oracle.spec.ts:405:3 › native authored histories preserve every publication (fixed) (6.7s)
+  ✓  108 [webkit] › e2e/cross-tab-oracle.spec.ts:405:3 › native authored histories preserve every publication (fresh) (6.6s)
+  ✓  109 [webkit] › e2e/cross-tab-oracle.spec.ts:447:1 › native ordered delete and reinsert removes omitted fields through an ordinary update (571ms)
+  ✓  110 [webkit] › e2e/cross-tab-oracle.spec.ts:491:3 › managed versionchange retains in-flight native work during upgrade (870ms)
+  ✓  111 [webkit] › e2e/cross-tab-oracle.spec.ts:491:3 › managed versionchange retains in-flight native work during delete (869ms)
+  ✓  112 [webkit] › e2e/cross-tab-oracle.spec.ts:546:3 › native receiver abort reports active Collection status (564ms)
+  ✓  113 [webkit] › e2e/cross-tab-oracle.spec.ts:546:3 › native receiver abort reports obsolete Collection status (566ms)
+  ✓  114 [webkit] › e2e/cross-tab-oracle.spec.ts:588:1 › subscriptions acquired before and during native startup observe peer progress (883ms)
+  ✓  115 [webkit] › e2e/cross-tab-oracle.spec.ts:649:1 › an unmanaged native blocker preserves pending deletion until it closes (554ms)
+  ✓  116 [webkit] › e2e/cross-tab-oracle.spec.ts:676:1 › native write abort after request progress rejects without durable rows or versions (868ms)
+  ✓  117 [webkit] › e2e/cross-tab-oracle.spec.ts:728:3 › a held native insert rolls back after ordered peer persistence (1.1s)
+  ✓  118 [webkit] › e2e/cross-tab-oracle.spec.ts:728:3 › a held native insert confirms after ordered peer persistence (869ms)
+  ✓  119 [webkit] › e2e/cross-tab-oracle.spec.ts:777:1 › native reload readiness waits for its establishing storage read (343ms)
+  ✓  120 [webkit] › e2e/cross-tab-oracle.spec.ts:810:1 › cleanup retains a primary mismatch and closes every page after an injected cleanup failure (555ms)
+  ✓  121 [webkit] › e2e/cross-tab-oracle.spec.ts:831:1 › late administrative deletion receipt preserves a recreated database snapshot (870ms)
+  ✓  122 [webkit] › e2e/cross-tab-oracle.spec.ts:862:1 › persists a later local update after a held insert in mutation order (570ms)
+  ✓  123 [webkit] › e2e/cross-tab-oracle.spec.ts:903:1 › native invalidation reconciles rows without version metadata (850ms)
+  ✓  124 [webkit] › e2e/cross-tab-oracle.spec.ts:948:1 › an old native deletion receipt cannot complete a newer blocked deletion (1.1s)
+  ✓  125 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after explicit closure (571ms)
+  ✓  126 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after explicit closure (573ms)
+  ✓  127 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after explicit closure (576ms)
+  ✓  128 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after explicit closure (578ms)
+  ✓  129 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after explicit closure (651ms)
+  ✓  130 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after explicit closure (571ms)
+  ✓  131 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after explicit closure (585ms)
+  ✘  132 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure (572ms)
+(node:55350) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55350) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  133 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after explicit closure (754ms)
+  ✘  134 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure (683ms)
+(node:55418) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55418) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  135 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after upgrade closure (767ms)
+  ✓  136 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after upgrade closure (604ms)
+  ✓  137 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after upgrade closure (648ms)
+  ✓  138 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after upgrade closure (588ms)
+  ✓  139 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after upgrade closure (580ms)
+  ✓  140 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after upgrade closure (564ms)
+  ✓  141 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after upgrade closure (556ms)
+  ✘  142 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure (552ms)
+(node:55589) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55589) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  143 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after upgrade closure (736ms)
+  ✘  144 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure (564ms)
+(node:55609) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55609) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  145 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert commits after delete closure (732ms)
+  ✓  146 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted insert aborts after delete closure (571ms)
+  ✓  147 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update commits after delete closure (558ms)
+  ✓  148 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted update aborts after delete closure (557ms)
+  ✓  149 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete commits after delete closure (566ms)
+  ✓  150 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted delete aborts after delete closure (560ms)
+  ✓  151 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear commits after delete closure (654ms)
+  ✘  152 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure (708ms)
+(node:55856) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55856) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  153 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import commits after delete closure (803ms)
+  ✘  154 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure (644ms)
+(node:55879) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55879) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  155 [webkit] › e2e/cross-tab-oracle.spec.ts:1081:3 › native deletion waits for both obligations, transaction first false (861ms)
+  ✓  156 [webkit] › e2e/cross-tab-oracle.spec.ts:1081:3 › native deletion waits for both obligations, transaction first true (708ms)
+
+
+  1) [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  7) [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-firefox/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  8) [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-firefox/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  9) [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-firefox/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10) [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-firefox/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  11) [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-firefox/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  12) [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           expect(after.retirement.native.at(-1)).toBe(
+           |                                                  ^
+      1048 |             abort ? 'abort' : 'complete',
+      1049 |           )
+      1050 |           assertSnapshot(
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-firefox/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  13) [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           if (abort) {
+           |                       ^
+      1048 |             expect(after.retirement.native.at(-1)).not.toBe('complete')
+      1049 |             await a.waitForFunction(
+      1050 |               () => window.crossTab!.observe().writes.at(-1) === 'abort',
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-adb72-orts-after-explicit-closure-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  14) [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           if (abort) {
+           |                       ^
+      1048 |             expect(after.retirement.native.at(-1)).not.toBe('complete')
+      1049 |             await a.waitForFunction(
+      1050 |               () => window.crossTab!.observe().writes.at(-1) === 'abort',
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-749d0-orts-after-explicit-closure-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  15) [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           if (abort) {
+           |                       ^
+      1048 |             expect(after.retirement.native.at(-1)).not.toBe('complete')
+      1049 |             await a.waitForFunction(
+      1050 |               () => window.crossTab!.observe().writes.at(-1) === 'abort',
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-13ca5-borts-after-upgrade-closure-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  16) [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           if (abort) {
+           |                       ^
+      1048 |             expect(after.retirement.native.at(-1)).not.toBe('complete')
+      1049 |             await a.waitForFunction(
+      1050 |               () => window.crossTab!.observe().writes.at(-1) === 'abort',
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-cbaaf-borts-after-upgrade-closure-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  17) [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           if (abort) {
+           |                       ^
+      1048 |             expect(after.retirement.native.at(-1)).not.toBe('complete')
+      1049 |             await a.waitForFunction(
+      1050 |               () => window.crossTab!.observe().writes.at(-1) === 'abort',
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-b0446-aborts-after-delete-closure-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  18) [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"abort"[39m
+    Received: [31m"pending"[39m
+
+      1045 |             abort ? 'rejected' : 'fulfilled',
+      1046 |           )
+    > 1047 |           if (abort) {
+           |                       ^
+      1048 |             expect(after.retirement.native.at(-1)).not.toBe('complete')
+      1049 |             await a.waitForFunction(
+      1050 |               () => window.crossTab!.observe().writes.at(-1) === 'abort',
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1047:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1002:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-webkit/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-cee25-aborts-after-delete-closure-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  18 failed
+    [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure
+    [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure
+    [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure
+    [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure
+    [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure
+    [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure
+    [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure
+    [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure
+    [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure
+    [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure
+    [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure
+    [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure
+    [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure
+    [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure
+    [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure
+    [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure
+    [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure
+    [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure
+  138 passed (2.3m)

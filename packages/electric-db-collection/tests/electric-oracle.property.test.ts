@@ -1,7 +1,12 @@
 import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IR, createCollection, createTransaction } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createTransaction,
+  withAcceptedReceipt,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { QueryClient } from '@tanstack/query-core'
 import {
@@ -16,6 +21,12 @@ import {
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import {
+  applyRetryModel,
+  createRetryModel,
+  expectedRetryObservation,
+  retryStepIsLegal,
+} from './electric-retry-decision-model'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
 import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
 import type {
@@ -23,6 +34,14 @@ import type {
   PersistenceAdapter,
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
+import type {
+  RetryDecision,
+  RetryHistory,
+  RetryObservation,
+  RetrySettlement,
+  RetryStep,
+  RetryWait,
+} from './electric-retry-decision-model'
 
 // Replays one generated law directly with
 // TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY=<property>
@@ -43,6 +62,7 @@ const historyPropertyIds = new Set([
   `electric.subset-request-row-validity`,
   `electric.resume-metadata-merge`,
   `electric.metadata-merge-complete-state`,
+  `electric.retry-decision`,
 ])
 
 if (
@@ -114,8 +134,8 @@ function electricHistoryProperty<T>(
  *
  * Electric delivers change messages, reset controls, offsets, handles, and
  * snapshot availability through an SDK stream. The adapter must publish atomic
- * callback cuts, wait for applied receipts before readiness, persist valid
- * resume evidence for a valid source prefix, reject unseen partial updates,
+ * callback cuts, wait for acceptance before Collection readiness and for
+ * application before subset success, persist valid resume evidence for a valid source prefix, reject unseen partial updates,
  * and keep stale callbacks and metadata scoped to the sync run that created
  * them.
  *
@@ -153,12 +173,15 @@ const mockStream = {
 function createDeferred<T>(): {
   promise: Promise<T>
   resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
 } {
   let resolve!: (value: T | PromiseLike<T>) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -299,7 +322,7 @@ function createPersistedAdapter(
           value: structuredClone(value),
         })),
       ),
-    applyCommittedTx: (_collectionId: string, tx: PersistedTx) => {
+    applyCommittedTx: (_target, tx: PersistedTx) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata.delete(mutation.key)
@@ -563,12 +586,20 @@ function createOracleCollection(
   id: string,
   syncMode: ElectricSyncMode,
   metadata: SyncMetadataApi<string | number>,
-  shapeResumeOptions: { offset?: Offset; handle?: string } = {},
+  shapeResumeOptions: {
+    offset?: Offset
+    handle?: string
+    signal?: AbortSignal
+    onError?: () => Promise<Record<string, never> | undefined>
+  } = {},
+  wrapParams: <TParams>(params: TParams) => TParams = (params) => params,
 ) {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
+  let sdkError!: (error: unknown) => void
   const unsubscribe = vi.fn()
-  mockSubscribe.mockImplementationOnce((callback) => {
+  mockSubscribe.mockImplementationOnce((callback, onSubscriberError) => {
     subscriber = callback
+    sdkError = onSubscriberError
     return unsubscribe
   })
   const options = electricCollectionOptions<OracleRow>({
@@ -588,10 +619,11 @@ function createOracleCollection(
       ...options,
       sync: {
         sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync({ ...params, metadata }),
+          originalSync.sync(wrapParams({ ...params, metadata })),
       },
     }),
     subscriber,
+    sdkError,
     unsubscribe,
   }
 }
@@ -653,10 +685,7 @@ function rowsFromMap(
  * owner does not establish live-service framing or native-host scheduling.
  */
 type QueuedPresenceHistory =
-  | `insert-update`
-  | `update-update`
-  | `delete-update`
-  | `truncate-update`
+  `insert-update` | `update-update` | `delete-update` | `truncate-update`
 
 type QueuedPresenceCampaign = {
   histories: Array<QueuedPresenceHistory>
@@ -924,9 +953,20 @@ async function runQueuedPresenceHistory(
   }, [() => releaseFirstPersistence.resolve(), () => collection.cleanup()])
 }
 
+/**
+ * Persisted Electric histories may overlap a source commit with a subset
+ * hydration, or let a later subset supersede an earlier absence. Source rows
+ * must converge in public and durable state at the final checkpoint. In the
+ * hydration history the caller explicitly aborts its demand after hydration
+ * starts. The uncancelable local read keeps that load pending while its gate is
+ * held. After the gate releases, the cached row applies before the load rejects
+ * with AbortError. The independent expected rows below combine that authored
+ * cache row with the source changes in order; caller abort does not undo them.
+ * These histories exercise the persisted Collection wrapper and mocked
+ * Electric callback boundary, not native-host scheduling.
+ */
 type PersistenceInterleavingKind =
-  | `open-transaction-hydration`
-  | `subset-supersedes-absence`
+  `open-transaction-hydration` | `subset-supersedes-absence`
 
 type PersistenceInterleavingCampaign = {
   histories: Array<PersistenceInterleavingKind>
@@ -937,6 +977,10 @@ type PersistenceInterleavingObservation =
   | {
       kind: `open-transaction-hydration`
       hydrationStartedBeforeCommit: boolean
+      hydrationOutcomeBeforeRelease: string
+      cachedRowBeforeRelease: boolean
+      hydrationOutcome: string
+      publicRowsAtHydrationSettlement: Array<[string | number, string, string]>
       deliveryErrors: Array<string>
       publicRows: Array<[string | number, string, string]>
       durableRows: Array<[string | number, string, string]>
@@ -1002,7 +1046,12 @@ function reconstructPersistenceInterleavingCampaign(
 }
 
 function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error
+  return typeof error === `object` &&
+    error !== null &&
+    `name` in error &&
+    typeof error.name === `string`
+    ? error.name
+    : typeof error
 }
 
 function publicErrorName(
@@ -1025,6 +1074,8 @@ async function observeOpenTransactionHydration(
   })
   const persistedRows = new Map<string | number, OracleRow>()
   const persistedMetadata = new Map<string, unknown>()
+  const cachedRow: OracleRow = { id: 2, name: `cached`, stable: `stable-2` }
+  persistedRows.set(cachedRow.id, cachedRow)
   const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
   const hydrationEntered = createDeferred<void>()
   const releaseHydration = createDeferred<void>()
@@ -1033,7 +1084,7 @@ async function observeOpenTransactionHydration(
     hydrationStarted = true
     hydrationEntered.resolve()
     await releaseHydration.promise
-    return []
+    return [{ key: cachedRow.id, value: cachedRow }]
   }
   const collection = createCollection(
     persistedCollectionOptions<
@@ -1056,7 +1107,11 @@ async function observeOpenTransactionHydration(
     }),
   )
   const abortHydration = new AbortController()
-  let hydration: Promise<void> | undefined
+  let hydrationOutcome: Promise<string> | undefined
+  let hydrationSettlement = `pending`
+  let publicRowsAtHydrationSettlement: Array<
+    [string | number, string, string]
+  > = []
   const deliveryErrors: Array<string> = []
 
   try {
@@ -1072,12 +1127,26 @@ async function observeOpenTransactionHydration(
     })
 
     subscriber([change(`insert`, 1, names[0])])
-    hydration = Promise.resolve(
+    const hydration = Promise.resolve(
       collection._sync.loadSubset({
         limit: 1,
         signal: abortHydration.signal,
       }),
-    ).then(() => undefined)
+    )
+    // Observe settlement immediately so an expected abort never becomes an
+    // unhandled rejection. Record the public snapshot at that exact cut.
+    hydrationOutcome = hydration.then(
+      () => {
+        hydrationSettlement = `fulfilled`
+        publicRowsAtHydrationSettlement = rowsFromCollection(collection)
+        return hydrationSettlement
+      },
+      (error: unknown) => {
+        hydrationSettlement = errorName(error)
+        publicRowsAtHydrationSettlement = rowsFromCollection(collection)
+        return hydrationSettlement
+      },
+    )
     await Promise.resolve()
     await Promise.resolve()
     const hydrationStartedBeforeCommit = hydrationStarted
@@ -1098,14 +1167,20 @@ async function observeOpenTransactionHydration(
       `open-transaction hydration entered after commit`,
     )
     abortHydration.abort()
+    // Cancellation is cooperative. A held local hydration read cannot finish
+    // or install its baseline yet, so its acquisition promise stays pending.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const hydrationOutcomeBeforeRelease = hydrationSettlement
+    const cachedRowBeforeRelease = collection.has(cachedRow.id)
     releaseHydration.resolve()
-    await hydration
+    const settledHydration = await hydrationOutcome
 
     if (deliveryErrors.length === 0) {
       await vi.waitFor(
         () =>
           expect(rowsFromMap(persistedRows)).toEqual([
             [1, names[1], `stable-1`],
+            [2, `cached`, `stable-2`],
           ]),
         { interval: 1, timeout: 250 },
       )
@@ -1114,6 +1189,10 @@ async function observeOpenTransactionHydration(
     return {
       kind: `open-transaction-hydration`,
       hydrationStartedBeforeCommit,
+      hydrationOutcomeBeforeRelease,
+      cachedRowBeforeRelease,
+      hydrationOutcome: settledHydration,
+      publicRowsAtHydrationSettlement,
       deliveryErrors,
       publicRows: rowsFromCollection(collection),
       durableRows: rowsFromMap(persistedRows),
@@ -1123,7 +1202,7 @@ async function observeOpenTransactionHydration(
   } finally {
     abortHydration.abort()
     releaseHydration.resolve()
-    await Promise.allSettled([hydration, collection.cleanup()])
+    await Promise.allSettled([hydrationOutcome, collection.cleanup()])
   }
 }
 
@@ -1205,12 +1284,17 @@ function expectPersistenceInterleavingObservation(
     [1, names[1], `stable-1`],
   ]
   if (observation.kind === `open-transaction-hydration`) {
+    const rowsWithCache = [...rows, [2, `cached`, `stable-2`] as const]
     expect(observation, JSON.stringify(observation)).toEqual({
       kind: `open-transaction-hydration`,
       hydrationStartedBeforeCommit: false,
+      hydrationOutcomeBeforeRelease: `pending`,
+      cachedRowBeforeRelease: false,
+      hydrationOutcome: `AbortError`,
+      publicRowsAtHydrationSettlement: rowsWithCache,
       deliveryErrors: [],
-      publicRows: rows,
-      durableRows: rows,
+      publicRows: rowsWithCache,
+      durableRows: rowsWithCache,
       status: `ready`,
       publicError: undefined,
     })
@@ -1529,8 +1613,7 @@ async function runPersistedTrace(
         expect(rows).toEqual(expectedRows)
         expect(durableRows).toEqual(expectedRows)
         const exported = collection.config.sync.exportSyncMeta?.() as
-          | { resume?: unknown }
-          | undefined
+          { resume?: unknown } | undefined
         const resume = observableResume(exported?.resume)
         const durableResume = observableResume(
           persistedMetadata.get(`electric:resume`),
@@ -1740,9 +1823,11 @@ type HistoryToken = {
   name: string
 }
 
+// Provider controls can initiate a sync commit; delivering them does not by
+// itself establish applied settlement, publication, or persistence durability.
 type DesignToken =
   | HistoryToken
-  | { operation: `reset` | `commit` | `subset` | `neutral` }
+  | { operation: `reset` | `deliver-up-to-date` | `subset` | `neutral` }
 
 type ProcessSlot = `a` | `b`
 
@@ -1780,8 +1865,7 @@ type ProcessRuntime = {
 }
 
 type PreloadOutcome =
-  | { status: `fulfilled` }
-  | { status: `rejected`; reason: unknown }
+  { status: `fulfilled` } | { status: `rejected`; reason: unknown }
 
 function observePreload(promise: Promise<void>) {
   const observed: {
@@ -2150,20 +2234,19 @@ const designTokenArb: fc.Arbitrary<DesignToken> = fc.oneof(
     name: fc.string({ maxLength: 8 }),
   }),
   fc.record({
-    operation: fc.constantFrom<`reset` | `commit` | `subset` | `neutral`>(
-      `reset`,
-      `commit`,
-      `subset`,
-      `neutral`,
-    ),
+    operation: fc.constantFrom<
+      `reset` | `deliver-up-to-date` | `subset` | `neutral`
+    >(`reset`, `deliver-up-to-date`, `subset`, `neutral`),
   }),
 )
 
+// Releasing persistence application opens the adapter's held applyCommittedTx
+// call. It is separate from provider delivery and the sync applied receipt.
 type SchedulerEvent =
   | `startup-promise`
   | `hydration`
   | `snapshot-available`
-  | `commit`
+  | `release-persistence-apply`
   | `cleanup`
 
 function permutations<T>(values: ReadonlyArray<T>): Array<Array<T>> {
@@ -2218,7 +2301,7 @@ function buildValidHistory(tokens: Array<HistoryToken>): {
 
 function designMessage(token: DesignToken): Message<OracleRow> {
   if (token.operation === `reset`) return mustRefetch
-  if (token.operation === `commit`) return upToDate
+  if (token.operation === `deliver-up-to-date`) return upToDate
   if (token.operation === `subset`) return subsetEnd
   if (token.operation === `neutral`) {
     return {
@@ -2250,7 +2333,7 @@ function buildDifferentialHistory(
       continue
     }
     if (
-      token.operation === `commit` ||
+      token.operation === `deliver-up-to-date` ||
       token.operation === `subset` ||
       token.operation === `neutral`
     ) {
@@ -2620,7 +2703,7 @@ async function runSchedulerPermutation(
 }> {
   const startup = createDeferred<void>()
   const hydration = createDeferred<void>()
-  const commit = createDeferred<void>()
+  const persistenceApplyGate = createDeferred<void>()
   const persistedMetadata = new Map(resumeState())
   const persistedRows = new Map<string | number, OracleRow>([
     [1, { id: 1, name: `persisted`, stable: `stable-1` }],
@@ -2637,7 +2720,7 @@ async function runSchedulerPermutation(
   }
   const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
   adapter.applyCommittedTx = async (...args) => {
-    await commit.promise
+    await persistenceApplyGate.promise
     return applyCommittedTx(...args)
   }
 
@@ -2732,7 +2815,7 @@ async function runSchedulerPermutation(
       if (event === `startup-promise`) startup.resolve()
       if (event === `hydration`) hydration.resolve()
       if (event === `snapshot-available`) snapshotRequested = true
-      if (event === `commit`) commit.resolve()
+      if (event === `release-persistence-apply`) persistenceApplyGate.resolve()
       if (event === `cleanup`) {
         await collection.cleanup()
         cleanupCompleted = true
@@ -2745,7 +2828,7 @@ async function runSchedulerPermutation(
 
     startup.resolve()
     hydration.resolve()
-    commit.resolve()
+    persistenceApplyGate.resolve()
     snapshotRequested = true
     await drainScheduler()
     deliverSnapshotIfPossible()
@@ -2791,6 +2874,10 @@ const describeUnlessQueuedPresenceReplay =
 
 function resetElectricOracleMocks(): void {
   vi.clearAllMocks()
+  // clearAllMocks retains one-shot implementations from a failed earlier
+  // history. Each history must own its transport responses independently.
+  mockSubscribe.mockReset()
+  mockStream.requestSnapshot.mockReset().mockResolvedValue(undefined)
   mockStream.isUpToDate = false
   mockStream.shapeHandle = `shape-current`
   mockStream.lastOffset = `20_0`
@@ -3474,12 +3561,12 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
   })
 
-  it(`settles every startup, hydration, snapshot availability, commit, and cleanup permutation`, async () => {
+  it(`settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`, async () => {
     const events: Array<SchedulerEvent> = [
       `startup-promise`,
       `hydration`,
       `snapshot-available`,
-      `commit`,
+      `release-persistence-apply`,
       `cleanup`,
     ]
     let permutationIndex = 0
@@ -3871,7 +3958,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     [
       [
         { operation: `insert`, id: 2, name: `` },
-        { operation: `commit` },
+        { operation: `deliver-up-to-date` },
         { operation: `delete`, id: 2, name: `` },
       ],
       2032071466,
@@ -5053,7 +5140,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     await trace.collection.cleanup()
   })
 
-  it(`waits for a deferred applied receipt before publishing readiness`, async () => {
+  // Readiness counts accepted rows; they publish when the mutation settles.
+  it(`publishes readiness once a held receipt is accepted`, async () => {
     const metadata = createMetadata(new Map())
     const trace = createOracleCollection(
       `deferred-applied-receipt`,
@@ -5075,7 +5163,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     trace.subscriber([change(`insert`, 1, `synced`), upToDate])
     await Promise.resolve()
 
-    expect(trace.collection.status).toBe(`loading`)
+    expect(trace.collection.status).toBe(`ready`)
     expect(trace.collection.has(1)).toBe(false)
 
     persistence.resolve()
@@ -5089,7 +5177,1203 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     await trace.collection.cleanup()
   })
 
-  it(`does not publish readiness after a parked receipt is rejected by cleanup`, async () => {
+  /**
+   * Full-mode recovery can accept its complete source snapshot while an
+   * optimistic transaction still withholds application. Collection readiness
+   * is allowed at acceptance; LoadSubsetFn success must await the applied
+   * receipt. The independent obligation is simply pending until the held
+   * transaction releases, then exact source-row visibility at settlement.
+   *
+   * Demand before and after readiness distinguishes an initial-ready gate
+   * from the stronger applied-settlement law, including receipts created
+   * before the acquisition's own commit cursor. The transaction promise
+   * controls application; yielding a turn only drains already queued work.
+   */
+  it.each([`before-ready`, `after-ready`] as const)(
+    `full recovery subset waits for application when acquired %s`,
+    async (acquireAt) => {
+      const trace = createOracleCollection(
+        `full-recovery-applied-${acquireAt}`,
+        `on-demand`,
+        createMetadata(
+          new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+        ).api,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() =>
+        trace.collection.insert({
+          id: 99,
+          name: `optimistic`,
+          stable: `stable-99`,
+        }),
+      )
+      let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+      const acquire = () =>
+        Promise.resolve(trace.collection._sync.loadSubset({ limit: 1 })).then(
+          () => {
+            outcome = `fulfilled`
+          },
+          (error: unknown) => {
+            outcome = `rejected`
+            throw error
+          },
+        )
+      let loading: Promise<void> | undefined
+      await withElectricCleanup(async () => {
+        if (acquireAt === `before-ready`) loading = acquire()
+        trace.subscriber([change(`insert`, 1, `replacement`), upToDate])
+        expect(trace.collection.status).toBe(`ready`)
+        if (acquireAt === `after-ready`) loading = acquire()
+        void loading!.catch(() => undefined)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(trace.collection.has(1), `application is still held`).toBe(false)
+        expect(outcome, `ready does not establish subset application`).toBe(
+          `pending`,
+        )
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await atCheckpoint(loading!, `full recovery applied settlement`)
+        expect(outcome).toBe(`fulfilled`)
+        expect(trace.collection.get(1)).toMatchObject({
+          id: 1,
+          name: `replacement`,
+          stable: `stable-1`,
+        })
+      }, [() => persistence.resolve(), () => trace.collection.cleanup()])
+    },
+  )
+
+  // A full stream keeps its capability across a same-run must-refetch. Its
+  // previous applied snapshot cannot establish newly requested replacement
+  // coverage. This continuation rejects a permanently fulfilled startup gate.
+  it(`full recovery demand waits again after a same-run reset`, async () => {
+    const trace = createOracleCollection(
+      `full-recovery-reset`,
+      `on-demand`,
+      createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      ).api,
+    )
+    await withElectricCleanup(async () => {
+      trace.subscriber([change(`insert`, 1, `first`), upToDate])
+      await trace.collection._sync.loadSubset({ limit: 1 })
+      trace.subscriber([mustRefetch])
+      let outcome = `pending`
+      const loading = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 2 }),
+      ).then(
+        () => {
+          outcome = `fulfilled`
+        },
+        (error: unknown) => {
+          outcome = `rejected`
+          throw error
+        },
+      )
+      void loading.catch(() => undefined)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(outcome, `prior readiness is not replacement coverage`).toBe(
+        `pending`,
+      )
+      trace.subscriber([change(`insert`, 2, `second`), upToDate])
+      await atCheckpoint(loading, `same-run replacement applied`)
+      expect(outcome).toBe(`fulfilled`)
+      expect(rowsFromCollection(trace.collection)).toEqual([
+        [2, `second`, `stable-2`],
+      ])
+    }, [() => trace.collection.cleanup()])
+  })
+
+  /**
+   * ## Does a source that still tries ever look failed?
+   *
+   * Law: an Electric source that is still trying is `loading`. While the
+   * user's `onError` decides, and after it asks for a retry, no initial wait
+   * fails: the Collection stays `loading`, and a waiting full-log or
+   * progressive demand settles, with its rows visible, when the retried
+   * stream delivers its snapshot. A retry that succeeds is a success. The
+   * source fails its initial sync only when it gives up: there is no
+   * `onError`, `onError` returns no retry or throws, the Electric client gives
+   * up by itself, or the stream's external signal aborts. Then the Collection
+   * enters `error`, and every waiting demand and readiness wait rejects with
+   * that same cause. A status listener that cleans the Collection up inside
+   * that failure does not turn a rejected demand into a quiet one. Once the
+   * first up-to-date is committed, its acceptance alone decides the initial
+   * sync, even while a persistence wrapper still holds it: when it is
+   * accepted, the Collection becomes `ready`, whatever errors, retries, or
+   * give-ups arrived meanwhile, and the demands it covers settle with its
+   * rows; when its acceptance fails, no usable snapshot exists, so the
+   * initial sync fails with that cause. Core marks a Collection ready
+   * when a commit carries a truncate, so a progressive history's first
+   * up-to-date is ready at its commit. After
+   * the first ready, a later failure does not change the status. A demand
+   * whose snapshot arrived before an external abort still settles when its
+   * rows apply. Cleanup ends a waiting demand quietly, except after an
+   * external abort: an aborted provider cannot fulfill a demand whose rows
+   * never became visible, so it rejects with `AbortError`.
+   *
+   * A persisting optimistic transaction can hold the retried snapshot: the
+   * commit is accepted, so the Collection becomes `ready`, but its rows apply
+   * only when the transaction settles. Applied settlement means a waiting or
+   * new demand settles only when those rows are visible. Core applies a
+   * truncate at once, with every commit before it, so it is never held. A
+   * progressive history starts with a must-refetch, so its first up-to-date
+   * commits a truncate and applies while a transaction persists.
+   *
+   * The independent model keeps six facts: whether the first up-to-date was
+   * delivered, whether its rows are visible, whether a transaction holds
+   * them, the final failure cause, the pending `onError` decision, and each
+   * demand's settlement. It does not read production state.
+   *
+   * The history grammar crosses four sources: full-log and progressive
+   * waits, and eager and changes-only sources, which have no
+   * established-snapshot wait and so add no demands. Each runs with and
+   * without `onError`, with the external signal already aborted at sync start
+   * in one history in ten, and with or without a status listener that cleans
+   * up on `error`. Its steps are errors whose decisions are a synchronous retry, a
+   * synchronous give-up, a throw, an asynchronous retry, or an asynchronous
+   * give-up; a later error after a retry; an Electric client give-up; an
+   * external abort before or during a decision; a held acceptance of the
+   * first up-to-date commit, crossed with later errors, retries, give-ups,
+   * and aborts, which then succeeds or fails;
+   * new demands; the first
+   * up-to-date; a persisting transaction that starts before it and later
+   * settles; and cleanup. It omits histories the client cannot produce:
+   * a stream message or a second error while `onError` decides, because the
+   * client awaits the decision; and stream steps after a final failure or an
+   * abort, because the stream has stopped. It also omits a second
+   * up-to-date while the first snapshot's acceptance is pending. The
+   * installed-client lane cannot hold an acceptance, so this dimension runs
+   * only here. A progressive history starts with
+   * a must-refetch, so its demands wait on the established snapshot.
+   *
+   * The driver runs the real adapter and Collection behind the controlled
+   * ShapeStream. After each step and a timer turn it compares the status,
+   * every demand's settlement and cause, a readiness wait's settlement and
+   * cause, and whether the snapshot's row is visible. The model lives in `electric-retry-decision-model.ts`. An
+   * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
+   * drives the same model through the real Electric client and HTTP.
+   */
+  const retryDecisionArb = fc.constantFrom<RetryDecision>(
+    `sync-retry`,
+    `sync-give-up`,
+    `throw`,
+    `async-retry`,
+    `async-give-up`,
+  )
+  const retryStepArb: fc.Arbitrary<RetryStep> = fc.oneof(
+    fc.constant({ kind: `demand` as const }),
+    retryDecisionArb.map((decision) => ({ kind: `error` as const, decision })),
+    fc.constant({ kind: `decide` as const }),
+    fc.constant({ kind: `up-to-date` as const }),
+    fc.constant({ kind: `client-give-up` as const }),
+    fc.constant({ kind: `abort` as const }),
+    fc.constant({ kind: `hold` as const }),
+    fc.constant({ kind: `release` as const }),
+    fc.constant({ kind: `hold-acceptance` as const }),
+    fc.constant({ kind: `accept` as const }),
+    fc.constant({ kind: `accept-fails` as const }),
+  )
+  // Generated steps that the client cannot produce in the current model state
+  // are dropped, so every history is legal.
+  const retryHistoryArb: fc.Arbitrary<RetryHistory> = fc
+    .record({
+      wait: fc.constantFrom<RetryWait>(
+        `full-log`,
+        `progressive`,
+        `eager`,
+        `changes-only`,
+      ),
+      hasOnError: fc.boolean(),
+      // One history in ten starts with the external signal already aborted.
+      abortedAtStart: fc.integer({ min: 0, max: 9 }).map((roll) => roll === 0),
+      cleanupOnError: fc.boolean(),
+      steps: fc.array(retryStepArb, { minLength: 1, maxLength: 8 }),
+    })
+    .map(({ wait, hasOnError, abortedAtStart, cleanupOnError, steps }) => {
+      const model = createRetryModel(wait, cleanupOnError)
+      if (abortedAtStart)
+        applyRetryModel(model, { kind: `abort` }, hasOnError, `start`)
+      const legal: Array<RetryStep> = []
+      const initial: RetryStep = { kind: `demand` }
+      if (retryStepIsLegal(model, initial)) {
+        legal.push(initial)
+        applyRetryModel(model, initial, hasOnError, `e0`)
+      }
+      for (const step of steps) {
+        if (!retryStepIsLegal(model, step)) continue
+        legal.push(step)
+        applyRetryModel(model, step, hasOnError, `e${legal.length - 1}`)
+      }
+      return { wait, hasOnError, abortedAtStart, cleanupOnError, steps: legal }
+    })
+
+  function retrySettlementTag(error: unknown, tags: Map<unknown, string>) {
+    const tag = tags.get(error)
+    if (tag !== undefined) return tag
+    return error instanceof Error ? error.name : String(error)
+  }
+
+  async function runRetryHistory(
+    history: RetryHistory,
+    id: string,
+  ): Promise<void> {
+    // A reset resume marker selects the full log for an on-demand source;
+    // without it the source reads the changes-only log.
+    const metadata = createMetadata(
+      history.wait === `changes-only`
+        ? new Map()
+        : new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+    )
+    const controller = new AbortController()
+    if (history.abortedAtStart) controller.abort()
+    const tags = new Map<unknown, string>()
+    let decide: ((retry: Record<string, never> | undefined) => void) | undefined
+    let decision: RetryDecision = `sync-retry`
+    let thrown: Error | undefined
+    const onError = () => {
+      if (decision === `throw`) throw thrown
+      if (decision === `sync-retry`) return {}
+      if (decision === `sync-give-up`) return undefined
+      return new Promise<Record<string, never> | undefined>((resolve) => {
+        decide = resolve
+      })
+    }
+    // A persistence wrapper accepts a commit after its durable step. Once
+    // armed, the driver holds the acceptance of every commit until `accept`;
+    // the rows are visible at once, as core applies the transaction.
+    let armAcceptance = false
+    const heldAcceptance = createDeferred<void>()
+    const holdAcceptance = <TParams>(params: TParams): TParams => {
+      const syncParams = params as unknown as {
+        commit: () => true | Promise<void>
+      }
+      const commit = syncParams.commit
+      return {
+        ...params,
+        commit: () => {
+          const receipt = commit()
+          if (!armAcceptance) return receipt
+          return withAcceptedReceipt(
+            receipt === true ? Promise.resolve() : receipt,
+            heldAcceptance.promise,
+          )
+        },
+      }
+    }
+    const trace = createOracleCollection(
+      id,
+      history.wait === `progressive`
+        ? `progressive`
+        : history.wait === `eager`
+          ? `eager`
+          : `on-demand`,
+      metadata.api,
+      {
+        signal: controller.signal,
+        ...(history.hasOnError
+          ? {
+              onError: onError as unknown as () => Promise<
+                Record<string, never> | undefined
+              >,
+            }
+          : {}),
+      },
+      holdAcceptance,
+    )
+    const streamOnError = (
+      vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as unknown as {
+        onError: (error: unknown) => Promise<unknown>
+      }
+    ).onError
+    const settlements: Array<RetrySettlement> = []
+    const model = createRetryModel(history.wait, history.cleanupOnError)
+    if (history.abortedAtStart)
+      applyRetryModel(model, { kind: `abort` }, history.hasOnError, `start`)
+    if (history.cleanupOnError) {
+      trace.collection.on(`status:change`, ({ status }) => {
+        if (status === `error`) void trace.collection.cleanup()
+      })
+    }
+    let preload: RetrySettlement = `pending`
+    void trace.collection.preload().then(
+      () => {
+        preload = `fulfilled`
+      },
+      (reason: unknown) => {
+        preload = `rejected:${retrySettlementTag(reason, tags)}`
+      },
+    )
+    const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const observe = (): RetryObservation => ({
+      status: trace.collection.status,
+      demands: [...settlements],
+      rowVisible: trace.collection.has(1),
+      preload: trace.collection.status === `cleaned-up` ? undefined : preload,
+    })
+    const decisions: Array<Promise<unknown>> = []
+    const persistence = createDeferred<void>()
+    let transaction: ReturnType<typeof createTransaction> | undefined
+
+    await withElectricCleanup(async () => {
+      if (history.wait === `progressive`) {
+        trace.subscriber([{ headers: { control: `must-refetch` } }])
+        await turn()
+      }
+      for (const [index, step] of history.steps.entries()) {
+        const tag = `e${index}`
+        switch (step.kind) {
+          case `demand`: {
+            const slot = settlements.push(`pending`) - 1
+            void Promise.resolve(
+              trace.collection._sync.loadSubset({ limit: slot + 1 }),
+            ).then(
+              () => {
+                settlements[slot] = `fulfilled`
+              },
+              (reason: unknown) => {
+                settlements[slot] =
+                  `rejected:${retrySettlementTag(reason, tags)}`
+              },
+            )
+            break
+          }
+          case `error`: {
+            const error = new Error(`provider error ${tag}`)
+            tags.set(error, tag)
+            decision = step.decision
+            thrown = new Error(`onError threw ${tag}`)
+            tags.set(thrown, `thrown-${tag}`)
+            decisions.push(
+              Promise.resolve(streamOnError(error)).catch(() => undefined),
+            )
+            break
+          }
+          case `decide`:
+            decide!(model.deciding!.decision === `async-retry` ? {} : undefined)
+            break
+          case `up-to-date`:
+            trace.subscriber(
+              history.wait === `changes-only`
+                ? [upToDate]
+                : [change(`insert`, 1, `recovered`), upToDate],
+            )
+            break
+          case `client-give-up`: {
+            const error = new Error(`client gave up ${tag}`)
+            tags.set(error, tag)
+            trace.sdkError(error)
+            break
+          }
+          case `abort`:
+            controller.abort()
+            break
+          case `hold`:
+            transaction = createTransaction({
+              mutationFn: () => persistence.promise,
+            })
+            transaction.mutate(() =>
+              trace.collection.insert({
+                id: 99,
+                name: `optimistic`,
+                stable: `stable-99`,
+              }),
+            )
+            break
+          case `release`:
+            persistence.resolve()
+            await transaction!.isPersisted.promise
+            break
+          case `hold-acceptance`:
+            armAcceptance = true
+            break
+          case `accept`:
+            armAcceptance = false
+            heldAcceptance.resolve()
+            break
+          case `accept-fails`: {
+            armAcceptance = false
+            const error = new Error(`persistence failed ${tag}`)
+            tags.set(error, `accept-failed-${tag}`)
+            heldAcceptance.reject(error)
+            break
+          }
+        }
+        applyRetryModel(model, step, history.hasOnError, tag)
+        await turn()
+        await turn()
+        expect(
+          observe(),
+          `after ${JSON.stringify(history.steps.slice(0, index + 1))}`,
+        ).toEqual(expectedRetryObservation(model, false))
+      }
+      await trace.collection.cleanup()
+      persistence.resolve()
+      heldAcceptance.resolve()
+      void heldAcceptance.promise.catch(() => undefined)
+      // A decision still pending at cleanup cannot change the stopped run.
+      decide?.(undefined)
+      await Promise.all(decisions)
+      await turn()
+      expect(observe(), `after cleanup`).toEqual(
+        expectedRetryObservation(model, true),
+      )
+    }, [() => persistence.resolve(), () => trace.collection.cleanup()])
+  }
+
+  let retryHistoryRun = 0
+  electricHistoryProperty(
+    `electric.retry-decision`,
+    `a source that still tries stays loading, and only a give-up fails its waits`,
+    retryHistoryArb,
+    30,
+    42_731,
+    async (history) => {
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      try {
+        resetElectricOracleMocks()
+        await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
+      } finally {
+        consoleError.mockRestore()
+        consoleWarn.mockRestore()
+      }
+    },
+    60_000,
+    [
+      // Named replays: a retried provider error while a transaction holds the
+      // recovered snapshot, for each wait, with and without a hold (this
+      // replaces the former fixed "renews full recovery demand" case); a
+      // held snapshot whose stream aborts before the hold settles; an
+      // asynchronous retry decision with a waiting and a new demand; an
+      // asynchronous give-up; a retry, then a give-up; a throwing onError;
+      // an Electric client give-up; and an abort during a decision.
+      ...([`full-log`, `progressive`] as const).flatMap((wait) =>
+        [false, true].map((held): [RetryHistory] => [
+          {
+            wait,
+            hasOnError: true,
+            steps: [
+              ...(held ? [{ kind: `hold` as const }] : []),
+              { kind: `demand` },
+              { kind: `error`, decision: `sync-retry` },
+              { kind: `up-to-date` },
+              { kind: `demand` },
+              ...(held ? [{ kind: `release` as const }] : []),
+            ],
+          },
+        ]),
+      ),
+      [
+        {
+          wait: `full-log`,
+          hasOnError: false,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold` },
+            { kind: `up-to-date` },
+            { kind: `abort` },
+            { kind: `release` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `demand` },
+            { kind: `decide` },
+            { kind: `up-to-date` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-give-up` },
+            { kind: `demand` },
+            { kind: `decide` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `error`, decision: `sync-give-up` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [{ kind: `demand` }, { kind: `error`, decision: `throw` }],
+        },
+      ],
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `client-give-up` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `abort` },
+            { kind: `decide` },
+          ],
+        },
+      ],
+      // The external signal is already aborted when sync starts, for each
+      // wait; a status listener that cleans up inside a give-up and inside an
+      // external abort; and the eager and changes-only sources, which have no
+      // established-snapshot wait.
+      ...([`full-log`, `progressive`, `eager`, `changes-only`] as const).map(
+        (wait): [RetryHistory] => [
+          { wait, hasOnError: true, abortedAtStart: true, steps: [] },
+        ],
+      ),
+      [
+        {
+          wait: `full-log`,
+          hasOnError: false,
+          cleanupOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          cleanupOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `abort` },
+          ],
+        },
+      ],
+      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+        {
+          wait,
+          hasOnError: true,
+          steps: [
+            { kind: `hold` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `decide` },
+            { kind: `up-to-date` },
+            { kind: `release` },
+          ],
+        },
+      ]),
+      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+        {
+          wait,
+          hasOnError: true,
+          steps: [
+            { kind: `error`, decision: `async-give-up` },
+            { kind: `decide` },
+          ],
+        },
+      ]),
+      // A final give-up after the first up-to-date is committed but before
+      // its acceptance settles is a post-ready failure: the Collection
+      // becomes ready when the snapshot is accepted, with its rows, and the
+      // demands it covers settle. One replay per give-up.
+      ...(
+        [
+          [false, { kind: `error`, decision: `sync-give-up` }],
+          [true, { kind: `error`, decision: `sync-give-up` }],
+          [true, { kind: `error`, decision: `throw` }],
+          [true, { kind: `client-give-up` }],
+          [true, { kind: `abort` }],
+        ] as Array<[boolean, RetryStep]>
+      ).map(([hasOnError, giveUp]): [RetryHistory] => [
+        {
+          wait: `full-log`,
+          hasOnError,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            giveUp,
+            { kind: `accept` },
+          ],
+        },
+      ]),
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            { kind: `error`, decision: `async-give-up` },
+            { kind: `decide` },
+            { kind: `demand` },
+            { kind: `accept` },
+          ],
+        },
+      ],
+      // While the first snapshot's acceptance is pending: a retry, then the
+      // acceptance, then a final give-up; a retry, then a give-up, then the
+      // acceptance; and an acceptance that fails, with and without an earlier
+      // external abort.
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `accept` },
+            { kind: `error`, decision: `sync-give-up` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `decide` },
+            { kind: `client-give-up` },
+            { kind: `accept` },
+          ],
+        },
+      ],
+      ...[false, true].map((aborted): [RetryHistory] => [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            ...(aborted ? [{ kind: `abort` as const }] : []),
+            { kind: `accept-fails` },
+          ],
+        },
+      ]),
+    ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
+  )
+
+  /**
+   * A scoped source snapshot owes applied settlement at subset-end, even
+   * when must-refetch opened a truncate replay. The independent model knows
+   * one inserted source row and no other rows; it predicts that a successful
+   * demand observes that row. This driver acquires through the real persisted
+   * wrapper before reset, delivers a subset-end without up-to-date, and checks
+   * public visibility at demand settlement. Full-mode replay's distinct
+   * up-to-date obligation is checked by neighboring laws.
+   */
+  it(`applies a scoped reset subset before its demand succeeds`, async () => {
+    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
+    mockSubscribe.mockImplementation((callback) => {
+      subscriber = callback
+      return vi.fn()
+    })
+    const adapter = createPersistedAdapter(
+      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      new Map(),
+    )
+    // This fixture abstracts physical cache IDs because the law here concerns
+    // source settlement. The SQLite generation oracle owns physical isolation.
+    let generation = 0
+    const claim = (id: string) => ({
+      storageCollectionId: `${id}:generation-${generation}`,
+      claimId: `claim-${generation}`,
+    })
+    adapter.claimCacheGeneration = async (id) => claim(id)
+    adapter.rotateCacheGeneration = async (id) => {
+      generation++
+      return claim(id)
+    }
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const options = electricCollectionOptions<OracleRow>({
+      id: `scoped-reset-applied-settlement`,
+      shapeOptions: {
+        url: `http://test-url`,
+        params: { table: `test_table` },
+      },
+      syncMode: `on-demand`,
+      getKey: (row) => row.id,
+      startSync: true,
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<
+        OracleRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<OracleRow>
+      >({ ...options, persistence: { adapter } }),
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+
+    await withElectricCleanup(async () => {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
+      const demand = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void demand.catch(() => undefined)
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      subscriber!([mustRefetch])
+      subscriber!([change(`insert`, 1, `scoped replacement`), subsetEnd])
+      snapshot.resolve()
+      await atCheckpoint(demand, `scoped reset applied settlement`)
+      expect(collection.get(1)).toMatchObject({
+        id: 1,
+        name: `scoped replacement`,
+        stable: `stable-1`,
+      })
+    }, [() => snapshot.resolve(), () => collection.cleanup()])
+  })
+
+  // Initial failure rejects all current waiters with the original error.
+  // Cleanup quietly settles adapter loads and invalidates later callbacks.
+  // A provider error alone does not make its future callbacks obsolete;
+  // retry semantics are checked by the neighboring recovery laws.
+  it.each([`failure`, `cleanup`] as const)(
+    `full recovery retires concurrent demand on %s`,
+    async (terminal) => {
+      const loggedError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const trace = createOracleCollection(
+        `full-recovery-${terminal}`,
+        `on-demand`,
+        createMetadata(
+          new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+        ).api,
+      )
+      const sentinel = new Error(`initial full sync failed`)
+      const outcomes = [1, 2].map((limit) =>
+        Promise.resolve(trace.collection._sync.loadSubset({ limit })).then(
+          () => ({ kind: `fulfilled` as const }),
+          (error: unknown) => ({ kind: `rejected` as const, error }),
+        ),
+      )
+      await withElectricCleanup(async () => {
+        if (terminal === `failure`) {
+          const options = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+            | {
+                onError?: (error: unknown) => void
+              }
+            | undefined
+          expect(options?.onError).toBeTypeOf(`function`)
+          options?.onError?.(sentinel)
+        } else await trace.collection.cleanup()
+        const results = await atCheckpoint(
+          Promise.all(outcomes),
+          `terminal full recovery settlement`,
+        )
+        if (terminal === `failure`) {
+          expect(results).toEqual([
+            { kind: `rejected`, error: sentinel },
+            { kind: `rejected`, error: sentinel },
+          ])
+          expect(trace.collection.status).toBe(`error`)
+        } else {
+          expect(results).toEqual([
+            { kind: `fulfilled` },
+            { kind: `fulfilled` },
+          ])
+          expect(trace.collection.status).toBe(`cleaned-up`)
+          trace.subscriber([change(`insert`, 1, `abandoned`), upToDate])
+          expect(trace.collection.has(1)).toBe(false)
+        }
+      }, [() => trace.collection.cleanup(), () => loggedError.mockRestore()])
+    },
+  )
+
+  // Each demand owns its cancellation even while full-log source evidence is
+  // shared. Aborting one demand ends that load before up-to-date; its sibling
+  // and a replacement of the canceled demand still wait for the source
+  // snapshot and succeed after the row applies.
+  it(`cancels one full recovery demand without settling its sibling`, async () => {
+    const trace = createOracleCollection(
+      `full-recovery-one-abort`,
+      `on-demand`,
+      createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      ).api,
+    )
+    const controller = new AbortController()
+    const canceled = Promise.resolve(
+      trace.collection._sync.loadSubset({
+        limit: 1,
+        signal: controller.signal,
+      }),
+    )
+    void canceled.catch(() => undefined)
+    let siblingOutcome = `pending`
+    const sibling = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 2 }),
+    ).then(
+      () => {
+        siblingOutcome = `fulfilled`
+      },
+      () => {
+        siblingOutcome = `rejected`
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      controller.abort()
+      await expect(
+        atCheckpoint(canceled, `canceled full recovery demand`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      expect(siblingOutcome).toBe(`pending`)
+
+      // Cancellation cannot mark this predicate complete or poison a later
+      // acquisition of the same demand key.
+      const replacement = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 1 }),
+      )
+      let replacementOutcome = `pending`
+      const observedReplacement = replacement.then(
+        () => {
+          replacementOutcome = `fulfilled`
+        },
+        () => {
+          replacementOutcome = `rejected`
+        },
+      )
+      await Promise.resolve()
+      expect(replacementOutcome).toBe(`pending`)
+
+      trace.subscriber([change(`insert`, 1, `source row`), upToDate])
+      await atCheckpoint(
+        Promise.all([sibling, observedReplacement]),
+        `remaining full recovery demands`,
+      )
+      expect(siblingOutcome).toBe(`fulfilled`)
+      expect(replacementOutcome).toBe(`fulfilled`)
+      expect(trace.collection.get(1)).toMatchObject({ name: `source row` })
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // An external ShapeStream abort is a provider failure, not Collection
+  // cleanup. It cannot fulfill an in-flight demand or certify its key as
+  // loaded when no source snapshot arrived. A second identical demand must
+  // therefore remain a failing acquisition rather than deduplicated success.
+  it(`does not certify a full recovery demand after external stream abort`, async () => {
+    const external = new AbortController()
+    const trace = createOracleCollection(
+      `full-recovery-external-abort`,
+      `on-demand`,
+      createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      ).api,
+      { signal: external.signal },
+    )
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    void first.catch(() => undefined)
+
+    await withElectricCleanup(async () => {
+      external.abort()
+      await expect(
+        atCheckpoint(first, `externally aborted full recovery demand`),
+      ).rejects.toMatchObject({ name: `StreamAbortedError` })
+      const second = trace.collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      await expect(Promise.resolve(second)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      expect(trace.collection.size).toBe(0)
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // A subset transport may return after the shared stream retires. Its
+  // messages cannot apply to that lifecycle, so transport settlement alone
+  // cannot certify the demand or its deduplication key.
+  it(`does not certify a subset snapshot after external stream abort`, async () => {
+    const external = new AbortController()
+    const trace = createOracleCollection(
+      `subset-external-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+      { signal: external.signal },
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    void first.catch(() => undefined)
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      external.abort()
+      snapshot.resolve()
+      await expect(
+        atCheckpoint(first, `externally aborted subset snapshot`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      const second = trace.collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      await expect(Promise.resolve(second)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      expect(trace.collection.size).toBe(0)
+    }, [() => snapshot.resolve(), () => trace.collection.cleanup()])
+  })
+
+  // Even a completed transport cannot certify a demand while its accepted
+  // source commit is waiting for application. Retiring the stream during that
+  // wait leaves no visible source row, so the demand must fail when the held
+  // applied receipt finally settles.
+  it(`does not certify an externally aborted subset during applied settlement`, async () => {
+    const external = new AbortController()
+    const trace = createOracleCollection(
+      `subset-held-external-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+      { signal: external.signal },
+    )
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    transaction.mutate(() =>
+      trace.collection.insert({
+        id: 99,
+        name: `optimistic`,
+        stable: `stable-99`,
+      }),
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    void first.catch(() => undefined)
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      trace.subscriber([change(`insert`, 1, `source row`), subsetEnd])
+      snapshot.resolve()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(trace.collection.has(1), `applied receipt is held`).toBe(false)
+      external.abort()
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await expect(
+        atCheckpoint(first, `externally aborted held subset`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      const second = trace.collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      await expect(Promise.resolve(second)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
+    }, [
+      () => snapshot.resolve(),
+      () => persistence.resolve(),
+      () => trace.collection.cleanup(),
+    ])
+  })
+
+  // Application can outlive the SDK request. A caller that releases its
+  // demand during that interval must reject promptly, while the source
+  // receipt remains held and a later acquisition can still wait for it.
+  it(`cancels a subset demand while its source receipt is held`, async () => {
+    const trace = createOracleCollection(
+      `subset-held-demand-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+    )
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    transaction.mutate(() =>
+      trace.collection.insert({
+        id: 99,
+        name: `optimistic`,
+        stable: `stable-99`,
+      }),
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+    const controller = new AbortController()
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({
+        limit: 1,
+        signal: controller.signal,
+      }),
+    )
+    let firstOutcome: `pending` | `fulfilled` | `rejected` = `pending`
+    let firstError: unknown
+    const observedFirst = first.then(
+      () => {
+        firstOutcome = `fulfilled`
+      },
+      (error: unknown) => {
+        firstOutcome = `rejected`
+        firstError = error
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      trace.subscriber([change(`insert`, 1, `source row`), subsetEnd])
+      snapshot.resolve()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(trace.collection.has(1)).toBe(false)
+      controller.abort()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(firstOutcome).toBe(`rejected`)
+      expect(firstError).toMatchObject({ name: `AbortError` })
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await observedFirst
+      expect(trace.collection.has(1)).toBe(true)
+    }, [
+      () => snapshot.resolve(),
+      () => persistence.resolve(),
+      () => trace.collection.cleanup(),
+    ])
+  })
+
+  // A demand canceled before its subset transport settles has no successful
+  // acquisition, whether that transport later resolves or rejects. The source
+  // may still apply a late SDK response, but this caller observes AbortError and
+  // an identical later demand remains eligible for a new acquisition.
+  it.each([`resolve`, `reject`] as const)(
+    `rejects a canceled subset demand when its transport later %ss`,
+    async (transportOutcome) => {
+      const trace = createOracleCollection(
+        `subset-demand-abort-${transportOutcome}`,
+        `on-demand`,
+        createMetadata(new Map()).api,
+      )
+      const controller = new AbortController()
+      const snapshot = createDeferred<void>()
+      mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+      const first = Promise.resolve(
+        trace.collection._sync.loadSubset({
+          limit: 1,
+          signal: controller.signal,
+        }),
+      )
+      void first.catch(() => undefined)
+
+      await withElectricCleanup(async () => {
+        await vi.waitFor(() =>
+          expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+        )
+        controller.abort()
+        if (transportOutcome === `resolve`) snapshot.resolve()
+        else snapshot.reject(new Error(`late provider failure`))
+        await expect(
+          atCheckpoint(first, `canceled subset ${transportOutcome}`),
+        ).rejects.toMatchObject({ name: `AbortError` })
+        const second = trace.collection._sync.loadSubset({ limit: 1 })
+        expect(second).not.toBe(true)
+        await expect(
+          atCheckpoint(
+            Promise.resolve(second).then(() => undefined),
+            `fresh subset after ${transportOutcome} and caller abort`,
+          ),
+        ).resolves.toBeUndefined()
+        expect(mockStream.requestSnapshot).toHaveBeenCalledTimes(2)
+      }, [() => snapshot.resolve(), () => trace.collection.cleanup()])
+    },
+  )
+
+  // Snapshot responses share one SDK cursor, but a queued demand owns its
+  // cancellation independently of the request ahead of it. At the next task
+  // boundary after abort, this caller must have rejected without invoking a
+  // second SDK request; the first demand remains pending until its response.
+  it(`cancels a queued subset demand while an earlier snapshot is held`, async () => {
+    const trace = createOracleCollection(
+      `queued-subset-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+    )
+    const held = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(held.promise)
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    const controller = new AbortController()
+    let secondOutcome: `pending` | `fulfilled` | `rejected` = `pending`
+    let secondError: unknown
+    const second = Promise.resolve(
+      trace.collection._sync.loadSubset({
+        limit: 2,
+        signal: controller.signal,
+      }),
+    ).then(
+      () => {
+        secondOutcome = `fulfilled`
+      },
+      (error: unknown) => {
+        secondOutcome = `rejected`
+        secondError = error
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      controller.abort()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(secondOutcome).toBe(`rejected`)
+      expect(secondError).toMatchObject({ name: `AbortError` })
+      expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
+      held.resolve()
+      await atCheckpoint(Promise.all([first, second]), `queued abort drain`)
+    }, [() => held.resolve(), () => trace.collection.cleanup()])
+  })
+
+  it(`drops a held receipt's rows when cleanup abandons it`, async () => {
     const metadata = createMetadata(new Map())
     const trace = createOracleCollection(
       `rejected-applied-receipt`,
@@ -5109,7 +6393,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     )
     trace.subscriber([change(`insert`, 1, `synced`), upToDate])
     await Promise.resolve()
-    expect(trace.collection.status).toBe(`loading`)
+    expect(trace.collection.status).toBe(`ready`)
 
     await trace.collection.cleanup()
     persistence.resolve()
@@ -5551,8 +6835,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     fc.array(
       fc.record({
         operation: fc.constantFrom<
-          HistoryToken[`operation`] | `reset` | `acquire` | `commit`
-        >(`insert`, `update`, `delete`, `reset`, `acquire`, `commit`),
+          HistoryToken[`operation`] | `reset` | `acquire` | `deliver-subset-end`
+        >(
+          `insert`,
+          `update`,
+          `delete`,
+          `reset`,
+          `acquire`,
+          `deliver-subset-end`,
+        ),
         id: fc.integer({ min: 1, max: 3 }),
         name: fc.string({ maxLength: 8 }),
       }),
@@ -5576,7 +6867,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           if (command.operation === `acquire`) {
             // This enters the acquisition API with a fresh disjoint predicate,
             // but the mock does not deliver response rows. Actual installed-SDK
-            // delivery and overlap are in electric-sdk-delivery.property.test.ts.
+            // delivery and overlap are in electric-sdk-delivery-oracle.property.test.ts.
             await trace.collection._sync.loadSubset({
               where: new IR.Func(`eq`, [
                 new IR.PropRef([`id`]),
@@ -5587,7 +6878,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             const message =
               command.operation === `reset`
                 ? mustRefetch
-                : command.operation === `commit`
+                : command.operation === `deliver-subset-end`
                   ? subsetEnd
                   : change(
                       command.operation === `insert` &&
@@ -5616,9 +6907,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     undefined,
     [
       [
-        ([`insert`, `commit`, `reset`, `acquire`, `update`] as const).map(
-          (operation) => ({ operation, id: 1, name: `` }),
-        ),
+        (
+          [
+            `insert`,
+            `deliver-subset-end`,
+            `reset`,
+            `acquire`,
+            `update`,
+          ] as const
+        ).map((operation) => ({ operation, id: 1, name: `` })),
       ],
     ],
   )
@@ -5751,6 +7048,33 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     expect(trace.collection.status).toBe(`ready`)
     await trace.collection.cleanup()
   })
+
+  // An explicit source cursor owns this run's resume decision. A malformed
+  // durable record is still invalid for a later implicit run, but it cannot
+  // authorize this run to write a reset before any source evidence arrives.
+  // The metadata Map observes that side effect at startup, before up-to-date
+  // can legitimately stage a fresh resume record.
+  it.each([
+    { name: `offset`, options: { offset: `10_0` as Offset } },
+    { name: `handle`, options: { handle: `explicit-handle` } },
+  ])(
+    `leaves malformed durable resume untouched with explicit $name`,
+    async ({ options }) => {
+      const malformed = { kind: `resume`, offset: 10, handle: `stale` }
+      const metadata = createMetadata(new Map([[`electric:resume`, malformed]]))
+      const trace = createOracleCollection(
+        `explicit-malformed-${options}`,
+        `on-demand`,
+        metadata.api,
+        options,
+      )
+      try {
+        expect(metadata.state.get(`electric:resume`)).toBe(malformed)
+      } finally {
+        await trace.collection.cleanup()
+      }
+    },
+  )
 
   it(`lets an equal-timestamp reset dominate a stale hydrated resume`, async () => {
     let subscriber!: (messages: Array<Message<OracleRow>>) => void
@@ -6249,6 +7573,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         {
           kind: `open-transaction-hydration`,
           hydrationStartedBeforeCommit: true,
+          hydrationOutcomeBeforeRelease: `AbortError`,
+          cachedRowBeforeRelease: true,
+          hydrationOutcome: `fulfilled`,
+          publicRowsAtHydrationSettlement: [],
           deliveryErrors: [`InvalidPersistedCollectionConfigError`],
           publicRows: [],
           durableRows: [],

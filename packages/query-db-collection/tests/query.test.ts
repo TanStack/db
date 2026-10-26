@@ -1,3 +1,18 @@
+import {
+  BTreeIndex,
+  DbClient,
+  IR,
+  collectionOptions,
+  createCollection,
+  createLiveQueryCollection,
+  createTransaction,
+  eq,
+  ilike,
+  inArray,
+  include,
+  or,
+  resetWarnings,
+} from '@tanstack/db'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   QueryClient,
@@ -8,26 +23,14 @@ import {
   onlineManager,
 } from '@tanstack/query-core'
 import {
-  BTreeIndex,
-  DbClient,
-  collectionOptions,
-  createCollection,
-  createLiveQueryCollection,
-  createTransaction,
-  eq,
-  ilike,
-  inArray,
-  or,
-  resetWarnings,
-} from '@tanstack/db'
-import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
-import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { SyncNotInitializedError } from '../src/errors'
+import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -111,6 +114,7 @@ function createInMemorySyncMetadataApi<
       protocol: `@tanstack/db/sync-persistence`,
       version: 1,
       hydrateBaseline: async () => {},
+      reserveCommitTurn: () => {},
       scanPersistedRows: async () =>
         Array.from(persistedRows.entries()).map(([key, value]) => ({
           key,
@@ -171,7 +175,7 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         metadata: rowMetadata.get(value.id),
       })),
     loadResumeSnapshot: async (
-      _collectionId: string,
+      _target: PersistedStorageTarget,
       options?: { includeRows?: boolean },
     ) => ({
       rows:
@@ -203,7 +207,7 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         value,
         metadata: rowMetadata.get(value.id),
       })),
-    applyCommittedTx: async (_collectionId: string, tx: any) => {
+    applyCommittedTx: async (_target: PersistedStorageTarget, tx: any) => {
       if (tx.truncate) {
         rows.clear()
         rowMetadata.clear()
@@ -313,6 +317,94 @@ describe(`QueryCollection`, () => {
 
     await dbClient.cleanup()
     constructionClient.clear()
+  })
+
+  it(`settles a DbClient preload after an eager Query source is automatically collected`, async () => {
+    vi.useFakeTimers()
+    try {
+      const receivingQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: { gcTime: Infinity, retry: false, staleTime: Infinity },
+        },
+      })
+      const replacement = createDeferred<Array<TestItem>>()
+      const queryFn = vi
+        .fn<() => Promise<Array<TestItem>>>()
+        .mockResolvedValueOnce([{ id: `old`, name: `Old` }])
+        .mockImplementationOnce(() => replacement.promise)
+      const descriptor = collectionOptions(
+        `eager-query-restart-preload`,
+        (db) => ({
+          ...queryCollectionOptions<TestItem>({
+            id: `eager-query-restart-preload`,
+            queryClient: db.requireDependency<QueryClient>(`queryClient`),
+            queryKey: [`eager-query-restart-preload`],
+            queryFn,
+            getKey,
+            syncMode: `eager`,
+          }),
+          gcTime: 1,
+        }),
+      )
+      const db = new DbClient({ queryClient: receivingQueryClient })
+      const source = db.collection(descriptor)
+      const preloadState: {
+        outcome: `pending` | `fulfilled` | `rejected`
+      } = { outcome: `pending` }
+      let preload: Promise<void> | undefined
+
+      try {
+        await source.preload()
+        expect(observeLifecycleRows(source.values())).toEqual([
+          { id: `old`, name: `Old` },
+        ])
+
+        // An initially unsubscribed Collection receives a 50 ms GC grace period.
+        await vi.advanceTimersByTimeAsync(51)
+        expect(source.status).toBe(`cleaned-up`)
+
+        preload = db
+          .preloadLiveQuery({ query: (q) => q.from({ row: descriptor }) })
+          .then(
+            () => {
+              preloadState.outcome = `fulfilled`
+            },
+            () => {
+              preloadState.outcome = `rejected`
+            },
+          )
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(2)
+          expect(source.status).toBe(`loading`)
+        })
+
+        expect(preloadState.outcome).toBe(`pending`)
+
+        replacement.resolve([{ id: `replacement`, name: `Replacement` }])
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect({
+          fetches: queryFn.mock.calls.length,
+          outcome: preloadState.outcome,
+          rows: observeLifecycleRows(source.values()),
+          sourceStatus: source.status,
+        }).toEqual({
+          fetches: 2,
+          outcome: `fulfilled`,
+          rows: [{ id: `replacement`, name: `Replacement` }],
+          sourceStatus: `ready`,
+        })
+      } finally {
+        if (preloadState.outcome === `pending`) {
+          await source.cleanup()
+          await preload
+        }
+        await db.cleanup()
+        receivingQueryClient.clear()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   afterEach(() => {
@@ -808,7 +900,8 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`keeps an eager result loading until its rows are applied`, async () => {
+    // Readiness counts accepted rows; they publish when the mutation settles.
+    it(`marks an eager result ready once its rows are accepted`, async () => {
       const queryResult = createDeferred<Array<TestItem>>()
       const queryFn = vi.fn(() => queryResult.promise)
       const collection = createCollection(
@@ -836,12 +929,12 @@ describe(`QueryCollection`, () => {
         queryResult.resolve([{ id: `server`, name: `Server` }])
         await flushPromises()
 
-        expect(collection.status).toBe(`loading`)
+        await ready
+        expect(collection.status).toBe(`ready`)
         expect(collection.get(`server`)).toBeUndefined()
 
         persistence.resolve()
         await transaction.isPersisted.promise
-        await ready
 
         expect(collection.status).toBe(`ready`)
         expect(collection.get(`server`)).toEqual(
@@ -1293,14 +1386,16 @@ describe(`QueryCollection`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
         id: lineItem.id,
-        product: q
-          .from({ product: products })
-          .where(({ product }) => eq(product.id, lineItem.productId))
-          .select(({ product }) => ({
-            id: product.id,
-            categoryId: product.categoryId,
-            name: product.name,
-          })),
+        product: include(
+          q
+            .from({ product: products })
+            .where(({ product }) => eq(product.id, lineItem.productId))
+            .select(({ product }) => ({
+              id: product.id,
+              categoryId: product.categoryId,
+              name: product.name,
+            })),
+        ),
       })),
     )
 
@@ -1373,13 +1468,15 @@ describe(`QueryCollection`, () => {
     const live = createLiveQueryCollection((q) =>
       q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
         id: lineItem.id,
-        product: q
-          .from({ product: products })
-          .where(({ product }) => eq(product.id, lineItem.productId))
-          .select(({ product }) => ({
-            id: product.id,
-            name: product.name,
-          })),
+        product: include(
+          q
+            .from({ product: products })
+            .where(({ product }) => eq(product.id, lineItem.productId))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+            })),
+        ),
       })),
     )
 
@@ -4071,14 +4168,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Test missing key error in writeUpdate
-      expect(() => {
-        collection.utils.writeUpdate({ id: `999`, name: `Missing` })
-      }).toThrow(/does not exist/)
+      await expect(
+        collection.utils.writeUpdate({ id: `999`, name: `Missing` }),
+      ).rejects.toThrow(/does not exist/)
 
       // Test missing key error in writeDelete
-      expect(() => {
-        collection.utils.writeDelete(`999`)
-      }).toThrow(/does not exist/)
+      await expect(collection.utils.writeDelete(`999`)).rejects.toThrow(
+        /does not exist/,
+      )
     })
 
     it(`should handle writeBatch validation errors`, async () => {
@@ -4104,26 +4201,26 @@ describe(`QueryCollection`, () => {
       })
 
       // Test duplicate keys within batch
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeInsert({ id: `2`, name: `Item 2` })
           collection.utils.writeUpdate({ id: `2`, name: `Updated Item 2` })
-        })
-      }).toThrow(/Duplicate key.*found within batch operations/)
+        }),
+      ).rejects.toThrow(/Duplicate key.*found within batch operations/)
 
       // Test updating non-existent item in batch
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeUpdate({ id: `999`, name: `Missing` })
-        })
-      }).toThrow(/does not exist/)
+        }),
+      ).rejects.toThrow(/does not exist/)
 
       // Test deleting non-existent item in batch
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeDelete(`999`)
-        })
-      }).toThrow(/does not exist/)
+        }),
+      ).rejects.toThrow(/does not exist/)
     })
 
     it(`should update query cache when using sync methods`, async () => {
@@ -4282,9 +4379,9 @@ describe(`QueryCollection`, () => {
       expect(initialCache).toHaveLength(2)
 
       // Try to update non-existent item (should throw and not update cache)
-      expect(() => {
-        collection.utils.writeUpdate({ id: `999`, name: `Should Fail` })
-      }).toThrow()
+      await expect(
+        collection.utils.writeUpdate({ id: `999`, name: `Should Fail` }),
+      ).rejects.toThrow()
 
       // Verify cache wasn't modified
       const cacheAfterError = queryClient.getQueryData(
@@ -4294,12 +4391,12 @@ describe(`QueryCollection`, () => {
       expect(cacheAfterError).toHaveLength(2)
 
       // Try batch with duplicate keys (should throw and not update cache)
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeInsert({ id: `3`, name: `Item 3` })
           collection.utils.writeUpdate({ id: `3`, name: `Duplicate` })
-        })
-      }).toThrow(/Duplicate key/)
+        }),
+      ).rejects.toThrow(/Duplicate key/)
 
       // Verify cache wasn't modified
       const cacheAfterBatchError = queryClient.getQueryData(
@@ -4576,12 +4673,10 @@ describe(`QueryCollection`, () => {
       expect(todo?.id).not.toBe(clientId)
     })
 
-    it(`should update syncedData immediately when writeUpsert is called after async API in onUpdate handler`, async () => {
-      // Reproduces bug where syncedData shows stale values when writeUpsert is called
-      // AFTER an async API call in a mutation handler. The async await causes the
-      // transaction to be added to state.transactions before writeUpsert runs,
-      // which means commitPendingTransactions() sees hasPersistingTransaction=true
-      // and would skip processing the sync transaction without the immediate flag.
+    // A handler that writes the server row before it returns must expose that
+    // row, and a Query cache holding it, once its mutation settles. See
+    // TanStack/db#1130: the cache once kept the stale row until the next sync.
+    it(`exposes a server row written after an async API call in onUpdate once the mutation settles`, async () => {
       const queryKey = [`writeUpsert-after-api-test`]
 
       type Brand = {
@@ -4595,9 +4690,7 @@ describe(`QueryCollection`, () => {
         return Promise.resolve([...serverBrands])
       })
 
-      // Track syncedData state immediately after writeUpsert
-      let syncedDataAfterWriteUpsert: Brand | undefined
-      let hasPersistingTransactionDuringWrite = false
+      let rowWhileHandlerRuns: Brand | undefined
 
       const collection = createCollection(
         queryCollectionOptions<Brand>({
@@ -4610,33 +4703,26 @@ describe(`QueryCollection`, () => {
           onUpdate: async ({ transaction }) => {
             const updates = transaction.mutations.map((m) => m.modified)
 
-            // Simulate async API call - THIS IS KEY!
-            // After this await, the transaction will be in state.transactions
+            // The async API call puts the transaction in the persisting state.
             await new Promise((resolve) => setTimeout(resolve, 10))
 
-            // Check if there's now a persisting transaction
-            hasPersistingTransactionDuringWrite = Array.from(
-              collection._state.transactions.values(),
-            ).some((tx) => tx.state === `persisting`)
-
-            // Update server state
             for (const update of updates) {
               const idx = serverBrands.findIndex((b) => b.id === update.id)
               if (idx !== -1) {
-                serverBrands[idx] = { ...serverBrands[idx], ...update }
+                serverBrands[idx] = {
+                  ...serverBrands[idx]!,
+                  ...update,
+                  brandName: `${update.brandName} (server)`,
+                }
               }
             }
 
-            // Write the server response back to syncedData
-            // Without the immediate flag, this would be blocked by the persisting transaction
-            collection.utils.writeBatch(() => {
-              for (const update of updates) {
-                collection.utils.writeUpsert(update)
+            await collection.utils.writeBatch(() => {
+              for (const brand of serverBrands) {
+                collection.utils.writeUpsert(brand)
               }
             })
-
-            // Check syncedData IMMEDIATELY after writeUpsert
-            syncedDataAfterWriteUpsert = collection._state.syncedData.get(`123`)
+            rowWhileHandlerRuns = stripVirtualProps(collection.get(`123`))
 
             return { refetch: false }
           },
@@ -4646,27 +4732,23 @@ describe(`QueryCollection`, () => {
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
       })
+      expect(collection.get(`123`)?.brandName).toBe(`A`)
 
-      // Verify initial state
-      expect(collection._state.syncedData.get(`123`)?.brandName).toBe(`A`)
-
-      // Update brandName from A to B
-      collection.update(`123`, (draft) => {
+      const tx = collection.update(`123`, (draft) => {
         draft.brandName = `B`
       })
+      await tx.isPersisted.promise
 
-      // Wait for mutation to complete
-      await flushPromises()
-      await new Promise((resolve) => setTimeout(resolve, 50))
-
-      // Verify we had a persisting transaction during the write
-      expect(hasPersistingTransactionDuringWrite).toBe(true)
-
-      // The CRITICAL assertion: syncedData should have been updated IMMEDIATELY after writeUpsert
-      // Without the fix, this would fail because commitPendingTransactions() would skip
-      // processing due to hasPersistingTransaction being true
-      expect(syncedDataAfterWriteUpsert).toBeDefined()
-      expect(syncedDataAfterWriteUpsert?.brandName).toBe(`B`)
+      // The queued server row is hidden behind the optimistic row until the
+      // mutation settles, then both change in one publication.
+      expect(rowWhileHandlerRuns).toEqual({ id: `123`, brandName: `B` })
+      expect(collection.get(`123`)).toMatchObject({
+        brandName: `B (server)`,
+        $synced: true,
+      })
+      expect(queryClient.getQueryData(queryKey)).toEqual([
+        { id: `123`, brandName: `B (server)` },
+      ])
     })
 
     it(`should not rollback object field updates after server response with refetch: false`, async () => {
@@ -4824,6 +4906,147 @@ describe(`QueryCollection`, () => {
           $synced: true,
         })
       } finally {
+        await collection.cleanup()
+      }
+    })
+
+    // A refetch may cancel only work that has not committed. A committed
+    // result waiting for durable storage still applies, so the later result
+    // for the same row applies after it. See TanStack/db#1990.
+    it.each([
+      { successor: `refetch`, held: `the result write` },
+      { successor: `refetch`, held: `the first write` },
+      { successor: `handler writeUpsert`, held: `the result write` },
+    ] as const)(
+      `applies the latest result when a $successor supersedes a result while storage holds $held`,
+      async ({ successor, held }) => {
+        type Row = { id: string; value: number }
+        let server: Row = { id: `row`, value: 1 }
+        const adapter = createPersistedQueryAdapter<Row>()
+        const applyCommittedTx = adapter.applyCommittedTx
+        let holdWrites = false
+        const entered = createDeferred<void>()
+        const release = createDeferred<void>()
+        // Hold a durable write, so the refetch's result is committed but not
+        // yet stored: either its own row write, or the first write after the
+        // refetch starts, which can be its retention metadata.
+        adapter.applyCommittedTx = async (...args) => {
+          if (
+            holdWrites &&
+            (held === `the first write` || args[1].mutations.length > 0)
+          ) {
+            holdWrites = false
+            entered.resolve()
+            await release.promise
+          }
+          return applyCommittedTx(...args)
+        }
+        const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+        const collection = createCollection(
+          persistedCollectionOptions<
+            Row,
+            string | number,
+            never,
+            QueryCollectionUtils<Row>
+          >({
+            ...queryCollectionOptions<Row>({
+              id: `superseded-held-application-${successor}-${held}`,
+              queryKey: [`superseded-held-application`, successor, held],
+              queryFn: () => Promise.resolve([{ ...server }]),
+              queryClient,
+              getKey: (row) => row.id,
+              startSync: true,
+              onUpdate: async ({ collection: handlerCollection }) => {
+                server = { id: `row`, value: 3 }
+                await handlerCollection.utils.writeUpsert({ ...server })
+                return { refetch: false }
+              },
+            }),
+            persistence: { adapter },
+          }),
+        )
+
+        try {
+          await collection.preload()
+          expect(collection.get(`row`)?.value).toBe(1)
+
+          holdWrites = true
+          server = { id: `row`, value: 2 }
+          const first = collection.utils.refetch()
+          await entered.promise
+
+          let second: Promise<unknown>
+          if (successor === `refetch`) {
+            server = { id: `row`, value: 3 }
+            second = collection.utils.refetch()
+          } else {
+            second = collection.update(`row`, (draft) => {
+              draft.value = 0
+            }).isPersisted.promise
+          }
+          release.resolve()
+          await Promise.all([first, second])
+          await flushPromises()
+
+          expect(collection.status).toBe(`ready`)
+          expect(collection.get(`row`)?.value).toBe(3)
+          expect(adapter.rows.get(`row`)?.value).toBe(3)
+          expect(errors).not.toHaveBeenCalled()
+        } finally {
+          errors.mockRestore()
+          release.resolve()
+          await collection.cleanup()
+        }
+      },
+    )
+
+    // A refetch that fetched before a handler wrote the server row must not
+    // overwrite that newer row when its older result applies afterward.
+    it(`keeps a handler's direct write over an older in-flight refetch result`, async () => {
+      type Row = { id: string; value: number }
+      let server: Row = { id: `row`, value: 1 }
+      const fetches: Array<ReturnType<typeof createDeferred<Array<Row>>>> = []
+      let holdFetches = false
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id: `stale-refetch-after-direct-write`,
+          queryKey: [`stale-refetch-after-direct-write`],
+          queryFn: () => {
+            const snapshot = [{ ...server }]
+            if (!holdFetches) return Promise.resolve(snapshot)
+            const fetch = createDeferred<Array<Row>>()
+            fetches.push(fetch)
+            return fetch.promise.then(() => snapshot)
+          },
+          queryClient,
+          getKey: (row) => row.id,
+          startSync: true,
+          onUpdate: async ({ collection: handlerCollection }) => {
+            server = { id: `row`, value: 3 }
+            await handlerCollection.utils.writeUpsert({ ...server })
+            return { refetch: false }
+          },
+        }),
+      )
+
+      try {
+        await collection.preload()
+        holdFetches = true
+        server = { id: `row`, value: 2 }
+        const refetch = collection.utils.refetch()
+        await vi.waitFor(() => expect(fetches).toHaveLength(1))
+
+        await collection.update(`row`, (draft) => {
+          draft.value = 0
+        }).isPersisted.promise
+        expect(collection.get(`row`)?.value).toBe(3)
+
+        fetches[0]!.resolve([])
+        await refetch
+        await flushPromises()
+        expect(collection.get(`row`)?.value).toBe(3)
+      } finally {
+        fetches.forEach((fetch) => fetch.resolve([]))
         await collection.cleanup()
       }
     })
@@ -5612,7 +5835,7 @@ describe(`QueryCollection`, () => {
       const consoleErrorSpy = vi
         .spyOn(console, `error`)
         .mockImplementation(() => {})
-      const demand = { where: eq(`id`, `1`) }
+      const demand = { where: eq(new IR.PropRef([`id`]), `1`) }
       const collection = createCollection(
         queryCollectionOptions<TestItem>({
           id: `failed-application-coverage`,
@@ -5766,7 +5989,7 @@ describe(`QueryCollection`, () => {
       expect(stripVirtualProps(collection.get(`1`))).toEqual(initialData[0])
       expect(stripVirtualProps(collection.get(`2`))).toEqual(initialData[1])
 
-      // Manual write operations work and clear error state
+      // Manual writes change rows without establishing a successful fetch.
       const newItem = { id: `3`, name: `Manual Item` }
       collection.utils.writeInsert(newItem)
       expect(collection.size).toBe(3)
@@ -5774,12 +5997,11 @@ describe(`QueryCollection`, () => {
 
       await flushPromises()
 
-      // Manual writes clear error state
-      expect(collection.utils.lastError).toBeUndefined()
-      expect(collection.utils.isError).toBe(false)
-      expect(collection.utils.errorCount).toBe(0)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.errorCount).toBe(1)
 
-      // Create error state again for persistence test
+      // Another failed fetch increments the recorded error count.
       await collection.utils.refetch()
       await vi.waitFor(() => expect(collection.utils.isError).toBe(true))
 
@@ -7158,7 +7380,7 @@ describe(`QueryCollection`, () => {
           ...baseOptions,
           sync: {
             sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-              params.begin({ immediate: true })
+              params.begin()
               params.write({ type: `insert`, value: retainedRow })
               params.commit()
               return originalSync.sync({
@@ -7198,6 +7420,10 @@ describe(`QueryCollection`, () => {
       // the observer since another subscription still needs it
 
       const baseQueryKey = [`refcount-bug-test`]
+      let persistInsert!: () => void
+      const insertPersisted = new Promise<void>((resolve) => {
+        persistInsert = resolve
+      })
       const items: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
         { id: `2`, name: `Item 2`, category: `A` },
@@ -7214,7 +7440,9 @@ describe(`QueryCollection`, () => {
         getKey: (item) => item.id,
         startSync: true,
         syncMode: `on-demand`,
-        onInsert: () => Promise.resolve({ refetch: false }),
+        // Keep the insert persisting while query2 observes it; its
+        // optimistic row drops when the handler returns.
+        onInsert: () => insertPersisted.then(() => ({ refetch: false })),
       }
 
       const options = queryCollectionOptions(config)
@@ -7274,7 +7502,6 @@ describe(`QueryCollection`, () => {
           name: `Item 4`,
           category: `A`,
         })
-        await inserted.isPersisted.promise
         await vi.waitFor(() => {
           expect(collection.size).toBe(4)
           expect(collection.has(`4`)).toBe(true)
@@ -7283,6 +7510,8 @@ describe(`QueryCollection`, () => {
           ...initial,
           { id: `4`, name: `Item 4` },
         ])
+        persistInsert()
+        await inserted.isPersisted.promise
         expect(queryFn).toHaveBeenCalledTimes(1)
         queryFn.mockResolvedValue([
           { id: `1`, name: `Provider changed`, category: `A` },
@@ -7473,7 +7702,7 @@ describe(`QueryCollection`, () => {
         ...baseOptions,
         sync: {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-            params.begin({ immediate: true })
+            params.begin()
             params.write({ type: `insert`, value: ownedRow })
             params.write({ type: `insert`, value: unrelatedRow })
             params.commit()
@@ -7522,6 +7751,7 @@ describe(`QueryCollection`, () => {
           protocol: `@tanstack/db/sync-persistence`,
           version: 1,
           hydrateBaseline: async () => {},
+          reserveCommitTurn: () => {},
           scanPersistedRows,
           resumeSnapshot: {
             certify: async () => {},
@@ -7630,7 +7860,7 @@ describe(`QueryCollection`, () => {
         ...baseOptions,
         sync: {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-            params.begin({ immediate: true })
+            params.begin()
             params.write({ type: `insert`, value: orphanRow })
             params.write({ type: `insert`, value: sharedRow })
             params.commit()
@@ -7709,7 +7939,7 @@ describe(`QueryCollection`, () => {
         ...baseOptions,
         sync: {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-            params.begin({ immediate: true })
+            params.begin()
             params.write({ type: `insert`, value: retainedRow })
             params.commit()
 
@@ -8679,6 +8909,141 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it(`publishes a warm ordered date findOne from cached subsets in the initiating call stack`, async () => {
+      type DateRow = { id: string; at: string }
+      type RequestShape = {
+        ordered: boolean
+        filtered: boolean
+        limit: number | undefined
+      }
+
+      const rows: Array<DateRow> = [
+        { id: `1`, at: `2026-10-01` },
+        { id: `2`, at: `2026-10-02` },
+      ]
+      const localQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+        },
+      })
+      const requestShape = (request: LoadSubsetOptions): RequestShape => ({
+        ordered: request.orderBy !== undefined,
+        filtered: request.where !== undefined,
+        limit: request.limit,
+      })
+      const fetchedRequests: Array<RequestShape> = []
+      const adapterReturns: Array<
+        RequestShape & {
+          result: true | Promise<void>
+          sourceRows: Array<string>
+        }
+      > = []
+      const options = queryCollectionOptions<DateRow>({
+        id: `warm-ordered-date-find-one-source`,
+        queryClient: localQueryClient,
+        queryKey: [`warm-ordered-date-find-one`],
+        queryFn: (context) => {
+          const request = context.meta?.loadSubsetOptions
+          fetchedRequests.push(requestShape(request ?? {}))
+          if (request?.where !== undefined) {
+            throw new Error(`This backend does not serve predicate requests`)
+          }
+          return Promise.resolve(request?.orderBy ? rows.slice(1) : rows)
+        },
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        defaultStringCollation: { stringSort: `locale` },
+        staleTime: Infinity,
+        gcTime: Infinity,
+      })
+      const originalSync = options.sync
+      const source = createCollection({
+        ...options,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            const hooks = originalSync.sync(params)
+            if (typeof hooks !== `object` || !hooks.loadSubset) {
+              throw new Error(`Expected the Query DB adapter to load subsets`)
+            }
+            const loadSubset = hooks.loadSubset
+            return {
+              ...hooks,
+              loadSubset: (request: LoadSubsetOptions) => {
+                const result = loadSubset(request)
+                adapterReturns.push({
+                  ...requestShape(request),
+                  result,
+                  sourceRows: params.collection.toArray.map(({ id }) => id),
+                })
+                return result
+              },
+            }
+          },
+        },
+      })
+      const build = () =>
+        createLiveQueryCollection({
+          startSync: false,
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.at, `desc`)
+              .findOne(),
+        })
+      const cold = build()
+      let warm: ReturnType<typeof build> | undefined
+
+      try {
+        await cold.preload()
+        expect(fetchedRequests).toEqual([
+          { ordered: true, filtered: false, limit: 1 },
+          { ordered: false, filtered: false, limit: undefined },
+        ])
+        expect(cold.toArray.map(({ id }) => id)).toEqual([`2`])
+        expect(cold.status).toBe(`ready`)
+        await cold.cleanup()
+        expect(source.toArray.map(({ id }) => id)).toEqual([])
+
+        adapterReturns.length = 0
+        fetchedRequests.length = 0
+        warm = build()
+        const preload = warm.preload()
+
+        // These are the raw adapter returns, before Collection normalizes them.
+        expect(adapterReturns).toEqual([
+          {
+            ordered: true,
+            filtered: false,
+            limit: 1,
+            result: true,
+            sourceRows: [`2`],
+          },
+          {
+            ordered: false,
+            filtered: false,
+            limit: undefined,
+            result: true,
+            sourceRows: [`1`, `2`],
+          },
+        ])
+        expect(fetchedRequests).toEqual([])
+        expect(warm.toArray.map(({ id }) => id)).toEqual([`2`])
+        expect(warm.status).toBe(`ready`)
+
+        await preload
+        expect(fetchedRequests).toEqual([])
+        expect(warm.toArray.map(({ id }) => id)).toEqual([`2`])
+        expect(warm.status).toBe(`ready`)
+      } finally {
+        await warm?.cleanup()
+        await cold.cleanup()
+        await source.cleanup()
+        localQueryClient.clear()
+      }
+    })
+
     it(`should process cached results immediately when QueryObserver resubscribes`, async () => {
       const queryKey = [`remount-cache-test`]
       const items: Array<TestItem> = [
@@ -8990,7 +9355,9 @@ describe(`QueryCollection`, () => {
           id: `on-demand-persistence-clone-safe-test`,
           queryClient,
           queryKey: [`on-demand-persistence-clone-safe-test`],
-          queryFn: vi.fn().mockResolvedValue(items),
+          queryFn: vi
+            .fn()
+            .mockResolvedValue(items.filter((item) => item.category === `A`)),
           getKey: (item) => item.id,
           syncMode: `on-demand`,
           startSync: true,
@@ -8999,7 +9366,7 @@ describe(`QueryCollection`, () => {
 
       try {
         await collection._sync.loadSubset({
-          where: eq(`category`, `A`),
+          where: eq(new IR.PropRef([`category`]), `A`),
           subscription: {
             options: {
               onUnsubscribe: () => {},
@@ -9203,11 +9570,8 @@ describe(`QueryCollection`, () => {
     })
   })
 
-  describe(`On-demand collection directWrite cache revalidation`, () => {
-    it(`should revalidate an active computed queryKey after writeUpdate`, async () => {
-      // Ensures writeUpdate on on-demand collections revalidates the active
-      // computed query key so the authoritative result survives a remount.
-
+  describe(`On-demand direct writes and cache ownership`, () => {
+    it(`keeps an updated computed queryKey through remount without refetching`, async () => {
       const serverItems: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
         { id: `2`, name: `Item 2`, category: `A` },
@@ -9271,7 +9635,7 @@ describe(`QueryCollection`, () => {
         // Verify the collection reflects the update
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
         // IMPORTANT: Simulate remount by cleaning up and recreating the live query
         // This is where the bug manifests - the updated data should persist
@@ -9294,8 +9658,9 @@ describe(`QueryCollection`, () => {
           expect(collection.size).toBe(2)
         })
 
-        // After remount, the authoritative updated data should persist.
+        // The key-scoped cache patch keeps the direct write on remount.
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       } finally {
         await query2?.cleanup()
         await query1.cleanup()
@@ -9304,7 +9669,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should revalidate a scoped static queryKey after writeUpdate`, async () => {
+    it(`keeps an updated scoped static queryKey through remount without refetching`, async () => {
       // Scenario: static queryKey + on-demand mode + where clause
       // The where clause causes a computed query key to be generated
 
@@ -9362,7 +9727,7 @@ describe(`QueryCollection`, () => {
 
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
         // Simulate remount
         await query1.cleanup()
@@ -9384,6 +9749,7 @@ describe(`QueryCollection`, () => {
 
         // After remount, the updated data should persist
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       } finally {
         await query2?.cleanup()
         await query1.cleanup()
@@ -9392,7 +9758,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should revalidate a constant function queryKey after writeUpdate`, async () => {
+    it(`keeps an updated constant function queryKey through remount without refetching`, async () => {
       // Scenario: function queryKey that returns same value
       // This creates an undefined entry in the cache
 
@@ -9445,7 +9811,7 @@ describe(`QueryCollection`, () => {
 
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
         // Simulate remount
         await query1.cleanup()
@@ -9463,6 +9829,7 @@ describe(`QueryCollection`, () => {
 
         // After remount, the updated data should persist
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       } finally {
         await query2?.cleanup()
         await query1.cleanup()
@@ -9520,14 +9887,20 @@ describe(`QueryCollection`, () => {
           const scopedQuery = customQueryClient.getQueryCache().getAll()[0]!
           expect(scopedQuery.state.dataUpdateCount).toBe(1)
 
-          collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+          await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
           expect(collection.get(`1`)?.name).toBe(`Manual`)
+          expect(scopedQuery.state.dataUpdateCount).toBe(1)
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          const refresh = collection.utils.refetch({ throwOnError: true })
           await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
           expect(collection.get(`1`)?.name).toBe(`Manual`)
-          expect(scopedQuery.state.data).toEqual([initial])
+          expect(scopedQuery.state.data).toEqual([
+            { ...initial, name: `Manual` },
+          ])
 
           refetchResult.resolve([authoritative])
+          await refresh
           await vi.waitFor(() => {
             expect(collection.get(`1`)?.name).toBe(`Authoritative`)
             expect(scopedQuery.state.dataUpdateCount).toBe(2)
@@ -9627,7 +10000,7 @@ describe(`QueryCollection`, () => {
           name: `Outside A scope`,
           category: `outside`,
         })
-        await vi.waitFor(() => expect(queryA).toHaveBeenCalledTimes(2))
+        expect(queryA).toHaveBeenCalledTimes(1)
 
         const afterAWrite = {
           queryPresent:
@@ -9832,6 +10205,7 @@ describe(`QueryCollection`, () => {
 
         barrier.resolve()
         await barrierCompletion
+        await foreignObserver.refetch()
         for (let turn = 0; turn < 20; turn++) await Promise.resolve()
 
         expect(
@@ -9851,7 +10225,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`evicts an owned custom-hash alias outside the base-key prefix`, async () => {
+    it(`leaves a custom-hash cache alias for the caller to evict`, async () => {
       const foreignKey = [`custom-hash-foreign-retained-key`]
       const baseKey = [`custom-hash-owned-base-key`]
       let enabled = false
@@ -9919,7 +10293,9 @@ describe(`QueryCollection`, () => {
 
         expect(
           customQueryClient.getQueryCache().getAll().includes(aliasedQuery),
-        ).toBe(false)
+        ).toBe(true)
+        expect(queryFn).not.toHaveBeenCalled()
+        customQueryClient.removeQueries({ queryKey: foreignKey, exact: true })
 
         enabled = true
         await first.cleanup()
@@ -10014,93 +10390,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`does not ready a remounted co-owner from a shared pre-write result`, async () => {
-      const refetchResult = createDeferred<Array<CategorisedItem>>()
-      const refetchStarted = createDeferred<void>()
-      const queryFn = vi
-        .fn<() => Promise<Array<CategorisedItem>>>()
-        .mockResolvedValueOnce([{ id: `1`, name: `Initial`, category: `A` }])
-        .mockImplementationOnce(() => {
-          refetchStarted.resolve()
-          return refetchResult.promise
-        })
-      const sharedQueryClient = new QueryClient({
-        defaultOptions: {
-          queries: {
-            gcTime: Number.POSITIVE_INFINITY,
-            staleTime: Number.POSITIVE_INFINITY,
-            retry: false,
-          },
-        },
-      })
-      const createSharedCollection = (id: string) =>
-        createCollection(
-          queryCollectionOptions<CategorisedItem>({
-            id,
-            queryClient: sharedQueryClient,
-            queryKey: [`shared-pre-write-result`],
-            queryFn,
-            getKey: (row) => row.id,
-            syncMode: `on-demand`,
-            startSync: true,
-          }),
-        )
-      const collectionA = createSharedCollection(`shared-write-owner-a`)
-      const collectionB = createSharedCollection(`shared-write-owner-b`)
-      const createActive = (collection: typeof collectionA) =>
-        createLiveQueryCollection({
-          query: (query) =>
-            query
-              .from({ row: collection })
-              .where(({ row }) => eq(row.category, `A`)),
-        })
-      const activeA = createActive(collectionA)
-      const firstB = createActive(collectionB)
-      let remountedB: ReturnType<typeof createActive> | undefined
-
-      try {
-        await Promise.all([activeA.preload(), firstB.preload()])
-
-        collectionA.utils.writeUpdate({ id: `1`, name: `Manual` })
-        await refetchStarted.promise
-        await firstB.cleanup()
-        expect(collectionB.size).toBe(0)
-
-        remountedB = createActive(collectionB)
-        let preloadSettled = false
-        let rowsAtSettlement: Array<string> | undefined
-        const preload = remountedB.preload().then(() => {
-          rowsAtSettlement = remountedB!.toArray.map((row) => row.name)
-          preloadSettled = true
-        })
-        await flushPromises()
-
-        expect(queryFn).toHaveBeenCalledTimes(2)
-        expect(sharedQueryClient.isFetching()).toBe(1)
-        expect(remountedB.toArray).toEqual([])
-        expect(preloadSettled).toBe(false)
-
-        refetchResult.resolve([
-          { id: `1`, name: `Authoritative`, category: `A` },
-        ])
-        await preload
-
-        expect(rowsAtSettlement).toEqual([`Authoritative`])
-        expect(remountedB.toArray.map((row) => row.name)).toEqual([
-          `Authoritative`,
-        ])
-      } finally {
-        refetchResult.resolve([])
-        await remountedB?.cleanup()
-        await firstB.cleanup()
-        await activeA.cleanup()
-        await collectionA.cleanup()
-        await collectionB.cleanup()
-        sharedQueryClient.clear()
-      }
-    })
-
-    it(`evicts a protected scoped Query when its owner unloads before deferred revalidation`, async () => {
+    it(`retains an explicitly refreshed scoped Query after its owner unloads`, async () => {
       const barrier = createDeferred<void>()
       let serverRows: Array<CategorisedItem> = [
         { id: `1`, name: `Initial`, category: `A` },
@@ -10146,13 +10436,14 @@ describe(`QueryCollection`, () => {
         await first.preload()
         collection.deferDataRefresh = barrier.promise
         serverRows = [{ id: `1`, name: `Authoritative`, category: `A` }]
-        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await first.cleanup()
 
         barrier.resolve()
         await barrierCompletion
 
-        expect(customQueryClient.getQueryCache().getAll()).toEqual([])
+        expect(customQueryClient.getQueryCache().getAll()).toHaveLength(1)
 
         remounted = createActive()
         await remounted.preload()
@@ -10170,7 +10461,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`requires post-write authority when an initial request is reused`, async () => {
+    it(`does not start a replacement request for a direct write during initial fetch`, async () => {
       const initialResult = createDeferred<Array<CategorisedItem>>()
       const postWriteResult = createDeferred<Array<CategorisedItem>>()
       const initialStarted = createDeferred<void>()
@@ -10220,9 +10511,7 @@ describe(`QueryCollection`, () => {
         })
 
         let preloadSettled = false
-        let rowsAtSettlement: Array<string> | undefined
         const preload = active.preload().then(() => {
-          rowsAtSettlement = active.toArray.map((row) => row.name)
           preloadSettled = true
         })
         await initialStarted.promise
@@ -10233,25 +10522,18 @@ describe(`QueryCollection`, () => {
         initialResult.resolve([{ id: `1`, name: `Stale`, category: `A` }])
         for (let turn = 0; turn < 30; turn++) await Promise.resolve()
 
-        expect({
-          providerCalls: queryFn.mock.calls.length,
-          preloadSettled,
-          materializedName: collection.get(`1`)?.name,
-          rowsAtSettlement,
-        }).toEqual({
-          providerCalls: 2,
-          preloadSettled: false,
-          materializedName: undefined,
-          rowsAtSettlement: undefined,
-        })
+        await preload
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(preloadSettled).toBe(true)
 
+        const refresh = collection.utils.refetch({ throwOnError: true })
         await postWriteStarted.promise
         postWriteResult.resolve([
           { id: `1`, name: `Authoritative`, category: `A` },
         ])
-        await preload
+        await refresh
 
-        expect(rowsAtSettlement).toEqual([`Authoritative`])
+        expect(active.toArray.map((row) => row.name)).toEqual([`Authoritative`])
       } finally {
         initialResult.resolve([])
         postWriteResult.resolve([])
@@ -10339,7 +10621,8 @@ describe(`QueryCollection`, () => {
             ?.state.dataUpdateCount,
         ).toBe(1)
 
-        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await writeRefetchStarted.promise
         expect(active.toArray.map((row) => row.name)).toEqual([`Manual`])
 
@@ -10462,6 +10745,7 @@ describe(`QueryCollection`, () => {
 
         barrier.resolve()
         await barrierCompletion
+        const refresh = outside.refetch()
         for (let turn = 0; turn < 30; turn++) await Promise.resolve()
 
         expect(queryFn).toHaveBeenCalledTimes(2)
@@ -10469,6 +10753,7 @@ describe(`QueryCollection`, () => {
         secondResult.resolve([
           { id: `1`, name: `Authoritative`, category: `A` },
         ])
+        await refresh
         await outsideUpdated.promise
 
         expect(outside.getCurrentResult().data?.[0]?.name).toBe(`Authoritative`)
@@ -10628,14 +10913,15 @@ describe(`QueryCollection`, () => {
         await active.preload()
         expect(queryFn).not.toHaveBeenCalled()
 
-        collection.utils.writeInsert({
+        await collection.utils.writeInsert({
           id: `outside`,
           name: `Outside`,
           category: `B`,
         })
-        expect(customQueryClient.getQueryCache().findAll({ queryKey })).toEqual(
-          [],
-        )
+        expect(
+          customQueryClient.getQueryCache().findAll({ queryKey }),
+        ).toHaveLength(1)
+        expect(queryFn).not.toHaveBeenCalled()
 
         await collection.utils.refetch({ throwOnError: true })
         expect(queryFn).toHaveBeenCalledTimes(1)
@@ -10687,11 +10973,12 @@ describe(`QueryCollection`, () => {
             ?.state.dataUpdateCount,
         ).toBe(1)
 
-        collection.utils.writeInsert({
+        await collection.utils.writeInsert({
           id: `outside`,
           name: `Outside`,
           category: `B`,
         })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
         await customQueryClient.resetQueries({ queryKey, exact: true })
@@ -10715,7 +11002,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`waits for recovery rows when remounting after a write-triggered refetch error`, async () => {
+    it(`waits for recovery rows when remounting after an explicit refetch error`, async () => {
       const initialResult = createDeferred<Array<CategorisedItem>>()
       const failedRefetch = createDeferred<Array<CategorisedItem>>()
       const recoveryResult = createDeferred<Array<CategorisedItem>>()
@@ -10724,7 +11011,7 @@ describe(`QueryCollection`, () => {
       const recoveryStarted = createDeferred<void>()
       const refetchErrored = createDeferred<void>()
       const recoverySucceeded = createDeferred<void>()
-      const failure = new Error(`write-triggered refetch failed`)
+      const failure = new Error(`explicit refetch failed`)
       const queryKey = [`error-remount-recovery`]
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -10799,7 +11086,8 @@ describe(`QueryCollection`, () => {
         await initialPreload
         expect(first.toArray.map((row) => row.name)).toEqual([`Initial`])
 
-        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await failedRefetchStarted.promise
         failedRefetch.reject(failure)
         await refetchErrored.promise
@@ -10907,6 +11195,8 @@ describe(`QueryCollection`, () => {
           if (outcome === `resolve`) barrier.resolve()
           else barrier.reject(failure)
           await barrierSettlement
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          await collection.utils.refetch({ throwOnError: true })
 
           await vi.waitFor(() => {
             expect(queryFn).toHaveBeenCalledTimes(2)
@@ -10997,7 +11287,7 @@ describe(`QueryCollection`, () => {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
             // Simulate a persistence layer hydrating rows from a previous
             // session on warm start, before the query layer initializes.
-            params.begin({ immediate: true })
+            params.begin()
             for (const item of preHydratedItems) {
               params.write({ type: `insert`, value: item })
             }

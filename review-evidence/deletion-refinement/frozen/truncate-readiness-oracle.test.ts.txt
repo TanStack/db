@@ -1,0 +1,74 @@
+/**
+ * Replacement rows and readiness are independent sync observations. A truncate
+ * promises readiness by default; markReady:false preserves the current status.
+ * This owner supplies the core boundary required by the IndexedDB retirement
+ * model. It does not change the optimistic history model's row/settlement laws.
+ *
+ * The reference fold is a sequence of authored replacements and status signals.
+ * Every last truncate in one source transaction supplies that replacement's
+ * readiness intent. Repeated transactions compose in publication order. We
+ * cross initial error/loading/ready, all two-truncate intent pairs, and a held
+ * optimistic transaction. Checks run inside public notifications as well as
+ * after commit, so transient false readiness cannot hide behind a final error.
+ */
+import { expect, it } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import { createDeferred } from '../src/deferred.js'
+import type { SyncConfig } from '../src/types.js'
+
+type Row = { id: number; value: string }
+type Sync = Parameters<SyncConfig<Row, number>['sync']>[0]
+type Intent = undefined | boolean
+const intents: Array<Intent> = [undefined, true, false]
+const cells = (['loading', 'ready', 'error'] as const).flatMap(status =>
+  [false, true].flatMap(held => intents.flatMap(first => intents.map(last => ({ status, held, first, last })))),
+)
+it.each(cells)('replacement readiness follows the final authored intent: %j', async ({ status, held, first, last }) => {
+  let sync!: Sync
+  const finish = createDeferred<void>()
+  const c = createCollection<Row, number>({
+    getKey: row => row.id,
+    startSync: true,
+    gcTime: Infinity,
+    sync: { sync: params => { sync = params } },
+    onInsert: () => finish.promise,
+  })
+  const observed: Array<string> = []
+  const stop = c.subscribeChanges(() => { observed.push(c.status) })
+  c.on('status:change', ({ status: next }) => { observed.push(next) })
+  try {
+    sync.begin(); sync.write({ type: 'insert', value: { id: 1, value: 'initial' } }); sync.commit()
+    if (status === 'ready') sync.markReady()
+    // Author optimistic work before marking error; Collection admission rejects
+    // new edits once errored. Loading admits edits after sync entry.
+    const optimistic = held ? c.insert({ id: 9, value: 'optimistic' }) : undefined
+    if (status === 'error') sync.markError(new Error('retired source'))
+    observed.length = 0
+    // Structural callable widening makes the pre-fix run reach assertions:
+    // an ignored option is a semantic failure, never a compiler-error witness.
+    const truncate: (options?: { markReady?: boolean }) => void = sync.truncate
+    sync.begin()
+    truncate(first === undefined ? undefined : { markReady: first })
+    sync.write({ type: 'insert', value: { id: 2, value: 'discarded' } })
+    truncate(last === undefined ? undefined : { markReady: last })
+    sync.write({ type: 'insert', value: { id: 3, value: 'replacement' } })
+    const receipt = sync.commit()
+    const expectedStatus = last === false ? status : 'ready'
+    expect.soft(c.status).toBe(expectedStatus)
+    expect.soft(observed.every(value => value === expectedStatus), 'status at publication').toBe(true)
+    expect([...c.base.values()].map(row => ({ id: row.id, value: row.value }))).toEqual([{ id: 3, value: 'replacement' }])
+    await receipt
+    if (held) expect(c.get(9)?.value).toBe('optimistic')
+    finish.resolve()
+    await optimistic?.isPersisted.promise
+    expect.soft(c.status).toBe(expectedStatus)
+    // A later independent ordinary replacement still recovers normally.
+    sync.begin(); sync.truncate(); sync.commit()
+    expect(c.status).toBe('ready')
+    expect(c.size).toBe(0)
+  } finally {
+    finish.resolve()
+    stop.unsubscribe()
+    await c.cleanup()
+  }
+})

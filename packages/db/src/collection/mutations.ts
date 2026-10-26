@@ -3,6 +3,7 @@ import {
   withChangeTracking,
   withFlatChangeTracking,
 } from '../proxy'
+import { normalizeError } from '../utils/error.js'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import {
@@ -22,7 +23,6 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from '../errors'
-import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -190,17 +190,7 @@ export class CollectionMutationsManager<
       throw new InvalidKeyError(key, item)
     }
 
-    return `KEY::${this.id}/${key}`
-  }
-
-  private markPendingLocalChanges(
-    mutations: Array<PendingMutation<TOutput>>,
-  ): void {
-    for (const mutation of mutations) {
-      // The handler can sync synchronously before its transaction is registered.
-      // This is provisional; only completed mutations retain a local origin.
-      this.state.pendingLocalChanges.add(mutation.key as TKey)
-    }
+    return `KEY::${JSON.stringify([this.id, typeof key, String(key)])}`
   }
 
   /**
@@ -227,13 +217,82 @@ export class CollectionMutationsManager<
     }
     const transaction = this.createTransaction<TOutput>({
       autoCommit: false,
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
-    direct.write(mutations)
-    transaction.setState(`completed`)
-    transaction.isPersisted.resolve(transaction)
+    // The rows are stored when `write` publishes them, so a throwing
+    // subscriber cannot undo the write; the transaction still completes.
+    try {
+      direct.write(mutations)
+    } finally {
+      transaction.setState(`completed`)
+      transaction.isPersisted.resolve(transaction)
+    }
+    return transaction
+  }
+
+  /** Own a transaction's new mutations and show them optimistically. */
+  private applyOwnedMutations(
+    transaction: TransactionType<any>,
+    mutations: Array<PendingMutation<TOutput>>,
+  ): void {
+    // The Collection owns the request before its handler can write through
+    // sync, so a confirmation written by the handler waits for settlement.
+    this.state.trackTransaction(transaction)
+    transaction.applyMutations(mutations)
+    this.state.recomputeOptimisticState(true)
+  }
+
+  /** Commit mutations in a new transaction that calls the operation's handler. */
+  private commitDirect<TOperation extends OperationType>(
+    type: TOperation,
+    handler: (params: {
+      transaction: TransactionWithMutations<
+        TOutput,
+        TOperation,
+        Collection<TOutput, TKey, TUtils>
+      >
+      collection: Collection<TOutput, TKey, TUtils>
+    }) => unknown,
+    mutations: Array<PendingMutation<TOutput>>,
+  ): TransactionType<TOutput> {
+    const localOnly = this.commitLocalOnlyDirect(mutations, type)
+    if (localOnly) return localOnly
+    const transaction = this.createTransaction<TOutput>({
+      mutationFn: async (params) =>
+        await handler({
+          transaction:
+            params.transaction as unknown as TransactionWithMutations<
+              TOutput,
+              TOperation,
+              Collection<TOutput, TKey, TUtils>
+            >,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
+        }),
+    })
+    try {
+      this.applyOwnedMutations(transaction, mutations)
+    } catch (error) {
+      // A subscriber threw before the handler could run. Roll back only this
+      // write, so no Collection keeps a transaction that nothing will settle.
+      // The admission error is the reported cause.
+      try {
+        transaction.rollback({
+          isSecondaryRollback: true,
+          error: normalizeError(error),
+        })
+      } catch {
+        // Settlement still ran every step.
+      }
+      throw error
+    }
+    // Errors still reject `isPersisted.promise`. This catch only prevents an
+    // unhandled rejection from the fire-and-forget commit.
+    transaction.commit().catch(() => undefined)
     return transaction
   }
 
@@ -306,50 +365,16 @@ export class CollectionMutationsManager<
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
-
-      state.transactions.set(ambientTransaction.id, ambientTransaction)
-      state.scheduleTransactionCleanup(ambientTransaction)
-      state.recomputeOptimisticState(true)
-
+      this.applyOwnedMutations(ambientTransaction, mutations)
       return ambientTransaction
-    } else {
-      const localOnly = this.commitLocalOnlyDirect(mutations, `insert`)
-      if (localOnly) return localOnly
-      // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = this.createTransaction<TOutput>({
-        metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-        mutationFn: async (params) => {
-          // Call the onInsert handler with the transaction and collection
-          return await this.config.onInsert!({
-            transaction:
-              params.transaction as unknown as TransactionWithMutations<
-                TOutput,
-                `insert`,
-                Collection<TOutput, TKey, TUtils>
-              >,
-            collection: this.collection as unknown as Collection<
-              TOutput,
-              TKey,
-              TUtils
-            >,
-          })
-        },
-      })
-
-      // Apply mutations to the new transaction
-      directOpTransaction.applyMutations(mutations)
-      this.markPendingLocalChanges(mutations)
-      // The Collection owns the request before its handler can write through
-      // sync, so a confirmation written by the handler waits for settlement.
-      state.transactions.set(directOpTransaction.id, directOpTransaction)
-      state.scheduleTransactionCleanup(directOpTransaction)
-      state.recomputeOptimisticState(true)
-      // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
-      directOpTransaction.commit().catch(() => undefined)
-
-      return directOpTransaction
     }
+
+    // Call each handler through the config so a method keeps its `this`.
+    return this.commitDirect(
+      `insert`,
+      (params) => this.config.onInsert!(params),
+      mutations,
+    )
   }
 
   /**
@@ -509,59 +534,20 @@ export class CollectionMutationsManager<
       })
       // Errors still propagate through tx.isPersisted.promise; suppress the background commit from warning
       emptyTransaction.commit().catch(() => undefined)
-      // Schedule cleanup for empty transaction
-      state.scheduleTransactionCleanup(emptyTransaction)
       return emptyTransaction
     }
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
-
-      state.transactions.set(ambientTransaction.id, ambientTransaction)
-      state.scheduleTransactionCleanup(ambientTransaction)
-      state.recomputeOptimisticState(true)
-
+      this.applyOwnedMutations(ambientTransaction, mutations)
       return ambientTransaction
     }
 
-    // No need to check for onUpdate handler here as we've already checked at the beginning
-
-    const localOnly = this.commitLocalOnlyDirect(mutations, `update`)
-    if (localOnly) return localOnly
-
-    // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = this.createTransaction<TOutput>({
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-      mutationFn: async (params) => {
-        // Call the onUpdate handler with the transaction and collection
-        return this.config.onUpdate!({
-          transaction:
-            params.transaction as unknown as TransactionWithMutations<
-              TOutput,
-              `update`,
-              Collection<TOutput, TKey, TUtils>
-            >,
-          collection: this.collection as unknown as Collection<
-            TOutput,
-            TKey,
-            TUtils
-          >,
-        })
-      },
-    })
-
-    // Apply mutations to the new transaction
-    directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalChanges(mutations)
-    // Own the request before its handler runs; see insert.
-    state.transactions.set(directOpTransaction.id, directOpTransaction)
-    state.scheduleTransactionCleanup(directOpTransaction)
-    state.recomputeOptimisticState(true)
-    // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
-    directOpTransaction.commit().catch(() => undefined)
-
-    return directOpTransaction
+    return this.commitDirect(
+      `update`,
+      (params) => this.config.onUpdate!(params),
+      mutations,
+    )
   }
 
   /**
@@ -630,50 +616,14 @@ export class CollectionMutationsManager<
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
-
-      state.transactions.set(ambientTransaction.id, ambientTransaction)
-      state.scheduleTransactionCleanup(ambientTransaction)
-      state.recomputeOptimisticState(true)
-
+      this.applyOwnedMutations(ambientTransaction, mutations)
       return ambientTransaction
     }
 
-    const localOnly = this.commitLocalOnlyDirect(mutations, `delete`)
-    if (localOnly) return localOnly
-
-    // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = this.createTransaction<TOutput>({
-      autoCommit: true,
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
-      mutationFn: async (params) => {
-        // Call the onDelete handler with the transaction and collection
-        return this.config.onDelete!({
-          transaction:
-            params.transaction as unknown as TransactionWithMutations<
-              TOutput,
-              `delete`,
-              Collection<TOutput, TKey, TUtils>
-            >,
-          collection: this.collection as unknown as Collection<
-            TOutput,
-            TKey,
-            TUtils
-          >,
-        })
-      },
-    })
-
-    // Apply mutations to the new transaction
-    directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalChanges(mutations)
-    // Own the request before its handler runs; see insert.
-    state.transactions.set(directOpTransaction.id, directOpTransaction)
-    state.scheduleTransactionCleanup(directOpTransaction)
-    state.recomputeOptimisticState(true)
-    // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
-    directOpTransaction.commit().catch(() => undefined)
-
-    return directOpTransaction
+    return this.commitDirect(
+      `delete`,
+      (params) => this.config.onDelete!(params),
+      mutations,
+    )
   }
 }

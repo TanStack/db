@@ -1,0 +1,41 @@
+Source log: /tmp/pr1179-browser-corrected.log
+SHA-256 of full source: 6e59b39cfe1c3dabee999ceb0713d1f7867ac2bfc2ff2b8fbd711eba64d79a17
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+[2m[WebServer] [22m(node:61665) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 18 tests using 1 worker
+
+(node:61677) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:61677) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure (239ms)
+  ✓   2 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure (204ms)
+  ✓   3 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure (200ms)
+  ✓   4 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure (278ms)
+  ✓   5 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure (279ms)
+  ✓   6 [chromium] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure (265ms)
+(node:61795) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:61795) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   7 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure (1.3s)
+  ✓   8 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure (487ms)
+  ✓   9 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure (485ms)
+  ✓  10 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure (533ms)
+  ✓  11 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure (597ms)
+  ✓  12 [firefox] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure (478ms)
+(node:62048) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:62048) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  13 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after explicit closure (759ms)
+  ✓  14 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after explicit closure (588ms)
+  ✓  15 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after upgrade closure (589ms)
+  ✓  16 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after upgrade closure (621ms)
+  ✓  17 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted clear aborts after delete closure (590ms)
+  ✓  18 [webkit] › e2e/cross-tab-oracle.spec.ts:999:7 › native admitted import aborts after delete closure (594ms)
+
+  18 passed (11.7s)

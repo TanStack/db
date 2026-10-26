@@ -1,5 +1,6 @@
 import { defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
+import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
 import packageJson from './package.json'
 
 const config = defineConfig({
@@ -17,5 +18,6 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: `./src/index.ts`,
     srcDir: `./src`,
+    beforeWriteDeclarationFile: commonJsDeclarations,
   }),
 )

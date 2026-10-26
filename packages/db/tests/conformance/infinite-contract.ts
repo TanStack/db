@@ -2,11 +2,13 @@
  * Cross-adapter contract for `useLiveInfiniteQuery`.
  *
  * The model is an ordered source plus a visible prefix split into pages. A
- * fetch may extend that prefix; changing the query, collection, or page shape
- * creates a new demand generation. The public observation includes flattened
- * rows, page boundaries and params, continuation, in-flight state, errors, and
- * the backing collection. Those facts must agree; final rows alone cannot show
- * a stale page ledger or a duplicate request.
+ * fetch may extend that prefix. Changing the query or input Collection identity
+ * replaces the live-query binding. Changing page shape updates the requested
+ * window and page labels while retaining committed page depth. The model tracks
+ * these input changes directly. The public observation includes flattened rows,
+ * page boundaries and params, continuation, in-flight state, errors, and the
+ * backing Collection. Those facts must agree; final rows alone cannot show a
+ * stale page ledger or a duplicate request.
  *
  * Drivers preserve native framework scheduling and package-realm details.
  * Controllable handles allow setter-to-fetch calls without an explicit driver
@@ -18,6 +20,23 @@
  * and scenario grammar are shared. The overlapping window-operation law below
  * uses each driver's DB controller directly: hooks expose fetchNextPage but not
  * controller preload, so that cell does not claim framework scheduling reach.
+ *
+ * Two publication laws read every value a binding published, not only settled
+ * state. For a source that loads synchronously, the first value is ready with
+ * the first page. Every ready value equals the source prefix for its own page
+ * count, with matching page boundaries and continuation. A ready value with
+ * fewer rows than its pages, or with a false end of list, breaks the second law
+ * even when the settled state recovers. Each driver records values at its
+ * framework's own publication cut. Pre-commit work, such as a React render that
+ * never commits, belongs to the drivers: Vue's setup is its commit, so that cut
+ * has no shared form.
+ *
+ * The query-identity laws in `contract.ts` apply to infinite bindings too. A
+ * binding that compares query identity needs `queryKey` for an unhashable
+ * query and rejects a different source object under a Collection ID it
+ * already read; rejection surfaces as a throw from the mount, `setParamSync`,
+ * the next `flush`, or `current()`. A reactive binding compiles either input
+ * and publishes the current source's pages.
  */
 import type { Collection, LiveQueryWindowController } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'
@@ -25,6 +44,8 @@ import type { QueryBuild, SourceHandle } from './contract'
 export interface InfiniteQueryConfig {
   pageSize?: number
   initialPageParam?: number
+  /** Explicit identity for a query whose IR has no stable hash. */
+  queryKey?: ReadonlyArray<unknown>
 }
 
 export interface InfiniteQueryResult {
@@ -38,8 +59,25 @@ export interface InfiniteQueryResult {
   collection: Collection<any, any, any>
 }
 
+/** One value the binding published, reduced to what the publication laws read. */
+export interface InfiniteQueryObservation {
+  status: string
+  ids: Array<string>
+  pages: Array<Array<string>>
+  hasNextPage: boolean
+}
+
 export interface InfiniteQueryHandle {
   current: () => InfiniteQueryResult
+  /**
+   * Every value the binding published since mount, oldest first, recorded at
+   * the framework's own publication cut: each React layout commit, each Vue
+   * pre-flush, and the Svelte construction value plus each pre-effect run. The
+   * first entry is the first paint. `current()` cannot serve these laws: React
+   * can coalesce a commit before `mount` returns, and a settled read hides an
+   * intermediate value that a consumer rendered.
+   */
+  observations: () => ReadonlyArray<InfiniteQueryObservation>
   /** Invoke a page fetch and wait until its observable request settles. */
   fetchNextPage: () => Promise<void>
   flush: () => Promise<void>
@@ -70,9 +108,14 @@ export interface InfiniteQueryInputHandle extends InfiniteQueryHandle {
 
 export interface InfiniteQueryDriver {
   name: string
+  /** Whether the binding compares query identity; see `contract.ts`. */
+  comparesQueryIdentity: boolean
   gt: (a: any, b: any) => any
+  eq: (a: any, b: any) => any
+  /** Pass `collectionId` to create another source object under an existing ID. */
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
+    collectionId?: string,
   ) => SourceHandle<T>
   makeOnDemandSource: <T extends { id: string; rank: number }>(
     data: ReadonlyArray<T>,
@@ -80,6 +123,18 @@ export interface InfiniteQueryDriver {
   ) => {
     collection: Collection<T, string | number, any>
     calls: Array<{ limit?: number }>
+  }
+  /**
+   * An on-demand source whose Collection stays `loading` until `markReady`.
+   * Each request writes its rows at once and stays pending until `settle`.
+   */
+  makeLaggingOnDemandSource: <T extends { id: string; rank: number }>(
+    data: ReadonlyArray<T>,
+  ) => {
+    collection: Collection<T, string | number, any>
+    pending: () => number
+    settle: () => void
+    markReady: () => void
   }
   makePrecreated: (build: QueryBuild) => {
     collection: Collection<any, any, any>
@@ -94,6 +149,17 @@ export interface InfiniteQueryDriver {
   ) => InfiniteQueryHandle
   mountControllable: <P>(
     build: (q: any, param: P) => any,
+    initial: P,
+    config?: InfiniteQueryConfig,
+  ) => InfiniteQueryControllableHandle<P>
+  /**
+   * Mount a controllable query whose config names `key(param)` as its
+   * `queryKey`, or none when that returns `undefined`. Every driver that
+   * compares query identity supplies it; a reactive binding has no keys.
+   */
+  mountKeyedControllable?: <P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
     initial: P,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryControllableHandle<P>

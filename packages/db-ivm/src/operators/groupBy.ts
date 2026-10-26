@@ -1,3 +1,4 @@
+import { structuralIdentity } from '../hashing/hash.js'
 import { serializeValue } from '../utils.js'
 import { map } from './map.js'
 import { reduce } from './reduce.js'
@@ -5,31 +6,17 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
 
-type BasicAggregateFunction<T, R, V = unknown> = {
+type AggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
   reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
 }
-
-type PipedAggregateFunction<T, R> = {
-  pipe: (stream: IStreamBuilder<T>) => IStreamBuilder<KeyValue<string, R>>
-}
-
-type AggregateFunction<T, R, V = unknown> =
-  | BasicAggregateFunction<T, R, V>
-  | PipedAggregateFunction<T, R>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never
 
 type AggregatesReturnType<T, A> = {
   [K in keyof A]: ExtractAggregateReturnType<T, A[K]>
-}
-
-function isPipedAggregateFunction<T, R>(
-  aggregate: AggregateFunction<T, R>,
-): aggregate is PipedAggregateFunction<T, R> {
-  return `pipe` in aggregate
 }
 
 /**
@@ -44,27 +31,19 @@ export function groupBy<
 >(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
   type ResultType = K & AggregatesReturnType<T, A>
 
-  const basicAggregates = Object.fromEntries(
-    Object.entries(aggregates).filter(
-      ([_, aggregate]) => !isPipedAggregateFunction(aggregate),
-    ),
-  ) as Record<string, BasicAggregateFunction<T, any, any>>
-
-  // @ts-expect-error - TODO: we don't use this yet, but we will
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const pipedAggregates = Object.fromEntries(
-    Object.entries(aggregates).filter(([_, aggregate]) =>
-      isPipedAggregateFunction(aggregate),
-    ),
-  ) as Record<string, PipedAggregateFunction<T, any>>
-
   return (
     stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
     const KEY_SENTINEL = Symbol(`original_group_key`)
 
-    // First map to extract keys and pre-aggregate values
+    const aggregateEntries = Object.entries(aggregates)
+
+    // First map to extract keys and pre-aggregate values. Each contribution
+    // leads with an identity built from its group key and pre-aggregate
+    // values when every one of them has one. Within one group the reduce
+    // index then merges equal contributions by that identity instead of
+    // hashing them. A null identity falls back to the structural hash.
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
@@ -73,51 +52,61 @@ export function groupBy<
         // Create values object with pre-aggregated values
         const values: Record<string | symbol, unknown> = {}
 
-        // Store the original key object
+        // Store the original key object. Contributions whose keys serialize
+        // alike but hash apart must not merge, so the key is part of the
+        // identity.
         values[KEY_SENTINEL] = key
 
         // Add pre-aggregated values
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          values[name] = aggregate.preMap(data)
+        let identity: string | null = structuralIdentity(key) ?? null
+        for (const [name, aggregate] of aggregateEntries) {
+          const value = aggregate.preMap(data)
+          values[name] = value
+          if (identity === null) continue
+          const part = structuralIdentity(value)
+          identity = part === undefined ? null : `${identity}|${part}`
         }
 
-        return [keyString, values] as KeyValue<
+        return [keyString, [identity, values]] as KeyValue<
           string,
-          Record<string | symbol, unknown>
+          [string | null, Record<string | symbol, unknown>]
         >
       }),
     )
 
     // Then reduce to compute aggregates
     const reduced = withKeysAndValues.pipe(
-      reduce((values) => {
-        // Calculate total multiplicity to check if the group should exist
-        let totalMultiplicity = 0
-        for (const [_, multiplicity] of values) {
-          totalMultiplicity += multiplicity
-        }
+      reduce(
+        (contributions) => {
+          // Calculate total multiplicity to check if the group should exist
+          let totalMultiplicity = 0
+          for (const [_, multiplicity] of contributions) {
+            totalMultiplicity += multiplicity
+          }
 
-        // If total multiplicity is 0 or negative, the group should be removed completely
-        if (totalMultiplicity <= 0) {
-          return []
-        }
+          // If total multiplicity is 0 or negative, the group should be removed completely
+          if (totalMultiplicity <= 0) {
+            return []
+          }
 
-        const result: Record<PropertyKey, unknown> = {}
+          const result: Record<PropertyKey, unknown> = {}
 
-        // Get the original key from first value in group
-        const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
-        result[KEY_SENTINEL] = originalKey
+          // Get the original key from first value in group
+          const originalKey = contributions[0]?.[0][1][KEY_SENTINEL]
+          result[KEY_SENTINEL] = originalKey
 
-        // Apply each aggregate function
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number],
-          )
-          result[name] = aggregate.reduce(preValues)
-        }
+          // Apply each aggregate function
+          for (const [name, aggregate] of aggregateEntries) {
+            const preValues = contributions.map(
+              ([[, v], m]) => [v[name], m] as [any, number],
+            )
+            result[name] = aggregate.reduce(preValues)
+          }
 
-        return [[result, 1]]
-      }),
+          return [[result, 1]]
+        },
+        { prefixIdentity: true },
+      ),
     )
 
     // Finally map to extract the key and include all values
@@ -133,7 +122,7 @@ export function groupBy<
         Object.assign(result, key)
 
         // Apply postMap if provided
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of aggregateEntries) {
           if (aggregate.postMap) {
             result[name] = aggregate.postMap(values[name])
           } else {

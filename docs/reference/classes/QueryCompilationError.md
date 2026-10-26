@@ -3,7 +3,7 @@ id: QueryCompilationError
 title: QueryCompilationError
 ---
 
-Defined in: [packages/db/src/errors.ts:498](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L498)
+Defined in: [packages/db/src/errors.ts:687](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L687)
 
 ## Extends
 
@@ -14,6 +14,7 @@ Defined in: [packages/db/src/errors.ts:498](https://github.com/TanStack/db/blob/
 - [`UnsafeAliasPathError`](UnsafeAliasPathError.md)
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
 - [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
+- [`GroupingOperatorRequiredError`](GroupingOperatorRequiredError.md)
 - [`UnsupportedFnSelectResultError`](UnsupportedFnSelectResultError.md)
 - [`UnsupportedRootScalarSelectError`](UnsupportedRootScalarSelectError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
@@ -27,6 +28,7 @@ Defined in: [packages/db/src/errors.ts:498](https://github.com/TanStack/db/blob/
 - [`JoinCollectionNotFoundError`](JoinCollectionNotFoundError.md)
 - [`MissingAliasInputsError`](MissingAliasInputsError.md)
 - [`SetWindowRequiresOrderByError`](SetWindowRequiresOrderByError.md)
+- [`SetWindowFindOneLimitError`](SetWindowFindOneLimitError.md)
 
 ## Constructors
 
@@ -36,7 +38,7 @@ Defined in: [packages/db/src/errors.ts:498](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L499)
+Defined in: [packages/db/src/errors.ts:688](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L688)
 
 #### Parameters
 

@@ -1,0 +1,29 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 1 with 1 worker on 18 cores with 981MB heap and 64MB offheap memory [pid: 95531] (Mac OS X 26.6.2 aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/pr1179-tla/retirement_oracle.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Naturals.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Sequences.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/FiniteSets.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module retirement_oracle
+Starting... (2026-10-05 22:34:22)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Computed 4 initial states...
+Finished computing initial states: 8 distinct states generated at 2026-10-05 22:34:23.
+Progress(11) at 2026-10-05 22:34:23: 7,892 states generated, 3,496 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 3496 total distinct states at (2026-10-05 22:34:23)
+Finished checking temporal properties in 00s at 2026-10-05 22:34:23
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 8.3E-13
+7892 states generated, 3496 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 11.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 22:34:23)

@@ -58,8 +58,13 @@ class PrefixMap<TValue, TPrefix> extends Map<
 > {
   /**
    * Add a value to the PrefixMap. Returns true if the map becomes empty after the operation.
+   * With `prefixIdentity`, values that share a prefix are the same value.
    */
-  addValue(value: TValue, multiplicity: number): boolean {
+  addValue(
+    value: TValue,
+    multiplicity: number,
+    prefixIdentity = false,
+  ): boolean {
     if (multiplicity === 0) return this.size === 0
 
     const prefix = getPrefix<TValue, TPrefix>(value)
@@ -73,7 +78,11 @@ class PrefixMap<TValue, TPrefix> extends Map<
         throw new Error(`Mismatching prefixes, this should never happen`)
       }
 
-      if (currentValue === value || hash(currentValue) === hash(value)) {
+      if (
+        currentValue === value ||
+        (prefixIdentity && prefix !== NO_PREFIX) ||
+        hash(currentValue) === hash(value)
+      ) {
         // Same value, update multiplicity
         const newMultiplicity = currentMultiplicity + multiplicity
         if (newMultiplicity === 0) {
@@ -150,10 +159,21 @@ export class Index<TKey, TValue, TPrefix = any> {
    *   hash to identify identical values, storing them in a third level value map.
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
-  #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
+  // Sum of multiplicities per key, for presence. Only joins read presence; a
+  // reduce index is built without it.
+  #consolidatedMultiplicity: Map<TKey, number> | undefined
+  /**
+   * When true, the producer guarantees that a value's string or number
+   * prefix determines the value: two values under one key with an equal
+   * prefix are equal, so they merge without a structural hash.
+   */
+  #prefixIdentity: boolean
 
-  constructor() {
+  constructor(options?: { prefixIdentity?: boolean; trackPresence?: boolean }) {
     this.#inner = new Map()
+    if (options?.trackPresence ?? true)
+      this.#consolidatedMultiplicity = new Map()
+    this.#prefixIdentity = options?.prefixIdentity ?? false
   }
 
   /**
@@ -194,6 +214,12 @@ export class Index<TKey, TValue, TPrefix = any> {
     return this.#inner.size
   }
 
+  #presence(): Map<TKey, number> {
+    if (this.#consolidatedMultiplicity === undefined)
+      throw new Error(`This Index does not track presence`)
+    return this.#consolidatedMultiplicity
+  }
+
   /**
    * This method checks if the index has a given key.
    * @param key - The key to check.
@@ -209,7 +235,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns True if the key has non-zero consolidated multiplicity, false otherwise.
    */
   hasPresence(key: TKey): boolean {
-    return (this.#consolidatedMultiplicity.get(key) || 0) !== 0
+    return (this.#presence().get(key) || 0) !== 0
   }
 
   /**
@@ -218,7 +244,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns The consolidated multiplicity for the key.
    */
   getConsolidatedMultiplicity(key: TKey): number {
-    return this.#consolidatedMultiplicity.get(key) || 0
+    return this.#presence().get(key) || 0
   }
 
   /**
@@ -226,7 +252,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterator of keys with non-zero consolidated multiplicity.
    */
   getPresenceKeys(): Iterable<TKey> {
-    return this.#consolidatedMultiplicity.keys()
+    return this.#presence().keys()
   }
 
   /**
@@ -235,7 +261,22 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An array of value tuples [value, multiplicity].
    */
   get(key: TKey): Array<[TValue, number]> {
-    return [...this.getIterator(key)]
+    // Built directly, in getIterator's order: join and reduce call this for
+    // every changed key.
+    const mapOrSingleValue = this.#inner.get(key)
+    if (mapOrSingleValue === undefined) return []
+    if (isSingleValue(mapOrSingleValue)) return [mapOrSingleValue]
+    if (mapOrSingleValue instanceof ValueMap)
+      return [...mapOrSingleValue.values()]
+    const result: Array<[TValue, number]> = []
+    for (const singleValueOrValueMap of mapOrSingleValue.values()) {
+      if (isSingleValue(singleValueOrValueMap))
+        result.push(singleValueOrValueMap)
+      else
+        for (const valueTuple of singleValueOrValueMap.values())
+          result.push(valueTuple)
+    }
+    return result
   }
 
   /**
@@ -303,12 +344,15 @@ export class Index<TKey, TValue, TPrefix = any> {
     if (multiplicity === 0) return
 
     // Update consolidated multiplicity tracking
-    const newConsolidatedMultiplicity =
-      (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
-    if (newConsolidatedMultiplicity === 0) {
-      this.#consolidatedMultiplicity.delete(key)
-    } else {
-      this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+    const presence = this.#consolidatedMultiplicity
+    if (presence) {
+      const newConsolidatedMultiplicity =
+        (presence.get(key) || 0) + multiplicity
+      if (newConsolidatedMultiplicity === 0) {
+        presence.delete(key)
+      } else {
+        presence.set(key, newConsolidatedMultiplicity)
+      }
     }
 
     const mapOrSingleValue = this.#inner.get(key)
@@ -348,7 +392,11 @@ export class Index<TKey, TValue, TPrefix = any> {
       }
     } else {
       // Handle existing PrefixMap
-      const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
+      const isEmpty = mapOrSingleValue.addValue(
+        value,
+        multiplicity,
+        this.#prefixIdentity,
+      )
       if (isEmpty) {
         this.#inner.delete(key)
       }
@@ -384,7 +432,8 @@ export class Index<TKey, TValue, TPrefix = any> {
     // Check if they're the same value by prefix/suffix comparison
     if (
       isSamePrefix(currentPrefix, newPrefix) &&
-      (currentValue === newValue || hash(currentValue) === hash(newValue))
+      ((this.#prefixIdentity && newPrefix !== NO_PREFIX) ||
+        hash(currentValue) === hash(newValue))
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {

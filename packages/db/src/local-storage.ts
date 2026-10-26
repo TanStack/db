@@ -1,11 +1,16 @@
 import { safeRandomUUID } from './utils/uuid'
+import { deepEquals } from './utils'
 import { withCollectionConfigFactory } from './client.js'
+import { collectionOptionsClaim } from './collection-options.js'
+import { registerTransactionCommitWork } from './transaction-commit-work.js'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
+  LocalStorageCollectionError,
   SerializationError,
   StorageKeyRequiredError,
 } from './errors'
+import { codedMessage, codedWarning, devBuild } from './error-message.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -36,6 +41,55 @@ export type StorageEventApi = {
     type: `storage`,
     listener: (event: StorageEvent) => void,
   ) => void
+}
+
+// Browser storage events do not reach other Collections in the writing tab.
+// A sync run owns one listener for writes through the same Storage object/key.
+const sameTabListeners = new WeakMap<StorageApi, Map<string, Set<() => void>>>()
+
+function subscribeToSameTabWrites(
+  storage: StorageApi,
+  key: string,
+  refresh: () => void,
+): () => void {
+  let byKey = sameTabListeners.get(storage)
+  if (!byKey) {
+    byKey = new Map()
+    sameTabListeners.set(storage, byKey)
+  }
+  let listeners = byKey.get(key)
+  if (!listeners) {
+    listeners = new Set()
+    byKey.set(key, listeners)
+  }
+  listeners.add(refresh)
+  return () => {
+    listeners.delete(refresh)
+    if (listeners.size === 0) byKey.delete(key)
+    if (byKey.size === 0) sameTabListeners.delete(storage)
+  }
+}
+
+function publishSameTabWrite(
+  storage: StorageApi,
+  key: string,
+  writer?: { listener: () => void; refresh: () => void },
+): void {
+  for (const refresh of [...(sameTabListeners.get(storage)?.get(key) ?? [])]) {
+    try {
+      if (refresh === writer?.listener) writer.refresh()
+      else refresh()
+    } catch (error) {
+      // A peer's parser or sync listener cannot revoke the writer's durable
+      // write or prevent another peer from observing it.
+      console.warn(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":`
+          : codedWarning(232, { storageKey: key }),
+        error,
+      )
+    }
+  }
 }
 
 /**
@@ -103,8 +157,11 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
   clearStorage: ClearStorageFn
   getStorageSize: GetStorageSizeFn
   /**
-   * Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
-   * This should be called in your transaction's mutationFn to persist local-storage data.
+   * Accepts this Collection's manual mutations in write order and persists
+   * them to localStorage. Call it inside the transaction's mutationFn. The
+   * transaction's persistence receipt waits for this work even if the caller
+   * does not await the returned Promise. Await it when later mutationFn work
+   * depends on the storage write.
    *
    * @param transaction - The transaction containing mutations to accept
    * @example
@@ -115,13 +172,13 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
    *     // Make API call first
    *     await api.save(...)
    *     // Then persist local-storage mutations after success
-   *     localSettings.utils.acceptMutations(transaction)
+   *     await localSettings.utils.acceptMutations(transaction)
    *   }
    * })
    */
   acceptMutations: (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
-  }) => void
+  }) => Promise<void>
 }
 
 /**
@@ -144,6 +201,116 @@ function validateJsonSerializable(
       error instanceof Error ? error.message : String(error),
     )
   }
+}
+
+// JSON writes instances of these types as `{}`, losing their contents.
+const opaqueTypes: Array<abstract new (...args: Array<never>) => object> = [
+  Map,
+  Set,
+  WeakMap,
+  WeakSet,
+  RegExp,
+  Promise,
+  ArrayBuffer,
+  ...(typeof SharedArrayBuffer === `undefined` ? [] : [SharedArrayBuffer]),
+]
+
+/**
+ * Describes a value that JSON.stringify would omit or replace, so a restore
+ * could not return it. A replacer sees each value after `toJSON` and before a
+ * boxed primitive is unwrapped. An `undefined` property reads back as absent,
+ * so it is kept. Other class instances keep only their enumerable data.
+ */
+function describeJsonLoss(
+  holder: object,
+  value: unknown,
+  path: string,
+): string | undefined {
+  if (value === undefined) {
+    return Array.isArray(holder) || path === `row`
+      ? `${path} is undefined`
+      : undefined
+  }
+  if (typeof value === `function` || typeof value === `symbol`) {
+    return `${path} is a ${typeof value}`
+  }
+  const number = value instanceof Number ? value.valueOf() : value
+  if (typeof number === `number` && !Number.isFinite(number)) {
+    return `${path} is ${number}`
+  }
+  if (typeof value !== `object` || value === null) return undefined
+  if (
+    ArrayBuffer.isView(value) ||
+    opaqueTypes.some((type) => value instanceof type)
+  ) {
+    return `${path} is a ${value.constructor.name}`
+  }
+  if (
+    Object.getOwnPropertySymbols(value).some((key) =>
+      Object.prototype.propertyIsEnumerable.call(value, key),
+    )
+  ) {
+    return `${path} has a symbol key`
+  }
+  // JSON writes only an array's elements. A hole is reported as `undefined`.
+  if (Array.isArray(value) && Object.keys(value).length > value.length) {
+    return `${path} has a property other than its elements`
+  }
+  return undefined
+}
+
+/**
+ * Validates that a fresh restore can return an authored row, and returns the
+ * checked JSON so the write stores exactly that text. A custom parser owns its
+ * value domain, so only serialization failures apply to it.
+ */
+function validateStorableRow(
+  parser: Parser,
+  value: unknown,
+  operation: string,
+): string | undefined {
+  if (parser !== JSON) {
+    validateJsonSerializable(parser, value, operation)
+    return undefined
+  }
+  const paths = new Map<object, string>()
+  let loss: string | undefined
+  let json: string | undefined
+  function replacer(this: object, key: string, item: unknown): unknown {
+    // After the first loss, stop descending; the result is discarded.
+    if (loss) return undefined
+    const parent = paths.get(this)
+    const path =
+      parent === undefined
+        ? `row`
+        : Array.isArray(this)
+          ? `${parent}[${key}]`
+          : `${parent}.${key}`
+    loss = describeJsonLoss(this, item, path)
+    if (typeof item === `object` && item !== null) paths.set(item, path)
+    return item
+  }
+  const stringify = (row: unknown) => (json = JSON.stringify(row, replacer))
+  validateJsonSerializable({ parse: JSON.parse, stringify }, value, operation)
+  if (loss) throw new SerializationError(operation, loss)
+  return json
+}
+
+/**
+ * Writes the same text as JSON.stringify of the storage object, but reuses
+ * each written row's checked JSON. Serializing that row again could call a
+ * `toJSON` that now returns something else.
+ */
+function serializeJsonSnapshot(
+  dataMap: Map<string | number, StoredItem<unknown>>,
+  rowJson: Map<string | number, string>,
+): string {
+  const entries = Array.from(dataMap, ([key, { versionKey, data }]) => {
+    const row = rowJson.get(key) ?? JSON.stringify(data)
+    const item = `{"versionKey":${JSON.stringify(versionKey)},"data":${row}}`
+    return `${JSON.stringify(encodeStorageKey(key))}:${item}`
+  })
+  return `{${entries.join(`,`)}}`
 }
 
 /**
@@ -191,6 +358,13 @@ function decodeStorageKey(encodedKey: string): string | number {
   return encodedKey
 }
 
+function sameStorageKey(
+  left: string | number,
+  right: string | number,
+): boolean {
+  return left === right || (Number.isNaN(left) && Number.isNaN(right))
+}
+
 /**
  * Creates an in-memory storage implementation that mimics the StorageApi interface
  * Used as a fallback when localStorage is not available (e.g., server-side rendering)
@@ -233,7 +407,11 @@ function createNoOpStorageEventApi(): StorageEventApi {
  * Creates localStorage collection options for use with a standard Collection
  *
  * This function creates a collection that persists data to localStorage/sessionStorage
- * and synchronizes changes across browser tabs using storage events.
+ * and synchronizes changes across browser tabs using storage events. Active
+ * Collections sharing this Storage object and storage key also synchronize
+ * writes in the same tab, without waiting for a browser event.
+ * Create fresh options for each direct `createCollection()` call. One options
+ * object contains state owned by one Collection and cannot be reused.
  *
  * **Fallback Behavior:**
  *
@@ -245,9 +423,9 @@ function createNoOpStorageEventApi(): StorageEventApi {
  *
  * **Using with Manual Transactions:**
  *
- * For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
- * to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
- * don't participate in the standard mutation handler flow for manual transactions.
+ * For manual transactions, call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * to persist changes made during `tx.mutate()`. The transaction receipt waits for this work even
+ * when the call is not awaited. Await it when later mutationFn work depends on the storage write.
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
@@ -302,7 +480,7 @@ function createNoOpStorageEventApi(): StorageEventApi {
  *     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
  *
  *     // Persist local-storage mutations after API success
- *     localSettings.utils.acceptMutations(transaction)
+ *     await localSettings.utils.acceptMutations(transaction)
  *   }
  * })
  *
@@ -391,6 +569,20 @@ export function localStorageCollectionOptions(
     parser,
     config.getKey,
     lastKnownData,
+    (collection) => {
+      const claim = (
+        collection.config as typeof collection.config & {
+          [collectionOptionsClaim]?: unknown
+        }
+      )[collectionOptionsClaim]
+      if (claim !== optionsClaim) {
+        throw new LocalStorageCollectionError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `LocalStorage sync belongs to its options Collection.`
+            : codedMessage(242),
+        )
+      }
+    },
   )
 
   /**
@@ -399,18 +591,50 @@ export function localStorageCollectionOptions(
    */
   const saveToStorage = (
     dataMap: Map<string | number, StoredItem<any>>,
-  ): void => {
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+    rowJson: Map<string | number, string>,
+  ): {
+    serialized: string
+    persisted: Map<string | number, StoredItem<any>>
+  } => {
     try {
       // Convert Map to object format for storage
       const objectData: Record<string, StoredItem<any>> = {}
       dataMap.forEach((storedItem, key) => {
         objectData[encodeStorageKey(key)] = storedItem
       })
-      const serialized = parser.stringify(objectData)
+      const serialized =
+        parser === JSON
+          ? serializeJsonSnapshot(dataMap, rowJson)
+          : parser.stringify(objectData)
+      // A custom parser may normalize rows while serializing. Validate and
+      // retain the exact snapshot before setItem makes the write durable.
+      const persisted =
+        parser === JSON
+          ? dataMap
+          : readFromStorage(
+              config.storageKey,
+              storage,
+              parser,
+              config.getKey,
+              serialized,
+            )
+      for (const mutation of mutations) {
+        const storedItem = persisted.get(mutation.key)
+        if (mutation.type === `delete` ? storedItem : !storedItem) {
+          throw new InvalidStorageDataFormatError(
+            config.storageKey,
+            encodeStorageKey(mutation.key),
+          )
+        }
+      }
       storage.setItem(config.storageKey, serialized)
+      return { serialized, persisted }
     } catch (error) {
       console.error(
-        `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`
+          : codedMessage(218, { storageKey: config.storageKey }),
         error,
       )
       throw error
@@ -418,10 +642,12 @@ export function localStorageCollectionOptions(
   }
 
   /**
-   * Removes all collection data from the configured storage
+   * Removes the stored snapshot and publishes removal of accepted synced rows.
+   * Pending optimistic mutations can still settle afterward.
    */
   const clearStorage: ClearStorageFn = (): void => {
     storage.removeItem(config.storageKey)
+    publishSameTabWrite(storage, config.storageKey)
   }
 
   /**
@@ -436,78 +662,199 @@ export function localStorageCollectionOptions(
   const persistMutations = (
     mutations: Array<PendingMutation<Record<string, unknown>>>,
   ): void => {
-    const staged = new Map(lastKnownData)
+    // A peer may have written after our last storage event. Start from the
+    // current durable snapshot so this write preserves untouched peer rows.
+    const staged = readFromStorage(
+      config.storageKey,
+      storage,
+      parser,
+      config.getKey,
+    )
+    const rowJson = new Map<string | number, string>()
     for (const mutation of mutations) {
       if (mutation.type === `delete`) staged.delete(mutation.key)
-      else
+      else {
+        if (parser === JSON) {
+          const json =
+            checkedRows.get(mutation) ?? JSON.stringify(mutation.modified)
+          rowJson.set(mutation.key, json)
+          const restored = JSON.parse(json)
+          if (!sameStorageKey(config.getKey(restored), mutation.key)) {
+            throw new InvalidStorageDataFormatError(
+              config.storageKey,
+              encodeStorageKey(mutation.key),
+            )
+          }
+        }
         staged.set(mutation.key, {
           versionKey: generateUuid(),
           data: mutation.modified,
         })
+      }
     }
-    saveToStorage(staged)
-    // Sync and storage-event handling share this Map. Promote only after the
-    // write succeeds, so rejected mutations cannot contaminate a later save.
-    lastKnownData.clear()
-    for (const [key, value] of staged) lastKnownData.set(key, value)
-    sync.confirmOperationsSync(mutations)
+    const { serialized: savedRaw, persisted } = saveToStorage(
+      staged,
+      mutations,
+      rowJson,
+    )
+    try {
+      for (const mutation of mutations) {
+        const storedItem = persisted.get(mutation.key)
+        if (storedItem) lastKnownData.set(mutation.key, storedItem)
+        else lastKnownData.delete(mutation.key)
+      }
+      sync.confirmOperationsSync(mutations, persisted)
+    } finally {
+      // Storage has already accepted this snapshot. A local confirmation
+      // error must not suppress publication to other active Collections.
+      const writerRefresh = sync.manualTrigger
+      publishSameTabWrite(
+        storage,
+        config.storageKey,
+        writerRefresh
+          ? {
+              listener: writerRefresh,
+              refresh: () =>
+                writerRefresh(
+                  storage.getItem(config.storageKey) === savedRaw
+                    ? persisted
+                    : undefined,
+                ),
+            }
+          : undefined,
+      )
+    }
   }
 
-  /*
-   * Create wrapper handlers for direct persistence operations that perform actual storage operations
-   * Wraps the user's onInsert handler to also save changes to localStorage
-   */
-  const wrappedOnInsert = async (params: InsertMutationFnParams<any>) => {
-    // Validate that all values in the transaction can be JSON serialized
-    params.transaction.mutations.forEach((mutation) => {
-      validateJsonSerializable(parser, mutation.modified, `insert`)
+  // Reserve automatic and manual writes in acceptance order. A rejected
+  // handler releases only its storage slot after its predecessor, while its
+  // own transaction receipt can reject immediately.
+  let writeTail: Promise<void> | undefined
+  const reserveWrite = () => {
+    const previous = writeTail
+    let release!: () => void
+    const slot = new Promise<void>((resolve) => {
+      release = resolve
     })
-
-    // Call the user handler BEFORE persisting changes (if provided)
-    let handlerResult: any = {}
-    if (config.onInsert) {
-      handlerResult = (await config.onInsert(params)) ?? {}
+    writeTail = slot
+    const retire = () => {
+      release()
+      if (writeTail === slot) writeTail = undefined
     }
-
-    persistMutations(params.transaction.mutations)
-
-    return handlerResult
+    return { previous, retire }
   }
 
-  const wrappedOnUpdate = async (params: UpdateMutationFnParams<any>) => {
-    // Validate that all values in the transaction can be JSON serialized
-    params.transaction.mutations.forEach((mutation) => {
-      validateJsonSerializable(parser, mutation.modified, `update`)
+  const persistAutomatic = (
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+    handler?: () => unknown | Promise<unknown>,
+  ): Promise<unknown> => {
+    const { previous, retire } = reserveWrite()
+
+    // Native Storage writes synchronously. With no handler or earlier write,
+    // preserve that direct-mutation return boundary.
+    if (!handler && previous === undefined) {
+      try {
+        persistMutations(mutations)
+        return Promise.resolve({})
+      } catch (error) {
+        return Promise.reject(error)
+      } finally {
+        retire()
+      }
+    }
+
+    let result: unknown
+    try {
+      result = handler?.()
+    } catch (error) {
+      if (previous) void previous.then(retire)
+      else retire()
+      return Promise.reject(error)
+    }
+    return Promise.resolve(result).then(
+      async (value) => {
+        await previous
+        try {
+          persistMutations(mutations)
+          return value ?? {}
+        } finally {
+          retire()
+        }
+      },
+      (error: unknown) => {
+        // Rejection belongs to this transaction immediately. Only its empty
+        // storage slot must wait for the earlier accepted write to retire.
+        if (previous) void previous.then(retire)
+        else retire()
+        throw error
+      },
+    )
+  }
+
+  const persistManual = (
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+  ): Promise<void> => {
+    const { previous, retire } = reserveWrite()
+    if (previous === undefined) {
+      try {
+        persistMutations(mutations)
+        return Promise.resolve()
+      } finally {
+        retire()
+      }
+    }
+    return previous.then(() => {
+      try {
+        persistMutations(mutations)
+      } finally {
+        retire()
+      }
     })
-
-    // Call the user handler BEFORE persisting changes (if provided)
-    let handlerResult: any = {}
-    if (config.onUpdate) {
-      handlerResult = (await config.onUpdate(params)) ?? {}
-    }
-
-    persistMutations(params.transaction.mutations)
-
-    return handlerResult
   }
 
-  const wrappedOnDelete = async (params: DeleteMutationFnParams<any>) => {
-    // Call the user handler BEFORE persisting changes (if provided)
-    let handlerResult: any = {}
-    if (config.onDelete) {
-      handlerResult = (await config.onDelete(params)) ?? {}
-    }
-
-    persistMutations(params.transaction.mutations)
-
-    return handlerResult
+  // The checked JSON of each insert or update, stored as is by its write.
+  const checkedRows = new WeakMap<object, string>()
+  const checkRow = (
+    mutation: PendingMutation<Record<string, unknown>>,
+    operation: `insert` | `update`,
+  ) => {
+    const json = validateStorableRow(parser, mutation.modified, operation)
+    if (json !== undefined) checkedRows.set(mutation, json)
   }
+
+  const wrappedOnInsert = (params: InsertMutationFnParams<any>) => {
+    params.transaction.mutations.forEach((mutation) => {
+      checkRow(mutation, `insert`)
+    })
+    return persistAutomatic(
+      params.transaction.mutations,
+      config.onInsert ? () => config.onInsert!(params) : undefined,
+    )
+  }
+
+  const wrappedOnUpdate = (params: UpdateMutationFnParams<any>) => {
+    params.transaction.mutations.forEach((mutation) => {
+      checkRow(mutation, `update`)
+    })
+    return persistAutomatic(
+      params.transaction.mutations,
+      config.onUpdate ? () => config.onUpdate!(params) : undefined,
+    )
+  }
+
+  const wrappedOnDelete = (params: DeleteMutationFnParams<any>) =>
+    persistAutomatic(
+      params.transaction.mutations,
+      config.onDelete ? () => config.onDelete!(params) : undefined,
+    )
 
   // Extract standard Collection config properties
+  // Remove localStorage-specific properties so they don't leak into the CollectionConfig
   const {
     storageKey: _storageKey,
     storage: _storage,
     storageEventApi: _storageEventApi,
+    parser: _parser,
     onInsert: _onInsert,
     onUpdate: _onUpdate,
     onDelete: _onDelete,
@@ -519,24 +866,22 @@ export function localStorageCollectionOptions(
   const collectionId = id ?? `local-collection:${config.storageKey}`
 
   /**
-   * Accepts mutations from a transaction that belong to this collection and persists them to storage
+   * Accepts this Collection's manual mutations in write order and resolves
+   * after their storage write. A mutationFn receipt tracks this work even
+   * when the caller does not await the returned Promise.
    */
-  const acceptMutations = (transaction: {
-    mutations: Array<PendingMutation<Record<string, unknown>>>
-  }) => {
-    // Filter mutations that belong to this collection
-    // Use collection ID for filtering if collection reference isn't available yet
-    const collectionMutations = transaction.mutations.filter((m) => {
-      // Try to match by collection reference first
-      if (sync.collection && m.collection === sync.collection) {
-        return true
-      }
-      // Fall back to matching by collection ID
-      return m.collection.id === collectionId
-    })
+  const persistAcceptedMutations = async (
+    transaction: {
+      mutations: Array<PendingMutation<Record<string, unknown>>>
+    },
+    owner: PendingMutation<Record<string, unknown>>[`collection`] | undefined,
+  ): Promise<void> => {
+    const collectionMutations = transaction.mutations.filter(
+      (mutation) => mutation.collection === owner,
+    )
 
     if (collectionMutations.length === 0) {
-      return
+      return Promise.resolve()
     }
 
     // Validate all mutations can be serialized before modifying storage
@@ -544,7 +889,7 @@ export function localStorageCollectionOptions(
       switch (mutation.type) {
         case `insert`:
         case `update`:
-          validateJsonSerializable(parser, mutation.modified, mutation.type)
+          checkRow(mutation, mutation.type)
           break
         case `delete`:
           validateJsonSerializable(parser, mutation.original, mutation.type)
@@ -552,7 +897,51 @@ export function localStorageCollectionOptions(
       }
     }
 
-    persistMutations(collectionMutations)
+    await persistManual(collectionMutations)
+  }
+
+  const materializedAcceptors = new WeakSet<
+    LocalStorageCollectionUtils[`acceptMutations`]
+  >()
+  const acceptMutations = (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }): Promise<void> => {
+    // A DbClient materializes module-level options into a fresh Collection.
+    // Route acceptance to that Collection's utility so its automatic and
+    // manual writes reserve slots in the same queue.
+    const candidates = new Set(
+      transaction.mutations
+        .filter((mutation) => mutation.collection.id === collectionId)
+        .map((mutation) => mutation.collection),
+    )
+    const owned = [...candidates].filter((candidate) => {
+      const candidateAccept = (candidate.utils as LocalStorageCollectionUtils)
+        .acceptMutations
+      return (
+        candidateAccept === acceptMutations ||
+        materializedAcceptors.has(candidateAccept)
+      )
+    })
+    if (owned.length > 1 || (candidates.size > 0 && owned.length === 0)) {
+      const work = Promise.reject(
+        new LocalStorageCollectionError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `LocalStorage manual acceptance belongs to a different Collection.`
+            : codedMessage(231),
+        ),
+      )
+      registerTransactionCommitWork(transaction, work)
+      return work
+    }
+    const owner = owned[0]
+    const ownerAccept = owner
+      ? (owner.utils as LocalStorageCollectionUtils).acceptMutations
+      : undefined
+    if (ownerAccept && ownerAccept !== acceptMutations)
+      return ownerAccept(transaction)
+    const work = persistAcceptedMutations(transaction, owner)
+    registerTransactionCommitWork(transaction, work)
+    return work
   }
 
   const options = {
@@ -569,70 +958,88 @@ export function localStorageCollectionOptions(
     },
   }
 
-  return withCollectionConfigFactory(
-    options,
-    () =>
-      localStorageCollectionOptions({
-        ...config,
-        id: collectionId,
-      }) as unknown as typeof options,
-  )
+  let claimed = false
+  function optionsClaim() {
+    if (claimed)
+      throw new LocalStorageCollectionError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
+          : codedMessage(230),
+      )
+    claimed = true
+    return () => {
+      sync.abortFailedConstruction()
+      claimed = false
+    }
+  }
+  Object.defineProperty(options, collectionOptionsClaim, {
+    enumerable: true,
+    value: optionsClaim,
+  })
+
+  return withCollectionConfigFactory(options, () => {
+    const materialized = localStorageCollectionOptions({
+      ...config,
+      id: collectionId,
+    }) as unknown as typeof options
+    materializedAcceptors.add(materialized.utils.acceptMutations)
+    return materialized
+  })
 }
 
 /**
- * Load data from storage and return as a Map
+ * Read data from storage without treating a failed read as an empty snapshot.
  * @param parser - The parser to use for deserializing the data
  * @param storageKey - The key used to store data in the storage API
  * @param storage - The storage API to load from (localStorage, sessionStorage, etc.)
- * @returns Map of stored items with version tracking, or empty Map if loading fails
+ * @returns Map of stored items with version tracking
  */
-function loadFromStorage<T extends object>(
+function readFromStorage<T extends object>(
   storageKey: string,
   storage: StorageApi,
   parser: Parser,
+  getKey: (item: T) => string | number,
+  knownRaw?: string,
 ): Map<string | number, StoredItem<T>> {
-  try {
-    const rawData = storage.getItem(storageKey)
-    if (!rawData) {
-      return new Map()
-    }
-
-    const parsed = parser.parse(rawData)
-    const dataMap = new Map<string | number, StoredItem<T>>()
-
-    // Handle object format where keys map to StoredItem values
-    if (
-      typeof parsed === `object` &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-    ) {
-      Object.entries(parsed).forEach(([encodedKey, value]) => {
-        // Runtime check to ensure the value has the expected StoredItem structure
-        if (
-          value &&
-          typeof value === `object` &&
-          `versionKey` in value &&
-          `data` in value
-        ) {
-          const storedItem = value as StoredItem<T>
-          const decodedKey = decodeStorageKey(encodedKey)
-          dataMap.set(decodedKey, storedItem)
-        } else {
-          throw new InvalidStorageDataFormatError(storageKey, encodedKey)
-        }
-      })
-    } else {
-      throw new InvalidStorageObjectFormatError(storageKey)
-    }
-
-    return dataMap
-  } catch (error) {
-    console.warn(
-      `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
-      error,
-    )
+  const rawData = knownRaw ?? storage.getItem(storageKey)
+  if (rawData === null) {
     return new Map()
   }
+
+  const parsed = parser.parse(rawData)
+  const dataMap = new Map<string | number, StoredItem<T>>()
+
+  // Handle object format where keys map to StoredItem values
+  if (typeof parsed === `object` && parsed !== null && !Array.isArray(parsed)) {
+    Object.entries(parsed).forEach(([encodedKey, value]) => {
+      // Runtime check to ensure the value has the expected StoredItem structure
+      if (
+        value &&
+        typeof value === `object` &&
+        `versionKey` in value &&
+        typeof value.versionKey === `string` &&
+        `data` in value &&
+        value.data !== null &&
+        typeof value.data === `object`
+      ) {
+        const storedItem = value as StoredItem<T>
+        const decodedKey = decodeStorageKey(encodedKey)
+        if (
+          !sameStorageKey(getKey(storedItem.data), decodedKey) ||
+          dataMap.has(decodedKey)
+        ) {
+          throw new InvalidStorageDataFormatError(storageKey, encodedKey)
+        }
+        dataMap.set(decodedKey, storedItem)
+      } else {
+        throw new InvalidStorageDataFormatError(storageKey, encodedKey)
+      }
+    })
+  } else {
+    throw new InvalidStorageObjectFormatError(storageKey)
+  }
+
+  return dataMap
 }
 
 /**
@@ -650,15 +1057,23 @@ function createLocalStorageSync<T extends object>(
   storage: StorageApi,
   storageEventApi: StorageEventApi,
   parser: Parser,
-  _getKey: (item: T) => string | number,
+  getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>,
+  assertOwner: (
+    collection: Parameters<SyncConfig<T>[`sync`]>[0][`collection`],
+  ) => void,
 ): SyncConfig<T> & {
-  manualTrigger?: () => void
+  manualTrigger?: (knownSnapshot?: Map<string | number, StoredItem<T>>) => void
   collection: any
-  confirmOperationsSync: (mutations: Array<any>) => void
+  abortFailedConstruction: () => void
+  confirmOperationsSync: (
+    mutations: Array<any>,
+    persisted: Map<string | number, StoredItem<T>>,
+  ) => void
 } {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
   let collection: any = null
+  let activeCleanup: (() => void) | null = null
 
   /**
    * Compare two Maps to find differences using version keys
@@ -669,6 +1084,7 @@ function createLocalStorageSync<T extends object>(
   const findChanges = (
     oldData: Map<string | number, StoredItem<T>>,
     newData: Map<string | number, StoredItem<T>>,
+    compareContent: boolean,
   ): Array<{
     type: `insert` | `update` | `delete`
     key: string | number
@@ -685,7 +1101,17 @@ function createLocalStorageSync<T extends object>(
       const newStoredItem = newData.get(key)
       if (!newStoredItem) {
         changes.push({ type: `delete`, key, value: oldStoredItem.data })
-      } else if (oldStoredItem.versionKey !== newStoredItem.versionKey) {
+      } else if (
+        oldStoredItem.versionKey !== newStoredItem.versionKey ||
+        (compareContent &&
+          !deepEquals(oldStoredItem.data, newStoredItem.data) &&
+          // A default-JSON writer may retain a native Date while the stored
+          // row contains its ISO string. A peer's unrelated write must not
+          // publish that representation change as an update.
+          (parser !== JSON ||
+            JSON.stringify(oldStoredItem.data) !==
+              JSON.stringify(newStoredItem.data)))
+      ) {
         changes.push({ type: `update`, key, value: newStoredItem.data })
       }
     })
@@ -704,66 +1130,89 @@ function createLocalStorageSync<T extends object>(
    * Process storage changes and update collection
    * Loads new data from storage, compares with last known state, and applies changes
    */
-  const processStorageChanges = () => {
+  const processStorageChanges = (
+    knownSnapshot?: Map<string | number, StoredItem<T>>,
+  ) => {
     if (!syncParams) return
 
     const { begin, write, commit } = syncParams
 
     // Load the new data
-    const newData = loadFromStorage<T>(storageKey, storage, parser)
+    let newData: Map<string | number, StoredItem<T>>
+    try {
+      newData =
+        knownSnapshot ?? readFromStorage<T>(storageKey, storage, parser, getKey)
+    } catch (error) {
+      console.warn(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`
+          : codedWarning(219, { storageKey }),
+        error,
+      )
+      return
+    }
 
     // Find the specific changes
-    const changes = findChanges(lastKnownData, newData)
+    // The default-JSON writer deliberately retains native authored values.
+    // Peers and storage events must compare content even under the same token.
+    const changes = findChanges(
+      lastKnownData,
+      newData,
+      knownSnapshot === undefined || parser !== JSON,
+    )
 
     if (changes.length > 0) {
+      // Reject an invalid snapshot before opening a sync transaction. This
+      // leaves the previous mirror available for a later valid refresh.
+      changes.forEach(({ type, value }) => {
+        if (value) validateJsonSerializable(parser, value, type)
+      })
       begin()
       changes.forEach(({ type, value }) => {
         if (value) {
-          validateJsonSerializable(parser, value, type)
           write({ type, value })
         }
       })
-      commit()
-
-      // Update lastKnownData
+      // A commit can synchronously publish to a subscriber that writes again.
+      // The nested refresh must compare against this snapshot, not its parent.
       lastKnownData.clear()
       newData.forEach((storedItem, key) => {
         lastKnownData.set(key, storedItem)
       })
+      commit()
     }
   }
 
   const syncConfig: SyncConfig<T> & {
-    manualTrigger?: () => void
-    collection: any
+    manualTrigger?: (
+      knownSnapshot?: Map<string | number, StoredItem<T>>,
+    ) => void
   } = {
     rowUpdateMode: `full`,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      assertOwner(params.collection)
       const { begin, write, commit, markReady } = params
 
-      // Store sync params and collection for later use
+      // A failed restore cannot establish an empty authoritative snapshot.
+      // Read before retaining this sync run's callbacks so startup failure
+      // leaves no stale adapter state.
+      const initialData = readFromStorage<T>(
+        storageKey,
+        storage,
+        parser,
+        getKey,
+      )
+      initialData.forEach((storedItem) => {
+        validateJsonSerializable(parser, storedItem.data, `load`)
+      })
       syncParams = params
       collection = params.collection
-
-      // Initial load
-      const initialData = loadFromStorage<T>(storageKey, storage, parser)
-      if (initialData.size > 0) {
-        begin()
-        initialData.forEach((storedItem) => {
-          validateJsonSerializable(parser, storedItem.data, `load`)
-          write({ type: `insert`, value: storedItem.data })
-        })
-        commit()
-      }
-
-      // Update lastKnownData
+      // Establish the mirror and same-tab listener before restore publishes
+      // callbacks, which can synchronously write through an already-ready peer.
       lastKnownData.clear()
       initialData.forEach((storedItem, key) => {
         lastKnownData.set(key, storedItem)
       })
-
-      // Mark collection as ready after initial load
-      markReady()
 
       // Listen for storage events from other tabs
       const handleStorageEvent = (event: StorageEvent) => {
@@ -775,10 +1224,45 @@ function createLocalStorageSync<T extends object>(
         processStorageChanges()
       }
 
-      // Add storage event listener for cross-tab sync
-      storageEventApi.addEventListener(`storage`, handleStorageEvent)
-
-      // Note: Cleanup is handled automatically by the collection when it's disposed
+      const unsubscribeSameTab = subscribeToSameTabWrites(
+        storage,
+        storageKey,
+        processStorageChanges,
+      )
+      try {
+        if (initialData.size > 0) {
+          begin()
+          initialData.forEach((storedItem) => {
+            write({ type: `insert`, value: storedItem.data })
+          })
+          commit()
+        }
+        // Mark collection as ready after initial load, then listen for
+        // browser events from other tabs.
+        markReady()
+        storageEventApi.addEventListener(`storage`, handleStorageEvent)
+      } catch (error) {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent)
+        unsubscribeSameTab()
+        if (syncParams === params) {
+          syncParams = null
+          collection = null
+        }
+        throw error
+      }
+      const cleanup = () => {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent)
+        unsubscribeSameTab()
+        if (syncParams === params) {
+          syncParams = null
+          collection = null
+        }
+        if (activeCleanup === cleanup) activeCleanup = null
+      }
+      activeCleanup = cleanup
+      return {
+        cleanup,
+      }
     },
 
     /**
@@ -795,9 +1279,6 @@ function createLocalStorageSync<T extends object>(
 
     // Manual trigger function for local updates
     manualTrigger: processStorageChanges,
-
-    // Collection instance reference
-    collection,
   }
 
   /**
@@ -805,7 +1286,10 @@ function createLocalStorageSync<T extends object>(
    * This moves mutations from optimistic to synced state
    * @param mutations - Array of mutation objects to confirm
    */
-  const confirmOperationsSync = (mutations: Array<any>) => {
+  const confirmOperationsSync = (
+    mutations: Array<any>,
+    persisted: Map<string | number, StoredItem<T>>,
+  ) => {
     if (!syncParams) {
       // Sync not initialized yet, mutations will be handled on next sync
       return
@@ -817,9 +1301,14 @@ function createLocalStorageSync<T extends object>(
     begin()
     mutations.forEach((mutation: any) => {
       write({
-        type: mutation.type,
+        // A peer may have inserted the same key while this local mutation
+        // was pending. Full-row update confirms the accepted stored value in
+        // either case without a duplicate insert.
+        type: mutation.type === `delete` ? `delete` : `update`,
         value:
-          mutation.type === `delete` ? mutation.original : mutation.modified,
+          mutation.type === `delete`
+            ? mutation.original
+            : persisted.get(mutation.key)!.data,
       })
     })
     commit()
@@ -827,6 +1316,10 @@ function createLocalStorageSync<T extends object>(
 
   return {
     ...syncConfig,
+    abortFailedConstruction: () => activeCleanup?.(),
+    get collection() {
+      return collection
+    },
     confirmOperationsSync,
   }
 }

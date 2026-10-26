@@ -7,7 +7,7 @@ title: walkExpression
 function walkExpression(expr, visitor): void;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:152](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L152)
+Defined in: [packages/db/src/query/expression-helpers.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L153)
 
 Generic expression tree walker that visits each node in the expression.
 Useful for implementing custom parsing logic.

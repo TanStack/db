@@ -1,0 +1,62 @@
+[
+  {
+    "fault": "explicitClose",
+    "selector": "confirms native-committed update",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "lateRead",
+    "selector": "rejects late replacement publication after explicit",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "truncateReady",
+    "selector": "confirms native-committed import",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "lateReady",
+    "selector": "does not admit a resolved handler after explicit",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "admitClosed",
+    "selector": "does not admit a resolved handler after explicit",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "notifyBeforeClose",
+    "selector": "closes native admission before exposing explicit",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "dropAccepted",
+    "selector": "publishes accepted update before caller settlement after explicit",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "rejectCommitted",
+    "selector": "first.*insert.*second.*insert.*explicit.*false",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "prematureSuccess",
+    "selector": "first.*insert.*second.*insert.*explicit.*false",
+    "exit": 1,
+    "assertionKill": true
+  },
+  {
+    "fault": "obsoleteProtocol",
+    "selector": "ignores the retired database-deleted message protocol",
+    "exit": 1,
+    "assertionKill": true
+  }
+]

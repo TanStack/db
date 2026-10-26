@@ -11,12 +11,18 @@ import {
   isResidualWhere,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { findIndexForField } from '../../utils/index-optimization.js'
+import {
+  findIndexForField,
+  supportsOrderedIndexStructure,
+  supportsOrderedRange,
+} from '../../utils/index-optimization.js'
+import { hasVirtualPropPath } from '../../virtual-props.js'
+import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
-import { replaceAggregatesByRefs } from './group-by.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
+import type { Grouping } from './grouping.js'
 import type { CompiledSingleRowExpression } from './evaluators.js'
 import type { OrderBy, OrderByClause, QueryIR, Select } from '../ir.js'
 import type {
@@ -24,7 +30,11 @@ import type {
   NamespacedAndKeyedStream,
   NamespacedRow,
 } from '../../types.js'
-import type { IStreamBuilder, KeyValue } from '@tanstack/db-ivm'
+import type {
+  IStreamBuilder,
+  KeyValue,
+  SetSizeCallback,
+} from '@tanstack/db-ivm'
 import type { IndexReader } from '../../indexes/base-index.js'
 import type { Collection } from '../../collection/index.js'
 
@@ -42,7 +52,11 @@ export type OrderByOptimizationInfo = {
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexReader<string | number>
-  dataNeeded?: () => number
+  /**
+   * Rows the window still needs. Given the loader's settled boundary, a window
+   * row after it does not count: the graph may lack an earlier eligible row.
+   */
+  dataNeeded?: (boundary?: Record<string, unknown>) => number
   /** Reads the source loader's synchronous request guard, when installed. */
   isRequesting?: () => boolean
   /**
@@ -50,8 +64,54 @@ export type OrderByOptimizationInfo = {
    * plan, including when a custom local collation defines another order.
    */
   requiresFullSource: boolean
+  /** Whether the ordered source's installed rows are the whole source. */
+  sourceHoldsAllRows: boolean
   /** Source whose lazy demand must settle before a joined-filter page. */
   joinedFilterSourceId?: string
+}
+
+function warnOrderIndexFallback(
+  collection: Collection,
+  path: Array<string>,
+  options: CompareOptions,
+  index?: IndexReader<string | number>,
+): void {
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
+    const field = path.join(`.`)
+    const prefix = `[TanStack DB]${collection.id ? ` [${collection.id}]` : ``} orderBy with limit`
+    if (options.stringSort === `custom`) {
+      console.warn(
+        `${prefix} uses a custom string comparator on "${field}". On-demand sources require a filtered full source request for local sorting. An index with the same compare function reference can sort installed rows, but cannot make provider pagination safe.`,
+      )
+      return
+    }
+    if (hasVirtualPropPath(path)) {
+      console.warn(
+        `${prefix} orders virtual field "${field}"; Collection indexes cannot cover virtual fields, so creating one will not enable ordered lazy loading.`,
+      )
+      return
+    }
+    if (index) return
+
+    const fieldIndexes = [...collection.indexes.values()].filter((candidate) =>
+      candidate.matchesField(path),
+    )
+    let detail: string
+    if (fieldIndexes.length === 0) {
+      detail = `requires an index on "${field}" for efficient lazy loading. Consider collection.createIndex((row) => row.${field}) or autoIndex: 'eager' with a defaultIndexType.`
+    } else if (
+      fieldIndexes.every(
+        (candidate) => !candidate.matchesCompareOptions(options),
+      )
+    ) {
+      detail = `found an index on "${field}", but none uses the query's compareOptions (nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}"${options.stringSort === `locale` ? `, including the same locale and localeOptions` : ``}). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.${field}, { indexType: BasicIndex, options: { compareOptions: { direction: "asc", nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}" } } }). Match the query's nulls and string collation, including any locale and localeOptions. The index direction may differ.`
+    } else {
+      detail = `found an index on "${field}" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.`
+    }
+    console.warn(
+      `${prefix} ${detail} Local reads may scan or sort installed rows; an underfilled on-demand window may require a full-source request.`,
+    )
+  }
 }
 
 /**
@@ -64,6 +124,8 @@ export function processOrderBy(
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
   selectClause: Select,
+  // The query's grouping compiler, if it has one, rewrites aggregates.
+  grouping: Grouping | undefined,
   collection: Collection,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
@@ -71,47 +133,34 @@ export function processOrderBy(
   offset?: number,
   groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
-  // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => {
-    const clauseWithoutAggregates = replaceAggregatesByRefs(
-      clause.expression,
-      selectClause,
-      `$selected`,
-    )
+    // Aggregate references read the SELECT result under $selected. A query
+    // without the grouping compiler has no aggregates.
+    const clauseWithoutAggregates = grouping
+      ? grouping.replaceAggregatesByRefs(
+          clause.expression,
+          selectClause,
+          `$selected`,
+        )
+      : clause.expression
 
     return {
       compiledExpression: compileExpression(clauseWithoutAggregates),
       compareOptions: buildCompareOptions(clause, collection),
     }
   })
-  // Create a value extractor function for the orderBy operator
+  // The row holds source aliases and any projected aggregate under $selected.
   const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
-    // The namespaced row contains:
-    // 1. Table aliases as top-level properties (e.g., row["tableName"])
-    // 2. SELECT results in $selected (e.g., row.$selected["aggregateAlias"])
-    // The replaceAggregatesByRefs function has already transformed:
-    // - Aggregate expressions that match SELECT aggregates to use the $selected namespace
-    // - $selected ref expressions are passed through unchanged (already using the correct namespace)
-    const orderByContext = row
-
     if (orderByClause.length > 1) {
-      // For multiple orderBy columns, create a composite key
-      return compiledOrderBy.map((compiled) =>
-        compiled.compiledExpression(orderByContext),
-      )
-    } else if (orderByClause.length === 1) {
-      // For a single orderBy column, use the value directly
-      const compiled = compiledOrderBy[0]!
-      return compiled.compiledExpression(orderByContext)
+      return compiledOrderBy.map((compiled) => compiled.compiledExpression(row))
     }
-
-    // Default case - no ordering
-    return null
+    return orderByClause.length === 1
+      ? compiledOrderBy[0]!.compiledExpression(row)
+      : null
   }
 
-  // Create a multi-property comparator that respects the order and direction of each property
+  // Compare order terms in declaration order, stopping at the first difference.
   const compare = (a: unknown, b: unknown) => {
-    // If we're comparing arrays (multiple properties), compare each property in order
     if (orderByClause.length > 1) {
       const arrayA = a as Array<unknown>
       const arrayB = b as Array<unknown>
@@ -126,7 +175,6 @@ export function processOrderBy(
       return arrayA.length - arrayB.length
     }
 
-    // Single property comparison
     if (orderByClause.length === 1) {
       const clause = compiledOrderBy[0]!
       const compareFn = makeComparator(clause.compareOptions)
@@ -136,7 +184,7 @@ export function processOrderBy(
     return defaultComparator(a, b)
   }
 
-  let setSizeCallback: ((getSize: () => number) => void) | undefined
+  let setSizeCallback: SetSizeCallback | undefined
 
   let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
 
@@ -178,19 +226,12 @@ export function processOrderBy(
       const compareOpts = buildCompareOptions(firstClause, collection)
 
       if (fieldName) {
-        // Use a single-column comparator for the index, not the
-        // multi-column `compare` function. The multi-column comparator
-        // expects array values [col1, col2, ...] but the index stores
-        // individual field values. Passing `compare` here causes the
-        // BTree to treat all single values as equal (since number[0]
-        // === undefined for both sides of the comparison).
-        const firstColumnCompareFn = makeComparator(compareOpts)
         ensureIndexForField(
           fieldName,
           followRefResult.path,
           followRefCollection,
           compareOpts,
-          firstColumnCompareFn,
+          supportsOrderedIndexStructure,
         )
       }
 
@@ -198,23 +239,15 @@ export function processOrderBy(
         followRefCollection,
         followRefResult.path,
         compareOpts,
+        supportsOrderedRange,
       )
 
-      // Only use the index if it supports range queries
-      if (!index?.supports(`gt`)) {
-        index = undefined
-      }
-
-      if (!index) {
-        const collectionId = followRefCollection.id
-        const fieldPath = followRefResult.path.join(`.`)
-        console.warn(
-          `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
-            `Falling back to loading all data. ` +
-            `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-            `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
-        )
-      }
+      warnOrderIndexFallback(
+        followRefCollection,
+        followRefResult.path,
+        compareOpts,
+        index,
+      )
 
       orderByAlias =
         firstOrderByExpression.path.length > 1
@@ -272,6 +305,8 @@ export function processOrderBy(
         index,
         orderBy: sourceOrderBy,
         joinedFilterSourceId,
+        sourceHoldsAllRows:
+          followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,
@@ -279,10 +314,11 @@ export function processOrderBy(
           !sourceOrderIsDirect ||
           rawQuery.from.type !== `collectionRef` ||
           rawQuery.from.sourceId !== orderBySourceId ||
-          (rawQuery.join?.some(
-            ({ type }) => type === `inner` || type === `right`,
-          ) ??
-            false) ||
+          // Only a LEFT join keeps every root row of a bounded prefix and
+          // adds no row the prefix cannot place: inner and cross joins drop
+          // root rows, and right, full and outer joins add joined rows whose
+          // root match may sit past the prefix.
+          (rawQuery.join?.some(({ type }) => type !== `left`) ?? false) ||
           (rawQuery.where?.some(isResidualWhere) ?? false) ||
           (hasCrossAliasWhere && joinedFilterSourceId === undefined) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||
@@ -298,17 +334,25 @@ export function processOrderBy(
       // sufficient identities here.
       optimizableOrderByCollections[orderBySourceId] = info
 
-      // Set up lazy loading callback to track how much more data is needed
-      // This is used by loadMoreIfNeeded to determine if more data should be loaded
-      // Only enable when an index exists — without an index, lazy loading can't work
-      // and all data is loaded eagerly via requestSnapshot instead.
-      if (index) {
-        setSizeCallback = (getSize: () => number) => {
-          optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] =
-            () => {
-              const size = getSize()
-              return Math.max(0, info.limit - size)
-            }
+      // loadMoreIfNeeded reads how many rows the window needs. Without an
+      // index, only an on-demand joined filter can leave the window short.
+      const needsCount =
+        info.joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
+      if (index || needsCount) {
+        setSizeCallback = (getSize) => {
+          info.dataNeeded = (boundary) => {
+            // Window rows at or before the boundary are a leading run of
+            // the window order.
+            const size = getSize(
+              boundary &&
+                ((row) =>
+                  compareSourceRows(
+                    (row as NamespacedRow)[orderByAlias],
+                    boundary,
+                  ) <= 0),
+            )
+            return Math.max(0, info.limit - size)
+          }
         }
       }
     }

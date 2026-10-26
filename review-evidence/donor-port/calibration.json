@@ -1,0 +1,26 @@
+{
+  "baselineSourceSha256": "829215a68e46e81f165b274795e93523ffd0ea2ae0eec2bd51754cd9f387e75b",
+  "results": [
+    {
+      "mutant": "name-prefix",
+      "outcome": "assertion failure",
+      "exitCode": 1,
+      "test": "tests/compatibility-oracle.test.ts",
+      "selector": "preserves store isolation under legal name"
+    },
+    {
+      "mutant": "premature-readiness",
+      "outcome": "assertion failure",
+      "exitCode": 1,
+      "test": "tests/compatibility-oracle.test.ts",
+      "selector": "concurrent first opens"
+    },
+    {
+      "mutant": "json-values",
+      "outcome": "assertion failure",
+      "exitCode": 1,
+      "test": "tests/persistence-values-oracle.test.ts",
+      "selector": "preserves date"
+    }
+  ]
+}

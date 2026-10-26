@@ -11,24 +11,26 @@
  * Grammar: direct, arithmetic-wrapped, conditional-branch, and
  * conditional-default global aggregates. The nested query crosses each shape
  * with an accepting and rejecting outer predicate; a grouped query is the
- * control. The model's missing `k` field represents the current global
- * aggregate projection, which omits fields that are not group keys. The
- * rejecting predicate distinguishes filtering after aggregation from dropping
- * the predicate altogether.
+ * control. A global aggregate cannot select a source field that is not
+ * aggregated (that throws), so its `k` field is `max(b.k)`, which is 2 here.
+ * A predicate on `k` pushed to source rows would filter them and change the
+ * total. The rejecting predicate distinguishes filtering after aggregation
+ * from dropping the predicate altogether.
  * An inner join has a separate boundary: the global aggregate joins when its
  * computed total matches an anchor. A materialized aggregate Collection
  * supplies a second formulation for matching and nonmatching controls.
  * The nested matching cases also reject an all-empty QueryRef implementation.
  */
 import { describe, expect, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
   add,
   caseWhen,
   eq,
   isUndefined,
+  max,
   or,
   sum,
 } from '../../src/query/builder/functions.js'
@@ -102,7 +104,7 @@ describe('optimizer aggregate semantics', () => {
         startSync: true,
         query: (q) => {
           const summary = q.from({ b: source }).select(({ b }) => ({
-            k: b.k,
+            k: max(b.k),
             total: sum(b.v),
           }))
           const joined = q
@@ -110,7 +112,7 @@ describe('optimizer aggregate semantics', () => {
             .innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
           if (scenario.filter === `accept`) {
             return joined
-              .where(({ s }) => isUndefined(s.k))
+              .where(({ s }) => eq(s.k, 2))
               .select(({ s }) => ({ total: s.total }))
           }
           if (scenario.filter === `reject`) {
@@ -178,7 +180,7 @@ describe('optimizer aggregate semantics', () => {
         startSync: true,
         query: (q) =>
           q.from({ b: source }).select(({ b }) => ({
-            k: b.k,
+            k: max(b.k),
             total:
               shape === `direct`
                 ? sum(b.v)
@@ -189,7 +191,9 @@ describe('optimizer aggregate semantics', () => {
                     : caseWhen(eq(1, 2), 0, sum(b.v)),
           })),
       })
-      expect(aggregate.toArray.map(stripVirtualProps)).toEqual(expected)
+      expect(aggregate.toArray.map(stripVirtualProps)).toEqual(
+        expected.map((row) => ({ k: 2, ...row })),
+      )
 
       const materialized = createLiveQueryCollection({
         startSync: true,
@@ -197,7 +201,7 @@ describe('optimizer aggregate semantics', () => {
           q
             .from({ s: aggregate })
             .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-            .where(({ s }) => isUndefined(s.k))
+            .where(({ s }) => eq(s.k, 2))
             .select(({ s }) => ({ total: s.total })),
       })
       expect(materialized.toArray.map(stripVirtualProps)).toEqual(expected)
@@ -207,7 +211,7 @@ describe('optimizer aggregate semantics', () => {
           startSync: true,
           query: (q) => {
             const summary = q.from({ b: source }).select(({ b }) => ({
-              k: b.k,
+              k: max(b.k),
               total:
                 shape === `direct`
                   ? sum(b.v)
@@ -221,7 +225,7 @@ describe('optimizer aggregate semantics', () => {
               .from({ s: summary })
               .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
               .where(({ s }) =>
-                outerPredicate === `accept` ? isUndefined(s.k) : eq(s.k, 1),
+                outerPredicate === `accept` ? eq(s.k, 2) : eq(s.k, 1),
               )
               .select(({ s }) => ({ total: s.total }))
           },
@@ -232,6 +236,60 @@ describe('optimizer aggregate semantics', () => {
       }
     })
   }
+
+  // A literal field of an aggregate subquery has one value for every group,
+  // but no source row holds it. Under a join the optimizer pushes outer
+  // predicates toward sources; one on a literal field must stay outside the
+  // aggregate subquery, where it would remove every source row.
+  test('literal-field filtering keeps each aggregate whole under a left join', () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `optimizer-literal-source`,
+        getKey: (row) => row.id,
+        initialData: rows,
+      }),
+    )
+    const anchor = createCollection(
+      mockSyncCollectionOptions({
+        id: `optimizer-literal-anchor`,
+        getKey: (row: { id: number; target: number }) => row.id,
+        initialData: [{ id: 1, target: 1 }],
+      }),
+    )
+    const total = (filter: (row: Row) => boolean) =>
+      rows.filter(filter).reduce((n, row) => n + row.v, 0)
+    const keys = [...new Set(rows.map((row) => row.k))].sort((a, b) =>
+      a < b ? -1 : 1,
+    )
+    for (const grouped of [false, true]) {
+      const query = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const base = q.from({ b: source })
+          const summary = grouped
+            ? base
+                .groupBy(({ b }) => b.k)
+                .select(({ b }) => ({ k: b.k, tag: `x`, total: sum(b.v) }))
+            : base.select(({ b }) => ({ k: 1, tag: `x`, total: sum(b.v) }))
+          return q
+            .from({ s: summary })
+            .leftJoin({ a: anchor }, ({ s, a }) => eq(s.k, a.target))
+            .where(({ s }) => eq(s.tag, `x`))
+            .select(({ s }) => ({ k: s.k, total: s.total }))
+        },
+      })
+      expect(
+        query.toArray
+          .map(stripVirtualProps)
+          .sort((a: any, b: any) => (a.k < b.k ? -1 : 1)),
+        grouped ? `grouped` : `single group`,
+      ).toEqual(
+        grouped
+          ? keys.map((k) => ({ k, total: total((row) => row.k === k) }))
+          : [{ k: 1, total: total(() => true) }],
+      )
+    }
+  })
 
   test('group-key filtering keeps each grouped aggregate under a left join', () => {
     const source = createCollection(
@@ -443,8 +501,10 @@ describe(`optimizer residual convergence`, () => {
                 {
                   type: join.type,
                   from: new CollectionRef(collection, `member`),
-                  left: new PropRef([`team`, `id`]),
-                  right: new PropRef([`member`, `teamId`]),
+                  on: new Func('eq', [
+                    new PropRef([`team`, `id`]),
+                    new PropRef([`member`, `teamId`]),
+                  ]),
                 },
               ],
               where,
@@ -505,14 +565,18 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
         {
           type: `inner`,
           from: new CollectionRef(collection, `tag`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`tag`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`tag`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -556,8 +620,10 @@ describe(`optimizer residual convergence`, () => {
           {
             type: joinType,
             from: new CollectionRef(collection, `member`),
-            left: new PropRef([`team`, `id`]),
-            right: new PropRef([`member`, `teamId`]),
+            on: new Func('eq', [
+              new PropRef([`team`, `id`]),
+              new PropRef([`member`, `teamId`]),
+            ]),
           },
         ],
         where: [cross, active],
@@ -586,8 +652,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -617,8 +685,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [predicate(`team`, `active`, true), new Value(false)],
@@ -644,8 +714,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -680,14 +752,18 @@ describe(`optimizer residual convergence`, () => {
           {
             type: `left`,
             from: new CollectionRef(collection, `member`),
-            left: new PropRef([`team`, `id`]),
-            right: new PropRef([`member`, `teamId`]),
+            on: new Func('eq', [
+              new PropRef([`team`, `id`]),
+              new PropRef([`member`, `teamId`]),
+            ]),
           },
           {
             type: laterJoin,
             from: new CollectionRef(collection, `tag`),
-            left: new PropRef([`team`, `id`]),
-            right: new PropRef([`tag`, `teamId`]),
+            on: new Func('eq', [
+              new PropRef([`team`, `id`]),
+              new PropRef([`tag`, `teamId`]),
+            ]),
           },
         ],
         where: [
@@ -745,8 +821,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -782,8 +860,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [createResidualWhere(prior), nullable, newlyPushable],

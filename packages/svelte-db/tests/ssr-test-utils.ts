@@ -7,6 +7,13 @@ export type Person = {
   sourcePayload: string
 }
 
+export type SsrHookFlags = {
+  isReady: boolean
+  isError: boolean
+  isLoading: boolean
+  isIdle: boolean
+}
+
 export const serverPerson: Person = {
   id: `server`,
   name: `Server snapshot`,
@@ -20,6 +27,9 @@ export const browserPerson: Person = {
 }
 
 export function createPeopleDescriptor() {
+  // The browser request starts only after the live query has a subscriber, so
+  // a test may release it before or after that request begins.
+  let browserLoadReleased = false
   let resolveBrowserLoad: (() => void) | undefined
   const descriptor = collectionOptions(`svelte-ssr-people`, (client) => {
     const runtime = client.requireDependency<`server` | `browser`>(`runtime`)
@@ -33,12 +43,12 @@ export function createPeopleDescriptor() {
           markReady()
           return {
             loadSubset: async () => {
-              if (runtime === `browser`) {
+              if (runtime === `browser` && !browserLoadReleased) {
                 await new Promise<void>((resolve) => {
                   resolveBrowserLoad = resolve
                 })
               }
-              begin({ immediate: true })
+              begin()
               write({
                 type: `insert`,
                 value: runtime === `server` ? serverPerson : browserPerson,
@@ -53,7 +63,10 @@ export function createPeopleDescriptor() {
 
   return {
     descriptor,
-    resolveBrowserLoad: () => resolveBrowserLoad?.(),
+    resolveBrowserLoad: () => {
+      browserLoadReleased = true
+      resolveBrowserLoad?.()
+    },
   }
 }
 

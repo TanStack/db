@@ -19,9 +19,9 @@ cursor experiment or the existing production controller.
 - Zero limit performs no transport work. Short and empty nonterminal pages do
   not establish exhaustion. A repeated cursor fails clearly rather than loops.
 - Reads of one pager serialize. Reader cancellation rejects that reader but
-  does not cancel Query's shared acquisition or discard its valid page. Use
+  does not cancel the shared Query fetch or discard its valid page. Use
   QueryClient cancellation to stop transport; reset rejects old reads. Failed
-  acquisitions leave the previous cached result available and can cause Query
+  Query fetches leave the previous cached result available and can cause Query
   to rebuild the prefix when retried. These are Query's semantics, replacing
   the prototype's rule that an aborted reader must discard its response.
 - Query owns cache expiry, garbage collection and invalidation. Use a distinct
@@ -33,11 +33,11 @@ cursor experiment or the existing production controller.
   invalidation alone can join an old in-flight append. Collection refetch alone may reuse
   fresh pages. Reset removes pages, but does not refresh collection rows.
 - The internal page format and full prefix are fixed: inherited `select` and
-  `maxPages` settings cannot change them. Explicit acquisition cancellation rejects its
-  waiting reads with AbortError without starting new work; a silent cancelling
+  `maxPages` settings cannot change them. Explicit Query fetch cancellation
+  rejects its waiting reads with AbortError without starting new work; a silent cancelling
   refetch moves waiters to the replacement. Aborted readers release their own
   queue position without cancelling transport. Cached reads
-  need not wait for a deeper peer acquisition.
+  need not wait for a deeper peer Query fetch.
 - Rows are immutable request/cache values. Reading may return a fresh array;
   cross-read object identity is not promised.
 
@@ -47,8 +47,8 @@ An adapter must define its real endpoint's cursor validity/invalidation rules.
 
 ## Oracle and responsibility boundary
 
-`model.ts` filters/sorts the complete independent dataset and slices it. It has
-no cursor or acquisition state. Generated histories vary windows, ties, backend
+`model-oracle.ts` filters/sorts the complete independent dataset and slices it. It has
+no cursor or Query fetch state. Generated histories vary windows, ties, backend
 page size, source scope, failure/retry and reset. Fixed products retain empty,
 zero, unlimited, peer and backend/UI boundary witnesses. Fault controls must
 fail value/protocol assertions, not merely fail setup or time out.
@@ -75,7 +75,7 @@ observe production publications, not manufacture them in the fixture.
 - Use Query's infinite-query page cache, not a parallel TTL/registry. Loading
   more fetches the missing suffix while pages are fresh. Expiry or invalidation
   rebuilds the loaded sequence from the beginning. Query measures freshness
-  from the latest successful acquisition, including page growth. This differs
+  from the latest successful Query fetch, including page growth. This differs
   from the earlier suggestion to date a session from its oldest page.
 - The fresh-pager-per-queryFn prototype was rejected: it would repeat fetching
   on ordinary page growth. Creating a helper per call is now safe **only
@@ -86,7 +86,7 @@ observe production publications, not manufacture them in the fixture.
 - Keep N+1. No metadata setter, no-peek optimization, metadata-only notification,
   eligibility planner, new D2 graph, total-count API, previous-page API, cursor
   persistence promise, backend snapshot guarantee or offset/cursor jump hybrid.
-- Query-native key sharing reuses acquisitions. We do not add cross-owner
+- Query-native key sharing reuses fetches. We do not add cross-owner
   cancellation leases or replace Query's own concurrent-fetch semantics.
 - The hook and core are unchanged. The maintainer chose to close #863 with this
   partial implementation. Cached opaque-cursor loading ships; metadata/no-peek
@@ -123,12 +123,12 @@ failed eight cells before production changed (seed 863, minimized size/depth
 `[1, 1]`): global/key `maxPages`, `select`, their combination, and cancellation
 with an existing prefix during growth/refresh. Initial cancellation stayed green.
 
-The fixes pin the internal page format and preserve acquisition rejection even
+The fixes pin the internal page format and preserve Query fetch rejection even
 when Query's fetch API returns reverted cache data. Generated cancellation
 histories hold actual response delivery at varied page depths, observe a real
 peer fetch join, assert both waiters reject without replacement transport, fence
 late completion, and retry. A fresh cached shallow read still completes while a
-deeper acquisition is held. The reference remains full filter/sort/slice; no
+deeper Query fetch is held. The reference remains full filter/sort/slice; no
 Query state machine was added to it. The reviewer independently rechecked the
 three fixes after implementation.
 
@@ -140,7 +140,7 @@ The new five-cell suite retains an invalidation-only mutant and covers
 shared readers, retries, malformed final tokens, recovery and bounded slice work.
 See LOSS-AUDIT.md for the distinct generator and observation gaps.
 
-Verification for the acquisition-boundary review fixes on base head `3f43deeb6`:
+Verification for the Query fetch boundary review fixes on base head `3f43deeb6`:
 
 - Full Query DB package: **370 tests in 14 files**, default random-seed lane,
   exit 0, 7.82 seconds.
@@ -168,9 +168,9 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 TANSTACK_DB_ORACLE_SEED=863 \
   tests/cursor-pagination.cache-oracle.test.ts \
   tests/cursor-pagination.publication-oracle.test.ts \
   tests/cursor-pagination.boundary-oracle.test.ts \
-  tests/cursor-pagination.integration.test.ts \
+  tests/cursor-pagination-oracle.integration.test.ts \
   tests/cursor-pagination.no-peek.test.ts \
-  tests/cursor-pagination.no-peek.integration.test.ts \
+  tests/cursor-pagination-oracle.no-peek.integration.test.ts \
   --typecheck.enabled=false --maxWorkers=1 --testTimeout=60000
 ```
 
@@ -226,7 +226,7 @@ From `packages/query-db-collection`, using the installed local binaries:
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 TANSTACK_DB_ORACLE_SEED=863 \
   ../../node_modules/.bin/vitest run \
   tests/cursor-pagination.oracle.test.ts \
-  tests/cursor-pagination.integration.test.ts \
+  tests/cursor-pagination-oracle.integration.test.ts \
   --typecheck.enabled=false --maxWorkers=1
 ```
 

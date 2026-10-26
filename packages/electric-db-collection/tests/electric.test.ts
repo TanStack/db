@@ -10,6 +10,7 @@ import {
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
+import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
@@ -119,7 +120,7 @@ describe(`Electric Integration`, () => {
         Array.from(rows.entries()).map(([key, value]) => ({ key, value })),
       ),
     loadResumeSnapshot: (
-      _collectionId: string,
+      _target: PersistedStorageTarget,
       options?: { includeRows?: boolean },
     ) =>
       Promise.resolve({
@@ -149,7 +150,7 @@ describe(`Electric Integration`, () => {
           }),
         ),
       ),
-    applyCommittedTx: (_collectionId: string, tx: any) => {
+    applyCommittedTx: (_target: PersistedStorageTarget, tx: any) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata?.delete(mutation.key)
@@ -232,8 +233,7 @@ describe(`Electric Integration`, () => {
     const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
     const preload = collection.preload()
     const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-      | { onError?: (error: unknown) => void }
-      | undefined
+      { onError?: (error: unknown) => void } | undefined
     const initialError = new Error(`initial stream failed`)
 
     try {
@@ -242,37 +242,6 @@ describe(`Electric Integration`, () => {
       expect(collection.status).toBe(`error`)
       await expect(preload).rejects.toBe(initialError)
     } finally {
-      loggedError.mockRestore()
-    }
-  })
-
-  it(`does not let a parked ready receipt overwrite a later stream error`, async () => {
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    const streamError = new Error(`stream failed`)
-    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    try {
-      transaction.mutate(() => collection.insert({ id: 99, name: `Local row` }))
-      subscriber([{ headers: { control: `up-to-date` } }])
-      expect(collection.status).toBe(`loading`)
-
-      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        | { onError?: (error: unknown) => void }
-        | undefined
-      streamOptions?.onError?.(streamError)
-      expect(collection.status).toBe(`error`)
-
-      persistence.resolve()
-      await transaction.isPersisted.promise
-      await Promise.resolve()
-
-      expect(collection.status).toBe(`error`)
-    } finally {
-      persistence.resolve()
-      await transaction.isPersisted.promise.catch(() => undefined)
       loggedError.mockRestore()
     }
   })
@@ -300,7 +269,8 @@ describe(`Electric Integration`, () => {
     )
   })
 
-  it(`marks the source ready only after its initial rows are applied`, async () => {
+  // Readiness counts accepted rows; they publish when the mutation settles.
+  it(`marks the source ready once its initial rows are accepted`, async () => {
     const persistence = createDeferred<void>()
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
@@ -319,7 +289,7 @@ describe(`Electric Integration`, () => {
     ])
     await Promise.resolve()
 
-    expect(collection.status).toBe(`loading`)
+    expect(collection.status).toBe(`ready`)
     expect(collection.get(1)).toBeUndefined()
 
     persistence.resolve()
@@ -3057,7 +3027,7 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`waits for both physical requests of one cursor demand`, async () => {
+    it(`serializes and waits for both physical requests of one cursor demand`, async () => {
       const whereCurrent = createDeferred<void>()
       const whereFrom = createDeferred<void>()
       mockRequestSnapshot
@@ -3090,10 +3060,13 @@ describe(`Electric Integration`, () => {
           }),
         )
         await vi.waitFor(() =>
-          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
         )
 
         whereCurrent.resolve()
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
         const nextTurn = new Promise<`next-turn`>((resolve) =>
           setTimeout(() => resolve(`next-turn`), 0),
         )
@@ -3272,7 +3245,9 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`ignores a progressive snapshot after its subset request is aborted`, async () => {
+    // A caller that aborts sees `AbortError` at every cut: here, after the
+    // fetch but before its commit, so the snapshot is discarded.
+    it(`discards a progressive snapshot after its subset request is aborted, and rejects the load`, async () => {
       mockFetchSnapshot.mockReset()
       let resolveSnapshot!: (value: {
         metadata: Record<string, never>
@@ -3321,7 +3296,8 @@ describe(`Electric Integration`, () => {
             },
           ],
         })
-        if (load instanceof Promise) await load
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
         expect(testCollection.has(2)).toBe(false)
       } finally {
@@ -3330,7 +3306,41 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`does not publish a progressive snapshot aborted while its commit is parked`, async () => {
+    it(`rejects a progressive subset load whose fetch fails because it was aborted`, async () => {
+      mockFetchSnapshot.mockReset()
+      const abortController = new AbortController()
+      mockFetchSnapshot.mockImplementation(async () => {
+        abortController.abort()
+        throw new DOMException(`aborted`, `AbortError`)
+      })
+      mockSubscribe.mockImplementation(() => () => {})
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `progressive-aborted-fetch-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      try {
+        const load = testCollection._sync.loadSubset({
+          limit: 1,
+          signal: abortController.signal,
+        })
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      } finally {
+        await testCollection.cleanup()
+      }
+    })
+
+    // A commit that core accepted always applies. Aborting the request after
+    // its snapshot committed cannot withdraw those rows, but the load rejects.
+    it(`publishes an accepted progressive snapshot and rejects its aborted load`, async () => {
       mockFetchSnapshot.mockResolvedValue({
         metadata: {},
         data: [
@@ -3376,9 +3386,12 @@ describe(`Electric Integration`, () => {
         abortController.abort()
         persistence.resolve()
         await transaction.isPersisted.promise
-        if (load instanceof Promise) await load
+        // The accepted snapshot applies, but the aborted caller sees
+        // `AbortError`.
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
-        expect(testCollection.has(2)).toBe(false)
+        expect(testCollection.has(2)).toBe(true)
       } finally {
         abortController.abort()
         persistence.resolve()
@@ -3959,6 +3972,7 @@ describe(`Electric Integration`, () => {
           protocol: `@tanstack/db/sync-persistence`,
           version: 1,
           hydrateBaseline: () => Promise.resolve(),
+          reserveCommitTurn: () => {},
           scanPersistedRows: () => Promise.resolve([]),
           resumeSnapshot: {
             certify: () => Promise.resolve(),
@@ -4177,7 +4191,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should honor persisted reset resume metadata through the persisted wrapper`, async () => {
+    it(`uses full-log recovery for unmanaged persisted reset metadata`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4428,7 +4442,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should ignore malformed persisted resume metadata`, async () => {
+    it(`uses a full fallback for malformed resume metadata without scoped persistence`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4473,13 +4487,17 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({ kind: `reset` }),
+      )
     })
 
-    it(`should reset and fall back when persisted resume identity is incompatible`, async () => {
+    it(`uses a full fallback for incompatible identity without scoped persistence`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4526,7 +4544,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )

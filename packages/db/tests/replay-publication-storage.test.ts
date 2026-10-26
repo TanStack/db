@@ -4,7 +4,7 @@ import { createDeferred } from '../src/deferred'
 import { BasicIndex } from '../src/indexes/basic-index'
 import { createLiveQueryCollection, eq } from '../src/query'
 import { PropRef } from '../src/query/ir'
-import { evaluateReferenceExpression } from './reference-expression'
+import { evaluateReferenceExpression } from './reference-expression-oracle'
 import { withHistoryCleanup } from './optimistic-history-oracle'
 import { flushPromises } from './utils'
 import type { Deferred } from '../src/deferred'
@@ -298,7 +298,7 @@ describe(`Replay publication storage`, () => {
     })
   })
 
-  it(`direct: releasing the last demand during replay retires it; re-acquisition reconciles`, async () => {
+  it(`direct: releasing the last demand during replay retires it and publishes its rows; re-acquisition reconciles`, async () => {
     return withReplayResources(async (resources) => {
       const s = makeSource(`probe-release`)
       resources.sources.push(() => s.source.cleanup())
@@ -333,20 +333,23 @@ describe(`Replay publication storage`, () => {
 
       sub.releaseSnapshot(where)
       const [outcome] = await settled
-      expect(outcome.status).toBe(`rejected`)
-      expect((outcome as PromiseRejectedResult).reason.name).toBe(`AbortError`)
+      // The retired replay published its rows, so its replacement resolves.
+      expect(outcome.status).toBe(`fulfilled`)
       expect(sub.status).toBe(`ready`)
       expect(sub.hasPendingTruncateReplacement).toBe(false)
-      expect(visible.get(1)).toBe(1)
+      // Nothing can complete the retired replay, and its attempt did not
+      // fail, so it publishes the row the source replaced during it.
+      expect(visible.get(1)).toBe(2)
+      expect(batches.at(-1)).toEqual([[`update`, 1, 2]])
       expect(replayStates(s.source)).toEqual([])
 
       // Late settlement of the released transport changes nothing.
       hold.resolve()
       await flushPromises()
-      expect(visible.get(1)).toBe(1)
+      expect(visible.get(1)).toBe(2)
       expect(sub.status).toBe(`ready`)
 
-      // Re-acquiring reconciles the retained row against the source.
+      // Re-acquiring reconciles the row against the source.
       s.setHold(undefined)
       s.setVersion(3)
       sub.requestSnapshot({ where, optimizedOnly: false })

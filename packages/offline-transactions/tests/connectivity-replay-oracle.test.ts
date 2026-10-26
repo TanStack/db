@@ -16,6 +16,8 @@ import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
  * calls and keeps the row; the visible/false cut permits one call and then no
  * row after provider success. The model describes public observations, not the
  * detector's predicate or the executor's queue.
+ * Outbox replay here means resuming unfinished durable transaction work in the
+ * same executor. It is neither Collection truncate replay nor oracle replay.
  *
  * Grammar: one elected executor, one write, false online hint, hidden admission,
  * then visible notification through either the browser event or explicit

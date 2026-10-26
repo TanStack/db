@@ -77,6 +77,14 @@ This Collection has no `sync` option. Its normal insert, update, and delete hand
 
 ### Manual transactions on a local Collection
 
+Local persistence reserves the utility names `acceptMutations`,
+`getLeadershipState`, and `forceReloadSubset`. If caller-supplied `utils`
+contains one of these properties, `persistedCollectionOptions` throws
+`InvalidPersistedCollectionConfigError` before it resolves persistence.
+This also applies to inherited properties and properties whose value is
+`undefined`. Other custom utility names remain available. Collections with a
+`sync` option retain their adapter utilities without this local-only restriction.
+
 For a Collection without a `sync` option, normal Collection mutations persist automatically. A manual transaction must call `acceptMutations` in its mutation function:
 
 ```ts
@@ -129,6 +137,50 @@ console.log(reopenedTodos.get('1')?.title) // 'Buy milk'
 await reopenedTodos.cleanup()
 await reopenedDatabase.close?.()
 ```
+
+## Temporal values
+
+SQLite persistence preserves `Temporal.Instant` and `Temporal.PlainDate` as
+native values, including nested fields, metadata and replay. Register the same
+Temporal implementation globally before writing or reopening persisted data.
+On a runtime without native Temporal, for example:
+
+```ts
+import 'temporal-polyfill/global'
+```
+
+Missing constructors and other Temporal kinds reject explicitly. Strings remain
+strings. Equality retains the Temporal kind and canonical text, including a
+PlainDate's calendar; ordering follows Temporal comparison. Supported native
+predicates and persisted expression indexes use the existing SQL filtering and
+in-memory cleanup pipeline without reducing nanosecond precision.
+
+This support applies to the shared SQLite adapter and local persisted wrapper.
+The remote-subset coordinator wire domain does not include Temporal literals;
+those requests reject before remote retry admission. If retained local demand
+becomes remote after an ownership change, fallback sequence-gap recovery fails
+the current Collection sync run before retrying that invalid request. This is a
+terminal Collection error: later active subsets are not recovered, subsequent
+loads reject with the same error, and later coordinator messages do not resume
+the failed run. Existing acquisitions can still be released. Multiprocess
+transport of native Temporal rows is not covered by this support claim.
+
+Values already stored as `{}` cannot be recovered. If an older version damaged
+a synced cache, replace it through the existing `schemaVersion` and schema-reset
+policy, then refetch. Updating the library does not automatically erase data.
+Also rebuild an older cache if ordinary objects used the reserved
+`__tanstack_db_persisted_type__` marker with a newly recognized type name. Older
+writes did not escape those objects, so their original meaning is ambiguous.
+New writes escape the marker and preserve the ordinary object.
+Older library versions cannot interpret the new Temporal encoding. Changed
+expression indexes rebuild when first ensured after upgrade. Later startups reuse
+those indexes. A changed native-literal or escaped-record signature can leave an
+obsolete registry entry and index until an explicit schema reset; this release
+does not reclaim those entries automatically. Increment the affected synced
+Collection's `schemaVersion` and retain its reset policy to rebuild that cache.
+The reset removes its old values and indexes before reading the new schema;
+other Collections with unchanged schema versions retain their caches. Refetch
+from the upstream source after reset.
 
 ## Add persistence to a synced Collection
 
@@ -184,7 +236,11 @@ The `sync` option determines which mode the wrapper uses:
 | `sync` present | Load persisted rows, then apply source sync transactions. The source remains responsible for current data. |
 | `sync` absent | Load and save local rows through a loopback sync adapter. The Collection has no remote source. |
 
-The wrapper also supports `syncMode: 'on-demand'`. In that mode, it loads rows for active query demand rather than loading every stored row into the Collection.
+The wrapper also supports `syncMode: 'on-demand'`. In that mode, it loads rows for active query demand rather than loading every stored row into the Collection. When no query needs rows, a peer reload or schema reset checks rows already visible in the Collection but does not add unrelated stored rows.
+
+Built-in SQLite adapters use managed generations for on-demand caches. If a cache claim expires, the wrapper retires the old source callbacks, cleans up that source session, rotates the cache, and calls a custom source's `sync` function again. A custom source does not need a restart hook. Query and Electric provide `restartAfterScopedRecovery` to control their own restart; their hooks must retire old callbacks immediately and start replacement loads after `cacheRotated` resolves.
+
+An on-demand cache is not yet a certified offline snapshot. The first managed generation does not import legacy cache tables, and a private replacement created after claim expiry is not the next run's shared cache. A later launch must refetch those subsets from the source.
 
 ## Render after SQLite restore
 

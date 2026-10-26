@@ -1,3 +1,5 @@
+import { codedMessage, devBuild } from './error-message'
+
 /**
  * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
@@ -136,9 +138,11 @@ export class Scheduler {
 
       if (!ranThisPass) {
         throw new Error(
-          `Scheduler detected unresolved dependencies for context ${String(
-            contextId,
-          )}.`,
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Scheduler detected unresolved dependencies for context ${String(
+                contextId,
+              )}.`
+            : codedMessage(161, { contextId }),
         )
       }
     }

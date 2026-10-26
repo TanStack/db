@@ -1,7 +1,16 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
-import { comparisonFunctions } from '../query/builder/functions.js'
+import {
+  comparisonFunctions,
+  indexableOperations,
+} from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
-import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
+import {
+  indexObjectKind,
+  makeCheckedComparator,
+  makeComparator,
+  normalizeValue,
+} from '../utils/comparison.js'
+import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
@@ -34,12 +43,19 @@ function resolveStringSort(
  */
 export const IndexOperation = comparisonFunctions
 
+export { indexableOperations } from '../query/builder/functions.js'
+
 export const builtInIndexResolverNames = new WeakMap<object, string>()
 
 /**
  * Type for index operation values
  */
 export type IndexOperation = (typeof comparisonFunctions)[number]
+
+export interface IndexComparisonOptions {
+  compareFn?: (a: any, b: any) => number
+  compareOptions?: CompareOptions
+}
 
 /** The read-side surface consumers use on a resolved (possibly reversed) index. */
 export type IndexReader<TKey extends string | number = string | number> = Pick<
@@ -51,6 +67,7 @@ export type IndexReader<TKey extends string | number = string | number> = Pick<
   | `keyCount`
   | `supports`
   | `supportsRangeOptimization`
+  | `supportsOrderOptimization`
   | `canOptimizeRangeFor`
 >
 
@@ -99,6 +116,8 @@ export interface IndexInterface<
    * a full scan when this is `false`.
    */
   get supportsRangeOptimization(): boolean
+  /** Whether a query can use this index for its declared ordered prefix. */
+  readonly supportsOrderOptimization?: boolean
 
   /**
    * Whether the live values in this index share the predicate operand's
@@ -121,7 +140,7 @@ export abstract class BaseIndex<
   public readonly id: number
   public readonly name?: string
   public readonly expression: BasicExpression
-  public abstract readonly supportedOperations: Set<IndexOperation>
+  public readonly supportedOperations: Set<IndexOperation>
   protected readonly compareOptions: CompareOptions
   /**
    * Orders indexed values. Every result is checked, because a custom
@@ -147,9 +166,12 @@ export abstract class BaseIndex<
     this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
     this.hasCustomComparator = options?.compareFn != null
     this.compareFn = makeCheckedComparator(
-      options?.compareFn ?? makeComparator(this.compareOptions),
+      options?.compareFn
+        ? (a, b) => options.compareFn(normalizeValue(a), normalizeValue(b))
+        : makeComparator(this.compareOptions, `index`),
     )
     this.name = name
+    this.supportedOperations = new Set<IndexOperation>(indexableOperations)
     this.initialize(options)
   }
 
@@ -180,10 +202,38 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract get keyCount(): number
   abstract equalityLookup(value: any): Set<TKey>
-  abstract inArrayLookup(values: Array<any>): Set<TKey>
+  protected exactBucketKeys(value: any): Iterable<TKey> | undefined {
+    return this.equalityLookup(value)
+  }
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
 
   // Common methods
+  protected lookupSupportedOperation(
+    operation: IndexOperation,
+    value: any,
+  ): Set<TKey> | undefined {
+    if (operation === `eq`) return this.equalityLookup(value)
+    if (operation === `in`) return this.inArrayLookup(value)
+    if (operation === `gt` || operation === `gte`)
+      return this.rangeQuery({
+        from: value,
+        fromInclusive: operation === `gte`,
+      })
+    if (operation === `lt` || operation === `lte`)
+      return this.rangeQuery({ to: value, toInclusive: operation === `lte` })
+    return undefined
+  }
+
+  /** Combine exact buckets without copying each bucket first. */
+  inArrayLookup(values: Array<any>): Set<TKey> {
+    const result = new Set<TKey>()
+    for (const value of values) {
+      const keys = this.exactBucketKeys(value)
+      if (keys) for (const key of keys) result.add(key)
+    }
+    return result
+  }
+
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const reversed: RangeQueryOptions = {}
@@ -204,6 +254,24 @@ export abstract class BaseIndex<
 
   get supportsRangeOptimization(): boolean {
     return !this.hasCustomComparator
+  }
+
+  get supportsOrderOptimization(): boolean {
+    if (this.hasCustomComparator || this.rangeValueDomains.size > 1)
+      return false
+    // Within these domains the index orders by a storage key (or lacks a
+    // defined query order), rather than by the query's value comparator.
+    const domain = this.rangeValueDomains.keys().next().value
+    return (
+      domain === undefined ||
+      ![
+        `Array`,
+        `Binary`,
+        `Temporal.Duration.calendar`,
+        `Temporal.PlainMonthDay`,
+        `function`,
+      ].includes(domain)
+    )
   }
 
   protected addRangeValue(value: unknown): void {
@@ -294,18 +362,33 @@ export abstract class BaseIndex<
     return this.compareOptions.direction === direction
   }
 
-  protected abstract initialize(options?: any): void
+  protected initialize(_options?: any): void {}
 
   protected evaluateIndexExpression(item: any): any {
     const evaluator = (this.compiledIndexEvaluator ??=
       compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
   }
+
+  /** The indexed value of a row being added. A throwing expression fails the write. */
+  protected evaluateAddedValue(key: TKey, item: any): any {
+    try {
+      return this.evaluateIndexExpression(item)
+    } catch (error) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Failed to evaluate index expression for key ${key}: ${error}`
+          : codedMessage(99, { key, error }),
+        { cause: error },
+      )
+    }
+  }
 }
 
 function rangeValueDomain(value: unknown): string | undefined {
   if (value == null) return undefined
   if (value instanceof Date) return `date`
+  if (typeof value === `object`) return indexObjectKind(value)
   return typeof value
 }
 
@@ -329,3 +412,13 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     name?: string,
     options?: any,
   ) => BaseIndex<TKey>
+
+/** A row being removed whose expression throws: warn, and skip the row. */
+export function warnRemovalFailure(key: unknown, error: unknown): void {
+  console.warn(
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Failed to evaluate index expression for key ${key} during removal:`
+      : codedWarning(216, { key }),
+    error,
+  )
+}

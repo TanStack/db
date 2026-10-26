@@ -10,7 +10,6 @@ import {
 } from 'vue'
 import {
   BaseQueryBuilder,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
@@ -25,7 +24,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
@@ -33,6 +32,14 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
+
+const DEFAULT_GC_TIME_MS = 1
+
+/** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
+function snapshotRows(data: unknown): Array<any> {
+  if (Array.isArray(data)) return [...data]
+  return data === undefined ? [] : [data]
+}
 
 /**
  * Return type for useLiveQuery hook
@@ -214,7 +221,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
+  config: LiveQueryHookConfig<TContext>,
   deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveQueryReturn<TContext>
 
@@ -284,7 +291,7 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const collection = computed(() => {
+  const resolveInput = () => {
     // First check if the original parameter might be a ref/getter
     // by seeing if toValue returns something different than the original
     // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
@@ -335,13 +342,33 @@ export function useLiveQuery(
       // A query function returning null or undefined disables the query.
       return resolveLiveQueryValue(
         unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
+        { gcTime: DEFAULT_GC_TIME_MS },
       )
     } else {
-      return createLiveQueryCollection({
-        ...unwrappedParam,
-        startSync: true,
+      return resolveLiveQueryValue(unwrappedParam, {
+        gcTime: DEFAULT_GC_TIME_MS,
       })
     }
+  }
+  // The input's live-query Collection, or the error resolving it threw. A
+  // Vue computed that throws serves its previous value on the next read, so
+  // this one never throws; each reader rethrows the error.
+  const resolved = computed(
+    (): {
+      collection?: ReturnType<typeof resolveInput>
+      error?: unknown
+    } => {
+      try {
+        return { collection: resolveInput() }
+      } catch (error) {
+        return { error }
+      }
+    },
+  )
+  const collection = computed(() => {
+    const { collection: current, error } = resolved.value
+    if (error !== undefined) throw error
+    return current
   })
 
   // Reactive state that gets updated granularly through change events
@@ -350,17 +377,12 @@ export function useLiveQuery(
   // Reactive data array that maintains sorted order
   const internalData = ref<Array<any>>([])
 
-  // Computed wrapper for the data to match expected return type
-  // Returns single item for singleResult collections, array otherwise
-  const data = computed(() => {
-    const currentCollection = collection.value
-    if (!currentCollection) {
-      return internalData.value
-    }
-    return isSingleResultCollection(currentCollection)
-      ? internalData.value[0]
-      : internalData.value
-  })
+  // Returns single item for singleResult collections, array otherwise. The
+  // effect below sets `singleResult`, so reading data never compiles a query.
+  const singleResult = ref(false)
+  const data = computed(() =>
+    singleResult.value ? internalData.value[0] : internalData.value,
+  )
 
   // Track collection status reactively
   const status = ref(
@@ -378,33 +400,36 @@ export function useLiveQuery(
     status.value = snapshot.status as CollectionStatus
     persistedStatus.value = snapshot.persistedStatus
     persistedError.value = snapshot.persistedError
-    internalData.value = Array.from(snapshot.state?.values() ?? [])
+    internalData.value = snapshotRows(snapshot.data)
   }
 
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
-    const currentCollection = collection.value
-
-    // Tear down any previous observer.
+    // Tear down any previous observer and its rows first: a query that fails
+    // to compile throws below, and Vue's computed then serves the previous
+    // collection, whose rows must not stay visible.
     currentObserver?.dispose()
     currentObserver = null
+    state.clear()
+    internalData.value = []
+
+    const { collection: currentCollection, error } = resolved.value
+    if (error !== undefined) throw error
+    singleResult.value =
+      !!currentCollection && isSingleResultCollection(currentCollection)
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
       persistedStatus.value = `unavailable`
       persistedError.value = undefined
-      state.clear()
-      internalData.value = []
       return
     }
 
-    const observer = createLiveQueryObserver(currentCollection)
-    currentObserver = observer
-
     // Initial rows arrive as the observer's first delta (includeInitialState);
     // apply them and every subsequent delta granularly to the reactive map.
-    state.clear()
+    const observer = createLiveQueryObserver(currentCollection)
+    currentObserver = observer
 
     const unsubscribe = observer.subscribe(
       (changes: Array<ChangeMessage<any>> | undefined) => {

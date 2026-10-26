@@ -7,9 +7,14 @@ const browserChannel =
 export default defineConfig({
   testDir: `./e2e`,
   testMatch: [
-    `shared-driver-fairness.opfs.spec.ts`,
+    `shared-driver-fairness-oracle.opfs.spec.ts`,
     `remote-subset-two-tab.opfs.spec.ts`,
+    `cache-claim-notice.opfs.spec.ts`,
     `open-timeout.opfs.spec.ts`,
+    `hydration-commit-oracle.opfs.spec.ts`,
+    `leader-close-oracle.opfs.spec.ts`,
+    `opfs-request-order-oracle.opfs.spec.ts`,
+    `reload-class-oracle.opfs.spec.ts`,
   ],
   timeout: 60_000,
   fullyParallel: false,

@@ -1,0 +1,5 @@
+Source: /tmp/pr1179-donors/keyval-atomicity-probe.log
+SHA-256: 4eef760cfc0d13f7876e9dc00ccc0c2a490162452673bc3d80f815881a5af62e
+Trailing whitespace normalized.
+
+{"failure":"DataCloneError","prefixAfterRejection":{"value":"valid"}}

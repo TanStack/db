@@ -668,7 +668,7 @@ describe(`Collection with schema validation`, () => {
       schema: userSchema,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           // Insert initial data
           write({
@@ -685,6 +685,7 @@ describe(`Collection with schema validation`, () => {
             },
           })
           commit()
+          markReady()
         },
       },
     })
@@ -833,7 +834,7 @@ describe(`Collection with schema validation`, () => {
       schema: updateSchema,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           // Add the transformed insert data
           write({
@@ -841,6 +842,7 @@ describe(`Collection with schema validation`, () => {
             value: insertMutation.modified as any,
           })
           commit()
+          markReady()
         },
       },
     })

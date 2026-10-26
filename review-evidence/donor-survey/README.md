@@ -1,0 +1,5 @@
+# Sighted donor survey evidence
+
+The [source-linked report](../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-survey.md) retains all 18 donor mechanisms, fit judgments, failed transfers, and the parent's subsequent dispositions. The historical probes have `.txt` suffixes so source paths and specimens are preserved without test registration. Remove that suffix and update the recorded checkout paths to replay. The negative donor probe requires the pinned idb-keyval clone named in the report. No donor code is shipped with the package.
+
+The settlement oracle failed 12 original-source histories with 8 positive controls, then all 22 new cases and 23 existing wrapper cases passed after the additive-listener repair. An intentionally wrong implementation that rejects on every request error is rejected at the terminal-outcome checkpoint. Full final adapter and browser regression receipts are recorded separately in validation.json. They do not extend the controlled observer matrix into a browser proof.

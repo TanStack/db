@@ -1,5 +1,70 @@
 # @tanstack/expo-db-sqlite-persistence
 
+## 0.2.37
+
+### Patch Changes
+
+- Updated dependencies [[`5a1b286`](https://github.com/TanStack/db/commit/5a1b286910bdf56917a76732ba160c99d7b1ad66)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.12
+
+## 0.2.36
+
+### Patch Changes
+
+- Updated dependencies [[`92b11b0`](https://github.com/TanStack/db/commit/92b11b006edc46cea23ae4423046bf9eb29fc50e)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.11
+
+## 0.2.35
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.10
+
+## 0.2.34
+
+### Patch Changes
+
+- Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Require explicit eager or claim-bound managed targets for SQLite adapter data operations, and forward them through Electron IPC protocol v6. Bare collection IDs no longer work at this lower-level adapter boundary. ([#2069](https://github.com/TanStack/db/pull/2069))
+
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`5d2a4b0`](https://github.com/TanStack/db/commit/5d2a4b00cffa8d8b9a1b89f708b4b71c2ff46ff3)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.9
+
+## 0.2.33
+
+### Patch Changes
+
+- Updated dependencies [[`8b0e1de`](https://github.com/TanStack/db/commit/8b0e1defb0ecf98ead912b3a906995398a30b510)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.8
+
+## 0.2.32
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.7
+
+## 0.2.31
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.6
+
+## 0.2.30
+
+### Patch Changes
+
+- Updated dependencies [[`5b9d434`](https://github.com/TanStack/db/commit/5b9d4340455201a42748f6ec951d543050c51d6f), [`a37e69a`](https://github.com/TanStack/db/commit/a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0), [`4777d20`](https://github.com/TanStack/db/commit/4777d205dfe292b81d047d3886d7a149f3e44552)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.5
+
+## 0.2.29
+
+### Patch Changes
+
+- Updated dependencies [[`dbffea1`](https://github.com/TanStack/db/commit/dbffea1fd4dcba669e4bb959629e2837c3970fbe), [`b6c8540`](https://github.com/TanStack/db/commit/b6c85403cf60aa10e2328f27b3adb04aae718eac), [`4b83aa7`](https://github.com/TanStack/db/commit/4b83aa7e18742a036cc55ef9570e3a9d1d222074), [`eac6e8b`](https://github.com/TanStack/db/commit/eac6e8b6a6150b8e48bdbe61365bceec1e768eb1)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.4
+
 ## 0.2.28
 
 ### Patch Changes

@@ -1,0 +1,84 @@
+[
+  {
+    "file": "collection/sync.ts",
+    "literals": [
+      "Calling .preload() on a collection with syncMode \"on-demand\" is a no-op. ",
+      "In on-demand mode, data is only loaded when queries request it. ",
+      "Instead, create a live query and call .preload() on that to load the specific data you need. ",
+      "See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details."
+    ]
+  },
+  {
+    "file": "collection/validate-config.ts",
+    "literals": [
+      "Possible misspelling in collection config: \"",
+      "\". Did you mean \""
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": [
+      "Queries on \"",
+      "\" are slow (avg ",
+      "ms). Consider adding an index.",
+      "Collection has ",
+      " items. Queries on \"",
+      "\" may benefit from an index."
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": [
+      "[TanStack DB] Index suggestion for \"",
+      "  Add index: collection.createIndex((row) => row."
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": ["slow-query"]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": ["collection-size"]
+  },
+  {
+    "file": "live-query-window-controller.ts",
+    "literals": [
+      "useLiveInfiniteQuery: Pre-created collection has window {offset: ",
+      "but the hook expects {offset: 0, limit: ",
+      "}. Adjusting window now."
+    ]
+  },
+  {
+    "file": "query/compiler/order-by.ts",
+    "literals": [
+      "[TanStack DB]",
+      " orderBy with limit",
+      " uses a custom string comparator on \"",
+      "\". On-demand sources require a filtered full source request for local sorting. An index with the same compare function reference can sort installed rows, but cannot make provider pagination safe.",
+      " orders virtual field \"",
+      "\"; Collection indexes cannot cover virtual fields, so creating one will not enable ordered lazy loading.",
+      "requires an index on \"",
+      "\" for efficient lazy loading. Consider collection.createIndex((row) => row.",
+      ") or autoIndex: 'eager' with a defaultIndexType.",
+      "found an index on \"",
+      "\", but none uses the query's compareOptions (nulls: \"",
+      "). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.",
+      "\" } } }). Match the query's nulls and string collation, including any locale and localeOptions. The index direction may differ.",
+      "found an index on \"",
+      "\" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.",
+      " Local reads may scan or sort installed rows; an underfilled on-demand window may require a full-source request."
+    ]
+  },
+  {
+    "file": "query/live/subset-demand-controller.ts",
+    "literals": [
+      "[TanStack DB]",
+      " Join requires an index on \"",
+      "\" for efficient loading. ",
+      "Falling back to scanning local data. ",
+      "Consider creating an index on the collection with collection.createIndex((row) => row.",
+      "or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType."
+    ]
+  }
+]

@@ -1,33 +1,46 @@
 import {
   IR,
+  compareTemporalValues,
   compileSingleRowExpression,
+  safeRandomUUID,
   toBooleanPredicate,
 } from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedStorageKeyEncodingError,
 } from './errors'
+import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createPersistedTableName,
   decodePersistedStorageKey,
   encodePersistedStorageKey,
+  resolvePersistedStorageTarget,
 } from './persisted'
 import {
   PERSISTED_TYPE_TAG,
   PERSISTED_VALUE_TAG,
   assertSQLiteBigIntInRange,
+  reviveSQLiteTemporal,
   serializeSQLiteBigInt,
+  serializeSQLiteTemporal,
+  sqliteTemporalIdentity,
+  sqliteTemporalKind,
 } from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  CommittedTxAnchor,
   HydrationPersistenceAdapter,
+  PersistedCacheGenerationClaim,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
   PersistedRowScanOptions,
   PersistedScannedRow,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
+  ReconciledCommittedTx,
+  RegularScope,
   ReplayableTxDelta,
   SQLiteDriver,
 } from './persisted'
@@ -36,7 +49,7 @@ type SqliteSupportedValue = null | number | string
 
 // The default stays below SQLite's older 999-variable limit. Drivers with a
 // lower binding cap use smaller chunks; each replacement row binds four values.
-const REPLACEMENT_BATCH_SIZE = 100
+const REPLACEMENT_BATCH_SIZE = 125
 
 type CollectionTableMapping = {
   tableName: string
@@ -47,6 +60,7 @@ type CompiledSqlFragment = {
   supported: boolean
   sql: string
   params: Array<SqliteSupportedValue>
+  identitySql?: string
   valueKind?: CompiledValueKind
 }
 
@@ -60,9 +74,7 @@ type StoredSqliteRow = {
 }
 
 type SQLiteCoreAdapterSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type SQLiteCoreAdapterOptions = {
   driver: SQLiteDriver
@@ -71,6 +83,10 @@ export type SQLiteCoreAdapterOptions = {
   appliedTxPruneMaxRows?: number
   appliedTxPruneMaxAgeSeconds?: number
   pullSinceReloadThreshold?: number
+  /** Milliseconds without renewal before a sync run loses cache access. */
+  cacheGenerationClaimTtlMs?: number
+  /** Host clock, injectable for expiry histories. */
+  now?: () => number
 }
 
 export type SQLitePullSinceResult<TKey extends string | number> =
@@ -100,6 +116,7 @@ class SharedPersistenceScheduler {
   private readonly hydrateQueue: Array<ScheduledOperation<unknown>> = []
   private running = false
   private lastCompletedKind: ScheduledOperationKind | undefined
+  private readonly unsettled = new Set<Promise<void>>()
 
   runRegular<T>(task: () => Promise<T>): Promise<T> {
     return this.enqueue(`regular`, task)
@@ -109,7 +126,14 @@ class SharedPersistenceScheduler {
     return this.enqueue(`hydrate`, task)
   }
 
+  // Settles once every operation queued or running at the call has settled.
+  // Waiting takes no turn, so the K=1 alternation is unchanged.
+  afterQueuedWork(): Promise<void> {
+    return settled(Promise.all(this.unsettled))
+  }
+
   adoptRunningHydrate(completion: Promise<unknown>): void {
+    this.track(completion)
     if (this.running) return
     this.running = true
     const finish = () => {
@@ -134,8 +158,15 @@ class SharedPersistenceScheduler {
       const queue = kind === `hydrate` ? this.hydrateQueue : this.regularQueue
       queue.push(operation as ScheduledOperation<unknown>)
     })
+    this.track(result)
     this.drain()
     return result
+  }
+
+  private track(completion: Promise<unknown>): void {
+    const done = settled(completion)
+    this.unsettled.add(done)
+    void done.then(() => this.unsettled.delete(done))
   }
 
   private drain(): void {
@@ -175,6 +206,13 @@ class SharedPersistenceScheduler {
     }
     return this.regularQueue.shift()
   }
+}
+
+function settled(promise: Promise<unknown>): Promise<void> {
+  return promise.then(
+    () => undefined,
+    () => undefined,
+  )
 }
 
 const sharedPersistenceSchedulers = new WeakMap<
@@ -222,6 +260,7 @@ function observeSharedLogicalSchedulingSupport(
   }
 
   return {
+    maxBoundParameters: driver.maxBoundParameters,
     exec: (sql) => observe(driver.exec(sql)),
     query: <T>(sql: string, params: ReadonlyArray<unknown> = []) =>
       observe(driver.query<T>(sql, params)),
@@ -240,6 +279,17 @@ function observeSharedLogicalSchedulingSupport(
 }
 
 const DEFAULT_SCHEMA_VERSION = 1
+const CACHE_GENERATION_ID_PREFIX = `tanstack-db-cache:`
+const LEGACY_CACHE_GENERATION_ID_PREFIX = `\u0000tanstack-db-cache:`
+
+function hasCacheGenerationIdPrefix(collectionId: string): boolean {
+  return (
+    collectionId.startsWith(CACHE_GENERATION_ID_PREFIX) ||
+    collectionId.startsWith(LEGACY_CACHE_GENERATION_ID_PREFIX)
+  )
+}
+
+export const DEFAULT_CACHE_GENERATION_CLAIM_TTL_MS = 5 * 60_000
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
 
 /**
@@ -256,7 +306,6 @@ export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS = 1_000
  */
 export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
 
-const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
@@ -266,6 +315,9 @@ type PersistedTaggedValueType =
   | `nan`
   | `infinity`
   | `-infinity`
+  | `string`
+  | `Temporal.Instant`
+  | `Temporal.PlainDate`
 type PersistedTaggedValue = {
   [PERSISTED_TYPE_TAG]: PersistedTaggedValueType
   [PERSISTED_VALUE_TAG]: string
@@ -277,6 +329,9 @@ const persistedTaggedValueTypes = new Set<PersistedTaggedValueType>([
   `nan`,
   `infinity`,
   `-infinity`,
+  `string`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
 ])
 
 const orderByObjectIds = new WeakMap<object, number>()
@@ -339,6 +394,9 @@ function encodePersistedJsonValue(value: unknown): unknown {
     return serializeSQLiteBigInt(value) satisfies PersistedTaggedValue
   }
 
+  const temporal = serializeSQLiteTemporal(value)
+  if (temporal) return temporal
+
   if (value instanceof Date) {
     return {
       [PERSISTED_TYPE_TAG]: `date`,
@@ -381,6 +439,13 @@ function encodePersistedJsonValue(value: unknown): unknown {
         encodedRecord[key] = encodedValue
       }
     }
+    // Escape the marker field itself, leaving ordinary nested JSON paths intact.
+    if (typeof recordValue[PERSISTED_TYPE_TAG] === `string`) {
+      encodedRecord[PERSISTED_TYPE_TAG] = {
+        [PERSISTED_TYPE_TAG]: `string`,
+        [PERSISTED_VALUE_TAG]: recordValue[PERSISTED_TYPE_TAG],
+      }
+    }
     return encodedRecord
   }
 
@@ -394,6 +459,14 @@ function decodePersistedJsonValue(value: unknown): unknown {
 
   if (isPersistedTaggedValue(value)) {
     switch (value[PERSISTED_TYPE_TAG]) {
+      case `string`:
+        return value[PERSISTED_VALUE_TAG]
+      case `Temporal.Instant`:
+      case `Temporal.PlainDate`:
+        return reviveSQLiteTemporal(
+          value[PERSISTED_TYPE_TAG],
+          value[PERSISTED_VALUE_TAG],
+        )
       case `bigint`:
         return BigInt(value[PERSISTED_VALUE_TAG])
       case `date`: {
@@ -465,7 +538,8 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
     return value.toISOString()
   }
 
-  return serializePersistedRowValue(value)
+  const temporal = serializeSQLiteTemporal(value)
+  return temporal?.order ?? serializePersistedRowValue(value)
 }
 
 function toSqliteLiteral(value: SqliteSupportedValue): string {
@@ -477,6 +551,10 @@ function toSqliteLiteral(value: SqliteSupportedValue): string {
     return Number.isFinite(value) ? String(value) : `NULL`
   }
 
+  if (value.includes(`\u0000`)) {
+    // JSON escapes NUL before SQL parsing and matches stored-string extraction.
+    return `json_extract(${toSqliteLiteral(JSON.stringify(value))}, '$')`
+  }
   return `'${value.replace(/'/g, `''`)}'`
 }
 
@@ -569,6 +647,10 @@ function compareOrderByValues(
     return left.getTime() - right.getTime()
   }
 
+  if (sqliteTemporalKind(left) && sqliteTemporalKind(right)) {
+    return compareTemporalValues(left, right)
+  }
+
   const leftIsObject = typeof left === `object`
   const rightIsObject = typeof right === `object`
   if (leftIsObject || rightIsObject) {
@@ -608,6 +690,39 @@ function createJsonPath(path: Array<string>): string | null {
   }
 
   return jsonPath
+}
+
+const MAX_INDEXED_NUMERIC_PATH_SEGMENTS = 3
+
+function hasDeepNumericPath(expression: IR.BasicExpression): boolean {
+  if (expression.type === `ref`) {
+    return (
+      IR.getPropRefPropertyPath(expression).filter((segment) =>
+        /^[0-9]+$/.test(String(segment)),
+      ).length > MAX_INDEXED_NUMERIC_PATH_SEGMENTS
+    )
+  }
+  return expression.type === `func` && expression.args.some(hasDeepNumericPath)
+}
+
+function createJsonPathVariants(path: Array<string>): Array<string> | null {
+  const canonical = createJsonPath(path)
+  if (!canonical) return null
+
+  let paths = [`$`]
+  for (const segment of path) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment)) {
+      paths = paths.map((prefix) => `${prefix}.${segment}`)
+    } else if (/^[0-9]+$/.test(segment)) {
+      if (paths.length >= 2 ** MAX_INDEXED_NUMERIC_PATH_SEGMENTS)
+        return [canonical]
+      paths = paths.flatMap((prefix) => [
+        `${prefix}[${segment}]`,
+        `${prefix}."${segment}"`,
+      ])
+    }
+  }
+  return paths
 }
 
 function getLiteralValueKind(value: unknown): CompiledValueKind {
@@ -693,16 +808,23 @@ function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
   const taggedValuePathSql = toSqliteLiteral(taggedValuePath)
   const jsonPathSql = toSqliteLiteral(jsonPath)
 
-  return {
-    supported: true,
-    sql: `(CASE json_extract(value, ${typePathSql})
+  const typeSql = `json_extract(value, ${typePathSql})`
+  const orderPathSql = toSqliteLiteral(`${jsonPath}.order`)
+  const sql = `(CASE ${typeSql}
       WHEN 'bigint' THEN CAST(json_extract(value, ${taggedValuePathSql}) AS NUMERIC)
       WHEN 'date' THEN json_extract(value, ${taggedValuePathSql})
+      WHEN 'string' THEN json_extract(value, ${taggedValuePathSql})
+      WHEN 'Temporal.Instant' THEN json_extract(value, ${orderPathSql})
+      WHEN 'Temporal.PlainDate' THEN json_extract(value, ${orderPathSql})
       WHEN 'nan' THEN NULL
       WHEN 'infinity' THEN NULL
       WHEN '-infinity' THEN NULL
       ELSE json_extract(value, ${jsonPathSql})
-    END)`,
+    END)`
+  return {
+    supported: true,
+    sql,
+    identitySql: `(CASE WHEN ${typeSql} IN ('Temporal.Instant', 'Temporal.PlainDate') THEN ${typeSql} || ':' || json_extract(value, ${taggedValuePathSql}) ELSE ${sql} END)`,
     params: [],
     valueKind: `unknown`,
   }
@@ -754,6 +876,13 @@ function stableStringify(value: unknown): string {
   return serializePersistedRowValue(value)
 }
 
+/** Balance disjunctions so a large membership index stays below SQL depth limits. */
+function joinSqlDisjunction(parts: ReadonlyArray<string>): string {
+  if (parts.length === 1) return parts[0]!
+  const middle = Math.floor(parts.length / 2)
+  return `(${joinSqlDisjunction(parts.slice(0, middle))} OR ${joinSqlDisjunction(parts.slice(middle))})`
+}
+
 function argumentCompilationContext(
   parentName: string,
   argumentIndex: number,
@@ -788,31 +917,78 @@ function argumentCompilationContext(
   }
 }
 
+function hasUnpairedSurrogate(value: string): boolean {
+  // With /u, paired surrogates form one code point; lone surrogates still match.
+  return /[\uD800-\uDFFF]/u.test(value)
+}
+
+function isSafeEqualityLiteral(value: unknown): boolean {
+  return (
+    typeof value === `string` ||
+    typeof value === `boolean` ||
+    typeof value === `bigint` ||
+    sqliteTemporalKind(value) !== undefined
+  )
+}
+
+function isSafeCoalesceOperand(
+  expression: IR.BasicExpression | undefined,
+): boolean {
+  return (
+    expression?.type === `func` &&
+    expression.name === `coalesce` &&
+    expression.args.length === 2 &&
+    expression.args[0]?.type === `ref` &&
+    expression.args[1]?.type === `val` &&
+    isSafeEqualityLiteral(expression.args[1].value) &&
+    !(
+      typeof expression.args[1].value === `string` &&
+      hasUnpairedSurrogate(expression.args[1].value)
+    )
+  )
+}
+
 function compileSqlExpression(
   expression: IR.BasicExpression,
   context: SqlExpressionCompilationContext = `predicate`,
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
-    const valueKind = getLiteralValueKind(expression.value)
+    if (
+      context === `predicate` &&
+      typeof expression.value === `string` &&
+      hasUnpairedSurrogate(expression.value)
+    ) {
+      // JSON extraction changes lone surrogates in stored strings. Apply the
+      // same extraction to the binding so an indexed equality keeps its row.
+      return {
+        supported: true,
+        sql: `json_extract(?, '$')`,
+        params: [JSON.stringify(expression.value)],
+      }
+    }
+    const temporal = serializeSQLiteTemporal(expression.value)
+    const value = temporal?.order ?? toSqliteParameterValue(expression.value)
     return {
+      identitySql: temporal
+        ? toSqliteLiteral(sqliteTemporalIdentity(temporal))
+        : undefined,
       supported: true,
       sql:
         context === `index-expression`
-          ? toSqliteExpressionLiteral(expression.value)
+          ? toSqliteExpressionLiteral(
+              typeof expression.value === `bigint` ? expression.value : value,
+            )
           : `?`,
-      params:
-        context === `predicate`
-          ? [toSqliteParameterValue(expression.value)]
-          : [],
-      valueKind,
+      params: context === `predicate` ? [value] : [],
+      valueKind: getLiteralValueKind(expression.value),
     }
   }
 
   if (expression.type === `ref`) {
-    const jsonPath = createJsonPath(
+    const jsonPaths = createJsonPathVariants(
       IR.getPropRefPropertyPath(expression).map(String),
     )
-    if (!jsonPath) {
+    if (!jsonPaths) {
       return {
         supported: false,
         sql: ``,
@@ -820,10 +996,21 @@ function compileSqlExpression(
       }
     }
 
-    return compileRefExpressionSql(jsonPath)
+    if (jsonPaths.length === 1) return compileRefExpressionSql(jsonPaths[0]!)
+    const variants = jsonPaths.map(compileRefExpressionSql)
+    return {
+      supported: true,
+      identitySql: `COALESCE(${variants.map((variant) => variant.identitySql).join(`, `)})`,
+      sql: `COALESCE(${variants.map((variant) => variant.sql).join(`, `)})`,
+      params: [],
+      valueKind: `unknown`,
+    }
   }
 
-  const compiledArgs = expression.args.map((arg, index) =>
+  // IN owns its list encoding; compiling that list as a scalar discards work.
+  const args =
+    expression.name === `in` ? expression.args.slice(0, 1) : expression.args
+  const compiledArgs = args.map((arg, index) =>
     compileSqlExpression(
       arg,
       argumentCompilationContext(expression.name, index, arg, context),
@@ -873,38 +1060,49 @@ function compileSqlExpression(
         lte: `<=`,
       }
 
+      const comparison = compileComparisonSql(
+        operatorByName[expression.name],
+        expression.args[0]!,
+        expression.args[1]!,
+        argSql[0],
+        argSql[1],
+        valueKind,
+        getCompiledValueKind(compiledArgs[0]),
+        getCompiledValueKind(compiledArgs[1]),
+      )
+      // Native order ties need canonical identity, including in persisted
+      // expressions. Ordinary string predicates keep one binding; residual
+      // filtering removes native order-key collisions from their candidate set.
+      const needsIdentity =
+        expression.name === `eq` &&
+        expression.args.every(
+          (arg) =>
+            arg.type !== `val` ||
+            sqliteTemporalKind(arg.value) ||
+            (context === `index-expression` && typeof arg.value === `string`),
+        )
       return {
         supported: true,
-        sql: compileComparisonSql(
-          operatorByName[expression.name],
-          expression.args[0]!,
-          expression.args[1]!,
-          argSql[0],
-          argSql[1],
-          valueKind,
-          getCompiledValueKind(compiledArgs[0]),
-          getCompiledValueKind(compiledArgs[1]),
-        ),
+        sql: needsIdentity
+          ? `(${comparison} AND (${compiledArgs[0].identitySql ?? argSql[0]} = ${compiledArgs[1].identitySql ?? argSql[1]}))`
+          : comparison,
         params,
       }
     }
-    case `and`: {
-      if (argSql.length < 2) {
-        return { supported: false, sql: ``, params: [] }
-      }
-      return {
-        supported: true,
-        sql: argSql.map((sql) => `(${sql})`).join(` AND `),
-        params,
-      }
-    }
+    case `and`:
     case `or`: {
-      if (argSql.length < 2) {
-        return { supported: false, sql: ``, params: [] }
+      if (argSql.length === 0) {
+        return {
+          supported: true,
+          sql: expression.name === `and` ? `(1 = 1)` : `(0 = 1)`,
+          params: [],
+        }
       }
       return {
         supported: true,
-        sql: argSql.map((sql) => `(${sql})`).join(` OR `),
+        sql: argSql
+          .map((sql) => `(${sql})`)
+          .join(expression.name === `and` ? ` AND ` : ` OR `),
         params,
       }
     }
@@ -938,54 +1136,54 @@ function compileSqlExpression(
         return { supported: false, sql: ``, params: [] }
       }
 
+      // Order and identity are two projections of one validated native encoding.
+      const values = listValue.map((value) => {
+        const temporal = serializeSQLiteTemporal(value)
+        return {
+          value:
+            typeof value === `bigint`
+              ? assertSQLiteBigIntInRange(value)
+              : (temporal?.order ?? toSqliteParameterValue(value)),
+          identity: temporal ? sqliteTemporalIdentity(temporal) : undefined,
+        }
+      })
+      let identity = ``
+      if (
+        listValue.some(
+          (value) =>
+            sqliteTemporalKind(value) ||
+            (context === `index-expression` && typeof value === `string`),
+        )
+      ) {
+        const leftIdentity = compiledArgs[0]?.identitySql ?? leftSql
+        // Index expressions cannot contain subqueries. Both forms preserve
+        // correlated membership and SQL's three-valued Boolean semantics.
+        identity =
+          context === `index-expression`
+            ? ` AND (${joinSqlDisjunction(values.map(({ value, identity: nativeIdentity }) => `(${leftSql} = ${toSqliteExpressionLiteral(value)} AND ${leftIdentity} = ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))})`
+            : ` AND ((${leftSql}, ${leftIdentity}) IN (VALUES ${[...new Set(values.map(({ value, identity: nativeIdentity }) => `(${toSqliteExpressionLiteral(value)}, ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))].join(`, `)}))`
+      }
       if (context === `index-expression`) {
         return {
           supported: true,
-          sql: `(${leftSql} IN (${listValue
-            .map((value) => toSqliteExpressionLiteral(value))
-            .join(`, `)}))`,
+          sql: `(${leftSql} IN (${values
+            .map(({ value }) => toSqliteExpressionLiteral(value))
+            .join(`, `)})${identity})`,
           params: leftParams,
         }
       }
 
-      if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
-        const chunkClauses: Array<string> = []
-        const batchedParams: Array<SqliteSupportedValue> = []
-
-        for (
-          let startIndex = 0;
-          startIndex < listValue.length;
-          startIndex += SQLITE_MAX_IN_BATCH_SIZE
-        ) {
-          const chunkValues = listValue.slice(
-            startIndex,
-            startIndex + SQLITE_MAX_IN_BATCH_SIZE,
-          )
-          const chunkParams: Array<SqliteSupportedValue> = []
-          const chunkValueSql = chunkValues.map((value) => {
-            chunkParams.push(toSqliteParameterValue(value))
-            return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
-          })
-          chunkClauses.push(`(${leftSql} IN (${chunkValueSql.join(`, `)}))`)
-          batchedParams.push(...leftParams, ...chunkParams)
-        }
-
-        return {
-          supported: true,
-          sql: `(${chunkClauses.join(` OR `)})`,
-          params: batchedParams,
-        }
-      }
-
-      const listParams: Array<SqliteSupportedValue> = []
-      const listValueSql = listValue.map((value) => {
-        listParams.push(toSqliteParameterValue(value))
-        return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
-      })
+      const jsonList = `[${values
+        .map(({ value }) =>
+          typeof value === `bigint`
+            ? assertSQLiteBigIntInRange(value).toString()
+            : JSON.stringify(value),
+        )
+        .join(`,`)}]`
       return {
         supported: true,
-        sql: `(${leftSql} IN (${listValueSql.join(`, `)}))`,
-        params: [...leftParams, ...listParams],
+        sql: `(${leftSql} IN (SELECT value FROM json_each(?))${identity})`,
+        params: [...leftParams, jsonList],
       }
     }
     case `like`:
@@ -1012,7 +1210,12 @@ function compileSqlExpression(
     case `concat`:
       return { supported: true, sql: `(${argSql.join(` || `)})`, params }
     case `coalesce`:
-      return { supported: true, sql: `COALESCE(${argSql.join(`, `)})`, params }
+      return {
+        supported: true,
+        sql: `COALESCE(${argSql.join(`, `)})`,
+        identitySql: `COALESCE(${compiledArgs.map((arg) => arg.identitySql ?? arg.sql).join(`, `)})`,
+        params,
+      }
     case `add`:
       return { supported: true, sql: `(${argSql[0]} + ${argSql[1]})`, params }
     case `subtract`:
@@ -1048,6 +1251,235 @@ function compileSqlExpression(
         params: [],
       }
   }
+}
+
+/** A raw ref/native-literal leaf has exact native truth before prefilter broadening. */
+function nativeComparisonRef(
+  expression: IR.BasicExpression,
+): IR.PropRef | undefined {
+  if (expression.type !== `func` || expression.args.length !== 2)
+    return undefined
+  const [left, right] = expression.args
+  if (expression.name === `in`) {
+    return left?.type === `ref` &&
+      right?.type === `val` &&
+      Array.isArray(right.value) &&
+      right.value.length > 0 &&
+      right.value.every((value) => sqliteTemporalKind(value))
+      ? left
+      : undefined
+  }
+  if (![`eq`, `gt`, `gte`, `lt`, `lte`].includes(expression.name))
+    return undefined
+  if (
+    left?.type === `ref` &&
+    right?.type === `val` &&
+    sqliteTemporalKind(right.value)
+  )
+    return left
+  if (
+    right?.type === `ref` &&
+    left?.type === `val` &&
+    sqliteTemporalKind(left.value)
+  )
+    return right
+  return undefined
+}
+
+function compileNativeRefGuard(ref: IR.PropRef): string {
+  const paths = createJsonPathVariants(
+    IR.getPropRefPropertyPath(ref).map(String),
+  )!
+  const kinds = paths.map(
+    (path) =>
+      `json_extract(value, ${toSqliteLiteral(`${path}.${PERSISTED_TYPE_TAG}`)})`,
+  )
+  const kind = kinds.length === 1 ? kinds[0] : `COALESCE(${kinds.join(`, `)})`
+  return `${kind} IN ('Temporal.Instant', 'Temporal.PlainDate')`
+}
+
+function compileSafeSqlPrefilter(
+  expression: IR.BasicExpression,
+  compiled?: CompiledSqlFragment,
+): CompiledSqlFragment | undefined {
+  // Every public match must pass this SQL candidate before JavaScript applies
+  // the authoritative row predicate. Extra candidates are allowed.
+  const direct = () => {
+    const candidate = compiled ?? compileSqlExpression(expression)
+    return candidate.supported ? candidate : undefined
+  }
+  if (expression.type === `val`) {
+    return typeof expression.value === `boolean` || expression.value == null
+      ? direct()
+      : undefined
+  }
+  if (expression.type === `ref`) return undefined
+
+  if (expression.name === `and` || expression.name === `or`) {
+    if (expression.args.length === 0) return direct()
+    const candidates = expression.args.map((argument) =>
+      compileSafeSqlPrefilter(argument),
+    )
+    if (expression.name === `or` && candidates.some((candidate) => !candidate))
+      return undefined
+    const selected = candidates.filter(
+      (candidate): candidate is CompiledSqlFragment => candidate !== undefined,
+    )
+    if (selected.length === 0) return undefined
+    return {
+      supported: true,
+      sql: selected
+        .map(({ sql }) => `(${sql})`)
+        .join(expression.name === `and` ? ` AND ` : ` OR `),
+      params: selected.flatMap(({ params }) => params),
+    }
+  }
+
+  // More than three digit segments need too many alternative JSON paths.
+  // Keep their prefilter unbounded rather than exclude an object-key match.
+  if (hasDeepNumericPath(expression)) return undefined
+  compiled ??= compileSqlExpression(expression)
+  if (!compiled.supported) return undefined
+  const [left, right] = expression.args
+  if (
+    expression.name === `not` &&
+    expression.args.length === 1 &&
+    left &&
+    nativeComparisonRef(left)
+  ) {
+    // Negate the original leaf, never a broadened prefilter. Nonfinite stored
+    // scalars project to NULL; retaining them also retains valid NOT matches.
+    return { ...compiled, sql: `COALESCE(${compiled.sql}, 1)` }
+  }
+  if (expression.args.length === 2) {
+    const nativeRef = nativeComparisonRef(expression)
+    if (nativeRef) {
+      if (expression.name === `eq` || expression.name === `in`) return compiled
+      // NaN orders above native values in the core evaluator. NULL candidates
+      // also preserve that law with either operand direction.
+      const fieldSql = compileSqlExpression(nativeRef, `index-expression`).sql
+      return { ...compiled, sql: `(${compiled.sql} OR ${fieldSql} IS NULL)` }
+    }
+    if (
+      expression.name === `eq` &&
+      left?.type === `ref` &&
+      right?.type === `ref`
+    ) {
+      // Ref/ref scalar coercions are not generally SQL-exact. Restrict only
+      // native pairs; leave every other pair to the authoritative evaluator.
+      return {
+        ...compiled,
+        sql: `(CASE WHEN ${compileNativeRefGuard(left)} AND ${compileNativeRefGuard(right)} THEN ${compiled.sql} ELSE 1 END)`,
+      }
+    }
+    if (
+      [`gt`, `gte`, `lt`, `lte`].includes(expression.name) &&
+      (left?.type === `ref` || right?.type === `ref`)
+    ) {
+      const field =
+        left?.type === `ref` ? left : right?.type === `ref` ? right : undefined
+      const literal = field === left ? right : left
+      if (
+        field &&
+        literal?.type === `val` &&
+        ((typeof literal.value === `number` &&
+          Number.isSafeInteger(literal.value)) ||
+          typeof literal.value === `bigint`)
+      ) {
+        const fieldSql = compileSqlExpression(field, `index-expression`).sql
+        const literalSql = compileSqlExpression(
+          literal,
+          typeof literal.value === `bigint` ? `index-expression` : `predicate`,
+        )
+        const greaterSide =
+          (field === left && [`gt`, `gte`].includes(expression.name)) ||
+          (field === right && [`lt`, `lte`].includes(expression.name))
+        const unsafeBigInt =
+          typeof literal.value === `bigint` &&
+          !Number.isSafeInteger(Number(literal.value))
+        const roundedNumberCandidates = unsafeBigInt
+          ? literal.value > 0n
+            ? ` OR ${fieldSql} >= ${Number.MAX_SAFE_INTEGER}`
+            : ` OR ${fieldSql} <= -${Number.MAX_SAFE_INTEGER}`
+          : ``
+        return {
+          supported: true,
+          sql: greaterSide
+            ? `(${fieldSql} >= ${literalSql.sql} OR ${fieldSql} IS NULL${roundedNumberCandidates})`
+            : `(${fieldSql} <= ${literalSql.sql} OR ${fieldSql} IS NULL OR ${fieldSql} >= ''${roundedNumberCandidates})`,
+          params: literalSql.params,
+        }
+      }
+    }
+    if (expression.name === `eq`) {
+      if (
+        ((left?.type === `ref` || isSafeCoalesceOperand(left)) &&
+          right?.type === `val` &&
+          isSafeEqualityLiteral(right.value)) ||
+        ((right?.type === `ref` || isSafeCoalesceOperand(right)) &&
+          left?.type === `val` &&
+          isSafeEqualityLiteral(left.value))
+      ) {
+        return compiled
+      }
+      const lower =
+        left?.type === `func` && left.name === `lower`
+          ? left
+          : right?.type === `func` && right.name === `lower`
+            ? right
+            : undefined
+      const literal = lower === left ? right : left
+      if (
+        lower?.args.length === 1 &&
+        lower.args[0]?.type === `ref` &&
+        literal?.type === `val` &&
+        typeof literal.value === `string` &&
+        [...literal.value].every((char) => char.charCodeAt(0) <= 0x7f) &&
+        !literal.value.includes(`\u0000`)
+      ) {
+        const lowerSql = compileSqlExpression(lower, `index-expression`).sql
+        return {
+          supported: true,
+          sql: `(${compiled.sql} OR (${lowerSql} >= ? AND ${lowerSql} GLOB '*[^ -~]*'))`,
+          params: [...compiled.params, literal.value],
+        }
+      }
+    }
+  }
+  if (
+    expression.name === `in` &&
+    expression.args.length === 2 &&
+    right?.type === `val` &&
+    Array.isArray(right.value)
+  ) {
+    if (right.value.length === 0) return compiled
+    if (left?.type === `ref`) {
+      if (right.value.every((value) => typeof value === `bigint`))
+        return compiled
+      if (right.value.every((value) => typeof value === `string`)) {
+        // Both sides pass through SQLite's JSON decoder; one binding keeps
+        // large string scopes within the host parameter limit, even in OR.
+        return {
+          supported: true,
+          sql: `(${compileSqlExpression(left, `index-expression`).sql} IN (SELECT value FROM json_each(?)))`,
+          params: [JSON.stringify(right.value)],
+        }
+      }
+    }
+  }
+  if (
+    expression.name === `like` &&
+    expression.args.length === 2 &&
+    left?.type === `ref` &&
+    right?.type === `val` &&
+    typeof right.value === `string` &&
+    /^[\x20-\x7e]*%$/.test(right.value) &&
+    !right.value.slice(0, -1).includes(`%`) &&
+    !right.value.includes(`_`)
+  ) {
+    return compiled
+  }
+  return undefined
 }
 
 function compileOrderByClauses(
@@ -1175,6 +1607,39 @@ function mergeObjectRows<T extends object>(existing: unknown, incoming: T): T {
   return incoming
 }
 
+function* batches<T>(
+  changes: ReadonlyArray<T>,
+  maxSize: number,
+): Generator<Array<T>> {
+  for (let offset = 0; offset < changes.length; offset += maxSize) {
+    yield changes.slice(offset, offset + maxSize)
+  }
+}
+
+function lastMetadataByKey<
+  T extends { type: `set` | `delete`; value?: unknown },
+>(
+  changes: ReadonlyArray<T>,
+  keyOf: (change: T) => string,
+  undefinedSetIsNull = false,
+): Array<T> {
+  const latest = new Map<string, T>()
+  for (const change of changes) {
+    const key = keyOf(change)
+    const previous = latest.get(key)
+    if (
+      previous?.type === `set` &&
+      (previous.value !== undefined || !undefinedSetIsNull) &&
+      (serializePersistedRowValue(previous.value) as string | undefined) ===
+        undefined
+    ) {
+      throw new TypeError(`Metadata value cannot be bound to SQLite`)
+    }
+    latest.set(key, change)
+  }
+  return [...latest.values()]
+}
+
 function buildIndexName(collectionId: string, signature: string): string {
   const sanitizedSignature = signature
     .toLowerCase()
@@ -1191,7 +1656,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
   private readonly schedulingIdentitySource: SQLiteDriver
   private scheduler: SharedPersistenceScheduler | undefined
-  private activeUnscheduledHydration: Promise<unknown> | undefined
+  private readonly activeUnscheduledHydrations = new Set<Promise<unknown>>()
   private readonly hydrationAdapter: HydrationPersistenceAdapter
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
@@ -1199,6 +1664,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly appliedTxPruneMaxAgeSeconds: number | undefined
   private readonly pullSinceReloadThreshold: number
   private readonly replacementBatchSize: number
+  private readonly cacheGenerationClaimTtlMs: number
+  private readonly now: () => number
 
   private initialized = false
   private readonly collectionTableCache = new Map<
@@ -1209,6 +1676,290 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     string,
     Promise<CollectionTableMapping>
   >()
+
+  claimCacheGeneration(
+    collectionId: string,
+  ): Promise<PersistedCacheGenerationClaim> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      return this.driver.transaction(async (driver) => {
+        const expiresAtMs = this.now() + this.cacheGenerationClaimTtlMs
+        // The first generation must not reuse the legacy collection ID: an older
+        // adapter can still write that ID without a claim after an upgrade.
+        const initialPhysicalId = `${CACHE_GENERATION_ID_PREFIX}${safeRandomUUID()}`
+        await driver.run(
+          `INSERT INTO cache_generation (logical_id, generation, physical_id, retired)
+           SELECT ?, 0, ?, 0
+           WHERE NOT EXISTS (
+             SELECT 1 FROM cache_generation WHERE logical_id = ?
+           )`,
+          [collectionId, initialPhysicalId, collectionId],
+        )
+        const head = await driver.query<{ physical_id: string }>(
+          `SELECT physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+          [collectionId],
+        )
+        const storageCollectionId = head[0]?.physical_id
+        if (!storageCollectionId) {
+          throw new InvalidPersistedCollectionConfigError(
+            `No active persisted cache generation for collection "${collectionId}"`,
+          )
+        }
+        const claimId = safeRandomUUID()
+        await driver.run(
+          `INSERT INTO cache_generation_claim
+             (claim_id, logical_id, physical_id, expires_at_ms)
+           VALUES (?, ?, ?, ?)`,
+          [claimId, collectionId, storageCollectionId, expiresAtMs],
+        )
+        await this.collectRetiredCacheGenerations(driver)
+        return { storageCollectionId, claimId, expiresAtMs }
+      })
+    })
+  }
+
+  rotateCacheGeneration(
+    collectionId: string,
+    claimId: string,
+    resetMetadata?: { key: string; value: unknown },
+    expectedStorageCollectionId?: string,
+  ): Promise<PersistedCacheGenerationClaim> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      return this.driver.transaction(async (driver) => {
+        const now = this.now()
+        const expiresAtMs = now + this.cacheGenerationClaimTtlMs
+        const claimed = await driver.query<{
+          physical_id: string
+          expires_at_ms: number
+        }>(
+          `SELECT physical_id, expires_at_ms
+           FROM cache_generation_claim
+           WHERE claim_id = ? AND logical_id = ?`,
+          [claimId, collectionId],
+        )
+        const claimedPhysicalId =
+          claimed[0] && claimed[0].expires_at_ms > now
+            ? claimed[0].physical_id
+            : undefined
+        if (
+          claimedPhysicalId &&
+          expectedStorageCollectionId &&
+          claimedPhysicalId !== expectedStorageCollectionId
+        ) {
+          throw new InvalidPersistedCollectionConfigError(
+            `Persisted cache claim changed generations before recovery`,
+          )
+        }
+        const head = await driver.query<{
+          generation: number
+          physical_id: string
+        }>(
+          `SELECT generation, physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+          [collectionId],
+        )
+        const active = head[0]
+        if (!active) {
+          throw new InvalidPersistedCollectionConfigError(
+            `No active persisted cache generation for collection "${collectionId}"`,
+          )
+        }
+        await driver.run(
+          `INSERT INTO cache_generation_sequence (logical_id, next_generation)
+           SELECT ?, COALESCE(MAX(generation), -1) + 1
+           FROM cache_generation WHERE logical_id = ?
+           ON CONFLICT(logical_id) DO NOTHING`,
+          [collectionId, collectionId],
+        )
+        const nextRows = await driver.query<{ next_generation: number }>(
+          `SELECT next_generation FROM cache_generation_sequence
+           WHERE logical_id = ?`,
+          [collectionId],
+        )
+        const nextGeneration = nextRows[0]!.next_generation
+        await driver.run(
+          `UPDATE cache_generation_sequence SET next_generation = ?
+           WHERE logical_id = ?`,
+          [nextGeneration + 1, collectionId],
+        )
+        // An expired claim no longer owns the head, even when it remembers
+        // the current storage ID. Its recovery is private so another run's
+        // valid current cache remains claimable.
+        const ownedHead = claimedPhysicalId === active.physical_id
+        const storageCollectionId = `${CACHE_GENERATION_ID_PREFIX}${safeRandomUUID()}`
+        if (ownedHead) {
+          await driver.run(
+            `UPDATE cache_generation SET retired = 1
+             WHERE logical_id = ? AND generation = ?`,
+            [collectionId, active.generation],
+          )
+        }
+        await driver.run(
+          `INSERT INTO cache_generation (logical_id, generation, physical_id, retired)
+           VALUES (?, ?, ?, ?)`,
+          [
+            collectionId,
+            nextGeneration,
+            storageCollectionId,
+            ownedHead ? 0 : 1,
+          ],
+        )
+        const nextClaimId = claimed[0] ? claimId : safeRandomUUID()
+        if (claimed[0]) {
+          await driver.run(
+            `UPDATE cache_generation_claim
+             SET physical_id = ?, expires_at_ms = ? WHERE claim_id = ?`,
+            [storageCollectionId, expiresAtMs, claimId],
+          )
+        } else {
+          await driver.run(
+            `INSERT INTO cache_generation_claim
+               (claim_id, logical_id, physical_id, expires_at_ms)
+             VALUES (?, ?, ?, ?)`,
+            [nextClaimId, collectionId, storageCollectionId, expiresAtMs],
+          )
+        }
+        await driver.run(
+          `INSERT INTO collection_version (
+             collection_id, latest_row_version,
+             key_set_evidence_available, key_set_evidence_incompatible
+           ) VALUES (?, 0, 1, 1)`,
+          [storageCollectionId],
+        )
+        if (resetMetadata) {
+          await driver.run(
+            `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
+             VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`,
+            [
+              storageCollectionId,
+              resetMetadata.key,
+              serializePersistedRowValue(resetMetadata.value),
+            ],
+          )
+        }
+        await this.collectRetiredCacheGenerations(driver)
+        return { storageCollectionId, claimId: nextClaimId, expiresAtMs }
+      })
+    })
+  }
+
+  releaseCacheGenerationClaim(claimId: string): Promise<void> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      await this.runInTransaction(async (driver) => {
+        await driver.run(
+          `DELETE FROM cache_generation_claim WHERE claim_id = ?`,
+          [claimId],
+        )
+        await this.collectRetiredCacheGenerations(driver)
+      })
+    })
+  }
+
+  renewCacheGenerationClaim(
+    storageCollectionId: string,
+    claimId: string,
+  ): Promise<number | undefined> {
+    return this.runRegular(() =>
+      this.renewCacheGenerationClaimUnscheduled(storageCollectionId, claimId),
+    )
+  }
+
+  private async renewCacheGenerationClaimUnscheduled(
+    storageCollectionId: string,
+    claimId: string,
+  ): Promise<number | undefined> {
+    await this.ensureInitialized()
+    return this.runInTransaction(async (driver) => {
+      const now = this.now()
+      const rows = await driver.query<{ claim_id: string }>(
+        `SELECT claim_id FROM cache_generation_claim
+           WHERE claim_id = ? AND physical_id = ? AND expires_at_ms > ?`,
+        [claimId, storageCollectionId, now],
+      )
+      if (!rows[0]) {
+        await this.collectRetiredCacheGenerations(driver)
+        return undefined
+      }
+      const expiresAtMs = now + this.cacheGenerationClaimTtlMs
+      await driver.run(
+        `UPDATE cache_generation_claim SET expires_at_ms = ?
+           WHERE claim_id = ?`,
+        [expiresAtMs, claimId],
+      )
+      return expiresAtMs
+    })
+  }
+
+  private async collectRetiredCacheGenerations(
+    driver: SQLiteDriver,
+  ): Promise<void> {
+    await driver.run(
+      `DELETE FROM cache_generation_claim WHERE expires_at_ms <= ?`,
+      [this.now()],
+    )
+    const retired = await driver.query<{
+      physical_id: string
+      table_name: string | null
+      tombstone_table_name: string | null
+    }>(
+      `SELECT generation.physical_id, registry.table_name,
+              registry.tombstone_table_name
+       FROM cache_generation AS generation
+       LEFT JOIN collection_registry AS registry
+         ON registry.collection_id = generation.physical_id
+       WHERE generation.retired = 1
+         AND NOT EXISTS (
+           SELECT 1 FROM cache_generation_claim AS claim
+           WHERE claim.physical_id = generation.physical_id
+         )`,
+    )
+    for (const generation of retired) {
+      if (generation.table_name) {
+        await driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(generation.table_name)}`,
+        )
+      }
+      if (generation.tombstone_table_name) {
+        await driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(generation.tombstone_table_name)}`,
+        )
+      }
+      for (const table of [
+        `applied_tx`,
+        `collection_expected_keys`,
+        `collection_metadata`,
+        `persisted_index_registry`,
+        `leader_term`,
+      ]) {
+        await driver.run(`DELETE FROM ${table} WHERE collection_id = ?`, [
+          generation.physical_id,
+        ])
+      }
+      await driver.run(
+        `DELETE FROM collection_version WHERE collection_id = ?`,
+        [generation.physical_id],
+      )
+      await driver.run(
+        `DELETE FROM collection_reset_epoch WHERE collection_id = ?`,
+        [generation.physical_id],
+      )
+      await driver.run(
+        `DELETE FROM collection_registry WHERE collection_id = ?`,
+        [generation.physical_id],
+      )
+      await driver.run(`DELETE FROM cache_generation WHERE physical_id = ?`, [
+        generation.physical_id,
+      ])
+      this.collectionTableCache.delete(generation.physical_id)
+    }
+  }
+
+  getCacheGenerationNow(): number {
+    return this.now()
+  }
 
   constructor(options: SQLiteCoreAdapterOptions) {
     const maxBoundParameters = options.driver.maxBoundParameters
@@ -1224,6 +1975,18 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       maxBoundParameters === undefined
         ? REPLACEMENT_BATCH_SIZE
         : Math.min(REPLACEMENT_BATCH_SIZE, Math.floor(maxBoundParameters / 4))
+
+    this.cacheGenerationClaimTtlMs =
+      options.cacheGenerationClaimTtlMs ?? DEFAULT_CACHE_GENERATION_CLAIM_TTL_MS
+    if (
+      !Number.isSafeInteger(this.cacheGenerationClaimTtlMs) ||
+      this.cacheGenerationClaimTtlMs <= 0
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite adapter cacheGenerationClaimTtlMs must be a positive safe integer`,
+      )
+    }
+    this.now = options.now ?? Date.now
 
     const schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
     if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
@@ -1276,8 +2039,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           observedDriverSchedulingKeys.set(options.driver, key)
           const scheduler = getSharedPersistenceScheduler(key)
           this.scheduler ??= scheduler
-          if (this.activeUnscheduledHydration) {
-            scheduler.adoptRunningHydrate(this.activeUnscheduledHydration)
+          for (const hydration of this.activeUnscheduledHydrations) {
+            scheduler.adoptRunningHydrate(hydration)
           }
         })
     this.schemaVersion = schemaVersion
@@ -1293,18 +2056,22 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         this.loadResumeSnapshotUnscheduled(collectionId, context),
       applyCommittedTx: (collectionId, tx) =>
         this.applyCommittedTxUnscheduled(collectionId, tx),
-      loadCollectionMetadata: (collectionId) =>
-        this.loadCollectionMetadataUnscheduled(collectionId),
-      scanRows: (collectionId, scanOptions) =>
-        this.scanRowsUnscheduled(collectionId, scanOptions),
-      ensureIndex: (collectionId, signature, spec) =>
-        this.ensureIndexUnscheduled(collectionId, signature, spec),
-      markIndexRemoved: (collectionId, signature) =>
-        this.markIndexRemovedUnscheduled(collectionId, signature),
-      getStreamPosition: (collectionId) =>
-        this.getStreamPositionUnscheduled(collectionId),
-      pullSince: (collectionId, fromRowVersion) =>
-        this.pullSinceUnscheduled(collectionId, fromRowVersion),
+      renewCacheGenerationClaim: (storageCollectionId, claimId) =>
+        this.renewCacheGenerationClaimUnscheduled(storageCollectionId, claimId),
+      reconcileCommittedTx: (collectionId, tx, anchor) =>
+        this.reconcileCommittedTxUnscheduled(collectionId, tx, anchor),
+      loadCollectionMetadata: (collectionId, context) =>
+        this.loadCollectionMetadataUnscheduled(collectionId, context),
+      scanRows: (collectionId, scanOptions, context) =>
+        this.scanRowsUnscheduled(collectionId, scanOptions, context),
+      ensureIndex: (collectionId, signature, spec, ctx) =>
+        this.ensureIndexUnscheduled(collectionId, signature, spec, ctx),
+      markIndexRemoved: (collectionId, signature, ctx) =>
+        this.markIndexRemovedUnscheduled(collectionId, signature, ctx),
+      getStreamPosition: (collectionId, ctx) =>
+        this.getStreamPositionUnscheduled(collectionId, ctx),
+      pullSince: (collectionId, fromRowVersion, ctx) =>
+        this.pullSinceUnscheduled(collectionId, fromRowVersion, ctx),
       runInHydrationScope: async (task) => task(this.hydrationAdapter),
     }
   }
@@ -1318,21 +2085,26 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
 
     const hydration = Promise.resolve().then(() => task(this.hydrationAdapter))
-    this.activeUnscheduledHydration = hydration
-    const clear = () => {
-      if (this.activeUnscheduledHydration === hydration) {
-        this.activeUnscheduledHydration = undefined
-      }
-    }
+    this.activeUnscheduledHydrations.add(hydration)
+    const clear = () => this.activeUnscheduledHydrations.delete(hydration)
     void hydration.then(clear, clear)
     return hydration
   }
 
-  runInRegularScope<T>(
-    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
-  ): Promise<T> {
-    return this.runRegular(() => task(this.hydrationAdapter))
-  }
+  runInRegularScope: RegularScope = Object.assign(
+    <T>(
+      task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+    ): Promise<T> => this.runRegular(() => task(this.hydrationAdapter)),
+    {
+      // Without a shared scheduler, only this adapter's running hydrates are
+      // ahead of the caller.
+      afterQueuedWork: (): Promise<void> =>
+        this.resolveScheduler()?.afterQueuedWork() ??
+        settled(
+          Promise.all([...this.activeUnscheduledHydrations].map(settled)),
+        ),
+    },
+  )
 
   isHydrationScopeScheduled(): boolean {
     return this.resolveScheduler() !== undefined
@@ -1384,10 +2156,48 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
+  private async assertCacheGenerationReadClaim(
+    driver: SQLiteDriver,
+    storageCollectionId: string,
+    claimId?: string,
+  ): Promise<void> {
+    await this.ensureInitialized()
+    if (!claimId) {
+      if (!hasCacheGenerationIdPrefix(storageCollectionId)) return
+      const generation = await driver.query<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+        [storageCollectionId],
+      )
+      if (generation[0]) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache claim is required for collection "${storageCollectionId}"`,
+        )
+      }
+      return
+    }
+    const rows = await driver.query<{ claim_id: string }>(
+      `SELECT claim.claim_id
+       FROM cache_generation_claim AS claim
+       JOIN cache_generation AS generation
+         ON generation.physical_id = claim.physical_id
+       WHERE claim.claim_id = ? AND claim.physical_id = ?
+         AND claim.expires_at_ms > ?`,
+      [claimId, storageCollectionId, this.now()],
+    )
+    if (!rows[0]) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted cache claim is no longer active for collection "${storageCollectionId}"`,
+      )
+    }
+  }
+
   loadSubset(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options: LoadSubsetOptions,
-    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      cacheGenerationClaimId?: string
+    },
   ): Promise<
     Array<{
       key: string | number
@@ -1396,14 +2206,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }>
   > {
     return this.runRegular(() =>
-      this.loadSubsetUnscheduled(collectionId, options, ctx),
+      this.loadSubsetUnscheduled(target, options, ctx),
     )
   }
 
   private async loadSubsetUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options: LoadSubsetOptions,
-    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      cacheGenerationClaimId?: string
+    },
   ): Promise<
     Array<{
       key: string | number
@@ -1411,8 +2224,29 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       metadata?: unknown
     }>
   > {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -1486,22 +2320,24 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   loadResumeSnapshot(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      cacheGenerationClaimId?: string
     },
   ) {
     return this.runRegular(() =>
-      this.loadResumeSnapshotUnscheduled(collectionId, ctx),
+      this.loadResumeSnapshotUnscheduled(target, ctx),
     )
   }
 
   private async loadResumeSnapshotUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      cacheGenerationClaimId?: string
     },
   ): Promise<{
     rows: Array<{
@@ -1516,10 +2352,31 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestRowVersion: number
     resetEpoch: number
   }> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const includeRows = ctx?.includeRows !== false
 
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -1580,30 +2437,84 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
+  applyCommittedTx(
+    target: PersistedStorageTarget,
+    tx: PersistedTx,
+  ): Promise<void> {
+    return this.runRegular(() => this.applyCommittedTxUnscheduled(target, tx))
+  }
+
+  reconcileCommittedTx(
+    target: PersistedStorageTarget,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
     return this.runRegular(() =>
-      this.applyCommittedTxUnscheduled(collectionId, tx),
+      this.reconcileCommittedTxUnscheduled(target, tx, anchor),
     )
   }
 
   private async applyCommittedTxUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     tx: PersistedTx,
   ): Promise<void> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.applyCommittedTxInternal(target, tx)
+  }
+
+  private reconcileCommittedTxUnscheduled(
+    target: PersistedStorageTarget,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
+    if (!isValidCommittedTxAnchor(anchor)) {
+      throw new Error(
+        `Cannot reconcile a committed transaction without a valid durable anchor`,
+      )
+    }
+    return this.applyCommittedTxInternal(target, tx, anchor)
+  }
+
+  private async applyCommittedTxInternal(
+    target: PersistedStorageTarget,
+    tx: PersistedTx,
+    anchor?: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      tx.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    tx = { ...tx, cacheGenerationClaimId: access.claimId }
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      tx.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      tx.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    await this.runInTransaction(async (transactionDriver) => {
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        tx.cacheGenerationClaimId,
+      )
       const versionRows = await transactionDriver.query<{
         latest_row_version: number
         key_set_evidence_available: number
         schema_version: number
         already_applied: number
+        reset_epoch: number | null
       }>(
         `SELECT
            latest_row_version,
            key_set_evidence_available,
+           (SELECT reset_epoch FROM collection_reset_epoch
+            WHERE collection_id = ? LIMIT 1) AS reset_epoch,
            (
              SELECT schema_version
              FROM collection_registry
@@ -1618,7 +2529,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-        [collectionId, collectionId, tx.term, tx.seq, collectionId],
+        [
+          collectionId,
+          collectionId,
+          collectionId,
+          tx.term,
+          tx.seq,
+          collectionId,
+        ],
       )
       const version = versionRows[0]
 
@@ -1635,8 +2553,47 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
+      if (anchor) {
+        const sameResetEpoch = (version.reset_epoch ?? 0) === anchor.resetEpoch
+        const matching = await transactionDriver.query<{
+          term: number
+          seq: number
+          row_version: number
+        }>(
+          `SELECT term, seq, row_version FROM applied_tx
+           WHERE collection_id = ? AND tx_id = ? LIMIT 2`,
+          [collectionId, tx.txId],
+        )
+        if (matching.length > 1) return { kind: `unknown` }
+        if (matching[0]) {
+          if (
+            matching[0].row_version <= anchor.latestRowVersion ||
+            !sameResetEpoch
+          ) {
+            return { kind: `unknown` }
+          }
+          return {
+            kind: `already-applied`,
+            committed: {
+              term: matching[0].term,
+              seq: matching[0].seq,
+              rowVersion: matching[0].row_version,
+            },
+            latestRowVersion: version.latest_row_version,
+          }
+        }
+        // A different durable write may have superseded this source row or
+        // its opaque cursor. Absence alone cannot authorize late application.
+        if (
+          version.latest_row_version !== anchor.latestRowVersion ||
+          !sameResetEpoch
+        ) {
+          return { kind: `unknown` }
+        }
+      }
+
       if (version.already_applied === 1) {
-        return
+        return { kind: `unknown` }
       }
 
       const currentRowVersion = version.latest_row_version
@@ -1672,58 +2629,134 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
 
-      const replacementKeys = replacesPersistedBaseline
-        ? tx.mutations.map((mutation) =>
-            encodePersistedStorageKey(mutation.key),
-          )
-        : []
-      const batchReplacement =
-        replacesPersistedBaseline &&
-        tx.mutations.length > 0 &&
-        tx.mutations.every((mutation) => mutation.type !== `delete`) &&
-        new Set(replacementKeys).size === replacementKeys.length
-
-      if (batchReplacement) {
-        const finalRowMetadata = new Map<string, unknown>()
-        for (const mutation of tx.rowMetadataMutations ?? []) {
-          finalRowMetadata.set(
-            encodePersistedStorageKey(mutation.key),
-            mutation.type === `delete` ? undefined : mutation.value,
-          )
+      const rowMutations = new Map<string, PersistedTx[`mutations`][number]>()
+      for (const mutation of tx.mutations) {
+        const key = encodePersistedStorageKey(mutation.key)
+        const previous = rowMutations.get(key)
+        if (!previous) {
+          rowMutations.set(key, mutation)
+          continue
         }
 
-        for (
-          let start = 0;
-          start < tx.mutations.length;
-          start += this.replacementBatchSize
+        // A superseded action still had to serialize successfully.
+        serializePersistedRowValue(previous.value)
+        if (
+          previous.type !== `delete` &&
+          previous.metadataChanged === true &&
+          previous.metadata !== undefined
         ) {
-          const mutations = tx.mutations.slice(
-            start,
-            start + this.replacementBatchSize,
+          serializePersistedRowValue(previous.metadata)
+        }
+        if (mutation.type === `delete`) {
+          rowMutations.set(key, mutation)
+          continue
+        }
+        const value =
+          mutation.type === `insert` || previous.type === `delete`
+            ? mutation.value
+            : mergeObjectRows(previous.value, mutation.value)
+        const metadataChanged =
+          mutation.metadataChanged === true ||
+          previous.type === `delete` ||
+          previous.metadataChanged === true
+        const metadata =
+          mutation.metadataChanged === true
+            ? mutation.metadata
+            : previous.type === `delete`
+              ? undefined
+              : previous.metadata
+        const next = { key: mutation.key, value, metadataChanged, metadata }
+        rowMutations.set(
+          key,
+          mutation.type === `insert` || previous.type !== `update`
+            ? { type: `insert`, ...next }
+            : { type: `update`, ...next },
+        )
+      }
+
+      for (const batch of batches(
+        [...rowMutations.values()],
+        this.replacementBatchSize,
+      )) {
+        const writes = batch.filter((mutation) => mutation.type !== `delete`)
+        const deletes = batch.filter((mutation) => mutation.type === `delete`)
+        const readKeys = writes
+          .filter(
+            (mutation) =>
+              mutation.type === `update` || mutation.metadataChanged !== true,
           )
-          const keys = replacementKeys.slice(
-            start,
-            start + this.replacementBatchSize,
-          )
+          .map((mutation) => encodePersistedStorageKey(mutation.key))
+        const existingRows =
+          readKeys.length > 0
+            ? await transactionDriver.query<{
+                key: string
+                value: string
+                metadata: string | null
+              }>(
+                `SELECT key, value, metadata
+               FROM ${collectionTableSql}
+               WHERE key IN (${readKeys.map(() => `?`).join(`, `)})`,
+                readKeys,
+              )
+            : []
+        const existing = new Map(existingRows.map((row) => [row.key, row]))
+        const writeKeys = writes.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+        const deleteKeys = deletes.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+
+        if (tracksPersistedKeySet && writeKeys.length > 0) {
           await transactionDriver.run(
             `INSERT INTO collection_expected_keys (collection_id, key)
-             VALUES ${keys.map(() => `(?, ?)`).join(`, `)}`,
-            keys.flatMap((key) => [collectionId, key]),
+             VALUES ${writeKeys.map(() => `(?, ?)`).join(`, `)}
+             ON CONFLICT(collection_id, key) DO NOTHING`,
+            writeKeys.flatMap((key) => [collectionId, key]),
           )
+        }
+        if (tracksPersistedKeySet && deleteKeys.length > 0) {
+          await transactionDriver.run(
+            `DELETE FROM collection_expected_keys
+             WHERE collection_id = ? AND key IN (${deleteKeys.map(() => `?`).join(`, `)})`,
+            [collectionId, ...deleteKeys],
+          )
+        }
+        if (deleteKeys.length > 0) {
+          await transactionDriver.run(
+            `DELETE FROM ${collectionTableSql}
+             WHERE key IN (${deleteKeys.map(() => `?`).join(`, `)})`,
+            deleteKeys,
+          )
+        }
+        if (writeKeys.length > 0) {
           await transactionDriver.run(
             `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
-             VALUES ${keys.map(() => `(?, ?, ?, ?)`).join(`, `)}`,
-            mutations.flatMap((mutation, index) => {
-              const key = keys[index]!
-              const metadata = finalRowMetadata.has(key)
-                ? finalRowMetadata.get(key)
-                : mutation.type !== `delete` &&
-                    mutation.metadataChanged === true
-                  ? mutation.metadata
+             VALUES ${writeKeys.map(() => `(?, ?, ?, ?)`).join(`, `)}
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               metadata = excluded.metadata,
+               row_version = excluded.row_version`,
+            writes.flatMap((mutation, index) => {
+              const previous = existing.get(writeKeys[index]!)
+              const previousValue = previous?.value
+                ? deserializePersistedRowValue(previous.value)
+                : undefined
+              const previousMetadata =
+                previous?.metadata != null
+                  ? deserializePersistedRowValue(previous.metadata)
                   : undefined
+              const value =
+                mutation.type === `update`
+                  ? mergeObjectRows(previousValue, mutation.value)
+                  : mutation.value
+              const metadata =
+                mutation.metadataChanged === true
+                  ? mutation.metadata
+                  : previousMetadata
               return [
-                key,
-                serializePersistedRowValue(mutation.value),
+                writeKeys[index]!,
+                serializePersistedRowValue(value),
                 metadata === undefined
                   ? null
                   : serializePersistedRowValue(metadata),
@@ -1731,143 +2764,85 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
               ]
             }),
           )
-        }
-      }
-
-      for (const mutation of batchReplacement ? [] : tx.mutations) {
-        const encodedKey = encodePersistedStorageKey(mutation.key)
-        if (mutation.type === `delete`) {
-          if (tracksPersistedKeySet) {
-            await transactionDriver.run(
-              `DELETE FROM collection_expected_keys
-               WHERE collection_id = ? AND key = ?`,
-              [collectionId, encodedKey],
-            )
-          }
           await transactionDriver.run(
-            `DELETE FROM ${collectionTableSql}
-             WHERE key = ?`,
-            [encodedKey],
+            `DELETE FROM ${tombstoneTableSql}
+             WHERE key IN (${writeKeys.map(() => `?`).join(`, `)})`,
+            writeKeys,
           )
+        }
+        if (deletes.length > 0) {
           await transactionDriver.run(
             `INSERT INTO ${tombstoneTableSql} (key, value, row_version, deleted_at)
-             VALUES (?, ?, ?, ?)
+             VALUES ${deleteKeys.map(() => `(?, ?, ?, ?)`).join(`, `)}
              ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                row_version = excluded.row_version,
                deleted_at = excluded.deleted_at`,
-            [
-              encodedKey,
+            deletes.flatMap((mutation, index) => [
+              deleteKeys[index]!,
               serializePersistedRowValue(mutation.value),
               nextRowVersion,
               new Date().toISOString(),
-            ],
+            ]),
           )
-          continue
         }
+      }
 
-        const existingRows = await transactionDriver.query<{
-          value: string
-          metadata: string | null
-        }>(
-          `SELECT value, metadata
-           FROM ${collectionTableSql}
-           WHERE key = ?
-           LIMIT 1`,
-          [encodedKey],
+      for (const batch of batches(
+        lastMetadataByKey(
+          tx.rowMetadataMutations ?? [],
+          (mutation) => encodePersistedStorageKey(mutation.key),
+          true,
+        ),
+        this.replacementBatchSize,
+      )) {
+        const keys = batch.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
         )
-        const existingValue = existingRows[0]?.value
-          ? deserializePersistedRowValue(existingRows[0].value)
-          : undefined
-        const existingMetadata =
-          existingRows[0]?.metadata != null
-            ? deserializePersistedRowValue(existingRows[0].metadata)
-            : undefined
-        const mergedValue =
-          mutation.type === `update`
-            ? mergeObjectRows(existingValue, mutation.value)
-            : mutation.value
-        const nextMetadata =
-          mutation.metadataChanged === true
-            ? mutation.metadata
-            : existingMetadata
-
-        if (tracksPersistedKeySet) {
-          await transactionDriver.run(
-            `INSERT INTO collection_expected_keys (collection_id, key)
-             VALUES (?, ?)
-             ON CONFLICT(collection_id, key) DO NOTHING`,
-            [collectionId, encodedKey],
-          )
-        }
         await transactionDriver.run(
-          `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-             value = excluded.value,
-             metadata = excluded.metadata,
-             row_version = excluded.row_version`,
+          `UPDATE ${collectionTableSql}
+           SET metadata = CASE key ${keys.map(() => `WHEN ? THEN ?`).join(` `)} END
+           WHERE key IN (${keys.map(() => `?`).join(`, `)})`,
           [
-            encodedKey,
-            serializePersistedRowValue(mergedValue),
-            nextMetadata === undefined
-              ? null
-              : serializePersistedRowValue(nextMetadata),
-            nextRowVersion,
+            ...batch.flatMap((mutation, index) => [
+              keys[index]!,
+              mutation.type === `delete` || mutation.value === undefined
+                ? null
+                : serializePersistedRowValue(mutation.value),
+            ]),
+            ...keys,
           ],
         )
-        await transactionDriver.run(
-          `DELETE FROM ${tombstoneTableSql}
-           WHERE key = ?`,
-          [encodedKey],
-        )
       }
 
-      for (const rowMetadataMutation of batchReplacement
-        ? []
-        : (tx.rowMetadataMutations ?? [])) {
-        const encodedKey = encodePersistedStorageKey(rowMetadataMutation.key)
-        if (rowMetadataMutation.type === `delete`) {
-          await transactionDriver.run(
-            `UPDATE ${collectionTableSql}
-             SET metadata = NULL
-             WHERE key = ?`,
-            [encodedKey],
-          )
-        } else {
-          await transactionDriver.run(
-            `UPDATE ${collectionTableSql}
-             SET metadata = ?
-             WHERE key = ?`,
-            [
-              rowMetadataMutation.value === undefined
-                ? null
-                : serializePersistedRowValue(rowMetadataMutation.value),
-              encodedKey,
-            ],
-          )
-        }
-      }
-
-      for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
-        if (metadataMutation.type === `delete`) {
+      for (const batch of batches(
+        lastMetadataByKey(
+          tx.collectionMetadataMutations ?? [],
+          (mutation) => mutation.key,
+        ),
+        this.replacementBatchSize,
+      )) {
+        const deletes = batch.filter((mutation) => mutation.type === `delete`)
+        const sets = batch.filter((mutation) => mutation.type === `set`)
+        if (deletes.length > 0) {
           await transactionDriver.run(
             `DELETE FROM collection_metadata
-             WHERE collection_id = ? AND key = ?`,
-            [collectionId, metadataMutation.key],
+             WHERE collection_id = ? AND key IN (${deletes.map(() => `?`).join(`, `)})`,
+            [collectionId, ...deletes.map((mutation) => mutation.key)],
           )
-        } else {
+        }
+        if (sets.length > 0) {
           await transactionDriver.run(
             `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
-             VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+             VALUES ${sets.map(() => `(?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`).join(`, `)}
              ON CONFLICT(collection_id, key) DO UPDATE SET
                value = excluded.value,
                updated_at = excluded.updated_at`,
-            [
+            sets.flatMap((mutation) => [
               collectionId,
-              metadataMutation.key,
-              serializePersistedRowValue(metadataMutation.value),
-            ],
+              mutation.key,
+              serializePersistedRowValue(mutation.value),
+            ]),
           )
         }
       }
@@ -1928,22 +2903,51 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
 
       await this.pruneAppliedTxRows(collectionId, transactionDriver)
+      return {
+        kind: `applied-now`,
+        committed: {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: nextRowVersion,
+        },
+        latestRowVersion: nextRowVersion,
+      }
     })
   }
 
   loadCollectionMetadata(
-    collectionId: string,
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<{ key: string; value: unknown }>> {
     return this.runRegular(() =>
-      this.loadCollectionMetadataUnscheduled(collectionId),
+      this.loadCollectionMetadataUnscheduled(target, ctx),
     )
   }
 
   private async loadCollectionMetadataUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<{ key: string; value: unknown }>> {
-    await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -1967,21 +2971,42 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   scanRows(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: PersistedRowScanOptions,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<PersistedScannedRow>> {
-    return this.runRegular(() =>
-      this.scanRowsUnscheduled(collectionId, options),
-    )
+    return this.runRegular(() => this.scanRowsUnscheduled(target, options, ctx))
   }
 
   private async scanRowsUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: PersistedRowScanOptions,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<PersistedScannedRow>> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2005,21 +3030,39 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   ensureIndex(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     spec: PersistedIndexSpec,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
     return this.runRegular(() =>
-      this.ensureIndexUnscheduled(collectionId, signature, spec),
+      this.ensureIndexUnscheduled(target, signature, spec, ctx),
     )
   }
 
   private async ensureIndexUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     spec: PersistedIndexSpec,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const indexName = buildIndexName(collectionId, signature)
     const indexNameSql = quoteIdentifier(indexName)
@@ -2034,6 +3077,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const persistedWhereSql = whereSql ?? null
 
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2107,18 +3155,41 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  markIndexRemoved(collectionId: string, signature: string): Promise<void> {
+  markIndexRemoved(
+    target: PersistedStorageTarget,
+    signature: string,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<void> {
     return this.runRegular(() =>
-      this.markIndexRemovedUnscheduled(collectionId, signature),
+      this.markIndexRemovedUnscheduled(target, signature, ctx),
     )
   }
 
   private async markIndexRemovedUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
-    await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2150,23 +3221,109 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  getStreamPosition(collectionId: string): Promise<{
+  reserveLeadershipTerm(
+    target: PersistedStorageTarget,
+    observedTerm: number,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    // Election may run while hydration waits for its first writer route.
+    return this.reserveLeadershipTermUnscheduled(target, observedTerm, ctx)
+  }
+
+  private async reserveLeadershipTermUnscheduled(
+    target: PersistedStorageTarget,
+    observedTerm: number,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `reserve a leadership term`,
+      )
+      await transactionDriver.run(
+        `INSERT INTO leader_term (collection_id, latest_term)
+         VALUES (?, ? + 1)
+         ON CONFLICT(collection_id) DO UPDATE SET
+           latest_term = MAX(leader_term.latest_term, ?) + 1`,
+        [collectionId, observedTerm, observedTerm],
+      )
+      const [position, latestRowVersion] = await Promise.all([
+        this.readStreamPosition(collectionId, transactionDriver),
+        this.readLatestRowVersion(collectionId, transactionDriver),
+      ])
+      return { ...position, latestRowVersion }
+    })
+  }
+
+  getStreamPosition(
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }> {
     // Election must not queue behind a hydrate awaiting its first writer route.
     // The stream-position snapshot still uses the driver's transaction admission.
-    return this.getStreamPositionUnscheduled(collectionId)
+    return this.getStreamPositionUnscheduled(target, ctx)
   }
 
-  private async getStreamPositionUnscheduled(collectionId: string): Promise<{
+  private async getStreamPositionUnscheduled(
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }> {
-    await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2263,23 +3420,46 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   pullSince(
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<SQLitePullSinceResult<string | number>> {
     return this.runRegular(() =>
-      this.pullSinceUnscheduled(collectionId, fromRowVersion),
+      this.pullSinceUnscheduled(target, fromRowVersion, ctx),
     )
   }
 
   private async pullSinceUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<SQLitePullSinceResult<string | number>> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2419,22 +3599,35 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     driver: SQLiteDriver = this.driver,
   ): Promise<Array<InMemoryRow<string | number, Record<string, unknown>>>> {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
+    // Compile even when SQL cannot safely prefilter: invalid bindings must
+    // reject before the in-memory fallback reads rows.
     const whereCompiled = options.where
       ? compileSqlExpression(options.where)
-      : { supported: true, sql: ``, params: [] as Array<SqliteSupportedValue> }
+      : { supported: false, sql: ``, params: [] as Array<SqliteSupportedValue> }
+    const safePrefilter = options.where
+      ? compileSafeSqlPrefilter(options.where, whereCompiled)
+      : undefined
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
     let sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
 
-    if (options.where && whereCompiled.supported) {
-      sql = `${sql} WHERE ${whereCompiled.sql}`
-      queryParams.push(...whereCompiled.params)
+    if (safePrefilter) {
+      sql = `${sql} WHERE ${safePrefilter.sql}`
+      queryParams.push(...safePrefilter.params)
     }
 
     if (options.orderBy && orderByCompiled.supported) {
       sql = `${sql} ORDER BY ${orderByCompiled.sql}, key ASC`
       queryParams.push(...orderByCompiled.params)
+    }
+
+    if (
+      queryParams.length >
+      (driver.maxBoundParameters ?? this.driver.maxBoundParameters ?? 999)
+    ) {
+      sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
+      queryParams.length = 0
     }
 
     const storedRows = await driver.query<StoredSqliteRow>(sql, queryParams)
@@ -2591,6 +3784,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
   private async ensureCollectionReady(
     collectionId: string,
+    cacheGenerationClaimId?: string,
   ): Promise<CollectionTableMapping> {
     await this.ensureInitialized()
 
@@ -2604,7 +3798,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       return inFlight
     }
 
-    const loadPromise = this.ensureCollectionReadyInternal(collectionId)
+    const loadPromise = this.ensureCollectionReadyInternal(
+      collectionId,
+      cacheGenerationClaimId,
+    )
     this.collectionTableLoads.set(collectionId, loadPromise)
 
     try {
@@ -2619,16 +3816,35 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         table_name: string
         tombstone_table_name: string
         schema_version: number
+        setup_complete: number
       }
     | undefined
   > {
+    // setup_complete is 1 when every setup statement in
+    // ensureCollectionReadyInternal would be a no-op.
     const rows = await this.driver.query<{
       table_name: string
       tombstone_table_name: string
       schema_version: number
+      setup_complete: number
     }>(
-      `SELECT table_name, tombstone_table_name, schema_version
-       FROM collection_registry
+      `SELECT table_name, tombstone_table_name, schema_version,
+         (SELECT COUNT(*) FROM sqlite_master
+          WHERE (type = 'table'
+                 AND name IN (table_name, tombstone_table_name))
+             OR (type = 'index'
+                 AND name IN (table_name || '_row_version_idx',
+                              tombstone_table_name || '_row_version_idx'))
+             OR (type = 'trigger'
+                 AND name IN (table_name || '_key_evidence_insert',
+                              table_name || '_key_evidence_delete',
+                              table_name || '_key_evidence_update'))) = 7
+         AND EXISTS (SELECT 1 FROM collection_version
+                     WHERE collection_id = registry.collection_id)
+         AND EXISTS (SELECT 1 FROM collection_reset_epoch
+                     WHERE collection_id = registry.collection_id)
+         AS setup_complete
+       FROM collection_registry AS registry
        WHERE collection_id = ?
        LIMIT 1`,
       [collectionId],
@@ -2639,24 +3855,43 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
   private async ensureCollectionReadyInternal(
     collectionId: string,
+    cacheGenerationClaimId?: string,
   ): Promise<CollectionTableMapping> {
+    // Record whether registration began for a managed physical ID. Collection
+    // may remove that catalog row while this operation waits on external DDL.
+    const managedAtAdmission =
+      cacheGenerationClaimId !== undefined ||
+      (hasCacheGenerationIdPrefix(collectionId) &&
+        (
+          await this.driver.query<{ physical_id: string }>(
+            `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+            [collectionId],
+          )
+        )[0] !== undefined)
     let registration = await this.loadCollectionRegistration(collectionId)
 
     if (!registration) {
       const tableName = createPersistedTableName(collectionId, `c`)
       const tombstoneTableName = createPersistedTableName(collectionId, `t`)
-      await this.driver.run(
-        `INSERT INTO collection_registry (
-           collection_id,
-           table_name,
-           tombstone_table_name,
-           schema_version,
-           updated_at
-         )
-         VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
-         ON CONFLICT DO NOTHING`,
-        [collectionId, tableName, tombstoneTableName, this.schemaVersion],
-      )
+      await this.runInTransaction(async (transactionDriver) => {
+        await this.assertCacheGenerationReadClaim(
+          transactionDriver,
+          collectionId,
+          cacheGenerationClaimId,
+        )
+        await transactionDriver.run(
+          `INSERT INTO collection_registry (
+             collection_id,
+             table_name,
+             tombstone_table_name,
+             schema_version,
+             updated_at
+           )
+           VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+           ON CONFLICT DO NOTHING`,
+          [collectionId, tableName, tombstoneTableName, this.schemaVersion],
+        )
+      })
 
       registration = await this.loadCollectionRegistration(collectionId)
       if (!registration) {
@@ -2675,9 +3910,62 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         this.schemaVersion,
         tableName,
         tombstoneTableName,
+        cacheGenerationClaimId,
       )
     }
+    // A schema reset keeps every setup object, so the check still holds.
+    if (registration.setup_complete !== 1) {
+      await this.createCollectionTables(
+        collectionId,
+        tableName,
+        tombstoneTableName,
+      )
+    }
+    if (managedAtAdmission) {
+      // Registration is outside the read/write transaction. If collection
+      // retired this generation while the DDL was in flight, remove any
+      // empty table recreated after collection instead of caching it.
+      const generation = await this.driver.query<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+        [collectionId],
+      )
+      if (!generation[0]) {
+        await this.driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`,
+        )
+        await this.driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(tombstoneTableName)}`,
+        )
+        await this.driver.run(
+          `DELETE FROM collection_registry WHERE collection_id = ?`,
+          [collectionId],
+        )
+        await this.driver.run(
+          `DELETE FROM collection_version WHERE collection_id = ?`,
+          [collectionId],
+        )
+        await this.driver.run(
+          `DELETE FROM collection_reset_epoch WHERE collection_id = ?`,
+          [collectionId],
+        )
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache generation was collected before registration finished`,
+        )
+      }
+    }
+    const mapping = {
+      tableName,
+      tombstoneTableName,
+    }
+    this.collectionTableCache.set(collectionId, mapping)
+    return mapping
+  }
 
+  private async createCollectionTables(
+    collectionId: string,
+    tableName: string,
+    tombstoneTableName: string,
+  ): Promise<void> {
     const collectionTableSql = quoteIdentifier(tableName)
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
@@ -2723,12 +4011,6 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       [collectionId],
     )
     await this.ensureCollectionKeyEvidenceTriggers(collectionId, tableName)
-    const mapping = {
-      tableName,
-      tombstoneTableName,
-    }
-    this.collectionTableCache.set(collectionId, mapping)
-    return mapping
   }
 
   private async ensureCollectionKeyEvidenceTriggers(
@@ -2804,6 +4086,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     nextSchemaVersion: number,
     tableName: string,
     tombstoneTableName: string,
+    cacheGenerationClaimId?: string,
   ): Promise<void> {
     if (this.schemaMismatchPolicy === `sync-absent-error`) {
       throw new InvalidPersistedCollectionConfigError(
@@ -2816,6 +4099,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        cacheGenerationClaimId,
+      )
       const currentSchemaRows = await transactionDriver.query<{
         schema_version: number
       }>(
@@ -2909,6 +4197,88 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     if (this.initialized) {
       return
     }
+    if (!(await this.databaseSetupComplete())) {
+      await this.setUpDatabase()
+    }
+    this.initialized = true
+  }
+
+  // 1 when every statement in setUpDatabase would be a no-op. Columns added
+  // by ALTER TABLE appear in sqlite_master's stored table definition.
+  private async databaseSetupComplete(): Promise<boolean> {
+    const rows = await this.driver.query<{ complete: number }>(
+      `SELECT
+         (SELECT COUNT(*) FROM sqlite_master
+          WHERE (type = 'table' AND name IN (
+                  'cache_generation', 'cache_generation_sequence',
+                  'cache_generation_claim', 'collection_registry',
+                  'persisted_index_registry', 'applied_tx',
+                  'collection_version', 'collection_expected_keys',
+                  'collection_metadata', 'leader_term',
+                  'collection_reset_epoch'))
+             OR (type = 'index' AND name IN (
+                  'cache_generation_head',
+                  'idx_applied_tx_collection_tx_id'))) = 13
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'cache_generation_claim'
+                       AND sql LIKE '%logical_id%'
+                       AND sql LIKE '%expires_at_ms%')
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'applied_tx'
+                       AND sql LIKE '%replay_json%'
+                       AND sql LIKE '%replay_requires_full_reload%')
+         AND EXISTS (SELECT 1 FROM sqlite_master
+                     WHERE name = 'collection_version'
+                       AND sql LIKE '%key_set_evidence_available%'
+                       AND sql LIKE '%key_set_evidence_incompatible%')
+         AS complete`,
+    )
+    return rows[0]?.complete === 1
+  }
+
+  private async setUpDatabase(): Promise<void> {
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS cache_generation (
+         logical_id TEXT NOT NULL,
+         generation INTEGER NOT NULL,
+         physical_id TEXT NOT NULL UNIQUE,
+         retired INTEGER NOT NULL DEFAULT 0,
+         PRIMARY KEY (logical_id, generation)
+       )`,
+    )
+    await this.driver.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS cache_generation_head
+       ON cache_generation (logical_id) WHERE retired = 0`,
+    )
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS cache_generation_sequence (
+         logical_id TEXT PRIMARY KEY,
+         next_generation INTEGER NOT NULL
+       )`,
+    )
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS cache_generation_claim (
+         claim_id TEXT PRIMARY KEY,
+         logical_id TEXT NOT NULL,
+         physical_id TEXT NOT NULL,
+         expires_at_ms INTEGER NOT NULL
+       )`,
+    )
+    const claimColumns = await this.driver.query<{ name: string }>(
+      `PRAGMA table_info(cache_generation_claim)`,
+    )
+    if (!claimColumns.some(({ name }) => name === `logical_id`)) {
+      await this.driver.exec(
+        `ALTER TABLE cache_generation_claim
+         ADD COLUMN logical_id TEXT NOT NULL DEFAULT ''`,
+      )
+    }
+    if (!claimColumns.some(({ name }) => name === `expires_at_ms`)) {
+      await this.driver.exec(
+        `ALTER TABLE cache_generation_claim
+         ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
+      )
+    }
 
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_registry (
@@ -2945,6 +4315,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          applied_at INTEGER NOT NULL,
          PRIMARY KEY (collection_id, term, seq)
        )`,
+    )
+    await this.driver.exec(
+      `CREATE INDEX IF NOT EXISTS idx_applied_tx_collection_tx_id
+       ON applied_tx (collection_id, tx_id)`,
     )
     try {
       await this.driver.exec(
@@ -3016,29 +4390,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        )`,
     )
     await this.driver.exec(
-      `CREATE TABLE IF NOT EXISTS schema_version (
-         scope TEXT PRIMARY KEY,
-         version INTEGER NOT NULL,
-         updated_at INTEGER NOT NULL
-       )`,
-    )
-    await this.driver.run(
-      `INSERT INTO schema_version (scope, version, updated_at)
-       VALUES ('global', ?, CAST(strftime('%s', 'now') AS INTEGER))
-       ON CONFLICT(scope) DO UPDATE SET
-         version = excluded.version,
-         updated_at = excluded.updated_at`,
-      [this.schemaVersion],
-    )
-    await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_reset_epoch (
          collection_id TEXT PRIMARY KEY,
          reset_epoch INTEGER NOT NULL,
          updated_at INTEGER NOT NULL
        )`,
     )
-
-    this.initialized = true
   }
 }
 

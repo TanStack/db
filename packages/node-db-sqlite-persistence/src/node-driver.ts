@@ -28,8 +28,7 @@ type BetterSqlite3OpenFileOptions = {
 }
 
 export type BetterSqlite3DriverOptions =
-  | BetterSqlite3ExistingDatabaseOptions
-  | BetterSqlite3OpenFileOptions
+  BetterSqlite3ExistingDatabaseOptions | BetterSqlite3OpenFileOptions
 
 type TransactionContext = {
   depth: number
@@ -264,10 +263,4 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
       throw error
     }
   }
-}
-
-export function createBetterSqlite3Driver(
-  options: BetterSqlite3DriverOptions,
-): BetterSqlite3SQLiteDriver {
-  return new BetterSqlite3SQLiteDriver(options)
 }

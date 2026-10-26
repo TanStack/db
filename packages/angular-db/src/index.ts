@@ -8,7 +8,7 @@ import {
 } from '@angular/core'
 import {
   BaseQueryBuilder,
-  createLiveQueryCollection,
+  configPool,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
@@ -22,14 +22,17 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
+  PooledLiveQueries,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
 import type { Signal } from '@angular/core'
+
+const DEFAULT_GC_TIME_MS = 1
 
 export * from '@tanstack/db'
 
@@ -120,6 +123,8 @@ export function injectLiveQuery<
   TParams extends any,
 >(options: {
   params: () => TParams
+  /** Pass `pooledLiveQueries` to share one partition among equal-shape queries. */
+  pool?: PooledLiveQueries
   query: (args: {
     params: TParams
     q: InitialQueryBuilder
@@ -130,6 +135,8 @@ export function injectLiveQuery<
   TParams extends any,
 >(options: {
   params: () => TParams
+  /** Pass `pooledLiveQueries` to share one partition among equal-shape queries. */
+  pool?: PooledLiveQueries
   query: (args: {
     params: TParams
     q: InitialQueryBuilder
@@ -144,7 +151,7 @@ export function injectLiveQuery<TContext extends Context>(
   ) => QueryBuilder<TContext> | undefined | null,
 ): InjectConditionalLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
+  config: LiveQueryHookConfig<TContext>,
 ): InjectLiveQueryResult<TContext>
 // Pre-created collection without singleResult
 export function injectLiveQuery<
@@ -182,7 +189,7 @@ export function injectLiveQuery(opts: any) {
         return null
       }
 
-      return resolveLiveQueryValue(result, { gcTime: 0 })
+      return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
     }
 
     // Check if it's reactive query options
@@ -193,26 +200,24 @@ export function injectLiveQuery(opts: any) {
       typeof opts.params === `function`
 
     if (isReactiveQueryOptions) {
-      const { params, query } = opts
-      const currentParams = params()
-
-      // Check if query function returns null/undefined (disabled query)
-      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-      const result = query({ params: currentParams, q: queryBuilder })
-
-      if (result === undefined || result === null) {
-        // Disabled query - return null
-        return null
-      }
-
-      return resolveLiveQueryValue(result, { gcTime: 0 })
+      // The pool is checked first, so a disabled query rejects it too.
+      const pool = configPool(opts)
+      // A query function returning null or undefined disables the query.
+      const result = opts.query({
+        params: opts.params(),
+        q: new BaseQueryBuilder() as InitialQueryBuilder,
+      })
+      return resolveLiveQueryValue(result, {
+        gcTime: DEFAULT_GC_TIME_MS,
+        pool,
+      })
     }
 
     // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
     // match the query-fn and reactive-options paths, but let an explicit value
     // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return createLiveQueryCollection({ startSync: true, gcTime: 0, ...opts })
+      return resolveLiveQueryValue(opts, { gcTime: DEFAULT_GC_TIME_MS })
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)

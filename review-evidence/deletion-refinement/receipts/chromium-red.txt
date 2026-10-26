@@ -1,0 +1,62 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/chromium-red.log
+SHA-256 of full source: fa0549ec9231c6589d6aa304975e80ad4d69099fa297179e663623c77bb1dd16
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+[2m[WebServer] [22m(node:42250) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:42253) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42253) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  1 [chromium] › e2e/cross-tab-oracle.spec.ts:1004:7 › native admitted import commits after explicit closure (265ms)
+
+
+  1) [chromium] › e2e/cross-tab-oracle.spec.ts:1004:7 › native admitted import commits after explicit closure
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"error"[39m
+    Received: [31m"ready"[39m
+
+      1020 |             await a.waitForFunction(() => window.crossTab!.observe().versionChanges === 1)
+      1021 |           }
+    > 1022 |           expect.soft((await observe(a)).status).toBe('error')
+           |                                                  ^
+      1023 |           await a.evaluate(() => window.crossTab!.releaseBarrier())
+      1024 |           await a.evaluate(() => window.crossTab!.retirementDone())
+      1025 |           const after = await observe(a)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1022:50
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1005:9
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"error"[39m
+    Received: [31m"ready"[39m
+
+      1033 |           assertSnapshot(after.rows, expected, 'native retired public rows')
+      1034 |           assertSnapshot(await a.evaluate(() => window.crossTab!.blockerRows()), expected, 'native retired disk rows')
+    > 1035 |           expect(after.status).toBe('error')
+           |                                ^
+      1036 |           const retiredAt = after.statuses.indexOf('error')
+      1037 |           expect(retiredAt).toBeGreaterThanOrEqual(0)
+      1038 |           expect(after.statuses.slice(retiredAt).every(status => status === 'error')).toBe(true)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1035:32
+        at withPages (/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:95:5)
+        at /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts:1005:9
+
+    Error Context: test-results/browser/cross-tab-oracle-native-ad-ff60f-mits-after-explicit-closure-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/browser/cross-tab-oracle-native-ad-ff60f-mits-after-explicit-closure-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/browser/cross-tab-oracle-native-ad-ff60f-mits-after-explicit-closure-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › e2e/cross-tab-oracle.spec.ts:1004:7 › native admitted import commits after explicit closure

@@ -9,6 +9,7 @@ yarn.lock
 # builds
 build
 coverage
+.vitest-reports
 dist
 playwright-report
 test-results

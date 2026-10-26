@@ -7,7 +7,11 @@ import { createTransaction } from '../src/transactions'
 import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import { hasVirtualProps } from '../src/virtual-props.js'
-import { stripVirtualProps } from './utils'
+import {
+  captureMicrotaskErrors,
+  flushPromises,
+  stripVirtualProps,
+} from './utils'
 import type { OutputWithVirtual } from './utils'
 import type {
   ChangeMessage,
@@ -2185,7 +2189,10 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.status).toBe(`error`)
   })
 
-  it(`preserves setup failure when subscription cleanup also throws`, () => {
+  it(`preserves setup failure when subscription cleanup also throws`, async () => {
+    // The cleanup failure is an adapter bug: it is reported uncaught, once,
+    // and the setup failure is what the caller sees.
+    const uncaught = captureMicrotaskErrors()
     const loadFailure = new Error(`initial subset failed`)
     const unloadFailure = new Error(`subset cleanup failed`)
     const collection = createCollection<{ id: number }>({
@@ -2213,6 +2220,12 @@ describe(`Collection.subscribeChanges`, () => {
         },
       }),
     ).toThrow(loadFailure)
+    try {
+      await flushPromises()
+    } finally {
+      uncaught.restore()
+    }
+    expect(uncaught.errors).toEqual([unloadFailure])
     expect(collection.subscriberCount).toBe(0)
   })
 })
@@ -2307,6 +2320,10 @@ describe(`Virtual properties`, () => {
         }
       | undefined
 
+    let confirm!: () => void
+    const confirmed = new Promise<void>((resolve) => {
+      confirm = resolve
+    })
     const collection = createCollection<{ id: string; value: string }, string>({
       id: `virtual-props-confirmed-sync`,
       getKey: (item) => item.id,
@@ -2316,9 +2333,9 @@ describe(`Virtual properties`, () => {
           markReady()
         },
       },
-      onInsert: async () => {
-        await waitForChanges()
-      },
+      // The handler returns once its confirmation is written, so the
+      // confirmation publishes with the drop of the optimistic row.
+      onInsert: () => confirmed,
     })
 
     const subscription = collection.subscribeChanges(
@@ -2352,6 +2369,7 @@ describe(`Virtual properties`, () => {
       value: { id: `row-1`, value: `optimistic` },
     })
     syncFns.commit()
+    confirm()
 
     await waitForChanges()
 
@@ -2672,7 +2690,7 @@ describe(`Virtual properties`, () => {
   })
 
   it.each([false, true])(
-    `keeps a completed reinsert visible before its sync echo (delete echoed: %s)`,
+    `drops a completed delete and reinsert that have no sync echo (delete echoed: %s)`,
     async (deleteEchoed) => {
       let echoDelete!: () => void
       const collection = createCollection<
@@ -2699,11 +2717,15 @@ describe(`Virtual properties`, () => {
       })
       try {
         await collection.delete(`row`).isPersisted.promise
-        expect(collection.has(`row`)).toBe(false)
+        // The delete settled without its echo, so the synced row returns.
+        expect(collection.get(`row`)?.value).toBe(`original`)
         if (deleteEchoed) echoDelete()
-        await collection.insert({ id: `row`, value: `replacement` }).isPersisted
-          .promise
-        expect(collection.get(`row`)?.value).toBe(`replacement`)
+        expect(collection.has(`row`)).toBe(!deleteEchoed)
+        if (deleteEchoed) {
+          await collection.insert({ id: `row`, value: `replacement` })
+            .isPersisted.promise
+          expect(collection.has(`row`)).toBe(false)
+        }
       } finally {
         await collection.cleanup()
       }
@@ -2751,10 +2773,14 @@ describe(`Virtual properties`, () => {
         finishMutation()
         await transaction.isPersisted.promise
       }
-      expect(collection.get(`row-1`)).toMatchObject({
-        id: `row-1`,
-        value: `client`,
-      })
+      // A settled insert without a confirmation has dropped.
+      if (settlement === `before`)
+        expect(collection.get(`row-1`)).toBeUndefined()
+      else
+        expect(collection.get(`row-1`)).toMatchObject({
+          id: `row-1`,
+          value: `client`,
+        })
 
       if (!syncFns) throw new Error(`Sync not ready`)
       syncFns.begin()
@@ -2958,6 +2984,10 @@ describe(`Virtual properties`, () => {
   })
 
   it(`should aggregate pending writes and origin for grouped rows`, async () => {
+    let persistInsert!: () => void
+    const insertPersisted = new Promise<void>((resolve) => {
+      persistInsert = resolve
+    })
     let syncFns:
       | {
           begin: () => void
@@ -2983,9 +3013,8 @@ describe(`Virtual properties`, () => {
           markReady()
         },
       },
-      onInsert: async () => {
-        await waitForChanges()
-      },
+      // Keep the local insert pending while the grouped row is observed.
+      onInsert: () => insertPersisted,
     })
 
     const grouped = createLiveQueryCollection({
@@ -3021,6 +3050,7 @@ describe(`Virtual properties`, () => {
     expect(groupRow!.$origin).toBe(`local`)
     expect(groupRow!.$collectionId).toBe(`virtual-props-aggregate-source`)
 
+    persistInsert()
     await source.cleanup()
     await grouped.cleanup()
   })

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
-import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import {
+  captureMicrotaskErrors,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from './utils.js'
@@ -675,8 +676,11 @@ describe(`createEffect`, () => {
       expect(secondDisposeSettled).toBe(true)
     })
 
-    it(`reports one in-progress cleanup failure to every disposer`, async () => {
+    // A throwing unloadSubset is an adapter bug. The subscription reports it
+    // uncaught once and fails nothing, so disposal still resolves.
+    it(`resolves every disposer and reports a source release failure uncaught once`, async () => {
       const failure = new Error(`source release failed`)
+      const uncaught = captureMicrotaskErrors()
       let resolveHandler!: () => void
       const handlerPending = new Promise<void>((resolve) => {
         resolveHandler = resolve
@@ -707,14 +711,20 @@ describe(`createEffect`, () => {
         onEnter: () => handlerPending,
       })
 
-      await flushPromises()
-      const firstDispose = effect.dispose()
-      const secondDispose = effect.dispose()
-      resolveHandler()
+      try {
+        await flushPromises()
+        const firstDispose = effect.dispose()
+        const secondDispose = effect.dispose()
+        expect(secondDispose).toBe(firstDispose)
+        resolveHandler()
 
-      await expect(firstDispose).rejects.toBe(failure)
-      await expect(secondDispose).rejects.toBe(failure)
-      await source.cleanup()
+        await expect(firstDispose).resolves.toBeUndefined()
+        await flushPromises()
+        expect(uncaught.errors).toEqual([failure])
+      } finally {
+        uncaught.restore()
+        await source.cleanup()
+      }
     })
 
     it.each([
@@ -725,7 +735,7 @@ describe(`createEffect`, () => {
       { name: `empty string`, failure: `` },
       { name: `NaN`, failure: Number.NaN },
     ])(
-      `reports a falsy cleanup failure once: $name`,
+      `reports a falsy source release failure uncaught once: $name`,
       async ({ name, failure }) => {
         let unloadCount = 0
         const source = createCollection<{ id: number }>({
@@ -750,24 +760,22 @@ describe(`createEffect`, () => {
           onBatch: () => {},
         })
 
+        const uncaught = captureMicrotaskErrors()
         try {
           await flushPromises()
-          let didReject = false
-          let rejection: unknown
-          try {
-            await effect.dispose()
-          } catch (error) {
-            didReject = true
-            rejection = error
-          }
-          expect(didReject).toBe(true)
-          expect(rejection).toBeInstanceOf(Error)
-          expect((rejection as Error).message).toBe(String(failure))
+          await expect(effect.dispose()).resolves.toBeUndefined()
+          await flushPromises()
+          // The report keeps the thrown value's identity, falsy or not.
+          expect(uncaught.errors).toHaveLength(1)
+          expect(Object.is(uncaught.errors[0], failure)).toBe(true)
           expect(unloadCount).toBe(1)
 
           await effect.dispose()
+          await flushPromises()
           expect(unloadCount).toBe(1)
+          expect(uncaught.errors).toHaveLength(1)
         } finally {
+          uncaught.restore()
           await effect.dispose()
           await source.cleanup()
         }
@@ -802,12 +810,15 @@ describe(`createEffect`, () => {
         onBatch: () => {},
       })
 
+      const uncaught = captureMicrotaskErrors()
       try {
         await flushPromises()
-        await expect(effect.dispose()).rejects.toBe(failure)
+        await expect(effect.dispose()).resolves.toBeUndefined()
         // Reentrant disposal cannot repeat an unload still on the stack.
         expect(unloadCount).toBe(1)
         expect(source.subscriberCount).toBe(0)
+        await flushPromises()
+        expect(uncaught.errors).toEqual([failure])
 
         await effect.dispose()
         // Finishing the failed attempt does not make the lease retryable.
@@ -815,6 +826,7 @@ describe(`createEffect`, () => {
         await effect.dispose()
         expect(unloadCount).toBe(1)
       } finally {
+        uncaught.restore()
         await effect.dispose()
         await source.cleanup()
       }
@@ -1728,7 +1740,7 @@ describe(`createEffect`, () => {
       await Promise.all([users.cleanup(), issues.cleanup()])
     })
 
-    it(`releases every source when one unsubscriber throws`, async () => {
+    it(`releases every source when one source release throws`, async () => {
       const failure = new Error(`first source unload failed`)
       const createSource = (id: string, unloadSubset: () => void) =>
         createCollection<{ id: number }>({
@@ -1762,14 +1774,20 @@ describe(`createEffect`, () => {
       expect(left.subscriberCount).toBe(1)
       expect(right.subscriberCount).toBe(1)
 
-      await expect(effect.dispose()).rejects.toBe(failure)
-      expect(left.subscriberCount).toBe(0)
-      expect(right.subscriberCount).toBe(0)
-
-      await Promise.all([left.cleanup(), right.cleanup()])
+      const uncaught = captureMicrotaskErrors()
+      try {
+        await expect(effect.dispose()).resolves.toBeUndefined()
+        expect(left.subscriberCount).toBe(0)
+        expect(right.subscriberCount).toBe(0)
+        await flushPromises()
+        expect(uncaught.errors).toEqual([failure])
+      } finally {
+        uncaught.restore()
+        await Promise.all([left.cleanup(), right.cleanup()])
+      }
     })
 
-    it(`preserves a startup error when cleanup also fails`, async () => {
+    it(`throws a startup error and reports a failed source release uncaught`, async () => {
       const startupFailure = new Error(`second source failed to subscribe`)
       const cleanupFailure = new Error(`first source failed to unload`)
       const left = createCollection<{ id: number }>({
@@ -1802,9 +1820,7 @@ describe(`createEffect`, () => {
       vi.spyOn(right, `subscribeChanges`).mockImplementation(() => {
         throw startupFailure
       })
-      const consoleErrorSpy = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
+      const uncaught = captureMicrotaskErrors()
 
       try {
         expect(() =>
@@ -1818,14 +1834,12 @@ describe(`createEffect`, () => {
             onBatch: () => {},
           }),
         ).toThrow(startupFailure)
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          expect.stringContaining(`failed to dispose after a startup error`),
-          cleanupFailure,
-        )
         expect(left.subscriberCount).toBe(0)
         expect(right.subscriberCount).toBe(0)
+        await flushPromises()
+        expect(uncaught.errors).toEqual([cleanupFailure])
       } finally {
-        consoleErrorSpy.mockRestore()
+        uncaught.restore()
         await Promise.all([left.cleanup(), right.cleanup()])
       }
     })
@@ -2002,7 +2016,7 @@ describe(`createEffect`, () => {
       }
     })
 
-    it(`reports failed obsolete-demand release without failing the source commit`, async () => {
+    it(`reports a failed obsolete-demand release uncaught without failing the source commit or the effect`, async () => {
       const failure = new Error(`obsolete effect demand release failed`)
       const users = createCollection(
         mockSyncCollectionOptions<User>({
@@ -2054,6 +2068,7 @@ describe(`createEffect`, () => {
         onSourceError: (error) => sourceErrors.push(error),
       })
 
+      const uncaught = captureMicrotaskErrors()
       try {
         await flushPromises()
         expect(loadCount).toBe(1)
@@ -2065,13 +2080,16 @@ describe(`createEffect`, () => {
         }).not.toThrow()
         await flushPromises()
 
-        expect(sourceErrors).toEqual([failure])
-        expect(effect.disposed).toBe(true)
+        // A release failure is not a source error, so the effect stays live.
+        expect(sourceErrors).toEqual([])
+        expect(effect.disposed).toBe(false)
         expect(unloadCount).toBe(1)
+        expect(uncaught.errors).toEqual([failure])
 
         await effect.dispose()
         expect(unloadCount).toBe(1)
       } finally {
+        uncaught.restore()
         await effect.dispose()
         await Promise.all([users.cleanup(), issues.cleanup()])
         consoleError.mockRestore()
@@ -2124,7 +2142,7 @@ describe(`createEffect`, () => {
       }
     })
 
-    it(`reports a cleanup failure from automatic disposal`, async () => {
+    it(`reports a source release failure from automatic disposal uncaught`, async () => {
       const loadFailure = new Error(`ordered subset failed`)
       const cleanupFailure = new Error(`ordered subset cleanup failed`)
       let loadCount = 0
@@ -2162,9 +2180,7 @@ describe(`createEffect`, () => {
         },
       })
       const sourceErrors: Array<Error> = []
-      const consoleErrorSpy = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
+      const uncaught = captureMicrotaskErrors()
       const effect = createEffect({
         query: (q) =>
           q
@@ -2182,13 +2198,12 @@ describe(`createEffect`, () => {
 
         expect(sourceErrors).toEqual([loadFailure])
         expect(effect.disposed).toBe(true)
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          expect.stringContaining(`failed to dispose after a source error`),
-          cleanupFailure,
-        )
+        // The first page's lease and the failed page's acquisition each get
+        // one release attempt, so each throw is reported once.
+        expect(uncaught.errors).toEqual([cleanupFailure, cleanupFailure])
       } finally {
         await expect(effect.dispose()).resolves.toBeUndefined()
-        consoleErrorSpy.mockRestore()
+        uncaught.restore()
         await users.cleanup()
       }
     })

@@ -3,6 +3,7 @@ import { compileQuery } from '../compiler/index.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
+  SetWindowFindOneLimitError,
   SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
@@ -12,11 +13,11 @@ import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
+import { codedMessage, devBuild } from '../../error-message.js'
+import { reducePublicKeys } from './public-key-reduction.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
-import { materializeCompilation } from './materialized-pipeline.js'
-import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
 import { scheduleQueryGraphRun } from './graph-scheduler.js'
 import { hasPendingJoinedWork as hasPendingJoinedSourceWork } from './subset-demand-controller.js'
 import {
@@ -24,8 +25,12 @@ import {
   extractCollectionFromSource,
   extractCollectionSources,
   extractCollectionsFromQuery,
+  sourcePermitsInitialReadiness,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
+import type { IncludesRuntime } from './includes-runtime.js'
+import type { BucketFacadeAdapter } from './bucket-facade-adapter.js'
+import type { materializeCompilation } from './materialized-pipeline.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -56,9 +61,15 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
-   * Sets the offset and limit of an ordered query.
-   * Is a no-op if the query is not ordered.
+   * Sets the offset and limit of the query's window, its ordered view. A
+   * windowed query has an `orderBy`. A `findOne` keeps its compiled limit (1,
+   * or 0 for `.limit(0).findOne()`); an ordered `findOne` has a movable window,
+   * and an unordered one is a fixed one-row result that accepts only its
+   * compiled limit at offset 0.
    *
+   * @throws `SetWindowRequiresOrderByError` if the query is neither windowed
+   * nor a `findOne`, or an unordered `findOne` would move its offset.
+   * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -106,8 +117,7 @@ export class CollectionConfigBuilder<
   // Current sync run state (set when sync starts, cleared when it stops)
   // Public for testing purposes (CollectionConfigBuilder is internal, not public API)
   public currentSyncConfig:
-    | Parameters<SyncConfig<TResult>[`sync`]>[0]
-    | undefined
+    Parameters<SyncConfig<TResult>[`sync`]>[0] | undefined
   public currentSyncState: FullSyncState | undefined
 
   // Error state tracking
@@ -119,13 +129,23 @@ export class CollectionConfigBuilder<
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
 
+  /**
+   * Whether this live-query Collection had a subscriber or a preload in its
+   * current sync run. Until then it reads its source Collections without
+   * starting provider work.
+   */
+  hasSubscriberOrPreload(): boolean {
+    // A builder driven without its Collection, as its own tests do, has no
+    // subscriber state to defer on.
+    return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
+  }
+
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
   private settledWindow: WindowOptions | undefined
   private activeWindowOperation:
-    | { generation: number; failed: boolean; error?: unknown }
-    | undefined
+    { generation: number; failed: boolean; error?: unknown } | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
   private loadMoreFn: (() => void) | undefined
@@ -137,11 +157,10 @@ export class CollectionConfigBuilder<
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
-    | Map<string, BasicExpression<boolean>>
-    | undefined
+    Map<string, BasicExpression<boolean>> | undefined
+  private includesRuntimeCache: IncludesRuntime | undefined
   private bucketFacadesCache:
-    | ReturnType<typeof materializeCompilation>[`facades`]
-    | undefined
+    ReturnType<typeof materializeCompilation>[`facades`] | undefined
 
   // Map of opaque source ID to subscription
   readonly subscriptions = createSourceRecord<CollectionSubscription>()
@@ -164,6 +183,14 @@ export class CollectionConfigBuilder<
   private windowFailed = false
   private syncRunGeneration = 0
   private windowOperationGeneration = 0
+  // Counts setWindow calls, deferred or not. A separate count from window
+  // operations, so a deferred call does not drop the settlement of a move
+  // that already applied.
+  private windowRequestGeneration = 0
+  // The newest call's settlement. An older call that a newer one superseded
+  // resolves only once it settles, so an awaited call reflects the window
+  // that won. A superseded call that fails still rejects with its own error.
+  private latestWindowRequest: Promise<void> | undefined
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections = createSourceRecord<OrderByOptimizationInfo>()
 
@@ -177,12 +204,15 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
-    this.initialWindow = this.query.orderBy?.length
-      ? {
-          offset: this.query.offset ?? 0,
-          limit: this.query.limit ?? Infinity,
-        }
-      : undefined
+    this.initialWindow =
+      this.query.orderBy?.length || this.query.singleResult
+        ? {
+            offset: this.query.offset ?? 0,
+            limit: this.query.singleResult
+              ? Math.min(this.query.limit ?? 1, 1)
+              : (this.query.limit ?? Infinity),
+          }
+        : undefined
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
@@ -282,6 +312,16 @@ export class CollectionConfigBuilder<
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
+    // A findOne keeps its compiled limit, and only an ordered one moves.
+    if (this.query.singleResult) {
+      if (!this.query.orderBy?.length && (options.offset ?? 0) !== 0)
+        throw new SetWindowRequiresOrderByError()
+      if (
+        (options.limit ?? this.initialWindow!.limit) !==
+        this.initialWindow!.limit
+      )
+        throw new SetWindowFindOneLimitError()
+    }
     if (
       this.activeWindowOperation ||
       this.isGraphRunning ||
@@ -300,17 +340,31 @@ export class CollectionConfigBuilder<
       offset: options.offset ?? baseWindow?.offset,
       limit: options.limit ?? baseWindow?.limit,
     }
+    const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      return sourceRecovery.then(async () => {
+      const deferred: Promise<void> = sourceRecovery.then(async () => {
+        // A newer call wins, even if this deferred one resumes after it.
+        if (request !== this.windowRequestGeneration) {
+          await this.latestWindowRequest
+          return
+        }
         const settlement = this.setWindow(requestedWindow)
+        // The resumed call settles on behalf of this one.
+        this.latestWindowRequest = deferred
         if (settlement !== true) await settlement
       })
+      return (this.latestWindowRequest = deferred)
     }
     if (this.hasFailedSourceRecovery()) {
-      return Promise.reject(
-        this.lastSubsetError ?? new Error(`Source recovery failed`),
-      )
+      return (this.latestWindowRequest = Promise.reject(
+        this.lastSubsetError ??
+          new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Source recovery failed`
+              : codedMessage(147),
+          ),
+      ))
     }
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
@@ -358,13 +412,17 @@ export class CollectionConfigBuilder<
     const settlement = loadOperation?.wait() ?? true
     if (settlement === true) {
       this.settledWindow = requestedWindow
+      this.latestWindowRequest = undefined
       return true
     }
-    return settlement.then(
+    return (this.latestWindowRequest = settlement.then(
       () => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
           this.settledWindow = requestedWindow
         }
+        return request === this.windowRequestGeneration
+          ? undefined
+          : this.latestWindowRequest
       },
       (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
@@ -373,11 +431,12 @@ export class CollectionConfigBuilder<
         }
         throw error
       },
-    )
+    ))
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
-    // Only return window if this is a windowed query (has orderBy and windowFn)
+    // A windowed query or an ordered findOne returns its window. An unordered
+    // findOne returns its fixed result: offset 0 and its compiled limit.
     const window = this.settledWindow ?? this.initialWindow
     if (!this.windowFn || !window) {
       return undefined
@@ -437,7 +496,9 @@ export class CollectionConfigBuilder<
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
     this.transitionToError(
-      `Subset demand '${planId}' failed: ${normalized.message}`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Subset demand '${planId}' failed: ${normalized.message}`
+        : codedMessage(228, { planId, cause: normalized.message }),
       normalized,
     )
   }
@@ -454,7 +515,9 @@ export class CollectionConfigBuilder<
     }
     if (fatalBeforeReady) {
       this.transitionToError(
-        `Initial subset load failed: ${normalized.message}`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Initial subset load failed: ${normalized.message}`
+          : codedMessage(229, { cause: normalized.message }),
         normalized,
       )
     }
@@ -580,7 +643,9 @@ export class CollectionConfigBuilder<
     // Should only be called when sync is active
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `maybeRunGraph called without active sync run. This should not happen.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `maybeRunGraph called without active sync run. This should not happen.`
+          : codedMessage(148),
       )
     }
 
@@ -610,7 +675,12 @@ export class CollectionConfigBuilder<
               syncState.graph.run()
             } catch (error) {
               if (isCurrentSyncRun()) {
-                this.transitionToError(`Live query graph failed`, error)
+                this.transitionToError(
+                  devBuild() && process.env.NODE_ENV !== `production`
+                    ? `Live query graph failed`
+                    : codedMessage(212),
+                  error,
+                )
               }
               throw error
             }
@@ -664,7 +734,9 @@ export class CollectionConfigBuilder<
   scheduleGraphRun(options?: { contextId?: SchedulerContextId }) {
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `scheduleGraphRun called without active sync run. This should not happen.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `scheduleGraphRun called without active sync run. This should not happen.`
+          : codedMessage(149),
       )
     }
 
@@ -791,6 +863,7 @@ export class CollectionConfigBuilder<
     this.pipelineCache = undefined
     this.sourceWhereClausesCache = undefined
     this.bucketFacadesCache = undefined
+    this.includesRuntimeCache = undefined
 
     // Reset lazy source alias state
     this.lazySources.clear()
@@ -841,14 +914,19 @@ export class CollectionConfigBuilder<
       },
     )
 
-    const materialized = materializeCompilation(
-      compilation,
-      this.config.getKey,
-      this.hasJoins(this.query),
-    )
+    // Includes bring the materializer. A joined query with a custom key
+    // reduces its public keys without it.
+    const includesRuntime = compilation.includes?.[0]?.runtime
+    const getKey = this.config.getKey
+    const materialized = includesRuntime
+      ? includesRuntime.materializeCompilation(compilation, getKey)
+      : getKey && this.hasJoins(this.query)
+        ? reducePublicKeys(compilation, getKey)
+        : { pipeline: compilation.pipeline, facades: undefined }
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.bucketFacadesCache = materialized.facades
+    this.includesRuntimeCache = includesRuntime
 
     const missingSources = this.collectionSources
       .map((source) => source.sourceId)
@@ -893,14 +971,22 @@ export class CollectionConfigBuilder<
       }),
     )
 
-    // A query whose pipeline was not materialized publishes its rows directly
-    // and pays for no facade state.
+    // A query without includes publishes its rows directly and pays for no
+    // facade state. With includes, the adapter also strips private route
+    // state at publication, even when every include is inline. A joined
+    // query with a custom key is materialized for key reduction only.
     const facadeCompilations = this.bucketFacadesCache
-    const bucketFacades = facadeCompilations
-      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
-          syncState.messagesCount += count
-        })
-      : undefined
+    const includesRuntime = this.includesRuntimeCache
+    const bucketFacades =
+      facadeCompilations && includesRuntime
+        ? includesRuntime.createBucketFacades(
+            this.id,
+            facadeCompilations,
+            (count) => {
+              syncState.messagesCount += count
+            },
+          )
+        : undefined
     if (bucketFacades) {
       syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
     }
@@ -919,11 +1005,7 @@ export class CollectionConfigBuilder<
         this.windowFailed ||
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
-        // Explicit window moves keep their atomic publication boundary.
-        (this.pendingOrderedLoads.size > 0 &&
-          (!this.config.publishUnconfirmedOrderedResults ||
-            this.liveQueryCollection?.status !== `loading` ||
-            this.activeWindowOperation !== undefined)) ||
+        this.pendingOrderedLoads.size > 0 ||
         Object.values(this.optimizableOrderByCollections).some(
           (info) =>
             info.joinedFilterSourceId !== undefined &&
@@ -939,17 +1021,17 @@ export class CollectionConfigBuilder<
       for (const [key, { inserts, deletes }] of pendingChanges) {
         if (Math.abs(inserts - deletes) > 1) {
           throw new Error(
-            `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`,
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`
+              : codedMessage(150, { key, change: inserts - deletes }),
           )
         }
       }
 
       let facadePublication:
-        | ReturnType<BucketFacadeAdapter[`flush`]>
-        | undefined
+        ReturnType<BucketFacadeAdapter[`flush`]> | undefined
       let rootPublication:
-        | ReturnType<Collection[`_deferPublication`]>
-        | undefined
+        ReturnType<Collection[`_deferPublication`]> | undefined
       try {
         facadePublication = bucketFacades?.flush()
         rootPublication = hasParentChanges
@@ -1068,7 +1150,9 @@ export class CollectionConfigBuilder<
       })
     } else {
       throw new Error(
-        `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`
+          : codedMessage(151),
       )
     }
   }
@@ -1088,7 +1172,9 @@ export class CollectionConfigBuilder<
     if (status === `error`) {
       this.erroredSourceIds.add(sourceId)
       this.setErrorState(
-        `Source collection '${collectionId}' entered error state`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Source collection '${collectionId}' entered error state`
+          : codedMessage(172, { collectionId }),
       )
       return
     }
@@ -1126,8 +1212,10 @@ export class CollectionConfigBuilder<
   private handleSourceCleanupStart(collectionId: string): Error | undefined {
     if (this.fatalQueryError) return
     const error = new Error(
-      `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
-        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
+            `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+        : codedMessage(152, { collectionId, id: this.id }),
     )
     this.transitionToError(error.message, error)
     return error
@@ -1174,20 +1262,19 @@ export class CollectionConfigBuilder<
     this.isInErrorState = true
 
     // Log error to console for debugging
-    console.error(`[Live Query Error] ${message}`)
+    console.error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[Live Query Error] ${message}`
+        : message,
+    )
 
     // Transition live query collection to error state
     this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
   }
 
   private allRequiredSourcesReady() {
-    return this.collectionSources.every(
-      (source) =>
-        // Only on-demand sources settle through route demand. Eager
-        // loadSubset calls return immediately, so they must reach ready.
-        (this.lazySources.has(source.sourceId) &&
-          source.collection.config.syncMode === `on-demand`) ||
-        source.collection.isReady(),
+    return this.collectionSources.every(({ collection }) =>
+      sourcePermitsInitialReadiness(collection),
     )
   }
 
@@ -1202,7 +1289,9 @@ export class CollectionConfigBuilder<
   ) {
     if (this.collectionSources.length === 0) {
       throw new Error(
-        `Query '${this.id}' has no collection sources. This should not happen; please report.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Query '${this.id}' has no collection sources. This should not happen; please report.`
+          : codedMessage(153, { id: this.id }),
       )
     }
 
@@ -1257,13 +1346,29 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription
+      if (subscription.isDeferringAcquisition()) {
+        // No subscriber or preload yet: source reads stay local, and the
+        // deferred provider work starts when the first one arrives.
+        syncState.unsubscribeCallbacks.add(
+          this.liveQueryCollection!._onFirstSubscriberOrPreload(() =>
+            subscription.resumeDeferredAcquisition(),
+          ),
+        )
+        // Creating the subscription can run user code, such as an inner live
+        // query's status handler, that already requested this one's data.
+        if (this.hasSubscriberOrPreload()) {
+          subscription.resumeDeferredAcquisition()
+        }
+      }
 
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
         lazyCallbacks.setDemand = (plan, keys) =>
           collectionSubscriber.setDemand(subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
-          if (plan.initialKeys.size > 0) {
+          // A window requested before start with a nonzero offset can drop
+          // the rows a static filter names, so it gets no static demand.
+          if (plan.initialKeys.size > 0 && !this.currentWindow?.offset) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
           }
         }

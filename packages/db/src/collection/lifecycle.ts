@@ -9,6 +9,7 @@ import {
 } from '../utils/browser-polyfills'
 import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
+import { codedMessage, devBuild } from '../error-message'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -30,6 +31,9 @@ import type { CollectionStateManager } from './state'
  */
 export const UNSUBSCRIBED_GC_FLOOR_MS = 50
 
+/** A Collection's gcTime when its config names none (5 minutes). */
+export const DEFAULT_GC_TIME_MS = 300000
+
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -47,6 +51,7 @@ export class CollectionLifecycleManager<
   public status: CollectionStatus = `idle`
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
+  private readyFailureSink: ((failure: { error: unknown }) => void) | undefined
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
@@ -117,19 +122,26 @@ export class CollectionLifecycleManager<
   public setStatus(
     newStatus: CollectionStatus,
     allowReady: boolean = false,
+    beforeEmit?: () => void,
   ): void {
     if (newStatus === `ready` && !allowReady) {
       // setStatus('ready') is an internal method that should not be called directly
       // Instead, use markReady to transition to ready triggering the necessary events
       // and side effects.
       throw new CollectionStateError(
-        `You can't directly call "setStatus('ready'). You must use markReady instead.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `You can't directly call "setStatus('ready'). You must use markReady instead.`
+          : codedMessage(208),
       )
     }
     this.validateStatusTransition(this.status, newStatus)
+    // Only an actual replacement run transfers later cleanup to a new run.
+    // Validation, deferred requests and failed admission retain the old promise.
+    if (newStatus === `loading`) this.cleanupPromise = null
     const revision = ++this.statusRevision
     const previousStatus = this.status
     this.status = newStatus
+    beforeEmit?.()
 
     // Emit event
     this.events.emitStatusChange(
@@ -159,24 +171,42 @@ export class CollectionLifecycleManager<
    * This is called by sync implementations to explicitly signal that the collection is ready,
    * providing a more intuitive alternative to using commits for readiness signaling
    * @private - Should only be called by sync implementations
+   *
+   * `beforeEffects` runs after the status reads `ready` and before status
+   * listeners and ready callbacks, so their writes follow it.
    */
-  public markReady(): void {
-    const failure = this.applyReadyTransition()
-    if (failure) throw failure.error
+  public markReady(beforeEffects?: () => void): void {
+    const failure = this.applyReadyTransition(beforeEffects)
+    if (!failure) return
+    if (this.readyFailureSink) this.readyFailureSink(failure)
+    else throw failure.error
   }
 
-  /** @internal Capture ready-effect failures while the sync entry completes. */
-  public markReadyDuringSyncStart(): { error: unknown } | undefined {
-    return this.applyReadyTransition()
+  /**
+   * @internal Hold ready-effect failures while a sync function runs, whether
+   * it calls markReady or commits a truncate. The returned function stops
+   * holding them and returns the first one.
+   */
+  public deferReadyFailures(): () => { error: unknown } | undefined {
+    let first: { error: unknown } | undefined
+    this.readyFailureSink = (failure) => {
+      first ??= failure
+    }
+    return () => {
+      this.readyFailureSink = undefined
+      return first
+    }
   }
 
-  private applyReadyTransition(): { error: unknown } | undefined {
+  private applyReadyTransition(
+    beforeEffects?: () => void,
+  ): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
     // A successful initial sync or recovery establishes a ready snapshot.
     if (this.status === `loading` || this.status === `error`) {
       this.syncError = undefined
       const readyRevision = this.statusRevision + 1
-      this.setStatus(`ready`, true)
+      this.setStatus(`ready`, true, beforeEffects)
 
       // A status listener can synchronously supersede this transition, even
       // when it restarts the Collection back to ready before returning.
@@ -194,9 +224,7 @@ export class CollectionLifecycleManager<
         this.hasBeenReady = true
 
         // Also mark as having received first commit for backwards compatibility
-        if (!this.hasReceivedFirstCommit) {
-          this.hasReceivedFirstCommit = true
-        }
+        this.hasReceivedFirstCommit = true
 
         readyEffects.push(...this.onFirstReadyCallbacks)
         this.onFirstReadyCallbacks = []
@@ -228,12 +256,15 @@ export class CollectionLifecycleManager<
   public assertCanStartSync(): void {
     if (this.cleaningUp) {
       throw new CollectionStateError(
-        `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`
+          : codedMessage(209, { id: this.id }),
       )
     }
-    // A synchronously finished retirement retains its public promise until
-    // settlement. Starting a new sync run assigns later cleanup to that run.
-    this.cleanupPromise = null
+  }
+
+  public isCleaningUp(): boolean {
+    return this.cleaningUp
   }
 
   /**
@@ -279,7 +310,7 @@ export class CollectionLifecycleManager<
   public startGCTimer(minDelay = 0): void {
     if (!this.canGarbageCollect()) return
 
-    const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
+    const gcTime = this.config.gcTime ?? DEFAULT_GC_TIME_MS
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
     // Note: setTimeout with Infinity coerces to 0 via ToInt32, causing immediate GC,
@@ -327,15 +358,11 @@ export class CollectionLifecycleManager<
     // This ensures cleanup happens even if the browser is busy
     this.idleCallbackId = safeRequestIdleCallback(
       (deadline) => {
-        // Perform cleanup if we still have no subscribers
-        if (this.canGarbageCollect()) {
-          const cleanupCompleted = this.performCleanup(deadline)
-          // Only clear the callback ID if cleanup actually completed
-          if (cleanupCompleted) {
-            this.idleCallbackId = null
-          }
-        } else {
-          // No need to cleanup, clear the callback ID
+        // Clean up if we still have no subscribers. Keep the callback ID
+        // only when cleanup rescheduled itself for a later idle period.
+        if (!this.canGarbageCollect()) {
+          this.idleCallbackId = null
+        } else if (this.performCleanup(deadline)) {
           this.idleCallbackId = null
         }
       },
@@ -410,28 +437,28 @@ export class CollectionLifecycleManager<
       // Keep cleanup observably asynchronous even when every release is
       // synchronous. Existing callers may use this turn to let optimistic
       // settlement finish before starting the next operation.
-      let failure: { error: unknown } | undefined
-      if (syncFailure && localFailures.length > 0) {
-        failure = {
-          error: new AggregateError(
-            [syncFailure.error, ...localFailures],
-            `Adapter cleanup and local teardown both failed`,
-            { cause: syncFailure.error },
-          ),
-        }
-      } else if (syncFailure) {
-        failure = syncFailure
-      } else if (localFailures.length === 1) {
-        failure = { error: localFailures[0] }
-      } else if (localFailures.length > 1) {
-        failure = {
-          error: new AggregateError(
-            localFailures,
-            `Multiple local teardown steps failed`,
-            { cause: localFailures[0] },
-          ),
-        }
-      }
+      const failures = syncFailure
+        ? [syncFailure.error, ...localFailures]
+        : localFailures
+      const failure =
+        failures.length === 0
+          ? undefined
+          : {
+              error:
+                failures.length === 1
+                  ? failures[0]
+                  : new AggregateError(
+                      failures,
+                      devBuild() && process.env.NODE_ENV !== `production`
+                        ? syncFailure
+                          ? `Adapter cleanup and local teardown both failed`
+                          : `Multiple local teardown steps failed`
+                        : codedMessage(173, {
+                            syncFailure: syncFailure !== undefined,
+                          }),
+                      { cause: failures[0] },
+                    ),
+            }
       void Promise.resolve()
         .then(() => Promise.resolve())
         .then(() => {

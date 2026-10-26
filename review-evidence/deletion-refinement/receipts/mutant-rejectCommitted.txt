@@ -1,0 +1,35 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/rejectCommitted.log
+SHA-256 of full source: 98d45d95734e4bfc68f29e28ce6acba8feea22d22ccb43b34284ae2fe3dd6ef4
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"explicit","reverse":false} 113ms
+   → caller follows native commit/abort: expected 'rejected' to be 'fulfilled' // Object.is equality
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:06
+   Duration  991ms (transform 332ms, setup 15ms, collect 482ms, tests 115ms, environment 185ms, prepare 54ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"explicit","reverse":false}
+AssertionError: caller follows native commit/abort: expected 'rejected' to be 'fulfilled' // Object.is equality
+
+Expected: "fulfilled"
+Received: "rejected"
+
+ ❯ tests/retirement-oracle.test.ts:218:13
+    216|             callers[slot]!.result.state,
+    217|             'caller follows native commit/abort',
+    218|           ).toBe(outcomes[slot] ? 'fulfilled' : 'rejected')
+       |             ^
+    219|           // abort() makes rollback irreversible before the asynchrono…
+    220|           // event. A callback rejection may therefore precede that ev…
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:151:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

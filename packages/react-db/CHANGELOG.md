@@ -1,5 +1,90 @@
 # @tanstack/react-db
 
+## 0.5.12
+
+### Patch Changes
+
+- Updated dependencies [[`5a1b286`](https://github.com/TanStack/db/commit/5a1b286910bdf56917a76732ba160c99d7b1ad66), [`9aecbab`](https://github.com/TanStack/db/commit/9aecbab4cacb3f1123b1716e6f063abb5affc74f)]:
+  - @tanstack/db@0.15.2
+
+## 0.5.11
+
+### Patch Changes
+
+- Keep `usePacedMutations` callbacks tied to the latest committed render so suspended transitions cannot mutate or persist another document's data. Refresh callbacks before descendant layout effects run while preserving the stable mutate function. ([#2170](https://github.com/TanStack/db/pull/2170))
+
+- Updated dependencies [[`468db85`](https://github.com/TanStack/db/commit/468db85fb5deeb286d08c8d9ca73c74613766d8c), [`3c481f6`](https://github.com/TanStack/db/commit/3c481f6c0455fbfe82ea94d9cf457cf00b20d3e7), [`a09ba67`](https://github.com/TanStack/db/commit/a09ba670b0e4e51821c20b958e5257d3d7a83c9d), [`92b11b0`](https://github.com/TanStack/db/commit/92b11b006edc46cea23ae4423046bf9eb29fc50e), [`fcd539a`](https://github.com/TanStack/db/commit/fcd539a515f43ab1a2bd06163548e839d7a576f3), [`2c83fdc`](https://github.com/TanStack/db/commit/2c83fdc53bd762fa8b8d5e5a8b82e092710618be)]:
+  - @tanstack/db@0.15.1
+
+## 0.5.10
+
+### Patch Changes
+
+- Updated dependencies [[`8660cc0`](https://github.com/TanStack/db/commit/8660cc0eb4914b8b0d3b2ba159416185f6d956c9), [`3a98e00`](https://github.com/TanStack/db/commit/3a98e0062fda2084596d218c14609f30dbef365a)]:
+  - @tanstack/db@0.15.0
+
+## 0.5.9
+
+### Patch Changes
+
+- Allow a `Query` built with Collection descriptors outside a `DbClient` to bind its sources when a client consumes it. Building or extending a query keeps descriptors unbound until that consumption. A reusable factory descriptor can now serve the same prebuilt query in separate client scopes, including React providers and server preloads. A prepared query is a bound snapshot; reuse the original unbound query across clients. The exported IR now represents an unbound descriptor with `DescriptorRef`; visitors of `IR.From` must handle the `descriptorRef` variant. ([#2077](https://github.com/TanStack/db/pull/2077))
+
+  React hooks bind standalone descriptor queries through their `DbProvider` client and report a provider hint when no client is available. Svelte hooks bind through their client and release deferred sources after failed query setup.
+
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`2f928e6`](https://github.com/TanStack/db/commit/2f928e6f240adb8874a6537905000009a2e9b53f), [`dfec42e`](https://github.com/TanStack/db/commit/dfec42e4a78ef609f9aa2f2c0f863a1e4f1ae1e3), [`1a65c2c`](https://github.com/TanStack/db/commit/1a65c2c63db9ad14c08d35b09d0081ecc121fbfc), [`1b4ee8d`](https://github.com/TanStack/db/commit/1b4ee8d57168978847687e75dbc1c33ddb935ed3), [`bbbf017`](https://github.com/TanStack/db/commit/bbbf017ef5b3884515295a4225faacdfd814499e), [`bc6f30e`](https://github.com/TanStack/db/commit/bc6f30e716aeb26c13b6a0e9ba00a27edc72a4d7), [`fade2e2`](https://github.com/TanStack/db/commit/fade2e24cfb9922b9b172f96194f7b6246731f50), [`bbe9327`](https://github.com/TanStack/db/commit/bbe9327ce90ab587ee6ef24e0030f79291f3057d), [`b34a579`](https://github.com/TanStack/db/commit/b34a579762b36dd49a89e11eacd7788f1df89453), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`f84387c`](https://github.com/TanStack/db/commit/f84387cd8220e8603dc24a99fe4881fa4cd5ddcd), [`be4a3d6`](https://github.com/TanStack/db/commit/be4a3d642c6d292150f7ff4e041442338e5a2de2), [`0dc696a`](https://github.com/TanStack/db/commit/0dc696a64901973d8025cb1a40af34c68c856855), [`fd13e3c`](https://github.com/TanStack/db/commit/fd13e3cc9d3302e7598a78ac8f49d06dbbde7e08)]:
+  - @tanstack/db@0.14.0
+
+## 0.5.8
+
+### Patch Changes
+
+- Updated dependencies [[`f6aba31`](https://github.com/TanStack/db/commit/f6aba314e44afdfa413d6d70bf8e272dfa67af85), [`faa3de6`](https://github.com/TanStack/db/commit/faa3de64b53737fb7896d8f9c5475e8c5daa05a9), [`bcb2af6`](https://github.com/TanStack/db/commit/bcb2af61b8a1513a09a88db230a4ffb3bb391541), [`2ab7f3e`](https://github.com/TanStack/db/commit/2ab7f3e55475ab6b86f6b5e3b566c89a7d9a9c58), [`86f00ea`](https://github.com/TanStack/db/commit/86f00ea63af5ef22f38f0c6a0a78bd4e3aaf49b5), [`f7ac2c6`](https://github.com/TanStack/db/commit/f7ac2c63a3cabc864caf38b7a4e966088cfe73bb), [`fa36267`](https://github.com/TanStack/db/commit/fa36267473bf989fd0bafd29ab6d67ab5fc91c60), [`2c98b49`](https://github.com/TanStack/db/commit/2c98b4992c412820f8476325ee6941db5ca9ac0f), [`f6d65ea`](https://github.com/TanStack/db/commit/f6d65eacea596f135d11c2adf4c9a4f97748457e), [`fe284cc`](https://github.com/TanStack/db/commit/fe284ccbdba51780f8b2d63efc75fa7100057bfd), [`8b0e1de`](https://github.com/TanStack/db/commit/8b0e1defb0ecf98ead912b3a906995398a30b510), [`4bd66cf`](https://github.com/TanStack/db/commit/4bd66cf8ee72cf2c318878995222415b0452b031)]:
+  - @tanstack/db@0.13.0
+
+## 0.5.7
+
+### Patch Changes
+
+- A live query no longer starts network work for its source collections before it has a subscriber or a preload. Rendering a component that never commits, or creating a live query with `startSync: true`, reads only the rows its sources already hold; the first subscriber or `preload()` starts the sources' sync and loads on-demand data. This applies to nested live queries and pooled `eq` queries too. `useLiveSuspenseQuery` preloads during render, so a source that already holds the rows still renders without suspending. A source collection's `subscriberCount` and `subscribers:change` now count only subscribers that ask for data, so a live query waiting for its first subscriber no longer makes a Query Collection refetch. ([#2060](https://github.com/TanStack/db/pull/2060))
+
+- Updated dependencies [[`487c5a6`](https://github.com/TanStack/db/commit/487c5a635a781d25924718c044a334f4ce4e2a01)]:
+  - @tanstack/db@0.12.3
+
+## 0.5.6
+
+### Patch Changes
+
+- Fix `useLiveInfiniteQuery` showing an empty idle result on its first render for a synchronously loaded source. The hook now starts sync during render, as `useLiveQuery` does, so the first committed render already shows the ready first page instead of flashing empty content before data arrives. This applies to query callbacks and to supplied live query collections whose window is exactly the first page or has no limit. A supplied collection with a wider finite limit waits for the hook to narrow its window at commit, so it never requests rows the hook does not need. Renders that never commit are reclaimed by garbage collection, and a React 19 StrictMode double render reuses one collection instead of starting two. In React, a startup error from a replacement query still reaches the error boundary, and the hook rejects a source replaced by a different collection with the same ID while it is mounted, as `useLiveQuery` does. ([#2027](https://github.com/TanStack/db/pull/2027))
+
+- Updated dependencies [[`043c9b1`](https://github.com/TanStack/db/commit/043c9b141b0e834fcba4ee0a6047ad5094205482), [`25201da`](https://github.com/TanStack/db/commit/25201da6c765a31043601a4f42ed60b74efc7621), [`9e8ed99`](https://github.com/TanStack/db/commit/9e8ed997885fb46ac98ec85906f4ca4f662e7cce), [`25201da`](https://github.com/TanStack/db/commit/25201da6c765a31043601a4f42ed60b74efc7621), [`e753bc7`](https://github.com/TanStack/db/commit/e753bc7d6cf87e2f1b9627dacf66c6e0d8e56341)]:
+  - @tanstack/db@0.12.2
+
+## 0.5.5
+
+### Patch Changes
+
+- Build a live query's keyed `state` map only when code reads it. Most callers read only `data`, so an update no longer builds a second copy of the results: ([#2043](https://github.com/TanStack/db/pull/2043))
+
+  - The shared live query snapshot and the infinite query window build `state` on first read.
+  - `useLiveInfiniteQuery` in React reads `state` only when your code reads it.
+  - Vue and Svelte `useLiveQuery` build their `data` array from the snapshot's ordered rows instead of from `state`.
+
+  A retained snapshot still shows the rows from the time it was built.
+
+- Updated dependencies [[`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`aa1b58e`](https://github.com/TanStack/db/commit/aa1b58e960421479c0fe1ffc243d49feada3c1c7), [`c3a4e4a`](https://github.com/TanStack/db/commit/c3a4e4a008ead8a2a910c9d965a1f3a77a0f2606), [`2376eb5`](https://github.com/TanStack/db/commit/2376eb581d66d1d52d2ab8fd1619060c74be5311), [`a37e69a`](https://github.com/TanStack/db/commit/a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`de8d0f1`](https://github.com/TanStack/db/commit/de8d0f1bffefb2885c4fe244c317c81d1ddc9117)]:
+  - @tanstack/db@0.12.1
+
+## 0.5.4
+
+### Patch Changes
+
+- Reject a different source Collection that reuses an ID within one mounted derived live query. Keep separate Suspense queries bound to their own source Collections when the sources share an ID. ([#2003](https://github.com/TanStack/db/pull/2003))
+
+- Document common React skill mistakes: use expression helpers such as `eq()` in structured `.where()` predicates and destructure `data` from `useLiveQuery()` before rendering rows. ([#1474](https://github.com/TanStack/db/pull/1474))
+
+- Updated dependencies [[`2806da0`](https://github.com/TanStack/db/commit/2806da0c41ba99ce6aeef70556a8ac2fd66e2295), [`7c516ce`](https://github.com/TanStack/db/commit/7c516ce025cdac8a986a5d11800b06ed554a1a64), [`eac6e8b`](https://github.com/TanStack/db/commit/eac6e8b6a6150b8e48bdbe61365bceec1e768eb1), [`a21f4a4`](https://github.com/TanStack/db/commit/a21f4a4d553514cd694051dfe74e64109c82b146), [`cfb03f2`](https://github.com/TanStack/db/commit/cfb03f201bb21d82b7f537a9fbe59d3623f395d6)]:
+  - @tanstack/db@0.12.0
+
 ## 0.5.3
 
 ### Patch Changes

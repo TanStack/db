@@ -1,10 +1,13 @@
 import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
+import { collectionOptionsClaim } from '../collection-options.js'
 import {
   CollectionConfigurationError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { codedMessage, devBuild } from '../error-message'
+import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
 import { CollectionStateManager } from './state'
@@ -224,6 +227,13 @@ export interface Collection<
  *
  */
 
+type CollectionConstructionConfig = CollectionConfig<
+  any,
+  string | number,
+  any,
+  UtilsRecord
+> & { schema?: StandardSchemaV1 }
+
 // Overload for when schema is provided and utils is required (not optional)
 // We can't infer the Utils type from the CollectionConfig because it will always be optional
 // So we omit it from that type and instead infer it from the extension `& { utils: TUtils }`
@@ -342,14 +352,31 @@ export function createCollection<
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any, UtilsRecord> & {
-    schema?: StandardSchemaV1
-  },
+  options: CollectionConstructionConfig,
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options,
-  )
-  return collection
+  // The literal comparison lets production bundlers erase the check and import.
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
+    validateCollectionConfig(options)
+  }
+
+  const claimOptions = (
+    options as typeof options & {
+      [collectionOptionsClaim]?: () => void | (() => void)
+    }
+  )[collectionOptionsClaim]
+  return constructWithClaim(options, claimOptions?.())
+}
+
+function constructWithClaim(
+  options: CollectionConstructionConfig,
+  releaseClaim: void | (() => void),
+): Collection<any, string | number, UtilsRecord, any, any> {
+  try {
+    return new CollectionImpl<any, string | number, any, any, any>(options)
+  } catch (error) {
+    releaseClaim?.()
+    throw error
+  }
 }
 
 type CollectionImplConfig<
@@ -448,10 +475,12 @@ export class CollectionImpl<
 
     if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
       throw new CollectionConfigurationError(
-        `autoIndex: 'eager' requires defaultIndexType to be set. ` +
-          `Import an index type and set it:\n` +
-          `  import { BasicIndex } from '@tanstack/db'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+              `Import an index type and set it:\n` +
+              `  import { BasicIndex } from '@tanstack/db'\n` +
+              `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`
+          : codedMessage(206),
       )
     }
 
@@ -526,10 +555,11 @@ export class CollectionImpl<
   }
 
   /**
-   * Get the number of subscribers to the collection
+   * Get the number of subscribers that ask for this collection's data. A live
+   * query that has no subscriber or preload of its own does not count.
    */
   public get subscriberCount(): number {
-    return this._changes.activeSubscribersCount
+    return this._changes.acquiringSubscribersCount
   }
 
   /**
@@ -646,7 +676,38 @@ export class CollectionImpl<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
-    return this._sync.preload()
+    // Preload asks for this Collection's data, so provider work may start.
+    return this.afterPreloadMark(() => this._sync.preload())
+  }
+
+  // Records a request for data, then continues. A source whose start throws
+  // on resumption rejects the returned promise instead of throwing.
+  private afterPreloadMark<T>(next: () => Promise<T>): Promise<T> {
+    try {
+      this._markPreload()
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    return next()
+  }
+
+  /**
+   * @internal Record a preload without starting one, for a caller whose data
+   * request another promise answers, such as a DbClient stream for the same
+   * query. The request still counts: deferred acquisition may now resume.
+   */
+  public _markPreload(): void {
+    this._changes.markSubscriberOrPreload()
+  }
+
+  /** @internal Whether this Collection had a subscriber or a preload in this sync run. */
+  public _hasSubscriberOrPreload(): boolean {
+    return this._changes.hasSubscriberOrPreload()
+  }
+
+  /** @internal Listen for the first subscriber or preload in this sync run. */
+  public _onFirstSubscriberOrPreload(listener: () => void): () => void {
+    return this._changes.onFirstSubscriberOrPreload(listener)
   }
 
   /**
@@ -656,6 +717,15 @@ export class CollectionImpl<
    */
   public get base(): CollectionBase<TKey, TOutput> {
     return this._state.syncedData
+  }
+
+  /** @internal Applied metadata keys without a source row. */
+  public _syncedRowMetadataKeysOutsideBase(): Array<TKey> {
+    const keys: Array<TKey> = []
+    for (const key of this._state.syncedMetadata.keys()) {
+      if (!this._state.syncedData.has(key)) keys.push(key)
+    }
+    return keys
   }
 
   /**
@@ -670,6 +740,26 @@ export class CollectionImpl<
    */
   public has(key: TKey): boolean {
     return this._state.has(key)
+  }
+
+  /** Maximum number of source rows whose visible projection a local write can hide. */
+  public _optimisticOverlaySize(): number {
+    return (
+      this._state.optimisticDeletes.size + this._state.optimisticUpserts.size
+    )
+  }
+
+  /** Whether a local write obscures this key's authoritative source row. */
+  public _hasOptimisticOverlay(key: TKey): boolean {
+    return (
+      this._state.optimisticDeletes.has(key) ||
+      this._state.optimisticUpserts.has(key)
+    )
+  }
+
+  /** Whether an accepted sync transaction is not yet visible. */
+  public _hasHeldSyncTransaction(): boolean {
+    return this._state.hasHeldSyncTransaction()
   }
 
   /**
@@ -1011,18 +1101,13 @@ export class CollectionImpl<
   }
 
   /**
-   * Gets the current state of the collection as a Map, but only resolves when data is available
-   * Waits for the first sync commit to complete before resolving
+   * Gets the current state of the collection as a Map once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
-    if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.state)
-    }
-
-    // Use preload to ensure the collection starts loading, then return the state
     return this.preload().then(() => this.state)
   }
 
@@ -1036,18 +1121,13 @@ export class CollectionImpl<
   }
 
   /**
-   * Gets the current state of the collection as an Array, but only resolves when data is available
-   * Waits for the first sync commit to complete before resolving
+   * Gets the current state of the collection as an Array once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
-    if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.toArray)
-    }
-
-    // Use preload to ensure the collection starts loading, then return the array
     return this.preload().then(() => this.toArray)
   }
 
@@ -1079,6 +1159,8 @@ export class CollectionImpl<
 
   /**
    * Subscribe to changes in the collection
+   * Ordinary subscriptions throw during active cleanup. Wait for cleanup()
+   * to settle before subscribing or resuming deferred acquisition.
    * Changes to the same key retain their causal order within a callback.
    * Changes to different keys have no promised order within a callback.
    * @param callback - Function called when items change

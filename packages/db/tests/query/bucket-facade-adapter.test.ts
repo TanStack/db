@@ -1,5 +1,6 @@
 import { D2, MultiSet } from '@tanstack/db-ivm'
 import { describe, expect, it, vi } from 'vitest'
+import { include } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq } from '../../src/query/builder/functions.js'
@@ -33,6 +34,27 @@ class ThrowingBuildIndex extends BasicIndex<number> {
   }
 }
 
+/**
+ * Each projected synced row's order in a facade entry, keyed by row key, so
+ * iteration order is not compared.
+ */
+function projectedOrders(
+  facadeEntry: unknown,
+): Map<number, string | undefined> {
+  const entry = facadeEntry as {
+    collection: {
+      _state: { acceptedSyncedEntries: () => Iterable<[number, object]> }
+    }
+    order: WeakMap<object, string>
+  }
+  return new Map(
+    [...entry.collection._state.acceptedSyncedEntries()].map(([key, value]) => [
+      key,
+      entry.order.get(value),
+    ]),
+  )
+}
+
 describe(`BucketFacadeAdapter`, () => {
   it.each(
     [false, true].flatMap((present) =>
@@ -53,16 +75,8 @@ describe(`BucketFacadeAdapter`, () => {
       const ref: BucketFacadeRef = {
         [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey: `group` },
       }
-      const oldRow: BucketRow = {
-        publicKey: 1,
-        value: { id: 1, name: `old` },
-        order: undefined,
-      }
-      const newRow: BucketRow = {
-        publicKey: 1,
-        value: { id: 1, name: `new` },
-        order: undefined,
-      }
+      const oldRow: BucketRow = [1, { id: 1, name: `old` }, undefined]
+      const newRow: BucketRow = [1, { id: 1, name: `new` }, undefined]
       const send = (row: BucketRow, weight: number) =>
         rows.sendData(new MultiSet([[[`group`, row], weight]]))
       try {
@@ -122,13 +136,11 @@ describe(`BucketFacadeAdapter`, () => {
           values.map((value) => [
             [
               bucketKey,
-              {
-                publicKey: value.id,
+              [
+                value.id,
                 value,
-                order: ordered
-                  ? String(size - value.id).padStart(3, `0`)
-                  : undefined,
-              },
+                ordered ? String(size - value.id).padStart(3, `0`) : undefined,
+              ],
             ],
             1,
           ]),
@@ -172,15 +184,7 @@ describe(`BucketFacadeAdapter`, () => {
         expect.soft(visited, `source rows visited`).toBeLessThanOrEqual(size)
         const inserted = { id: size }
         rows.sendData(
-          new MultiSet([
-            [
-              [
-                bucketKey,
-                { publicKey: inserted.id, value: inserted, order: `999` },
-              ],
-              1,
-            ],
-          ]),
+          new MultiSet([[[bucketKey, [inserted.id, inserted, `999`]], 1]]),
         )
         graph.run()
         adapter.flush().publish()
@@ -210,8 +214,8 @@ describe(`BucketFacadeAdapter`, () => {
     activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
     rows.sendData(
       new MultiSet([
-        [[bucketKey, { publicKey: moving.id, value: moving, order: `0` }], 1],
-        [[bucketKey, { publicKey: fixed.id, value: fixed, order: `1` }], 1],
+        [[bucketKey, [moving.id, moving, `0`]], 1],
+        [[bucketKey, [fixed.id, fixed, `1`]], 1],
       ]),
     )
     graph.run()
@@ -228,8 +232,8 @@ describe(`BucketFacadeAdapter`, () => {
 
     rows.sendData(
       new MultiSet([
-        [[bucketKey, { publicKey: moving.id, value: moving, order: `0` }], -1],
-        [[bucketKey, { publicKey: moving.id, value: moving, order: `2` }], 1],
+        [[bucketKey, [moving.id, moving, `0`]], -1],
+        [[bucketKey, [moving.id, moving, `2`]], 1],
       ]),
     )
     graph.run()
@@ -256,11 +260,8 @@ describe(`BucketFacadeAdapter`, () => {
     activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
     rows.sendData(
       new MultiSet([
-        [
-          [bucketKey, { publicKey: original.id, value: original, order: `0` }],
-          1,
-        ],
-        [[bucketKey, { publicKey: fixed.id, value: fixed, order: `1` }], 1],
+        [[bucketKey, [original.id, original, `0`]], 1],
+        [[bucketKey, [fixed.id, fixed, `1`]], 1],
       ]),
     )
     graph.run()
@@ -315,38 +316,21 @@ describe(`BucketFacadeAdapter`, () => {
     const added = { id: 2, value: `added` }
     rows.sendData(
       new MultiSet([
-        [
-          [bucketKey, { publicKey: original.id, value: original, order: `0` }],
-          -1,
-        ],
-        [
-          [
-            bucketKey,
-            {
-              publicKey: replacement.id,
-              value: replacement,
-              order: `2`,
-            },
-          ],
-          1,
-        ],
-        [[bucketKey, { publicKey: added.id, value: added, order: `3` }], 1],
+        [[bucketKey, [original.id, original, `0`]], -1],
+        [[bucketKey, [replacement.id, replacement, `2`]], 1],
+        [[bucketKey, [added.id, added, `3`]], 1],
       ]),
     )
     graph.run()
 
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
     expect(facade.toArray.map(stripVirtualProps)).toEqual([original, fixed])
-    expect([
-      ...(
-        entries.get(`children`)?.get(bucketKey) as unknown as {
-          currentOrder: Map<number, string | undefined>
-        }
-      ).currentOrder,
-    ]).toEqual([
-      [original.id, `0`],
-      [fixed.id, `1`],
-    ])
+    expect(projectedOrders(entries.get(`children`)?.get(bucketKey))).toEqual(
+      new Map([
+        [original.id, `0`],
+        [fixed.id, `1`],
+      ]),
+    )
     expect(publications).toEqual([])
     expect(layoutPublications).toBe(0)
     expect(statusChanges).toBe(0)
@@ -382,42 +366,18 @@ describe(`BucketFacadeAdapter`, () => {
       replacement.id,
       added.id,
     ])
-    expect([
-      ...(
-        entries.get(`children`)?.get(bucketKey) as unknown as {
-          currentOrder: Map<number, string | undefined>
-        }
-      ).currentOrder,
-    ]).toEqual([
-      [original.id, `2`],
-      [fixed.id, `1`],
-      [added.id, `3`],
-    ])
+    expect(projectedOrders(entries.get(`children`)?.get(bucketKey))).toEqual(
+      new Map([
+        [original.id, `2`],
+        [fixed.id, `1`],
+        [added.id, `3`],
+      ]),
+    )
 
     rows.sendData(
       new MultiSet([
-        [
-          [
-            bucketKey,
-            {
-              publicKey: replacement.id,
-              value: replacement,
-              order: `2`,
-            },
-          ],
-          -1,
-        ],
-        [
-          [
-            bucketKey,
-            {
-              publicKey: replacement.id,
-              value: replacement,
-              order: `0`,
-            },
-          ],
-          1,
-        ],
+        [[bucketKey, [replacement.id, replacement, `2`]], -1],
+        [[bucketKey, [replacement.id, replacement, `0`]], 1],
       ]),
     )
     graph.run()
@@ -494,23 +454,10 @@ describe(`BucketFacadeAdapter`, () => {
     firstActiveBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
     secondActiveBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
     firstRows.sendData(
-      new MultiSet([
-        [
-          [bucketKey, { publicKey: first.id, value: first, order: undefined }],
-          1,
-        ],
-      ]),
+      new MultiSet([[[bucketKey, [first.id, first, undefined]], 1]]),
     )
     secondRows.sendData(
-      new MultiSet([
-        [
-          [
-            bucketKey,
-            { publicKey: second.id, value: second, order: undefined },
-          ],
-          1,
-        ],
-      ]),
+      new MultiSet([[[bucketKey, [second.id, second, undefined]], 1]]),
     )
     graph.run()
 
@@ -572,15 +519,7 @@ describe(`BucketFacadeAdapter`, () => {
     const original = { id: 1, value: `original` }
     activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
     rows.sendData(
-      new MultiSet([
-        [
-          [
-            bucketKey,
-            { publicKey: original.id, value: original, order: undefined },
-          ],
-          1,
-        ],
-      ]),
+      new MultiSet([[[bucketKey, [original.id, original, undefined]], 1]]),
     )
     graph.run()
     adapter.flush().publish()
@@ -627,24 +566,8 @@ describe(`BucketFacadeAdapter`, () => {
     index.throwBeforeBuild = true
     rows.sendData(
       new MultiSet([
-        [
-          [
-            bucketKey,
-            { publicKey: original.id, value: original, order: undefined },
-          ],
-          -1,
-        ],
-        [
-          [
-            bucketKey,
-            {
-              publicKey: replacement.id,
-              value: replacement,
-              order: undefined,
-            },
-          ],
-          1,
-        ],
+        [[bucketKey, [original.id, original, undefined]], -1],
+        [[bucketKey, [replacement.id, replacement, undefined]], 1],
       ]),
     )
     graph.run()
@@ -658,21 +581,8 @@ describe(`BucketFacadeAdapter`, () => {
     const final = { id: 1, value: `final` }
     rows.sendData(
       new MultiSet([
-        [
-          [
-            bucketKey,
-            {
-              publicKey: replacement.id,
-              value: replacement,
-              order: undefined,
-            },
-          ],
-          -1,
-        ],
-        [
-          [bucketKey, { publicKey: final.id, value: final, order: undefined }],
-          1,
-        ],
+        [[bucketKey, [replacement.id, replacement, undefined]], -1],
+        [[bucketKey, [final.id, final, undefined]], 1],
       ]),
     )
     graph.run()
@@ -710,8 +620,7 @@ describe(`BucketFacadeAdapter`, () => {
     )
     const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
     let builder:
-      | CollectionConfigBuilder<Context, Record<string, unknown>>
-      | undefined
+      CollectionConfigBuilder<Context, Record<string, unknown>> | undefined
     CollectionConfigBuilder.prototype.getConfig = function () {
       builder = this as unknown as CollectionConfigBuilder<
         Context,
@@ -722,9 +631,11 @@ describe(`BucketFacadeAdapter`, () => {
     const live = createLiveQueryCollection((q) =>
       q.from({ parent: parents }).select(({ parent }) => ({
         id: parent.id,
-        children: q
-          .from({ child: children })
-          .where(({ child }) => eq(child.groupId, parent.groupId)),
+        children: include(
+          q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId)),
+        ),
       })),
     )
 

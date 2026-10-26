@@ -1,4 +1,5 @@
 import type { D2, RootStreamBuilder } from '@tanstack/db-ivm'
+import type { PooledLiveQueries } from '../pooled-live-query.js'
 import type {
   CollectionConfig,
   ResultStream,
@@ -110,15 +111,6 @@ export interface LiveQueryCollectionConfig<
   gcTime?: number
 
   /**
-   * Publish an initial ordered window from available local rows before its
-   * provider requests settle. Defaults to false. Cached order is not
-   * authoritative: missing rows may change the window as loading continues.
-   * Initial-query readiness and preload still wait for provider coverage;
-   * explicit window moves, source replay, and repair remain atomic.
-   */
-  publishUnconfirmedOrderedResults?: boolean
-
-  /**
    * If enabled the collection will return a single object instead of an array
    */
   singleResult?: true
@@ -128,4 +120,17 @@ export interface LiveQueryCollectionConfig<
    * If provided, these will be used instead of inheriting from the FROM collection.
    */
   defaultStringCollation?: StringCollationConfig
+}
+
+/**
+ * A live query config that a framework hook accepts. Pass `pooledLiveQueries`
+ * as `pool` to serve the query from a shared equality partition when its
+ * shape allows. A config with any option other than `query`, `gcTime`, and
+ * `pool` compiles its own Collection.
+ */
+export type LiveQueryHookConfig<
+  TContext extends Context,
+  TResult extends object = RootQueryResult<TContext>,
+> = LiveQueryCollectionConfig<TContext, TResult> & {
+  pool?: PooledLiveQueries
 }

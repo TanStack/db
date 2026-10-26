@@ -1,0 +1,15 @@
+Source log: /tmp/pr1179-vitest-type-fresh.log
+SHA-256 of full source: 1d9d5945985cb7432bf5460be688e8d5b13d486be84a3230c1f9fef4d218dd87
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.
+
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+
+ Test Files  1 passed (1)
+      Tests  24 passed (24)
+Type Errors  no errors
+   Start at  08:15:01
+   Duration  292ms (transform 0ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 0ms, typecheck 272ms)

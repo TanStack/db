@@ -57,8 +57,7 @@ type OpSQLiteOpenDatabaseOptions = OpSQLiteResultOptions & {
 }
 
 export type OpSQLiteDriverOptions =
-  | OpSQLiteExistingDatabaseOptions
-  | OpSQLiteOpenDatabaseOptions
+  OpSQLiteExistingDatabaseOptions | OpSQLiteOpenDatabaseOptions
 
 type TransactionContextStore = {
   transactionDriver: SQLiteDriver

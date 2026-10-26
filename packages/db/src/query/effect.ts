@@ -4,6 +4,7 @@ import { createDeferred } from '../deferred.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -21,6 +22,7 @@ import {
   extractCollectionsFromQuery,
   reconcileChangesForD2,
   sendChangesToInput,
+  sourcePermitsInitialReadiness,
   splitUpdates,
 } from './live/utils.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
@@ -87,8 +89,7 @@ export interface EffectContext {
 
 /** Query input - can be a builder function or a prebuilt query */
 export type EffectQueryInput<TContext extends Context> =
-  | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-  | QueryBuilder<TContext>
+  ((q: InitialQueryBuilder) => QueryBuilder<TContext>) | QueryBuilder<TContext>
 
 type EffectEventHandler<
   TRow extends object = Record<string, unknown>,
@@ -312,18 +313,26 @@ export function createEffect<
           config.onSourceError(error)
         } catch (callbackError) {
           console.error(
-            `[Effect '${id}'] onSourceError callback threw:`,
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `[Effect '${id}'] onSourceError callback threw:`
+              : codedMessage(220, { id }),
             callbackError,
           )
         }
       } else {
-        console.error(`[Effect '${id}'] ${error.message}. Disposing effect.`)
+        console.error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `[Effect '${id}'] ${error.message}. Disposing effect.`
+            : codedMessage(221, { id, message: error.message }),
+        )
       }
 
       // Auto-dispose — the effect can no longer function
       void dispose().catch((cleanupError) => {
         console.error(
-          `[Effect '${id}'] failed to dispose after a source error:`,
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `[Effect '${id}'] failed to dispose after a source error:`
+            : codedMessage(222, { id }),
           cleanupError,
         )
       })
@@ -336,7 +345,9 @@ export function createEffect<
       runner.dispose()
     } catch (cleanupError) {
       console.error(
-        `[Effect '${id}'] failed to dispose after a startup error:`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[Effect '${id}'] failed to dispose after a startup error:`
+          : codedMessage(223, { id }),
         cleanupError,
       )
     }
@@ -364,6 +375,28 @@ interface EffectPipelineRunnerConfig<
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
+}
+
+/**
+ * Report how a held acquisition ends. A truncate replay rejects the
+ * acquisition it supersedes and starts a replacement, which inherits the hold.
+ */
+function followHeldAcquisition(
+  acquisition: Promise<unknown>,
+  replacementAfterFailure: () => Promise<void> | undefined,
+  handlers: {
+    settled: (succeeded: boolean) => void
+    replaced: (replacement: Promise<void>) => void
+  },
+): void {
+  void acquisition.then(
+    () => handlers.settled(true),
+    () => {
+      const replacement = replacementAfterFailure()
+      if (replacement) handlers.replaced(replacement)
+      else handlers.settled(false)
+    },
+  )
 }
 
 /**
@@ -405,6 +438,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // several prefix/tie/refill steps. Keep their net Effect delta private until
   // the final participant settles, matching live-query Collection publication.
   private readonly pendingOrderedPublications = new Set<Promise<unknown>>()
+  private readonly pendingInitialLoads = new Set<Promise<unknown>>()
   private orderedPublicationFailed = false
 
   // Subscription management
@@ -535,6 +569,28 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
+      const handleSourceCleanup = () => {
+        if (this.disposed) return
+        this.onSourceError(
+          new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Source collection '${collectionId}' was cleaned up while effect depends on it`
+              : codedMessage(134, { collectionId }),
+          ),
+        )
+      }
+      // Observe cleanup before subscription admission, which rejects while
+      // cleanup is active. A late Effect still returns its disposed handle.
+      const cleanupStartUnsubscribe =
+        collection._onCleanupStart(handleSourceCleanup)
+      // Registration can dispose the runner before its handle is available.
+      if (this.isDisposed()) {
+        cleanupStartUnsubscribe()
+        this.starting = false
+        return
+      }
+      this.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
+
       this.sentToD2RowsBySource.set(sourceId, new Map())
 
       // Discover dependencies: if source collection is itself a live query
@@ -582,6 +638,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         onLoadSubsetError: ({ error }) => {
           this.onSourceError(normalizeError(error))
         },
+        // subscribeChanges can report a result before it returns the
+        // subscription, so read it from the record when a load fails.
+        onLoadSubsetResult: (result) =>
+          this.trackInitialLoad(
+            result,
+            () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
+          ),
       })
 
       // Store subscription immediately so the join compiler can find it
@@ -653,14 +716,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
-      }
-
-      const handleSourceCleanup = () => {
-        if (this.disposed) return
-        this.onSourceError(
-          new Error(
-            `Source collection '${collectionId}' was cleaned up while effect depends on it`,
-          ),
+        // The sync adapter reports that served pages may have shifted after
+        // its own refetch. Re-establish the window with a bounded repair.
+        this.unsubscribeCallbacks.add(
+          collection.on(`loadedSubsets:invalidated`, () => {
+            if (this.disposed) return
+            loader.revalidateLoadedCoverage()
+            this.scheduleGraphRun()
+          }),
         )
       }
 
@@ -674,7 +737,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (status === `error`) {
           this.onSourceError(
             new Error(
-              `Source collection '${collectionId}' entered error state`,
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Source collection '${collectionId}' entered error state`
+                : codedMessage(135, { collectionId }),
             ),
           )
           return
@@ -696,16 +761,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         }
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
-      const cleanupStartUnsubscribe =
-        collection._onCleanupStart(handleSourceCleanup)
-      // Registration reports an already-active cleanup synchronously. That
-      // callback can dispose this runner before the unsubscribe handle exists.
-      if (this.isDisposed()) {
-        cleanupStartUnsubscribe()
-        this.starting = false
-        return
-      }
-      this.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
     }
 
     // Mark as subscribed so the graph can start running
@@ -753,9 +808,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     scheduleGraph = true,
   ): void {
     if (this.optimizableOrderByCollections[sourceId]) {
+      const source = this.collectionSources.find(
+        (candidate) => candidate.sourceId === sourceId,
+      )!
       this.orderedLoaders
         .get(sourceId)
-        ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
+        ?.onSourceChanges(
+          changes,
+          this.sentToD2RowsBySource.get(sourceId),
+          (key) => source.collection._hasOptimisticOverlay(key),
+        )
       changes = [...splitUpdates(changes)]
     }
     this.sendChangesToD2(sourceId, changes)
@@ -779,6 +841,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       return
     }
     if (update.ready instanceof Promise) {
+      this.trackInitialLoad(
+        update.ready,
+        () => subscription.pendingTruncateReplacement,
+      )
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
@@ -807,6 +873,34 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
   }
 
+  /** Keep `skipInitial` suppression open until a pending initial load settles. */
+  private trackInitialLoad(
+    result: true | Promise<unknown>,
+    replacementAfterFailure: () => Promise<void> | undefined,
+  ): void {
+    if (
+      !(result instanceof Promise) ||
+      this.initialLoadComplete ||
+      this.disposed
+    )
+      return
+    this.pendingInitialLoads.add(result)
+    const release = () => {
+      if (this.pendingInitialLoads.delete(result) && !this.disposed)
+        this.scheduleGraphRun()
+    }
+    // A load failure disposes the Effect through onLoadSubsetError. Any other
+    // rejection comes from an obsolete or aborted acquisition, so the hold
+    // fails open: it releases unless a truncate replacement takes it over.
+    followHeldAcquisition(result, replacementAfterFailure, {
+      settled: release,
+      replaced: (replacement) => {
+        this.trackInitialLoad(replacement, replacementAfterFailure)
+        release()
+      },
+    })
+  }
+
   /** Hold Effect callback publication across one authoritative repair chain. */
   private trackOrderedPublication(
     promise: Promise<unknown>,
@@ -831,24 +925,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.scheduleGraphRun()
       }
     }
-    void promise.then(
-      () => finish(true),
-      () => {
-        const replacement = replacementAfterFailure()
-        if (
-          replacement &&
-          this.pendingOrderedPublications.delete(promise) &&
-          !this.disposed
-        ) {
-          // Truncate replay aborted an obsolete acquisition. Its replacement
-          // now owns the same publication hold and settles after replay rows
-          // have reached this Effect's private D2 state.
+    // A failed repair chain fails closed until a fresh chain starts. A
+    // replacement settles after replay rows reach this Effect's private D2
+    // state, so it takes over the same publication hold.
+    followHeldAcquisition(promise, replacementAfterFailure, {
+      settled: finish,
+      replaced: (replacement) => {
+        if (this.pendingOrderedPublications.delete(promise) && !this.disposed)
           this.trackOrderedPublication(replacement, replacementAfterFailure)
-          return
-        }
-        finish(false)
       },
-    )
+    })
   }
 
   /**
@@ -953,20 +1039,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /** Check if all source collections are in the ready state */
-  private checkAllCollectionsReady(): boolean {
-    return Object.values(this.collections).every((collection) =>
-      collection.isReady(),
+  /** Check the source-readiness part of initial readiness for every source. */
+  private sourcesPermitInitialReadiness(): boolean {
+    return this.collectionSources.every(({ collection }) =>
+      sourcePermitsInitialReadiness(collection),
     )
   }
 
-  /** Initial callbacks start only after source readiness and ordered loading. */
+  /** Initial callbacks start only after every source served its initial data. */
   private canCompleteInitialLoad(): boolean {
     return (
       !this.orderedPublicationFailed &&
       this.pendingOrderedPublications.size === 0 &&
+      this.pendingInitialLoads.size === 0 &&
       !this.hasPendingJoinedFilterWork() &&
-      this.checkAllCollectionsReady()
+      this.sourcesPermitInitialReadiness()
     )
   }
 
@@ -1072,6 +1159,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.pendingChanges.clear()
     this.publishedRows.clear()
     this.pendingOrderedPublications.clear()
+    this.pendingInitialLoads.clear()
     this.orderedPublicationFailed = false
     this.lazySources.clear()
     this.demand.clear()
@@ -1214,10 +1302,25 @@ function reportError<TRow extends object, TKey extends string | number>(
       onError(normalised, event)
     } catch (onErrorError) {
       // Don't let onError errors propagate
-      console.error(`[Effect] Error in onError handler:`, onErrorError)
-      console.error(`[Effect] Original error:`, normalised)
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[Effect] Error in onError handler:`
+          : codedMessage(224),
+        onErrorError,
+      )
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[Effect] Original error:`
+          : codedMessage(225),
+        normalised,
+      )
     }
   } else {
-    console.error(`[Effect] Unhandled error in handler:`, normalised)
+    console.error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[Effect] Unhandled error in handler:`
+        : codedMessage(226),
+      normalised,
+    )
   }
 }

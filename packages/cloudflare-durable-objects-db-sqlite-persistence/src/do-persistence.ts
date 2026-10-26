@@ -17,13 +17,10 @@ import type { DurableObjectStorageLike } from './do-driver'
 export type { DurableObjectStorageLike } from './do-driver'
 
 type CloudflareDOCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type CloudflareDOSchemaMismatchPolicy =
-  | CloudflareDOCoreSchemaMismatchPolicy
-  | `throw`
+  CloudflareDOCoreSchemaMismatchPolicy | `throw`
 
 type CloudflareDOSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -87,6 +84,8 @@ function resolveAdapterBaseOptions(
       options.appliedTxPruneMaxAgeSeconds ??
       DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+    cacheGenerationClaimTtlMs: options.cacheGenerationClaimTtlMs,
+    now: options.now,
   }
 }
 

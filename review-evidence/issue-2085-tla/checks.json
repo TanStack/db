@@ -1,0 +1,163 @@
+[
+  {
+    "name": "route-safe",
+    "scenario": "route",
+    "fault": "none"
+  },
+  {
+    "name": "exact-safe",
+    "scenario": "exact",
+    "fault": "none"
+  },
+  {
+    "name": "reset-safe",
+    "scenario": "reset",
+    "fault": "none"
+  },
+  {
+    "name": "route-fair",
+    "scenario": "route",
+    "fault": "none",
+    "fair": true
+  },
+  {
+    "name": "exact-fair",
+    "scenario": "exact",
+    "fault": "none",
+    "fair": true
+  },
+  {
+    "name": "reset-fair",
+    "scenario": "reset",
+    "fault": "none",
+    "fair": true
+  },
+  {
+    "name": "route-reuse-term",
+    "scenario": "route",
+    "fault": "reuseTerm",
+    "violation": "DurableTermUnique"
+  },
+  {
+    "name": "route-reuse-term-public",
+    "scenario": "route",
+    "fault": "reuseTerm",
+    "invariants": ["TypeOK", "SuccessorRouteStable"],
+    "violation": "SuccessorRouteStable"
+  },
+  {
+    "name": "route-accept-old",
+    "scenario": "route",
+    "fault": "acceptOldBeat",
+    "violation": "SuccessorRouteStable"
+  },
+  {
+    "name": "exact-ignore-anchor",
+    "scenario": "exact",
+    "fault": "ignoreAnchor",
+    "violation": "AbsentApplyNeedsAnchor"
+  },
+  {
+    "name": "reset-ignore-epoch",
+    "scenario": "reset",
+    "fault": "ignoreEpoch",
+    "violation": "AbsentApplyNeedsAnchor"
+  },
+  {
+    "name": "exact-anchor-first",
+    "scenario": "exact",
+    "fault": "anchorFirst",
+    "violation": "PresentIdAcknowledged"
+  },
+  {
+    "name": "reset-retain-ledger",
+    "scenario": "reset",
+    "fault": "retainStaleLedger",
+    "violation": "AlreadyAppliedSameEpoch"
+  },
+  {
+    "name": "exact-latest-receipt",
+    "scenario": "exact",
+    "fault": "latestReceipt",
+    "violation": "OriginalPositionReceipt"
+  },
+  {
+    "name": "exact-drop-equal-reload",
+    "scenario": "exact",
+    "fault": "dropEqualReload",
+    "violation": "CertifiedDelivery"
+  },
+  {
+    "name": "reset-trust-stale",
+    "scenario": "reset",
+    "fault": "trustStaleNotice",
+    "violation": "CertifiedDelivery"
+  },
+  {
+    "name": "exact-publish-position",
+    "scenario": "exact",
+    "fault": "publishOnObserve",
+    "violation": "PositionReadIsNotPublication"
+  },
+  {
+    "name": "exact-duplicate-reload-event",
+    "scenario": "exact",
+    "fault": "duplicateReloadEvent",
+    "violation": "NoDuplicateEvents"
+  },
+  {
+    "name": "exact-no-reconcile-notice",
+    "scenario": "exact",
+    "fault": "noReconcileNotice",
+    "violation": "CertifiedReloadIssued"
+  },
+  {
+    "name": "witness-exact-after-peer",
+    "scenario": "exact",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoExactAfterPeerWitness"],
+    "violation": "NoExactAfterPeerWitness"
+  },
+  {
+    "name": "witness-absent-peer-conflict",
+    "scenario": "exact",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoAbsentPeerConflictWitness"],
+    "violation": "NoAbsentPeerConflictWitness"
+  },
+  {
+    "name": "witness-missed-equal-notice",
+    "scenario": "exact",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoMissedEqualNoticeWitness"],
+    "violation": "NoMissedEqualNoticeWitness"
+  },
+  {
+    "name": "witness-reset-old-notice",
+    "scenario": "reset",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoResetOldNoticeWitness"],
+    "violation": "NoResetOldNoticeWitness"
+  },
+  {
+    "name": "witness-lost-notice-recovery",
+    "scenario": "exact",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoLostNoticeRecoveryWitness"],
+    "violation": "NoLostNoticeRecoveryWitness"
+  },
+  {
+    "name": "witness-pruned-unknown",
+    "scenario": "exact",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoPrunedUnknownWitness"],
+    "violation": "NoPrunedUnknownWitness"
+  },
+  {
+    "name": "challenge-pre-signal-reset",
+    "scenario": "reset",
+    "fault": "none",
+    "invariants": ["TypeOK", "NoOldEpochBeforeResetSignal"],
+    "violation": "NoOldEpochBeforeResetSignal"
+  }
+]

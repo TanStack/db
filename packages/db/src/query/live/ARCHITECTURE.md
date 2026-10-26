@@ -99,17 +99,27 @@ operators and a few boundary adapters:
 | Architectural role                         | Concrete implementation                                                                                |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | Compile relation IDs and demand plans      | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
-| Reduce public keys and build routes        | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Reduce public keys                         | `packages/db/src/query/live/public-key-reduction.ts`                                                   |
+| Build include routes                       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
 | Run the graph and publish root rows        | `packages/db/src/query/live/collection-config-builder.ts`                                              |
 | Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                        |
 | Publish Collection-valued buckets          | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
 | Start and release asynchronous demand      | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
 | Ordered provider loading and continuation  | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
 
+Operator values carry their compilers, so an app bundles only the operators it
+imports. `include()`, `toArray()`, and `materialize()` carry the materializer
+and the Collection-facade adapter (`includes-runtime.ts`); aggregates and
+`groupKeys()` carry the grouping compiler. A query that uses an operator always
+holds the value that carries it, so compilation stays synchronous. Joins are
+core: the join compiler and public-key reduction (`public-key-reduction.ts`)
+ship with every live query, without the include materializer.
+
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
 function: its possible duplicate contributors still pass through the keyed
-reduction that enforces public-key congruence and multiplicity.
+reduction that enforces public-key congruence and multiplicity. The include
+materializer uses the same reduction for its root rows.
 
 ### Loading handoffs
 
@@ -138,10 +148,28 @@ publication to the builder while the graph keeps its private contributions.
 ## Identity
 
 Aliases are lexical query-language names rather than source runtime identities.
-The query builder requires collection aliases to be unique within each lexical
-scope and rejects nested queries that shadow an ancestor alias. Sibling include
-scopes may reuse an alias because neither alias is visible to the other.
-Compilation then assigns opaque IDs to the accepted plan:
+The query builder requires source aliases to be unique within each lexical
+scope. A nested query may shadow an ancestor alias: a reference captured from
+an earlier callback retains that source's lexical binding, while a callback in
+the nested scope reads its local source. Sibling scopes may also reuse aliases.
+The builder gives each source reference a binding ID when it is created and
+preserves that ID when it places or rewrites the query. Compilation assigns
+separate opaque IDs to the accepted plan:
+
+A source declaration may be placed in sibling query scopes, but one builder's
+source declaration cannot serve as both an ancestor and a descendant in an
+include. Those scopes need distinct binding IDs. Start the descendant with a
+fresh `new Query().from(...)`, even when it reads the same Collection.
+A bound reference captured from an unrelated query is outside the lexical
+scope, even when its alias matches a local source, and must be rejected before
+its expression can accept rows. This applies to join operands, predicates,
+grouping, ordering, and projections. Functional callbacks receive row values
+at runtime and do not carry statically inspectable binding references.
+A `QueryRef` or union branch exports its result, not its internal source
+declarations, to the containing query or an include. A joined `QueryRef` may
+read actual ancestor route context, but it does not receive the enclosing
+query's sibling source rows. A captured sibling reference inside that joined
+source must be rejected; the enclosing join condition combines the two sources.
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -149,11 +177,15 @@ type RelationNodeId = Brand<string, 'RelationNodeId'>
 type MaterializationEdgeId = Brand<string, 'MaterializationEdgeId'>
 ```
 
-An explicit projection can alpha-normalize aliases because its field names
-define the public shape. Without a projection, joined and grouped queries return
-a namespaced row whose keys are the lexical aliases. Those observable keys are
-part of query identity. Alias text may otherwise remain as debug metadata
-without becoming source identity.
+An explicit structured projection can alpha-normalize aliases because its field
+names define the public shape. Its query identity resolves captured references
+by binding role, including when the captured alias is shadowed. A functional
+callback may inspect its input keys; alias equivalence applies to it only when
+the callback is alias-equivariant. Without a projection, joined and grouped
+queries return a namespaced row whose keys are the lexical aliases. Those
+observable keys are part of query identity. A functional callback still
+receives the user's lexical keys. Alias text may otherwise remain as debug
+metadata without becoming source identity.
 
 A plan rewrite must preserve each Collection reference's `SourceId`. The
 optimizer reuses the reference when it copies, wraps, or collapses a source,
@@ -163,6 +195,21 @@ source from another scope. The branches of one `unionAll()` share an alias
 namespace, and the compiler rejects a name that two branches repeat. A union row
 holds the branches' projected fields, so a branch alias is not visible to the
 union's own joins or includes.
+
+Join conditions are an equality or a nonempty, possibly nested conjunction of
+equalities. `JoinClause.on` keeps the complete expression tree. Every equality
+contributes to query identity, optimizer copies, and parent-reference discovery.
+Each operand pair binds the joined source to an available source expression;
+the pairs may reverse operand direction independently. OR and non-equality
+predicates are rejected at join admission.
+
+A compound match requires every component equality to be TRUE. Any nullish
+operand prevents a match. Each component uses the same graph-scoped equality
+identity as a single-condition join; raw JSON representations do not define
+value equality. Lazy loading may use the first equality to acquire a superset
+of candidate rows, while the compiled join checks the full tuple. A tuple with
+any nullish component contributes no keyed lazy demand. A parent
+reference in any joined-side component requires route context before evaluation.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
@@ -185,40 +232,79 @@ match. Equality tokens collapse `-0` with `0`, compare Date, Temporal, and
 binary values by the same normalized value as `eq`/`in`, and retain runtime
 reference identity for other objects, functions, and symbols. These tokens are
 valid only for equality-keyed routing, grouping, and demand. Output values and
-arbitrary function arguments keep their exact runtime identity and value.
-Tree indexes give symbols a stable runtime-local order because JavaScript
-relational comparison throws for them; comparator equality still holds only
-for the same symbol. That order is a physical index detail: symbol range
-predicates fall back to the evaluator instead of treating it as query
-semantics. Range predicates also fall back when the live indexed values do not
-share the bound's relational domain. An index's advertised comparison options
-also define its executable comparator; metadata cannot claim an order that the
-index does not use. Explicit `undefined` range and cursor bounds denote the
-indexed nullish comparator group, while an absent bound denotes the start or
-end of the index. An ordered index groups exact value
-buckets that compare at the same position and keeps a live representative for
-each group, so range traversal and ordered limits cannot drop rows whose
-distinct values are comparator-equal.
-Compiler tokens belong to one compiled graph. This keeps every operator in the
-graph on the same identity relation. Objects, functions, and local symbols are
-weakly keyed where the runtime supports weak symbol keys. Older runtimes retain
-local symbols strongly within the scope rather than collapse distinct symbols
-and corrupt equality. Registered symbols use their registry key because the
-runtime registry already retains them. A demand controller owns a separate
-scope and discards it when the controller is cleared. Process-wide query
-identity and opaque public group keys keep their own runtime scope because
-equivalent query plans and retained public keys must survive graph replacement.
-For grouping, the equality token is the D2 group key. The group retains a raw
-value from a currently positive contributor only as the projected
-representative. The representative is chosen by stable source-row identity, so
-restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not
-the raw value itself. A separate public group key preserves primitive keys and
-serializes opaque equality identity; graph-local identity tokens never cross
-the Collection boundary. Compiler group fields use a query-local namespace
-disjoint from every selected alias. Direct correlated joins canonicalize both
-sides before the first D2 join; normalizing only the later group key is too
-late.
+arbitrary function arguments keep their exact runtime identity and value. Tree
+indexes give symbols a stable runtime-local order because JavaScript relational
+comparison throws for them; comparator equality still holds only for the same
+symbol. That order is a physical index detail: symbol range predicates fall back
+to the evaluator instead of treating it as query semantics. Range predicates
+also fall back when the live indexed values do not share the bound's relational
+domain. An index's advertised comparison options also define its executable
+comparator; metadata cannot claim an order that the index does not use. Explicit
+`undefined` range and cursor bounds denote the indexed nullish comparator group,
+while an absent bound denotes the start or end of the index. An ordered index
+groups exact value buckets that compare at the same position and keeps a live
+representative for each group, so range traversal and ordered limits cannot drop
+rows whose distinct values are comparator-equal. Compiler tokens belong to one
+compiled graph. This keeps every operator in the graph on the same identity
+relation. Objects, functions, and local symbols are weakly keyed where the
+runtime supports weak symbol keys. Older runtimes retain local symbols strongly
+within the scope rather than collapse distinct symbols and corrupt equality.
+Registered symbols use their registry key because the runtime registry already
+retains them. A demand controller owns a separate scope and discards it when the
+controller is cleared. Process-wide query identity and opaque public group keys
+keep their own runtime scope because equivalent query plans and retained public
+keys must survive graph replacement. For grouping, the equality token is the D2
+group key. The group retains a raw value from a currently positive contributor
+only as the projected representative. The representative is the contributor with
+the smallest exact value: another primitive before -0, and every primitive
+before an object. Objects are ordered by an explicit type tag (`Buffer`, `Date`,
+a Temporal type, then `Uint8Array`). Contributors of one tag are equal in
+content, so the contributor with the smallest row key supplies the instance; the
+choice does not depend on update history, and a deleted contributor's instance
+is never projected. Equal primitives share a representative key and consolidate.
+D2 consolidates contributions whose hashes match, and its hash treats -0 as 0
+and equal Dates as one value. Each contribution therefore carries the exact
+identity of every value a contributor can supply: the representative key, and
+the exact input of every min or max, taken from the value that the min or max
+compares. A primitive input is keyed by its exact value and an object input by
+its contributor's row key, because a rebuilt argument is a new instance at each
+evaluation and its retraction must still cancel its insert. A sum, avg, or count
+adds coerced numbers, so merging its equal inputs cannot change its result.
+Contributions merge only when those identities are equal, so a merged
+contribution supplies only a value that a positive contributor holds. A
+correlated include's route representative carries the correlation key and parent
+context instances. Members that read the correlation key from their own row hold
+distinct instances when the key is an object, such as a Date or a binary array,
+so those members do not consolidate. A count, sum, or avg over consolidated
+contributions updates without re-reading the group; a min or max over distinct
+primitive values keeps one contribution per distinct exact input, and a min or
+max over objects keeps one contribution per contributor. D2 sees only safe
+exact-value identity for a representative, not the raw value itself. A separate
+public group key preserves primitive keys and serializes opaque equality
+identity; graph-local identity tokens never cross the Collection boundary.
+Compiler group fields use a query-local namespace disjoint from every selected
+alias. Direct correlated joins canonicalize both sides before the first D2 join;
+normalizing only the later group key is too late.
+
+An aggregate query has one row per group: one group without `groupBy`, or one
+per group key, within each route inside an include. Each select value must
+have one value for its group outside its aggregates: a literal, a group key
+(a `groupBy` expression, a ref or a computed one), or a parent field that the
+route's parent context supplies. Every such value is evaluated with its group
+keys substituted, as the parts of a wrapped aggregate are. Any other field of
+the query's own sources has none, wherever it appears, so the query throws
+`NonAggregateExpressionNotInGroupByError`. A spread throws too, because a
+parent context holds only the parent fields the query names, and so does a
+nested include in a grouped or aggregate select, which has one Collection per
+row. A source ref is identified by its lexical binding, so a parent ref keeps
+its meaning when the include's source shadows the parent alias. Group keys
+match by structure, with literals compared by value. A HAVING condition
+follows the same rule: it reads group keys and parent fields, and a source
+field outside an aggregate throws. A HAVING aggregate reads the same aggregate
+that the select names as a top-level field. Recorded limit: parents that
+are equal under query equality but differ exactly, such as `x: 0` and `x: -0`,
+share a route, so a parent field can show the other parent's exact value,
+which is equal under query equality.
 
 ### Route-context transport
 
@@ -453,6 +539,15 @@ type BucketValue<Value> = readonly [bucketKey: BucketKey, value: Value]
 type CellValue<Value> = readonly [cellId: MaterializationCellId, value: Value]
 ```
 
+Physical layout: a value that D2 keeps in join or reduce state under a key
+it shares with other values leads with its own string, number or bigint
+key, as the `[publicKey, row, order]` child of a bucket row and the routed
+parent of an inline include do. The D2 index tells apart values with
+different leading keys without hashing them, so a value is hashed only
+against a value with the same leading key, such as its own retraction. A
+value of another shape is still correct, but the index hashes it whenever
+it shares a key. This is a cost rule, not part of the relation semantics.
+
 A route move is an ordinary weighted batch:
 
 ```text
@@ -543,8 +638,9 @@ tie-breaker, normally the child public key. An order-only change is a
 bucket-value change for arrays, singletons, concatenation, and Collection
 layout.
 
-A bare child query is a Collection-valued include. It exposes one stable public
-Collection facade per active bucket in that edge:
+`include(childQuery)` is a Collection-valued include. A bare child query in a
+select throws `IncludeOperatorRequiredError`. The include exposes one stable
+public Collection facade per active bucket in that edge:
 
 ```text
 ActiveBucket + BucketRow -> ActiveBucketRow -> BucketFacade(bucket, Collection)
@@ -553,14 +649,37 @@ Route + BucketFacade -> CellValue(cell, Collection)
 
 Parents sharing a bucket share its facade. Child changes update that Collection
 without re-emitting every parent, and moving a route changes the parent field to
-the destination bucket's facade. A facade is never retargeted to another
-bucket. The D2 join retains inactive bucket rows and emits their current
-snapshot when the bucket becomes active; the facade adapter does not buffer
-discarded deltas. The adapter retains a facade only while at least one parent
-route uses its bucket. When the last route leaves, it retracts the facade's rows
-and drops its strong reference. An external holder may keep that empty
-Collection alive, but a later active interval gets a new facade. Inline modes
-do not create child Collections.
+the destination bucket's facade. A facade is never retargeted to another bucket.
+The D2 join retains inactive bucket rows and emits their current snapshot when
+the bucket becomes active; the facade adapter does not buffer discarded deltas.
+It keeps only the deltas a flush consumed until that flush publishes: if the
+root commit fails, the adapter restores them, so the next successful flush
+publishes each pending child change exactly once. The adapter retains a facade
+only while at least one parent route uses its bucket. When the last route
+leaves, it drops its strong reference. The graph has already retracted the
+bucket's rows, but a facade is a Collection: a user transaction can show an
+optimistic row in it, and a sync commit can be held behind a persisting
+transaction. Retiring a facade that still shows such rows is legal, not an
+invariant violation. Those rows have no synced row, so they leave when their
+transactions settle. A row that the graph sent and never retracted is
+different. The adapter reads each facade's projected synced rows: the synced
+rows once every queued sync transaction applies, including a transaction a
+persisting one holds and a transaction still open. It decides inserts, updates
+and deletes from them rather than from the visible rows. A projected row left
+at retirement is a
+contradictory graph signal: the retirement throws, and the flush aborts and
+restores every facade it wrote. The live query owns its facades:
+several parent rows can share one, so a holder's `cleanup()` rejects (code 241).
+The adapter disposes facades itself, when the live query is cleaned up and
+when a failed flush removes the facades it created. Ordinary Collections keep
+their cleanup and restart. A
+restore undoes only the keys the
+flush wrote, including writes that a persisting transaction still holds, so a
+held write cannot land after the rollback. A facade that `resolve()` created
+before its bucket activated can stay ready and empty after a failed flush; the
+next flush writes its rows (a recorded limit). An external holder may keep the
+retired Collection alive, but a later active interval gets a new facade. Inline
+modes do not create child Collections.
 
 Composition is pure. It constructs a new result along changed paths and does
 not mutate a previously published row or use public routing metadata:
@@ -642,14 +761,19 @@ rolls the tentative owner back without calling `unloadSubset`. Logical demand
 retires even when `unloadSubset` fails. Each physical acquisition gets one release
 attempt, marked before calling adapter or error-listener code. Reentrant and
 repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
-and a cleanup failure cannot replace an earlier request failure. Core reports
-the error but retains no retry debt: a broken adapter can leak external resources
-if it throws before freeing them. Adapters must make their own cleanup reliable.
+and a cleanup failure cannot replace an earlier request failure. An
+`unloadSubset` that throws is an adapter bug. Core reports its error uncaught,
+once, from a microtask, and continues as if the release had succeeded: the
+error is not a load error, so it sets no `lastError`, emits no
+`loadSubset:error`, fails no replay, window move, or Effect, and no
+`releaseSnapshot()`, `unsubscribe()`, or `dispose()` call throws or rejects
+with it. Core retains no retry debt: a broken adapter can leak external
+resources if it throws before freeing them. Adapters must make their own
+cleanup reliable.
 Replay replaces acquisition leases sequentially: detach and release the old lease,
 then acquire a fresh one only if the logical demand and replay are still current.
-A release failure fails that replay without starting a replacement. A load
-throw leaves the logical demand detached; a later authoritative replay can
-reacquire it. Neither path restores an already released lease. A sole adapter
+A load throw leaves the logical demand detached; a later authoritative replay
+can reacquire it. Neither path restores an already released lease. A sole adapter
 resource may stop and restart in this gap; adapters must not tear down resources
 held by another owner. The public replacement barrier remains closed throughout
 the gap and through failed startup, so visible results do not flicker. Once a
@@ -775,18 +899,23 @@ to one acquisition.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
-transaction is parked in the causal queue. The promise resolves only after the
-writes and events become visible. It rejects with `AbortError` if request
-cancellation or collection cleanup abandons the transaction first. An abort
-after application has no effect. Application becomes irrevocable before change
-events are emitted, so an abort raised by a publication observer is already
-late. A successful `loadSubset` implementation must await or return every
-receipt for the transactions that establish its result. A source must not add
-priority merely to make a subset load settle.
-Existing immediate bootstrap and persistence-hydration paths, plus truncate,
-retain their queue-bypass contract; if one applies a parked subset transaction
-as part of that prefix, the subset receipt settles only after the writes are
-visible. Rejected acquisitions establish no result. Canceled or obsolete
+transaction is parked in the causal queue. Commit accepts the transaction, and
+an accepted transaction always applies in commit order. The promise resolves
+only after the writes and events become visible. It rejects with `AbortError`
+only if its signal aborted before acceptance or collection cleanup abandons
+the transaction; a later abort cannot withdraw its rows. A source discards a
+stale page by checking the signal before `commit()`, and rejects a load whose
+caller aborted with `AbortError` once its accepted rows apply. The receipt also carries its
+acceptance moment for handler-facing writes and Collection readiness
+(`whenSyncAccepted`): readiness counts accepted rows, and a mutation
+handler waits for acceptance, because a transaction parked behind its own
+persisting optimistic transaction becomes visible only when that transaction
+settles. A successful `loadSubset` implementation must await or return every
+receipt for the transactions that establish its result, so a handler that
+awaits an on-demand load of its own Collection waits for itself. A source must
+not add priority merely to make a subset load settle. Truncate retains its
+queue-bypass contract; if it applies a parked subset transaction as part of
+that prefix, the subset receipt settles only after the writes are visible. Rejected acquisitions establish no result. Canceled or obsolete
 acquisitions either stop before publishing more request-scoped rows or settle
 behind the active replay barrier.
 
@@ -808,7 +937,16 @@ identity; it must not invent source extent from a requested limit. A local row
 seen before the first ordered source request proves neither a continuation
 boundary nor a remote offset. This matters when a zero-sized window admits live
 source changes before it opens: the first nonzero window must still request its
-prefix from the start. Starting that request proves nothing until it succeeds;
+prefix from the start. An optimistic delete or update can hide one provider row
+per changed key from the local ordered window. A finite source-prefix request
+must leave room for those rows, including during ordered repair. An optimistic
+insert or rank move may fill a visible window, but it does not establish a
+provider offset or cursor boundary. The loader therefore counts source-derived
+rows for continuation even when optimistic rows make the visible window full.
+The extra provider limit used for optimistic headroom does not enlarge the
+local count from which a settled boundary is inferred; a held mutation may
+become authoritative before that request settles. Starting that
+request proves nothing until it succeeds;
 if it rejects, an explicit retry must also start at offset zero without a
 cursor. The same holds after any later ordered request fails or is canceled:
 the adapter may already have written only part of its response, so those rows
@@ -828,7 +966,10 @@ logical demand so a later truncate replay can retry one authoritative
 replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
-a later truncate replays one logical demand rather than both attempts. A
+a later truncate replays one logical demand rather than both attempts. The
+failed read stops being the loader's source demand before its lease is
+released. A replay that settles during or after a throwing release therefore
+cannot count the released read as complete source coverage. A
 successful authoritative replay clears its source-recovery gate, but it does
 not clear an unrelated failed window operation. A later explicit window move
 revalidates that physical window before publishing it.
@@ -846,13 +987,34 @@ Successful authoritative full-source recovery also retires settled successful
 page and tie demands. Later replay therefore reacquires the full source without
 repeating those finite requests. Retirement waits for each original request to
 settle and for any active replay to finish; it does not cancel unfinished work
-merely because the full-source request finished first. Failed finite demands
-still follow the explicit-retry rule above. Release callbacks retire ownership
+merely because the full-source request finished first. A failed finite demand
+that authoritative work superseded also retires then, or at once if it fails
+after full-source coverage completed: the full-source read covers its partial
+writes. Other failed finite demands still follow the explicit-retry rule above,
+and a full-source replay does not retire them. Release callbacks retire ownership
 before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
 A visible delete or source-order change after an otherwise settled,
-expressible window uses a narrower authoritative path. Core reissues the
+expressible window uses a narrower authoritative path. So does a sync adapter's
+`invalidateLoadedSubsets()` report: after a refetch that the adapter started on
+its own has applied, served pages may have shifted so that a row now sorts
+between two of them and is in neither result. The adapter reports that instead
+of keeping each served prefix whole (the `LoadSubsetFn` rule). Core emits
+`loadedSubsets:invalidated` once per turn, and each ordered loader on the
+Collection runs this repair. A loader whose coverage is one full-source
+acquisition, or a `requiresFullSource` plan, ignores the report: the refetch
+has already re-read that acquisition, and it has no page boundary to repair.
+A loader whose coverage is still its own first ordered request, of at least
+`offset + limit` rows with no continuation past it, also ignores the report
+when its window is inside that page: every window row sorts at or before the
+`offset + limit`-th source row, and the next source row sorts strictly after
+it in the leading term. The refetched page holds every row from the start
+through its end, and any row it left out sorts after that end, so the window
+is proven. A window that needs a row past the page, such as one whose page
+holds rows a joined filter rejects, still repairs. So does any loader while
+its source holds accepted sync rows back, as behind a persisting optimistic
+transaction: the visible rows then predate the refetch. Core reissues the
 ordered prefix from the start with the query predicate, order terms, and
 `limit = offset + limit`; the transport `offset` is omitted because this
 acquisition starts at the provider's source prefix. It then reacquires the
@@ -866,34 +1028,154 @@ before the obsolete chain can issue another tie or refill. A repeated prefix or
 page fixed point ends the repair when no more data is needed; it cannot leave a
 held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
-replacement chain succeeds.
-An invalidation that overlaps unfinished non-repair source work, a failed
-or canceled request, or a boundary that cannot be expressed still requires the
-full-source recovery above. A bounded repair failure likewise upgrades its
+replacement chain succeeds. That retirement can make the adapter remove rows
+only the replaced acquisitions held. The chain holds every row through its
+boundary, so such a removal is not a source-order change, and the repair keeps
+its boundary. A loader that discarded it would restart paging from the start
+of the order with a smaller first page that cannot retire the repair's prefix.
+Full-source reads can be very expensive, so a repair avoids one whenever a
+bounded read is available. An invalidation that overlaps unfinished page or tie
+work after the source has settled once does not force one: the bounded repair
+starts at once, and that work's later result is ignored for its boundary.
+Such a prefix also cannot retire the repair's acquisitions: it was issued before
+the invalidation, so it proves no current coverage. The repair supersedes any
+such request, so one that settles after the repair finished is released at
+once, like the acquisitions the repair retires. A request is superseded when
+authoritative work (a bounded repair or a full-source read) started after it was
+issued. Its failure is not the loader's own failure and blocks no refills: its
+partial writes only raise the repair debt to the full-source read that the
+overlap replaced. A running repair restarts as that read. Otherwise the loader
+starts it at once, unless its own recorded failure is waiting for an explicit
+retry. This holds even when the repair finished and a newer invalidation's
+reaction is still deferred. A request belongs to the ordering epoch it was
+issued in, even when its own synchronous delivery invalidates ordering before it
+returns, so its result and continuation do not count as current coverage. An
+authoritative read also stops waiting on the superseded request: a repair that
+answers at once continues without it. A superseded failure cannot drop the
+repair's staged continuation, and a repair-chain step does not release failed
+acquisitions; the explicit retry that resumed it does. A repair request belongs
+to the chain it was issued in. When a truncate replay finishes a chain whose
+prefix is still in flight and a newer invalidation starts the replacement, that
+prefix settles outside the replacement's chain, and the replacement retires it.
+A repair chain is superseded once a newer repair or full-source read starts.
+A request of the superseded chain proves no current coverage: it issues no
+tie or refill, and its failure is not the loader's own. A chain that finished
+still owns a request that settles late. Once a full-source read covers the source, any
+finite or repair request that settles later is retired at once. Every lease
+release pass, including the explicit and backoff retries' release of failed
+acquisitions, stops when a release resets the cursor or disposes the loader.
+The replay that follows owns the leases the pass did not reach. A release
+can deliver deletes that run the graph synchronously, so ordered refinement
+stays blocked until the pass unwinds. No second pass can then reach the same
+leases within one generation, so a lease missing from its map during a pass is
+an invariant violation, not a case to skip.
+
+The loader's authoritative work is a small state machine. Its work slot is
+idle, a repair chain, or a full-source read that is held, complete, or failed;
+its repair debt is none, bounded, or full. Every move names the states it may
+leave, and the loader throws `OrderedLoaderInvariantError` for any other move:
+
+| Move                                           | From                   | To                   |
+| ---------------------------------------------- | ---------------------- | -------------------- |
+| Start a bounded repair or a full-source read   | idle                   | repair, held         |
+| A chain finishes, is replaced, or is abandoned | repair                 | idle                 |
+| A chain request fails as the loader's own      | repair                 | idle                 |
+| A full-source read succeeds                    | held, complete         | complete (debt none) |
+| A truncate replay settles                      | held, failed, complete | complete (debt none) |
+| A full-source read fails as the loader's own   | held                   | failed               |
+| A cursor reset                                 | complete               | held                 |
+| An explicit or backoff retry                   | failed (or idle)       | idle                 |
+
+Three work and debt pairs are coherent only one way: complete coverage owes no
+debt, a repair runs only to pay a debt, and a failed full-source read owes a
+full-source read. So full coverage absorbs what would otherwise raise debt: a
+failure or an invalidation under complete coverage owes nothing, and a
+full-source transport that fails after a replay reacquired its demand leaves
+the coverage and its lease in place. A replay that settles is the full-source
+read's success: it pays the debt and retires the settled finite leases and the
+superseded failed leases, as a full-source success does. A chain request owns authority only while its
+chain runs: when a replay finished the chain first, the request's later failure
+is superseded by that replay.
+
+Each request carries one stamp from issue: the ordered-load generation, the
+authority generation, the ordering generation, and its role (finite, repair,
+or full-source). A request is dead after a cursor reset. A repair-chain request
+is stale once a newer authoritative start supersedes it; a finite request is
+stale once the ordering epoch moves; a full-source read stays current. A
+request that fails reports its own error. When the full-source read that a
+superseded failure starts throws while it starts, that read is the loader's
+own failure and is reported on its own; the superseded request still reports
+its error. Dispose
+resets the cursor, so a disposed loader's requests are dead and it issues and
+releases nothing more.
+
+A truncate replay owns every request the loader issued before the truncate:
+their results and failures change no loader state beyond the debt a failure
+raises, and the replay settles their demands. The loader has no request
+timeout. A request the provider never answers keeps its work slot, so an
+authoritative read that never settles holds its repair or recovery until the
+subscription ends; recovery from a provider that stops answering belongs to the
+adapter or the subscription lifecycle.
+A request issued before a cursor reset that later fails still raises the repair
+debt, but it cannot drop work staged after the reset.
+A failed or canceled request, an invalidation before any request has
+settled, or a boundary that cannot be expressed still requires the full-source
+recovery above. A bounded repair failure likewise upgrades its
 next attempt to full-source recovery because partial writes cannot establish
 finite coverage.
 
 “Bounded prefix” describes the adapter acquisition, not the subscription's
 immediate local replay. `requestSnapshot()` composes the subscription and
-request predicates for both legs, but its local snapshot is predicate-only: it
-may deliver every matching row already installed in the Collection without
-applying the request's order or limit. The ordered graph's top-K operator owns
-the local result window. Provider transfer remains bounded by `orderBy` and
-`limit`; local delivery cardinality is a separate observation.
+request predicates for both legs. For an on-demand source its local snapshot is
+predicate-only: it may deliver every matching row already installed in the
+Collection without applying the request's order or limit, and the repair chain
+relies on that delivery. An eager source's installed rows are the whole source,
+so an indexed request with one order term reads only the first `limit` matching
+local rows; a row in the source's first `limit` is also in the local first
+`limit`. A second order term keeps the full local read, because an index on the
+first term cannot order its ties. A filter on a LEFT-joined source also keeps
+the full local read: it drops rows only after the source's `limit`, so a full
+window after a bounded read would not prove that it holds the first eligible
+rows. A row that entered the graph through an earlier live update could fill
+the window in place of an eligible row the bounded read never sent. When every
+request in a bounded prefix
+repair (an eager source, an index, one order term, no joined filter) returns
+literal `true`, the
+repair settles synchronously,
+so its tie and refill steps finish inside the same graph run and a window move
+that consumes the repair still publishes once. A full-source repair keeps
+asynchronous settlement; its scheduling is not part of the initial synchronous
+cut. An initial
+full-source load follows that cut as described under initial readiness. The
+ordered graph's top-K operator owns the local result window. Provider transfer
+remains bounded by `orderBy` and `limit`; local delivery cardinality is a
+separate observation.
 
 Bounded repair is available only when a provider prefix is sufficient for the
 local plan. Core requires full-source recovery for an indirect order
-expression, a non-root ordered source, an inner or right join, a residual or
-cross-alias predicate, a functional predicate, grouping, `having`, functional
-`having`, or `distinct`. These cases can discard or reorder an otherwise valid
-provider prefix even when a cursor value itself is expressible. A single direct
+expression, a non-root ordered source, any join other than a LEFT join, a
+residual or cross-alias predicate, a functional predicate, grouping, `having`,
+functional `having`, or `distinct`. These cases can discard or reorder an
+otherwise valid provider prefix even when a cursor value itself is expressible.
+A right, full or outer join also adds joined rows whose root match may sit
+past the prefix; within it they would look unmatched and could take the
+window. A single direct
 LEFT join to a Collection is an exception for a cross-alias filter when every order
 term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root
 page, core waits for the current lazy join demand and any joined subset load to
-settle, then reruns the graph. Joined-side changes also recheck ordered demand
+settle, then reruns the graph. A joined load can settle without delivering a
+row, so the joined source becoming ready schedules that run itself. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. An empty joined replay still
-releases held Effect callbacks. The adapter receives ordinary
+releases held Effect callbacks.
+
+A finite indexed window is proven only up to the loader's settled boundary.
+Live root rows past the bounded prefix still enter the graph, so a window row
+after that boundary does not count toward a full window: an earlier eligible
+row may be unsent. The window then asks for the next page from the boundary,
+as an underfilled window does, until every window row is at or before it.
+This holds however a row leaves the window: a joined-side delete or insert, a
+join-key update, or a root change, and for Collection and Effect consumers. The adapter receives ordinary
 finite root requests; this contract does not imply that it can evaluate the
 relation filter remotely.
 Finite continuation still requires an order index; an underfilled unindexed
@@ -930,7 +1212,11 @@ provider capability negotiation, comparator exception policy, and backend
 collation fidelity are outside this contract.
 
 An ordered request cannot start another ordered request through its own
-synchronous writes. If the adapter then throws, graph callbacks scheduled by
+synchronous writes. A graph turn that those writes run inside the request may
+ask for more data; the loader ignores that call, stages its continuation, and
+resumes it once the request returns, because that turn has already processed
+the writes and no later turn will ask again. A continuation staged with input
+the graph has not yet processed waits for the graph turn that processes it. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
 A public `setWindow()` call made from inside that synchronous operation throws
 `SetWindowReentrancyError`; it must not claim that a nested window settled after
@@ -977,9 +1263,12 @@ A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
 retire cursor suffixes, ties, unfinished work, or another subscription's leases.
 Adapter eviction must still preserve rows owned by the replacement or peers.
-If an older prefix's release throws, the successful replacement still finishes
-its boundary and continuation bookkeeping before surfacing the cleanup error.
-Cleanup failure does not turn the successful acquisition into a failed load.
+A lease release reports an adapter's throwing `unloadSubset` uncaught, as
+described for subscription cleanup, and does not throw. The ordered loader
+also reports any error a release callback still throws uncaught, from a
+microtask, and continues as if the release had succeeded. The error changes no load result,
+window move, publication, or loader state: the successful replacement finishes
+its boundary and continuation bookkeeping and publishes.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting
@@ -1000,15 +1289,6 @@ and truncate discard the boundary; replay establishes an authoritative source
 replacement instead of reviving a stale cursor.
 
 ### Atomic window publication
-
-`publishUnconfirmedOrderedResults` is an opt-in exception for initial row
-publication only. While the live-query Collection is loading and no explicit
-window operation is active, available local rows may cross the ordered-request
-publication hold. Their cached order is not authoritative. Initial-query
-readiness and preload still require all current provider requests to settle.
-Failure, source replay, repair, and joined-demand holds remain closed. Explicit
-window moves retain the atomic publication contract below. The option defaults
-to false.
 
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
@@ -1063,6 +1343,23 @@ restart. Queued ordered-repair startup joins this barrier before invoking the
 adapter, so a synchronous throw cannot publish a partial replacement merely
 because it returned no acquisition promise. The queued task belongs to the
 loader that scheduled it, not a replacement created after cleanup.
+
+An optimistic overlay departure is not an authoritative loss of provider
+coverage. When an optimistic update removes query membership, or an optimistic
+delete removes a row from an ordered window, live-query Collections and Effects
+publish that departure immediately, even when provider work that could refill
+the window is pending. The intermediate result may be shorter than the
+requested window. The loader starts any needed acquisition while the optimistic
+transaction persists. A provider row stays private while its accepted sync
+transaction is queued behind that mutation; application may publish the
+recomputed window before the receipt promise resolves. If the provider answers
+later, acknowledgement can retain the short window until application. Rollback
+removes this overlay and recomputes from the then-current applied base and any
+remaining overlays; it restores the prior window only when that base is
+unchanged and no other overlay remains. This exception does not define a rank
+move or let a partially applied provider page or authoritative repair bypass
+the complete-window barrier.
+
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 
@@ -1073,7 +1370,9 @@ delta, but `onBatch`/`onEnter`/`onUpdate`/`onExit` callbacks retain the last
 complete result. Prefix, tie, and refill promises join one continuous gate;
 the final successful participant schedules one flush of the accumulated delta.
 A synchronous adapter result still contributes the loader's wrapped repair
-participant. At flush, equal insert/delete counts are classified against the
+participant, except in a synchronous bounded prefix repair:
+that repair finishes inside the graph run that publishes its window, so no
+callback can observe a partial window and no participant is needed. At flush, equal insert/delete counts are classified against the
 last callback-visible membership and value: absent-to-absent produces no event,
 while present-to-present produces an update only when the value changed.
 If truncate replay aborts an obsolete repair participant, its replacement
@@ -1130,7 +1429,13 @@ replacement. Replay failure is scoped to the logical demand that failed. If
 that demand retires, its failure cannot poison a successful replacement for the
 remaining demand. If the last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
-graph; unrelated parent or sibling changes may then publish. If release
+graph; unrelated parent or sibling changes may then publish. A direct
+subscriber's replay whose current attempt has not failed instead publishes the
+rows it holds at that retirement and resolves its completion, because nothing
+can complete it and keeping the old snapshot would leave values the source
+replaced or deleted. A replay whose
+current attempt failed keeps the last public snapshot, even after its failed
+owner was released; a later request reconciles a row it still shows. If release
 publication or adapter unload synchronously acquires new demand, core checks
 completion after that callback: the new demand joins the private replacement,
 while the retired transport can no longer gate it. A genuine replay failure is
@@ -1153,21 +1458,91 @@ framework unless a source contract proves that the sync-run generation and
 source up-to-date protocol cannot express its ordering.
 
 **Initial readiness:** preload is complete when every demand currently
-reachable from the initial query graph is covered by a settled request. Demand
-that is no longer reachable does not block completion. An empty outer relation
-has no child demand, but its root demand must still settle. Later readiness
-transitions follow the existing Collection contract until an executable test
-defines another public behavior.
+reachable from the initial query graph is covered by a settled request, and
+every eager source Collection is ready. An on-demand source Collection's own
+readiness does not gate it. Demand that is no longer reachable does not block
+completion. An empty outer relation has no child demand, but its root demand
+must still settle. Later readiness transitions follow the existing Collection
+contract until an executable test defines another public behavior.
 
-An ordinary initial ordered request also has a synchronous observation cut.
-When every acquisition needed for its completed initial window returns literal
-`true` after its establishing applied receipts are visible, core drains the
-remaining synchronous ordered continuations and graph work before the
-initiating call stack returns. The live-query Collection rows and initial-query
-readiness are observable at that cut. A Promise result keeps that acquisition
-asynchronous. This cut does not apply to explicit window moves, repair,
-truncate replay, or framework render timing, and it proves neither source
-exhaustion nor broader source coverage.
+The simple rule would wait for every source Collection to be ready. A
+progressive Electric source shows why that rule is wrong. Its "first query
+loads immediately (on-demand)" while it "syncs full dataset in background"
+([TanStack DB 0.5](https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync)).
+Its Collection stays `loading` until that full sync completes, so the simple
+rule holds a query whose rows are already present.
+
+The distinction is the evidence that a query's rows are present. An eager
+source loads everything it holds without per-query requests, so its Collection
+readiness is the only evidence. An on-demand source serves each query through
+subset requests, so a settled request is the evidence. Its Collection readiness
+says something about the rest of its data, not about this query. The adapter
+owns the other half of that bargain: a successful load settles only after its
+rows are visible (law 7). A load that installs no rows itself, such as a
+progressive load during a must-refetch, must settle when the sync that supplies
+the rows does.
+
+Every consumer of initial readiness uses the same rule:
+`sourcePermitsInitialReadiness()` in `utils.ts` holds it. Framework adapters
+derive `isReady` and Suspense release from live-query readiness, so they
+release together. A read that waits for readiness, such as `queryOnce`,
+resolves at the same point. An Effect with `skipInitial` ends its initial
+suppression there too. Its initial subset loads and lazy demand hold
+suppression until they settle. An obsolete or aborted initial load releases its
+hold, and a truncate replacement takes the hold over. Neither can keep
+suppression open or close it for good. A real load failure disposes the
+Effect.
+
+Two limits remain. Before an on-demand source completes a full sync, a ready
+query can hold rows that the source does not yet update. The source contract,
+not this law, decides when it delivers those changes; Electric applies them at
+its atomic swap. A source that resumes from complete local rows settles its
+loads at once, so its queries are ready on those rows before the network
+responds.
+
+**Deferred acquisition:** a live-query Collection reads local memory and
+starts no provider work on its own. Until it has a subscriber or a preload in
+its current sync run, its own subscriptions to source Collections defer
+acquisition: they start no idle source Collection's sync run and no
+acquisition attempt. Their demand stays active and reads the rows the source
+Collections already hold. A framework render or `startSync: true` may start the
+live-query Collection's sync run; that is not a subscriber. An ordered window
+over an on-demand source Collection stays unpublished until its acquisitions
+settle, by atomic window publication; an unordered query publishes the rows its
+source Collections hold as a partial result. Without a subscriber or preload,
+the live-query Collection is ready only when it needs no provider work: every
+source Collection is eager and already started, or is a live-query Collection
+whose acquisitions settled. The first subscriber or preload resumes deferred
+acquisition. A deferring subscriber may start an inner live-query Collection,
+which reads local memory, but not a base source Collection, so the rule is
+transitive. Cleanup ends the sync run, and a restarted live-query Collection
+defers again. A preload answered by a `DbClient` stream still counts. A pooled
+live query applies the same rule to its partition's source subscription: a
+view built during a render defers it until a view has a subscriber or a
+preload.
+
+An initial ordered load also has a synchronous observation cut. The initial
+load is the request chain needed to complete the first ordered window. It may
+start with an ordinary ordered request or, for a plan that requires the full
+source, a filtered full-source request. A full-source fallback after an
+inexpressible boundary is still part of that initial chain while the window
+remains unpublished. The cut holds when the first
+subscriber or preload starts the live-query Collection's sync run, or when its
+source Collections are eager. A sync run that started earlier resumes deferred
+on-demand acquisition through the subscription's restart path, which settles
+asynchronously. When every acquisition needed for its completed initial window
+returns literal `true` after its establishing applied receipts are visible,
+core drains the remaining synchronous ordered continuations and graph work
+before the initiating call stack returns. The live-query Collection rows and
+initial-query readiness are observable at that cut. A Promise result keeps that
+acquisition asynchronous. This cut does not apply to explicit window moves,
+full-source work started after the initial window publishes, repair other than
+a bounded prefix repair, truncate replay, or framework render timing, and it
+proves neither source exhaustion nor broader source coverage.
+The first-publication boundary limits this guarantee; it does not require
+later full-source work to wait for a microtask. A later literal `true`
+full-source fallback without ordering-repair debt may finish in the current
+graph turn.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
@@ -1226,23 +1601,31 @@ snapshots, including fields they did not change and insert schema defaults.
 Do not merge newer synced fields into those snapshots: that could publish a
 combination neither the mutation nor the server created. This applies to both
 ordinary sync and truncate. The mutation payload stays unchanged as well.
-Active snapshots are selected in transaction order. Completed snapshots remain
-beneath active transactions under the existing retention policy until sync
-retires them. A later snapshot may contain values seen from an earlier sibling;
-rolling back that sibling does not rewrite the later snapshot. Sync publication
-compares actual previous and next visible rows, not just mutation identities.
-An update made over an unconfirmed insert retains that exact insert dependency,
-not just its key. Insert success preserves the later completed snapshot; insert
-failure removes the already-retained dependent row. An independently submitted
-update accepted after that failure still retains its own snapshot. An
-acknowledged insert or a later same-key
-insertion is not the failed insertion. Truncate replay derives events and reads
+Active snapshots are selected in transaction order. A transaction's
+optimistic state drops when its mutation function settles. Sync transactions
+accepted while it persisted are held and publish in the same update as that
+drop. A completed row is held only while an accepted, queued sync transaction
+touches its key; nothing else retains it. A later snapshot may contain values
+seen from an earlier sibling; rolling back that sibling does not rewrite the
+later snapshot. Sync publication compares actual previous and next visible
+rows, not just mutation identities. Truncate replay derives events and reads
 from the same snapshot overlay, without merging in its new authoritative fields.
 
 Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not
 defer state or index installation. Routing and identity remain inside D2.
+
+A failed flush is atomic. If a facade write or the root commit fails, every
+facade the flush wrote returns to its rows, order, and key mapping from before
+the flush, the facades it created are disposed, and no facade publishes an
+event or a layout revision. The child deltas that flush consumed stay pending
+with the builder's pending root rows, so the next successful flush publishes
+each of them exactly once. No graph output reaches the adapter between a flush
+and its rollback, because the flush runs inside the graph run; a rollback that
+finds new pending deltas is an invariant violation. It restores the facades and
+discards the deferred events first, so the facades keep delivering events, and
+then throws. A rollback after the adapter is cleaned up does nothing.
 
 ## External boundaries
 
@@ -1252,6 +1635,16 @@ Row ownership in `@tanstack/query-db-collection` is separate. Eager retention,
 active query acquisition, and persisted retention are distinct owner tokens.
 The live-query graph publishes coherent rows but does not own query-db cache or
 listener lifetime.
+For a static on-demand Query key, an active, applied full-source Query may own
+a later narrower acquisition. Query DB pins that acquisition to the full Query
+until its final release, including after the original full-source demand ends.
+An incomplete or failed full-source request does not establish this coverage;
+an explicit subset refetch retains its exact Query key. Function-built keys
+retain their caller-defined cache identity.
+The initial full fetch keeps its acquisition's signal in request metadata.
+When narrower acquisitions share its Query, later fetches give `queryFn` the
+Query fetch signal in `meta.loadSubsetOptions.signal`: releasing the original
+full acquisition cannot abort work still owned by those narrower acquisitions.
 
 ### Pooled live queries
 
@@ -1282,13 +1675,43 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
+A windowed query has an `orderBy`; its window is the ordered view, by offset
+and limit, that `setWindow` moves. A `findOne` is bounded by a top-K too: it
+keeps its compiled limit (1, or 0 for `.limit(0).findOne()`), and `setWindow`
+throws `SetWindowFindOneLimitError` for any other limit. An ordered `findOne`
+has a movable window. An unordered `findOne` is a fixed one-row result that
+accepts only its compiled limit at offset 0; a nonzero offset throws
+`SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does. A query
+that is neither windowed nor an ordered `findOne` rejects offset moves, and one
+that is neither windowed nor a `findOne` rejects `setWindow`. Only the query's
+own top-K answers `setWindow`; a top-K inside a `from` or joined subquery or an
+include child never does. A windowed query or a `findOne` adds route relations
+for the includes in its own `select` only from the rows it shows, so a row it
+drops activates no bucket and creates no demand. A static filter creates static
+child demand before the query runs only when no enclosing query is windowed or
+a `findOne`, and either the query is neither windowed nor a `findOne`, or it is
+a `findOne` that shows one row for one named correlation value, with no
+`offset`, and offset 0 at start if a window was requested before start. Within
+one graph run, an index-backed top-K can briefly hold a row outside the rows it
+shows once its ordered acquisition completes, and that row's children may load
+(a recorded limit, #2151; the public snapshot stays correct). Includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the top-K (a recorded limit).
+
 ## Normative laws
 
-1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
-   change an explicitly projected result. An implicit namespaced result keeps
-   its aliases as public field names. Aliases must be unique within one lexical
-   scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases,
-   except that the branches of one `unionAll()` share one alias namespace.
+1. **Alpha-renaming:** changing an accepted alias to another unused name in a
+   structured plan cannot change an explicitly projected result when references
+   are renamed with their binding. The same equivalence applies to a functional
+   callback only when it is alias-equivariant. A captured reference retains its
+   source even when a nested query shadows its alias. An implicit namespaced
+   result and a functional callback keep the user's aliases as public field
+   names. Aliases must be unique within one lexical scope. The branches of one
+   `unionAll()` share one alias namespace. A builder's source declaration may
+   be reused in sibling includes, but an include cannot reuse it across an
+   ancestor/descendant scope boundary; the descendant starts from a fresh
+   `new Query().from()`. A join operand captured outside the current and
+   ancestor scopes is rejected.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.
@@ -1312,7 +1735,8 @@ create recursive Collection machinery.
    succeeds. A failed replay with no remaining logical demand cannot gate other
    graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
-    is covered; obsolete demand does not block it.
+    is covered and every eager source is ready; obsolete demand does not block
+    it, and an on-demand source's own Collection readiness does not gate it.
     Lazy-demand growth loads only uncovered keys. A fragmented churn replacement
     retires prior coverage only after its union applies; failure preserves it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
@@ -1328,6 +1752,15 @@ create recursive Collection machinery.
     disposed. The source Collection keeps its prior status until adapter cleanup
     settles; only then does it publish `cleaned-up` and settle its cleanup
     promise.
+15. **Deferred acquisition:** a live-query Collection or pooled live query
+    starts no source Collection's sync run and no acquisition attempt until it
+    has a subscriber that asks for data, or a preload in its current sync run;
+    before that it reads only rows its sources already hold. A subscriber that
+    survives cleanup still asks for data. Another consumer starting a source,
+    or a source truncate, resumes nothing. A read that waits for readiness
+    counts as a preload. A deferring live query keeps its sources from
+    garbage collection but is not counted in their `subscriberCount` or
+    `subscribers:change`, which adapters read as a request for live data.
 
 ## Glossary
 
@@ -1361,28 +1794,30 @@ keep the meanings defined there.
 
 ## Executable contracts
 
-| Contract                                                                            | Test suite                                                                                                                      |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition         | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
-| Joined multiplicity, alias identity, and null-key normalization                     | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
-| Alias reuse across sibling scopes and `SourceId` preservation                       | `packages/db/tests/query/includes-oracle.property.test.ts` (sibling scopes), `packages/db/tests/query/validate-aliases.test.ts` |
-| Demand, cancellation, and progressive timing                                        | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
-| Optimistic confirmation, rollback, and later reactivity                             | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
-| Coherent layered publication                                                        | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
-| Collection facades, event coherence, and route activation                           | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
-| Correlated physical work                                                            | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
-| Constructed and retained facades in a nested Collection tree                        | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
-| Route-context discovery and transport across recursive and join boundaries          | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
-| Functional projection input boundaries, timing, and output preservation             | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
-| Functional input rejection and inline alternatives                                  | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
-| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
-| Cross-formulation equivalence and reference-sensitive route identity                | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
-| Query-db ownership                                                                  | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
-| Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
-| Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
-| Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
-| Cleanup-start invalidation, settlement, and restart admission                       | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
-| Pooled live queries match their live-query Collection, including cleanup            | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
+| Contract                                                                                | Test suite                                                                                                                      |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition             | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
+| Joined multiplicity, alias identity, and null-key normalization                         | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
+| Alias reuse, captured bindings, public keys, and `SourceId` preservation                | (`packages/db/tests/query/includes-oracle.property.test.ts`, `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`) |
+| Same-scope and union alias rejection                                                    | `packages/db/tests/query/validate-aliases.test.ts`                                                                              |
+| Demand, cancellation, progressive timing, and source readiness                          | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
+| Optimistic confirmation, rollback, and later reactivity                                 | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
+| Coherent layered publication                                                            | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
+| Collection facades, event coherence, and route activation                               | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
+| Correlated physical work                                                                | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
+| Constructed and retained facades in a nested Collection tree                            | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
+| Route-context discovery and transport across recursive and join boundaries              | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
+| Functional projection input boundaries, timing, and output preservation                 | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
+| Functional input rejection and inline alternatives                                      | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
+| Public-container descriptors and reference-key matches across internal query stages     | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
+| Cross-formulation equivalence and reference-sensitive route identity                    | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
+| Query-db ownership                                                                      | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
+| Failed replay retention, peer isolation, and explicit consumer-only recovery            | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
+| Replay lease balance, reference-counted peers, and failed-start recovery                | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
+| Reachable nested shape                                                                  | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
+| Cleanup-start invalidation, settlement, and restart admission                           | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
+| Pooled live queries match their live-query Collection, including cleanup                | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
+| Deferred acquisition before a subscriber or preload, readiness, and the synchronous cut | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts`                                                              |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

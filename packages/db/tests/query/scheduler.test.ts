@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+  isNull,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
@@ -504,7 +509,7 @@ describe(`live query scheduler`, () => {
     }
   })
 
-  it(`settles a dependent live query when an earlier source listener throws`, async () => {
+  it(`publishes dependent live-query rows before reporting an earlier source listener failure`, async () => {
     let begin!: () => void
     let write!: (message: { type: `insert`; value: User }) => void
     let commit!: () => void
@@ -633,8 +638,7 @@ describe(`live query scheduler`, () => {
             .select(({ user }) => ({ id: user.id, name: user.name })),
       })
       let dependentSubscription:
-        | ReturnType<typeof live.subscribeChanges>
-        | undefined
+        ReturnType<typeof live.subscribeChanges> | undefined
 
       try {
         await live.preload()
@@ -986,19 +990,17 @@ describe(`live query scheduler`, () => {
       })
     }).toThrowError(`boom`)
 
+    // The failed callback restores its authored mutations before its scope
+    // flushes. No stale graph job may later publish the abandoned join.
+    expect(users.get(31)).toBeUndefined()
+    expect(tasks.get(41)).toBeUndefined()
+    expect([...assignments]).toEqual([])
+    const batchesAtThrow = [...recorder.batches]
     tx.rollback()
-
-    const batchesBeforeFlush = recorder.batches.length
     transactionScopedScheduler.flush(tx.id)
-    expect(recorder.batches.length).toBeGreaterThanOrEqual(batchesBeforeFlush)
-    if (recorder.batches.length > batchesBeforeFlush) {
-      const latestBatch = recorder.batches.at(-1)!
-      expect(latestBatch[0]?.type).toBe(`delete`)
-    }
+    expect(recorder.batches).toEqual(batchesAtThrow)
     expect(hasPendingJobs(transactionScopedScheduler, tx.id)).toBe(false)
-    // We emit the optimistic insert and, after the explicit rollback, possibly a
-    // compensating delete – but no duplicate inserts.
-    expect(recorder.batches[0]![0]).toMatchObject({ type: `insert` })
+    expect([...assignments]).toEqual([])
 
     recorder.unsubscribe()
   })
@@ -1049,7 +1051,7 @@ describe(`live query scheduler`, () => {
       ),
     ),
   )(
-    `publishes settled dependencies once: $consumer shared=$sharedSource derivedRight=$derivedRight reverse=$reverseWrites`,
+    `publishes both updated dependencies together: $consumer shared=$sharedSource derivedRight=$derivedRight reverse=$reverseWrites`,
     async ({ consumer, sharedSource, derivedRight, reverseWrites }) => {
       type Row = { id: number; left: string; right: string }
       const makeSource = (id: string) =>
@@ -1156,7 +1158,7 @@ describe(`live query scheduler`, () => {
     },
   )
 
-  it(`runs join live queries once after their parent queries settle`, async () => {
+  it(`runs the joined graph once after both parent graphs publish in the same scheduler context`, async () => {
     const collectionA = createCollection<{ id: number; value: string }>({
       id: `diamond-A`,
       getKey: (row) => row.id,
@@ -1632,12 +1634,16 @@ describe(`live query scheduler`, () => {
         query: (q) =>
           q.from({ root: firstSource }).select(({ root }) => ({
             id: root.id,
-            second: q
-              .from({ item: secondSource })
-              .where(({ item }) => eq(item.id, root.id)),
-            third: q
-              .from({ item: thirdSource })
-              .where(({ item }) => eq(item.id, root.id)),
+            second: include(
+              q
+                .from({ item: secondSource })
+                .where(({ item }) => eq(item.id, root.id)),
+            ),
+            third: include(
+              q
+                .from({ item: thirdSource })
+                .where(({ item }) => eq(item.id, root.id)),
+            ),
           })),
       })
       type BuilderSyncConfig = Parameters<

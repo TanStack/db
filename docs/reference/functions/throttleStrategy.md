@@ -7,7 +7,7 @@ title: throttleStrategy
 function throttleStrategy(options): ThrottleStrategy;
 ```
 
-Defined in: [packages/db/src/strategies/throttleStrategy.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/throttleStrategy.ts#L47)
+Defined in: [packages/db/src/strategies/throttleStrategy.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/throttleStrategy.ts#L49)
 
 Creates a throttle strategy that ensures transactions are evenly spaced
 over time.

@@ -1,4 +1,4 @@
-import type { Row, Scope } from './model.js'
+import type { Row, Scope } from './model-oracle.js'
 
 export type Page<T> = { rows: Array<T>; nextCursor: string | null }
 export type FetchPage<T> = (

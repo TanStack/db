@@ -46,8 +46,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
       ...options,
     })
     let handler:
-      | ((event: unknown, request: unknown) => Promise<unknown>)
-      | undefined
+      ((event: unknown, request: unknown) => Promise<unknown>) | undefined
     const dispose = exposeElectronSQLitePersistence({
       ipcMain: {
         handle: (_channel, listener) => {

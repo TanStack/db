@@ -9,7 +9,7 @@ title: min
 function min<T>(arg): Aggregate<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:692](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L692)
+Defined in: [packages/db/src/query/builder/functions.ts:685](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L685)
 
 ### Type Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:692](https://github.com/
 function min<T>(arg): Aggregate<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:693](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L693)
+Defined in: [packages/db/src/query/builder/functions.ts:686](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L686)
 
 ### Type Parameters
 
@@ -57,7 +57,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:693](https://github.com/
 function min<T>(arg): Aggregate<ExtractType<T>>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:694](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L694)
+Defined in: [packages/db/src/query/builder/functions.ts:687](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L687)
 
 ### Type Parameters
 

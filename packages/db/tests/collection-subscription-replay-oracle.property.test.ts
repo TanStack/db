@@ -7,11 +7,11 @@ import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
+import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
-import { flushPromises } from './utils.js'
+import { captureMicrotaskErrors, flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
 import type { CollectionSubscription } from '../src/collection/subscription.js'
-import type { OrderBy } from '../src/query/ir.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
@@ -26,7 +26,13 @@ import type { Scheduler } from 'fast-check'
  * optimistic state, callbacks, and cleanup may still be in flight. The public
  * snapshot must change only when the newest complete replay earns authority.
  * Older, failed, aborted, or released work may settle and release resources,
- * but it must not leak rows or overwrite a newer snapshot.
+ * but it must not leak rows or overwrite a newer snapshot. An `unloadSubset`
+ * that throws is an adapter bug: the subscription reports it uncaught once,
+ * and it is not a replay failure, so the replay continues as if the release
+ * had succeeded.
+ * A direct snapshot can select source rows while replay keeps publication
+ * private. A later ordered local snapshot must continue after those selected
+ * rows, including during subscriber callback reentry.
  *
  * Small scenario records describe source rows, logical demands, replay
  * attempts, settlement order, release points, and later source actions. Plain
@@ -35,9 +41,13 @@ import type { Scheduler } from 'fast-check'
  * and callback reentry. It compares every intermediate publication, not only
  * the final rows.
  *
- * This file owns replay-specific data and timing. General owner/attempt status
- * is modeled in the lifecycle grammar, and optimistic transaction semantics
- * are modeled by the optimistic-history oracle.
+ * `collection-subscription-lifecycle-publication-oracle.property.test.ts`
+ * owns the general public-row and exact-batch law. This file applies it to
+ * replay-specific schedules, including same-key source changes after a failed
+ * replay. The Collection `subscribeChanges` contract supplies the public
+ * observation. General owner/attempt status is modeled in the lifecycle
+ * grammar, and optimistic transaction semantics in the optimistic-history
+ * oracle.
  */
 
 type ReplayRow = {
@@ -600,8 +610,19 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           pending: Set<number>
           currentAttemptIndex: number
           publicationCount: number
+          // The current attempt failed, even if its demand was released since.
+          failed: boolean
         }
       | undefined
+
+    // A new attempt supersedes the previous one, and its failure with it.
+    const startModelAttempt = (
+      state: NonNullable<typeof modelReplayState>,
+      attemptIndex: number,
+    ): void => {
+      state.currentAttemptIndex = attemptIndex
+      state.failed = false
+    }
 
     const writeReplayRows = (
       pending: PendingReplay,
@@ -647,6 +668,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       } else {
         if (isCurrent) {
           lastReportedError = pending.error
+          replayState.failed = true
         } else {
           expect(pending.signal?.aborted).toBe(true)
         }
@@ -717,8 +739,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         pending: new Set(),
         currentAttemptIndex: attemptIndex,
         publicationCount: expectedPublicationCount,
+        failed: false,
       }
-      modelReplayState.currentAttemptIndex = attemptIndex
+      startModelAttempt(modelReplayState, attemptIndex)
 
       for (const load of attempt.loads) {
         queuedLoads.push({ attemptIndex, load })
@@ -753,8 +776,29 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           }
         }
         // A released request does not retract rows already applied by the
-        // source, nor change the retained baseline of an unfinished replay.
+        // source. Releasing the final demand retires the replay: one that has
+        // not failed publishes the rows the source applied, since nothing can
+        // complete it; a failed one keeps the retained baseline (law 9).
         if (modelReplayState.pending.size === 0 && activeDemandIds.size === 0) {
+          if (!modelReplayState.failed) {
+            const previousPublication = new Map(expectedPublished)
+            expectedPublished.clear()
+            for (const [id, row] of sourceRows) {
+              expectedPublished.set(id, { ...row })
+            }
+            const expectedBatch = publicationDiff(
+              previousPublication,
+              expectedPublished,
+            )
+            expect(publicationCount - modelReplayState.publicationCount).toBe(
+              Number(expectedBatch.length > 0),
+            )
+            if (expectedBatch.length > 0) {
+              expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
+                sortedChanges(expectedBatch),
+              )
+            }
+          }
           expectedPublicationCount = publicationCount
           modelReplayState = undefined
         }
@@ -1352,11 +1396,12 @@ function applyOptimisticOperation(
 async function runOptimisticReplayScenario(
   scenario: OptimisticReplayScenario,
 ): Promise<void> {
-  let begin!: (options?: { immediate?: boolean }) => void
+  let begin!: () => void
   let write!: (
     message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
   ) => void
-  let commit!: () => void
+  let commit!: () => true | Promise<void>
+  let replayReceipt: true | Promise<void> = true
   let truncate!: () => void
   let loadCount = 0
   const replay = createDeferred<void>()
@@ -1397,7 +1442,10 @@ async function runOptimisticReplayScenario(
               commit()
               return true
             }
-            return replay.promise
+            // The load settles after its rows are visible.
+            return replay.promise.then(async () => {
+              await replayReceipt
+            })
           },
           unloadSubset: () => {},
         }
@@ -1443,21 +1491,25 @@ async function runOptimisticReplayScenario(
     truncate()
     commit()
     await flushPromises()
-    // A loadSubset adapter must install its request-scoped rows before its
-    // promise settles, even while a user mutation is still persisting.
-    begin({ immediate: true })
+    // A loadSubset adapter commits its request-scoped rows before its
+    // promise settles. The persisting mutation holds them; they publish with
+    // the drop of its optimistic state when it settles.
+    begin()
     for (const row of replayRows) {
       write({ type: `insert`, value: { ...row } })
     }
-    commit()
+    replayReceipt = commit()
     if (scenario.outcome === `resolve`) replay.resolve()
     else replay.reject(replayFailure)
     await flushPromises()
+    mutation.resolve()
+    await transaction.isPersisted.promise
+    await flushPromises()
+    await flushPromises()
 
-    const expected = applyOptimisticOperation(
-      scenario.outcome === `resolve` ? replaySource : initialSource,
-      scenario,
-    )
+    // A failed replay leaves the subscription at its last coherent snapshot.
+    const expected =
+      scenario.outcome === `resolve` ? replaySource : optimisticBaseline
     const expectedBatch =
       scenario.outcome === `resolve`
         ? publicationDiff(optimisticBaseline, expected)
@@ -1905,7 +1957,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   ])
 
   it.each(orderedReplayCases)(
-    `restores ordered offset and cursor state after replay: $name`,
+    `requests a safe ordered provider prefix after replay: $name`,
     async ({ direction, delivery, identity }) => {
       type OrderedReplayRow = {
         id: `one` | `two` | `three` | `four`
@@ -1985,13 +2037,9 @@ describe(`CollectionSubscription replay oracle`, () => {
       const index = collection.createIndex((row) => row.value, {
         indexType: BTreeIndex,
       })
-      const orderedIndex = direction === `asc` ? index : new ReverseIndex(index)
-      const orderBy: OrderBy = [
-        {
-          expression: new PropRef([`value`]),
-          compareOptions: { direction, nulls: `first` },
-        },
-      ]
+      const orderedIndex =
+        direction === `asc` ? index : new ReverseIndex(index, true)
+      const orderBy = valueOrderBy(direction)
       const batches: Array<Array<OrderedReplayRow[`id`]>> = []
       const subscription = collection.subscribeChanges((changes) => {
         batches.push(changes.map(({ value }) => value.id))
@@ -2017,10 +2065,9 @@ describe(`CollectionSubscription replay oracle`, () => {
           limit: 1,
           minValues: [direction === `asc` ? 1 : 2],
         })
-        expect(loadOptions[1]).toMatchObject({
-          offset: 1,
-          cursor: { lastKey: initialIds[1] },
-        })
+        expect(loadOptions[1]).toMatchObject({ offset: 0 })
+        expect(loadOptions[1]?.limit).toBeUndefined()
+        expect(loadOptions[1]?.cursor?.lastKey).toBeUndefined()
 
         begin()
         truncate()
@@ -2052,12 +2099,8 @@ describe(`CollectionSubscription replay oracle`, () => {
           limit: 1,
           minValues: [direction === `asc` ? 2 : 1],
         })
-        expect(loadOptions[4]).toMatchObject({
-          offset: 2,
-          cursor: {
-            lastKey: succeeds ? expectedIds[1] : initialIds[1],
-          },
-        })
+        expect(loadOptions[4]).toMatchObject({ offset: 0 })
+        expect(loadOptions[4]?.cursor?.lastKey).toBeUndefined()
         if (succeeds) expect(batches.at(-1)).toEqual([])
         else expect(batches).toHaveLength(batchCount)
       } finally {
@@ -2066,6 +2109,411 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  // A successful replacement restores the public row, but that row need not
+  // be a provider prefix. The plain remote array is the reference order. A
+  // provider may honor a last-key cursor before an offset; naming the sparse
+  // public row as that cursor would hide every earlier row. The held replay
+  // separates replacement settlement from the next ordered acquisition.
+  it(`loads rows before a sparse public key after successful replay`, async () => {
+    type Row = { id: string; value: number }
+    const remote: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let holdReplay = false
+    let heldRequests = 0
+    const held = createDeferred<void>()
+    const orderedLoads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `ordered-replay-sparse-provider-prefix`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          write({ type: `insert`, value: remote[2]! })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              if (holdReplay && options.orderBy === undefined) {
+                holdReplay = false
+                heldRequests++
+                return held.promise
+              }
+              if (options.orderBy === undefined) return true
+
+              orderedLoads.push(options)
+              const cursorKey = options.cursor?.lastKey
+              const start =
+                cursorKey === undefined
+                  ? (options.offset ?? 0)
+                  : remote.findIndex(({ id }) => id === cursorKey) + 1
+              const page = remote.slice(
+                start,
+                options.limit === undefined ? undefined : start + options.limit,
+              )
+              const missing = page.filter(({ id }) => !collection.has(id))
+              if (missing.length > 0) {
+                begin()
+                for (const value of missing) write({ type: `insert`, value })
+                commit()
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy = valueOrderBy()
+    const whereThree = new Func(`eq`, [new PropRef([`id`]), new Value(`three`)])
+    const publicRows = new Map<string, Row>()
+    const invalidChanges: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = String(change.key)
+        if (change.type === `delete`) {
+          if (!publicRows.delete(key))
+            invalidChanges.push(`delete absent:${key}`)
+        } else {
+          if (change.type === `insert` && publicRows.has(key))
+            invalidChanges.push(`duplicate insert:${key}`)
+          publicRows.set(key, change.value)
+        }
+      }
+    })
+    subscription.setOrderByIndex(index)
+    try {
+      subscription.requestSnapshot({ where: whereThree })
+      expect([...publicRows.keys()]).toEqual([`three`])
+
+      holdReplay = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(heldRequests).toBe(1)
+      begin()
+      write({ type: `insert`, value: remote[2]! })
+      commit()
+      expect([...publicRows.keys()]).toEqual([`three`])
+      held.resolve()
+      await flushPromises()
+
+      for (const expectedRow of remote) {
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          minValues: [0],
+        })
+        expect(publicRows.has(expectedRow.id)).toBe(true)
+      }
+      await flushPromises()
+      expect(orderedLoads).toHaveLength(remote.length)
+      expect(orderedLoads[0]).toMatchObject({ offset: 0 })
+      expect(orderedLoads[0]?.cursor?.lastKey).toBeUndefined()
+      expect(invalidChanges).toEqual([])
+      expect([...publicRows.keys()].sort()).toEqual(
+        remote.map(({ id }) => id).sort(),
+      )
+    } finally {
+      held.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  // A direct subscriber buffers ordered rows privately while a replay is
+  // pending. Each row still counts once: repeated ordered snapshots during the
+  // replay continue after the rows already chosen. Those private selections
+  // widen the provider prefix without claiming a provider cursor boundary.
+  it(`continues after buffered rows when ordered snapshots repeat during a replay`, async () => {
+    type Row = { id: string; value: number }
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const loadOptions: Array<LoadSubsetOptions> = []
+    const heldReplay = createDeferred<void>()
+    let holdReplayRequest = false
+    let heldRequestCount = 0
+    const rows: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    const collection = createCollection<Row>({
+      id: `ordered-replay-repeated-snapshots`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          for (const value of rows) write({ type: `insert`, value })
+          commit()
+          params.markReady()
+          return {
+            // Hold the replay of the first ordered demand. The phase and
+            // request data identify it independently of other load calls.
+            loadSubset: (options) => {
+              loadOptions.push(options)
+              if (
+                holdReplayRequest &&
+                options.orderBy !== undefined &&
+                options.offset === 0 &&
+                options.cursor === undefined
+              ) {
+                holdReplayRequest = false
+                heldRequestCount++
+                return heldReplay.promise
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy = valueOrderBy()
+    // The public subscriber model starts with one visible row. Replay adds
+    // the other two as one replacement batch, without re-inserting that row.
+    const publicRows = new Map<string, Row>()
+    const batches: Array<Array<string>> = []
+    const invalidChanges: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      const batch: Array<string> = []
+      for (const change of changes) {
+        batch.push(`${change.type}:${change.key}`)
+        if (change.type === `insert`) {
+          if (publicRows.has(String(change.key)))
+            invalidChanges.push(`duplicate insert:${change.key}`)
+          publicRows.set(String(change.key), change.value)
+        } else if (change.type === `delete`) {
+          publicRows.delete(String(change.key))
+        } else {
+          publicRows.set(String(change.key), change.value)
+        }
+      }
+      if (batch.length > 0) batches.push(batch)
+    })
+    subscription.setOrderByIndex(index)
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(batches).toEqual([[`insert:one`]])
+      // An unrelated empty demand may be added before replay. It must not
+      // determine which acquisition the fixture holds.
+      subscription.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`missing`)]),
+      })
+      holdReplayRequest = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(heldRequestCount).toBe(1)
+      begin()
+      for (const value of rows) write({ type: `insert`, value })
+      commit()
+      await flushPromises()
+      expect(batches).toEqual([[`insert:one`]])
+
+      const before = loadOptions.length
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(loadOptions[before + 2]).toMatchObject({ offset: 0 })
+      expect(loadOptions[before + 2]?.limit).toBeGreaterThanOrEqual(4)
+      expect(loadOptions[before + 2]?.cursor?.lastKey).toBeUndefined()
+      expect(batches).toEqual([[`insert:one`]])
+      heldReplay.resolve()
+      await flushPromises()
+      expect(batches.map((batch) => [...batch].sort())).toEqual([
+        [`insert:one`],
+        [`insert:three`, `insert:two`],
+      ])
+      expect(invalidChanges).toEqual([])
+      expect([...publicRows.keys()].sort()).toEqual(
+        rows.map(({ id }) => id).sort(),
+      )
+    } finally {
+      heldReplay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  // A snapshot chosen while a direct truncate replay is pending enters the
+  // private replacement, not the callback mirror. Its key still excludes that
+  // row from the next ordered local selection. An earlier subscriber's callback
+  // is a legal reentry cut: it can read the source replacement before this
+  // subscriber receives the same source transaction.
+  it(`continues after a privately selected filtered snapshot during callback reentry`, async () => {
+    type Row = { id: string; value: number }
+    const rows: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    // The model separates a callback-visible row from rows selected locally
+    // during replay. Neither all source rows nor the callback mirror determines
+    // the next choice; only the filtered snapshot selected `one` here.
+    const privatelySelected = new Set(
+      rows.filter(({ id }) => id === `one`).map(({ id }) => id),
+    )
+    const nextOrdered = rows
+      .filter(({ value }) => value >= 1)
+      .sort((left, right) => left.value - right.value)
+      .find(({ id }) => !privatelySelected.has(id))
+    const initialPublicRows = new Map<string, Row>([[`one`, rows[0]!]])
+    const expectedReplacement = rows
+      .filter(({ id }) => !initialPublicRows.has(id))
+      .map(({ id }) => `insert:${id}`)
+    const publicRows = new Map<string, Row>()
+
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const heldReplay = createDeferred<void>()
+    const loadOptions: Array<LoadSubsetOptions> = []
+    let holdReplayRequest = false
+    let heldRequestCount = 0
+    const collection = createCollection<Row>({
+      id: `ordered-replay-mixed-snapshot-reentry`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          for (const value of rows) write({ type: `insert`, value })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadOptions.push(options)
+              if (
+                holdReplayRequest &&
+                options.orderBy !== undefined &&
+                options.offset === 0 &&
+                options.cursor === undefined
+              ) {
+                holdReplayRequest = false
+                heldRequestCount++
+                return heldReplay.promise
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy = valueOrderBy()
+    const whereOne = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const batches: Array<Array<string>> = []
+    const invalidChanges: Array<string> = []
+    let armed = false
+    let reentered = false
+    const trigger = collection.subscribeChanges(
+      (changes) => {
+        if (!armed || !changes.some(({ type }) => type === `insert`)) return
+        armed = false
+        reentered = true
+        target.requestSnapshot({ where: whereOne })
+        target.requestLimitedSnapshot({ orderBy, limit: 1 })
+      },
+      { includeInitialState: false },
+    )
+    const target = collection.subscribeChanges((changes) => {
+      if (changes.length === 0) return
+      const batch: Array<string> = []
+      for (const change of changes) {
+        batch.push(`${change.type}:${change.key}`)
+        if (change.type === `insert`) {
+          if (publicRows.has(String(change.key)))
+            invalidChanges.push(`duplicate insert:${change.key}`)
+          publicRows.set(String(change.key), change.value)
+        } else if (change.type === `delete`) {
+          publicRows.delete(String(change.key))
+        } else {
+          publicRows.set(String(change.key), change.value)
+        }
+      }
+      batches.push(batch)
+    })
+    target.setOrderByIndex(index)
+    try {
+      target.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(batches).toEqual([[`insert:one`]])
+      batches.length = 0
+
+      target.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`missing`)]),
+      })
+      holdReplayRequest = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(heldRequestCount).toBe(1)
+
+      armed = true
+      begin()
+      for (const value of rows) write({ type: `insert`, value })
+      commit()
+      await flushPromises()
+
+      expect(reentered).toBe(true)
+      expect(batches).toEqual([])
+      expect(loadOptions.at(-1)).toMatchObject({ offset: 0 })
+      expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
+        1 + privatelySelected.size + Number(nextOrdered !== undefined),
+      )
+      expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined()
+      heldReplay.resolve()
+      await flushPromises()
+      expect(batches.map((batch) => [...batch].sort())).toEqual([
+        expectedReplacement.sort(),
+      ])
+      expect(invalidChanges).toEqual([])
+      expect([...publicRows.keys()].sort()).toEqual(
+        rows.map(({ id }) => id).sort(),
+      )
+    } finally {
+      heldReplay.resolve()
+      trigger.unsubscribe()
+      target.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it(`keeps private row tracking through consecutive failed replays`, async () => {
     await runReplayScenario({
@@ -2373,6 +2821,116 @@ describe(`CollectionSubscription replay oracle`, () => {
       afterSettlement: [{ type: `request`, demandId: `one` }],
     })
   })
+
+  // Law 9 at retirement: a failure in the current attempt keeps the replay
+  // private even after the last owner is released. Each site writes a row
+  // before it fails, so publishing the private rows would show that row.
+  // A throwing release is not such a failure; the next test owns that site.
+  it.each([
+    `replay load throws`,
+    `old lease unload throws`,
+    `new request throws`,
+  ])(
+    `keeps a replay private at retirement after a synchronous failure, except a throwing release: %s`,
+    async (site) => {
+      let begin!: () => void
+      let write!: (message: {
+        type: `insert` | `update`
+        value: ReplayRow
+      }) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loads = 0
+      let unloads = 0
+      const writeRow = (row: ReplayRow) => {
+        begin()
+        write({ type: `insert`, value: row })
+        commit()
+      }
+      const collection = createCollection<ReplayRow>({
+        id: `retired-replay-synchronous-failure-${site}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                if (loads === 1) {
+                  writeRow({ id: `one`, value: 1 })
+                  return true
+                }
+                if (site === `replay load throws` && loads === 2) {
+                  writeRow({ id: `one`, value: 5 })
+                  throw new Error(`replay load failed`)
+                }
+                if (site === `new request throws` && loads === 3) {
+                  writeRow({ id: `two`, value: 2 })
+                  throw new Error(`request failed`)
+                }
+                return createDeferred<void>().promise
+              },
+              unloadSubset: () => {
+                unloads++
+                if (site === `old lease unload throws` && unloads === 1) {
+                  writeRow({ id: `two`, value: 2 })
+                  throw new Error(`unload failed`)
+                }
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, ReplayRow>()
+      const uncaught = captureMicrotaskErrors()
+      const subscription = collection.subscribeChanges((changes) => {
+        recordPublishedChanges(visible, changes)
+      })
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      try {
+        subscription.requestSnapshot({ where, optimizedOnly: false })
+        await flushPromises()
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        if (site === `new request throws`) {
+          expect(() =>
+            subscription.requestSnapshot({
+              where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
+              optimizedOnly: false,
+            }),
+          ).toThrow(`request failed`)
+        }
+        subscription.releaseSnapshot(where)
+        await flushPromises()
+
+        expect(subscription.pendingTruncateReplacement).toBeUndefined()
+        // A release error fails no replay, so the retired replay publishes
+        // the rows it holds: the truncate removed `one`, and the adapter
+        // wrote `two` before it threw.
+        expect(sortedRows(visible)).toEqual(
+          site === `old lease unload throws`
+            ? [{ id: `two`, value: 2 }]
+            : [{ id: `one`, value: 1 }],
+        )
+        expect(
+          uncaught.errors.map((error) => (error as Error).message),
+        ).toEqual(site === `old lease unload throws` ? [`unload failed`] : [])
+      } finally {
+        uncaught.restore()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`replaces a retained snapshot with a later empty replay`, async () => {
     await runReplayScenario({
@@ -3333,6 +3891,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
+      const uncaught = captureMicrotaskErrors()
 
       try {
         subscription.requestSnapshot({ where, optimizedOnly: false })
@@ -3341,18 +3900,22 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
 
-        const reacquires = !releaseDemand && !failRelease
+        // A failed release is reported uncaught and still counts as released,
+        // so only a retired logical demand stops the reacquisition.
+        const reacquires = !releaseDemand
         expect(loads).toHaveLength(reacquires ? 2 : 1)
         // indexOf checks the exact options object, not a structurally equal copy.
         expect(unloads.map((options) => loads.indexOf(options))).toEqual([0])
         if (reacquires) expect(loads[1]!.signal?.aborted).toBe(false)
-        if (failRelease) expect(subscription.lastError).toBe(releaseFailure)
+        expect(subscription.lastError).toBe(undefined)
+        expect(uncaught.errors).toEqual(failRelease ? [releaseFailure] : [])
         subscription.unsubscribe()
-        // A failed release or retired logical demand never starts a replacement.
+        // A retired logical demand never starts a replacement.
         expect(unloads.map((options) => loads.indexOf(options))).toEqual(
           reacquires ? [0, 1] : [0],
         )
       } finally {
+        uncaught.restore()
         subscription.unsubscribe()
         await collection.cleanup()
       }
@@ -3911,6 +4474,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const unloaded: Array<LoadSubsetOptions> = []
     let failRelease = false
     const succeeded = vi.fn()
+    const uncaught = captureMicrotaskErrors()
     const collection = createCollection<ReplayRow>({
       id: `replay-error-ownership`,
       getKey: ({ id }) => id,
@@ -3962,9 +4526,10 @@ describe(`CollectionSubscription replay oracle`, () => {
       failed.reject(replayFailure)
       await flushPromises()
       failRelease = true
-      expect(() => subscription.releaseSnapshot(peerWhere)).toThrow(
-        releaseFailure,
-      )
+      // The release error goes uncaught; the replay keeps its own failure.
+      expect(() => subscription.releaseSnapshot(peerWhere)).not.toThrow()
+      await Promise.resolve()
+      expect(uncaught.errors).toEqual([releaseFailure])
       expect(succeeded).not.toHaveBeenCalled()
       await expect(observed).resolves.toEqual({
         status: `rejected`,
@@ -3979,6 +4544,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         error: replayFailure,
       })
     } finally {
+      uncaught.restore()
       failed.resolve()
       peer.resolve()
       failRelease = false
@@ -4201,11 +4767,10 @@ describe(`CollectionSubscription replay oracle`, () => {
         reacquireOnReady = reacquireTiming === `during-ready`
         reacquireInUnload = reacquireTiming === `during-unload`
         subscription.releaseSnapshot(where)
+        // Releasing the final demand retires the replay, which publishes the
+        // row it holds, so the replacement resolves.
         if (reacquireTiming === `after-release`) {
-          await expect(settlement).resolves.toMatchObject({
-            status: `rejected`,
-            error: { name: `AbortError` },
-          })
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
           subscription.requestSnapshot({ where })
         } else if (reacquireTiming === `during-unload`) {
           let settled = false
@@ -4229,10 +4794,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           await expect(settlement).resolves.toEqual({ status: `resolved` })
         } else {
           expect(subscription.pendingTruncateReplacement).toBeUndefined()
-          await expect(settlement).resolves.toMatchObject({
-            status: `rejected`,
-            error: { name: `AbortError` },
-          })
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
         }
 
         expect(subscription.pendingTruncateReplacement).toBeUndefined()
@@ -4240,7 +4802,11 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(sortedChanges(batches[0]!)).toEqual([
           { type: `insert`, key: `one`, value: { id: `one`, value: 1 } },
         ])
-        expect(sortedChanges(batches.at(-1)!)).toEqual([
+        // Retiring the replay publishes its applied row at the release; the
+        // reacquired demand then has nothing new to deliver.
+        expect(
+          sortedChanges(batches.filter((batch) => batch.length > 0).at(-1)!),
+        ).toEqual([
           {
             type: `update`,
             key: `one`,

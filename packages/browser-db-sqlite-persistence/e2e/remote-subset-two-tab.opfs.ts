@@ -30,9 +30,13 @@ export type RemoteSubsetObservation = {
   phase: `starting` | `ready` | `failed`
   failure?: string
   isLeader: boolean
+  storageCollectionId?: string
   rows: Array<Item>
+  // The rows visible at the live query's first-ready transition.
+  rowsAtFirstReady?: Array<Item>
   upstreamLoads: number
   ensureRequests: Array<{
+    collectionId: string
     hasWhere: boolean
     hasSignal: boolean
     hasSubscriptionCallback: boolean
@@ -66,12 +70,15 @@ if (!databaseId || !itemId) throw new Error(`Missing oracle parameters`)
 let phase: RemoteSubsetObservation[`phase`] = `starting`
 let failure: string | undefined
 let upstreamLoads = 0
+let rowsAtFirstReady: Array<Item> | undefined
 let remoteSubsetPosts = 0
+let storageCollectionId: string | undefined
 const remoteSubsetPostFailures: Array<string> = []
 const ensureRequests: RemoteSubsetObservation[`ensureRequests`] = []
 const cleanupTasks: Array<() => Promise<void> | void> = []
 let readRuntime = () => ({
   isLeader: false,
+  storageCollectionId,
   rows: [] as Array<Item>,
 })
 let cleaned = false
@@ -83,6 +90,7 @@ window.__remoteSubsetProbe = {
     phase,
     ...(failure ? { failure } : {}),
     ...readRuntime(),
+    ...(rowsAtFirstReady ? { rowsAtFirstReady } : {}),
     upstreamLoads,
     ensureRequests: [...ensureRequests],
     remoteSubsetPosts,
@@ -137,9 +145,16 @@ try {
 
   const coordinator = new BrowserCollectionCoordinator({ dbName: databaseId })
   cleanupTasks.unshift(() => coordinator.dispose())
+  const originalSetAdapter =
+    coordinator.setAdapterForCollection.bind(coordinator)
+  coordinator.setAdapterForCollection = (collectionId, adapter, claimId) => {
+    if (claimId) storageCollectionId = collectionId
+    originalSetAdapter(collectionId, adapter, claimId)
+  }
   const originalEnsure = coordinator.requestEnsureRemoteSubset.bind(coordinator)
   coordinator.requestEnsureRemoteSubset = (collectionId, options) => {
     ensureRequests.push({
+      collectionId,
       hasWhere: options.where !== undefined,
       hasSignal: options.signal !== undefined,
       hasSubscriptionCallback: typeof options.subscription?.on === `function`,
@@ -147,9 +162,10 @@ try {
     return originalEnsure(collectionId, options)
   }
   tryInvalidWire = async () => {
+    if (!storageCollectionId) throw new Error(`No claimed storage Collection`)
     const postsBefore = remoteSubsetPosts
     try {
-      await coordinator.requestEnsureRemoteSubset(`repro-items`, {
+      await coordinator.requestEnsureRemoteSubset(storageCollectionId, {
         where: new IR.Value({ nested: () => {} }),
       } as unknown as LoadSubsetOptions)
       return { name: `none`, postsBefore, postsAfter: remoteSubsetPosts }
@@ -207,8 +223,17 @@ try {
       .select(({ item }) => ({ id: item.id, label: item.label })),
   )
   cleanupTasks.unshift(() => live.cleanup())
+  live.onFirstReady(() => {
+    rowsAtFirstReady = [...live.values()].map(({ id, label }) => ({
+      id,
+      label,
+    }))
+  })
   readRuntime = () => ({
-    isLeader: coordinator.isLeader(`repro-items`),
+    isLeader: storageCollectionId
+      ? coordinator.isLeader(storageCollectionId)
+      : false,
+    storageCollectionId,
     rows: [...live.values()],
   })
 

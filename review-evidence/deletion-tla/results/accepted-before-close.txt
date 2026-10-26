@@ -1,0 +1,15 @@
+Historical output; trailing whitespace normalized.
+SHA-256 of full original log: e6a7b3a8c1d93a92af366566833323e085e0b168e9d8c71f3aa0d0ca38845d10
+
+
+ RUN  v3.2.4 /private/tmp/pr1179-tla
+
+stdout | accepted-before-close.test.ts > accepted manual confirmation publishes after connection closure without restoring readiness
+accepted-before-close {"status":"error","caller":"completed","base":"after","durable":[{"id":1,"value":"after"}]}
+
+ ✓ accepted-before-close.test.ts (1 test) 7ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  22:33:16
+   Duration  754ms (transform 378ms, setup 0ms, collect 553ms, tests 7ms, environment 0ms, prepare 66ms)

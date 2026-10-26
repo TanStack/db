@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createTransaction } from '../../src/transactions.js'
+import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 
 /**
  * # When can an abort cancel a load?
@@ -13,10 +14,14 @@ import { createTransaction } from '../../src/transactions.js'
  * 1. The source writes a row to a pending batch.
  * 2. The collection publishes the row to readers.
  *
- * Another transaction can delay the second stage. During this delay, the
- * source can finish the first stage. An abort before publication must reject
- * the load and discard the row. An abort after publication starts must resolve
- * the load and keep the row.
+ * Another transaction can delay the second stage. Commit accepts the batch,
+ * and an accepted batch always applies. An abort before acceptance discards
+ * the row. A later abort, while the batch waits or after publication starts,
+ * keeps the row. In every phase the aborted load rejects with `AbortError`;
+ * a source that wants to discard a stale page checks the signal before
+ * `commit()`. Adapters extend the same law to every cut of their own loads
+ * (before the fetch, a fetch rejected by the abort, after the fetch but before
+ * the commit, and between pages); their test suites own those drivers.
  *
  * `expectedOutcome` states this rule from public facts. It does not copy the
  * production queue. The test creates each timing phase in production. It then
@@ -36,23 +41,57 @@ type ExpectedOutcome = {
   callbackReads: Array<Array<string>>
 }
 
-// Publication is the boundary. An abort before publication rejects the load
-// and discards the row. An abort after publication starts resolves the load
-// and keeps the row visible.
+// Acceptance is the row boundary. An abort at commit, before acceptance,
+// discards the row. An accepted transaction always applies, so a later abort
+// keeps the row, which publishes when the parked optimistic transaction
+// settles. Every aborted caller sees its load reject.
 function expectedOutcome(
   abortPhase: AbortPhase,
   remoteKey: string,
 ): ExpectedOutcome {
-  const publicationStarted = abortPhase === `after-publication-starts`
+  const accepted = abortPhase !== `at-commit`
   return {
-    load: publicationStarted ? `resolves` : `rejects`,
-    rowIsVisible: publicationStarted,
-    publishedBatches: publicationStarted ? [[remoteKey]] : [],
-    callbackReads: publicationStarted ? [[remoteKey]] : [],
+    load: `rejects`,
+    rowIsVisible: accepted,
+    publishedBatches: accepted ? [[remoteKey]] : [],
+    callbackReads: accepted ? [[remoteKey]] : [],
   }
 }
 
 describe(`loadSubset transaction refinement`, () => {
+  // A load aborted before it starts rejects with `AbortError` and never
+  // reaches the source.
+  it(`rejects a load aborted before it reaches the source`, async () => {
+    let loadSubsetCalls = 0
+    const source = createCollection<Row>({
+      id: `transaction-refinement-before-load`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              loadSubsetCalls++
+              return true
+            },
+          }
+        },
+      },
+    })
+    source.startSyncImmediate()
+    try {
+      const controller = new AbortController()
+      controller.abort()
+      const load = source._sync.loadSubset({ signal: controller.signal })
+      if (load === true) throw new Error(`Expected a rejected load`)
+      await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      expect(loadSubsetCalls).toBe(0)
+    } finally {
+      await source.cleanup()
+    }
+  })
+
   // These three phases cover the contract:
   // - The caller aborts during commit.
   // - The caller aborts after commit while publication waits.
@@ -95,7 +134,12 @@ describe(`loadSubset transaction refinement`, () => {
                 abortObservedAtCommit = signal?.aborted ?? false
                 const receipt = commit(signal)
                 receiptWasDeferred = receipt instanceof Promise
-                return receipt
+                // Source contract: a caller that aborted sees `AbortError`,
+                // even though its accepted rows apply.
+                return Promise.resolve(receipt).then(() => {
+                  if (signal?.aborted)
+                    throw new LoadSubsetOperationAbortedError()
+                })
               },
             }
           },

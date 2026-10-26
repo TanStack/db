@@ -101,7 +101,7 @@ const query = injectLiveQuery({
 })
 ```
 
-A bare `{ query }` config defaults to `startSync: true` and `gcTime: 0`, like
+A bare `{ query }` config defaults to `startSync: true` and `gcTime: 1`, like
 the query-function overload. Explicit values in the config override those
 defaults.
 
@@ -188,7 +188,7 @@ Angular 16 structural directives:
 
 ## Includes (Hierarchical Data)
 
-When a query uses includes (subqueries in `select`), each child field is a live `Collection` by default. Subscribe to it with `injectLiveQuery` in a child component:
+When a query uses `include()` for a subquery in `select`, each child field is a live `Collection`. Subscribe to it with `injectLiveQuery` in a child component:
 
 ```typescript
 @Component({
@@ -209,10 +209,12 @@ export class ProjectListComponent {
     q.from({ p: projectsCollection }).select(({ p }) => ({
       id: p.id,
       name: p.name,
-      issues: q
-        .from({ i: issuesCollection })
-        .where(({ i }) => eq(i.projectId, p.id))
-        .select(({ i }) => ({ id: i.id, title: i.title })),
+      issues: include(
+        q
+          .from({ i: issuesCollection })
+          .where(({ i }) => eq(i.projectId, p.id))
+          .select(({ i }) => ({ id: i.id, title: i.title })),
+      ),
     })),
   )
 }
