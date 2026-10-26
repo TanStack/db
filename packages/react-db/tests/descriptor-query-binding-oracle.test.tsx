@@ -118,6 +118,7 @@ import {
   ssrSnapshotExamples,
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
+import { ssrStreamHydrationMismatches } from '../../db/tests/ssr-stream-view-oracle'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
@@ -134,6 +135,7 @@ import {
 } from '../../db/tests/collection-subscription-lifecycle-grammar-oracle'
 import type { DehydratedRouterDbState } from '../../react-router-with-db/src'
 import type { SsrSnapshotHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
+import type { SsrStreamHistory } from '../../db/tests/ssr-stream-view-oracle'
 import type {
   Context,
   DeferredLiveQueryCollections,
@@ -2006,6 +2008,9 @@ describe(`SSR snapshot admission`, () => {
           if (history.sourceState === `ready`) await warming
           else void warming.catch(() => {})
         }
+        // Explicit materialization registers normalized source rows for
+        // dehydration. The warming query established this fixture's rows;
+        // registration, rather than a second preload, makes them portable.
         if (history.preparation === `source`) server.collection(descriptor)
         if (
           history.preparation === `query` ||
@@ -2217,6 +2222,11 @@ describe(`SSR Suspense discovery`, () => {
         const result = useLiveSuspenseQuery({ query })
         return <span>{result.data.map((row) => row.name).join(`,`)}</span>
       }
+      // This driver invokes React's Node server host inside jsdom. Match the
+      // actual host's globals so the hydration getter cannot mistake it for a
+      // browser receiver waiting for a record the server has not produced yet.
+      const originalWindow = globalThis.window
+      vi.stubGlobal(`window`, undefined)
       try {
         if (warm)
           await client.preloadLiveQuery({
@@ -2266,6 +2276,7 @@ describe(`SSR Suspense discovery`, () => {
           expect.objectContaining({ name: `server 1` }),
         ])
       } finally {
+        vi.stubGlobal(`window`, originalWindow)
         await client.cleanup()
       }
     })
@@ -2598,15 +2609,18 @@ describe(`infinite hydration identity`, () => {
 // preserving the earlier view cannot prevent the explicit preload completing.
 // Synchronous act permits the ordinary sibling's effects before React hydrates
 // its Suspense boundary. That sibling must not consume another reader's seed.
+// The readiness schedule also holds source writes and markReady until an ordinary
+// server read occurs. With Suspense first, the Router has already queued a pending
+// stream before that ordinary reader contributes its loading view. Both reader
+// orders must transfer each hook's own view; a final direct dehydrate is not a
+// substitute for the actual queued Router chunks. The provider and Router render
+// callback are controlled premises, not a deployed Start or Electric witness.
+// A held source may instead report an initial-sync error. The ordinary reader
+// already rendered loading, while Suspense renders its server fallback. Error
+// object fidelity is outside this relation; the ordinary first-view status is
+// still owed before browser commit, and the Suspense boundary may recover.
 async function checkStreamCut(
-  history: {
-    count: number
-    writes: number
-    ordinaryFirst?: boolean
-    ordinaryLast?: boolean
-    browserWrite?: boolean
-    splitHydration?: boolean
-  },
+  history: SsrStreamHistory,
   reach: ReturnType<typeof createStreamReach>,
 ) {
   reach.beginHistory()
@@ -2615,29 +2629,41 @@ async function checkStreamCut(
     name: `first ${i}`,
   }))
   const client = new DbClient({ runtime: `server` })
+  const ordinaryRendered = createDeferred<void>()
+  let releaseServerSource: (() => void) | undefined
+  const sourceError = new Error(`stream source unavailable`)
   const descriptor = collectionOptions(`stream-render-cut`, (owner) => ({
     id: `stream-render-cut`,
     getKey: (row: { id: string; name: string }) => row.id,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
+      sync: ({ begin, write, commit, markReady, markError }) => {
         const rows =
           owner !== client && history.browserWrite
             ? [{ id: `0`, name: `browser only` }]
             : authoredRows
-        for (const row of rows) write({ type: `insert`, value: row })
-        commit()
-        markReady()
-        queueMicrotask(() => {
-          for (let i = 0; i < history.writes; i++) {
-            begin()
-            write({
-              type: rows.length || i ? `update` : `insert`,
-              value: { id: `0`, name: `later ${i}` },
-            })
-            commit()
+        const publish = () => {
+          if (owner === client && history.sourceError) {
+            markError(sourceError)
+            return
           }
-        })
+          begin()
+          for (const row of rows) write({ type: `insert`, value: row })
+          commit()
+          markReady()
+          queueMicrotask(() => {
+            for (let i = 0; i < history.writes; i++) {
+              begin()
+              write({
+                type: rows.length || i ? `update` : `insert`,
+                value: { id: `0`, name: `later ${i}` },
+              })
+              commit()
+            }
+          })
+        }
+        if (owner === client && history.holdSourceReadiness)
+          releaseServerSource = publish
+        else publish()
       },
     },
   }))
@@ -2683,17 +2709,30 @@ async function checkStreamCut(
       status: result.status,
       names: result.data.map((row) => row.name),
     })
+    if (typeof window === `undefined`) ordinaryRendered.resolve()
     return (
       <output data-status={result.status}>
         {result.data.map((row) => row.name).join(`,`)}
       </output>
     )
   }
+  class StreamBoundary extends Component<
+    { children: ReactNode },
+    { failed: boolean }
+  > {
+    state = { failed: false }
+    static getDerivedStateFromError() {
+      return { failed: true }
+    }
+    render() {
+      return this.state.failed ? <b>query failed</b> : this.props.children
+    }
+  }
   const browserWindow = globalThis.window
   vi.stubGlobal(`window`, undefined)
   try {
     const errors: Array<unknown> = []
-    const html = await new Promise<string>((resolve, reject) => {
+    const renderedHtml = new Promise<string>((resolve, reject) => {
       let text = ``
       const sink = new Writable({
         write(chunk, _encoding, done) {
@@ -2706,9 +2745,11 @@ async function checkStreamCut(
       const stream = renderToPipeableStream(
         <DbProvider client={client}>
           {history.ordinaryFirst && <OrdinaryConsumer />}
-          <Suspense fallback={<span>loading</span>}>
-            <Consumer />
-          </Suspense>
+          <StreamBoundary>
+            <Suspense fallback={<span>loading</span>}>
+              <Consumer />
+            </Suspense>
+          </StreamBoundary>
           {history.ordinaryLast && <OrdinaryConsumer />}
         </DbProvider>,
         {
@@ -2721,23 +2762,63 @@ async function checkStreamCut(
         },
       )
     })
-    expect(errors).toEqual([])
-    const rendered = html.match(/<span>([^<]*)<\/span>/)?.[1]
-    expect(rendered).toBe(authoredRows.map((row) => row.name).join(`,`))
-    const transport = client
-      .dehydrate({ shouldDehydrateLiveQuery: () => true })
-      .liveQueries!.find(
-        (result) => result.queryHash === getLiveQueryHash({ query }),
-      )!
-    const snapshot = transport.snapshot ?? (await transport.promise)
-    expect(
-      snapshot?.rows.map((row) => (row.value as { name: string }).name),
-      `stream transport reproduces its rendered view`,
-    ).toEqual(authoredRows.map((row) => row.name))
+    if (history.holdSourceReadiness) {
+      // Holding readiness is legal only with an ordinary sibling. Its actual
+      // public read, rather than a delay, proves this source-loading cut ran.
+      await ordinaryRendered.promise
+      expect(ordinaryReads[0], `held source renders ordinary loading`).toEqual({
+        status: `loading`,
+        names: [],
+      })
+      expect(
+        releaseServerSource,
+        `Suspense entered the held source`,
+      ).toBeTypeOf(`function`)
+      reach.reach(
+        history.ordinaryFirst ? `held-ordinary-first` : `held-suspense-first`,
+      )
+      releaseServerSource!()
+      releaseServerSource = undefined
+    } else {
+      reach.reach(`synchronous-readiness`)
+    }
+    const html = await renderedHtml
+    if (history.sourceError) {
+      // Live-query startup may wrap the provider's error. The receiving
+      // premise is failure before readiness, not cross-boundary error identity.
+      expect(
+        errors.length,
+        `Suspense received the held provider failure`,
+      ).toBeGreaterThan(0)
+      reach.reach(`held-source-error`)
+    } else {
+      expect(errors).toEqual([])
+      const rendered = html.match(/<span>([^<]*)<\/span>/)?.[1]
+      expect(rendered).toBe(authoredRows.map((row) => row.name).join(`,`))
+      const transport = client
+        .dehydrate({ shouldDehydrateLiveQuery: () => true })
+        .liveQueries!.find(
+          (result) => result.queryHash === getLiveQueryHash({ query }),
+        )!
+      const snapshot = transport.snapshot ?? (await transport.promise)
+      expect(
+        snapshot?.rows.map((row) => (row.value as { name: string }).name),
+        `stream transport reproduces its rendered view`,
+      ).toEqual(authoredRows.map((row) => row.name))
+    }
     if (history.ordinaryFirst || history.ordinaryLast) {
       const firstServerRead = ordinaryReads[0]
+      expect(
+        firstServerRead,
+        `ordinary server hook returned a view`,
+      ).toBeDefined()
       ordinaryReads.length = 0
       const firstSuspenseRead = suspenseReads[0]
+      if (!history.sourceError)
+        expect(
+          firstSuspenseRead,
+          `Suspense server hook returned its ready view`,
+        ).toBeDefined()
       suspenseReads.length = 0
       vi.stubGlobal(`window`, browserWindow)
       const browser = new DbClient({ runtime: `browser` })
@@ -2777,9 +2858,11 @@ async function checkStreamCut(
             host,
             <DbProvider client={browser}>
               {history.ordinaryFirst && <OrdinaryConsumer />}
-              <Suspense fallback={<span>loading</span>}>
-                <Consumer />
-              </Suspense>
+              <StreamBoundary>
+                <Suspense fallback={<span>loading</span>}>
+                  <Consumer />
+                </Suspense>
+              </StreamBoundary>
               {history.ordinaryLast && <OrdinaryConsumer />}
             </DbProvider>,
             { onRecoverableError: (error) => hydrationErrors.push(error) },
@@ -2793,13 +2876,36 @@ async function checkStreamCut(
                 await Promise.resolve()
               },
         )
-        expect(ordinaryReads[0], `ordinary first hydration view`).toEqual(
-          firstServerRead,
+        reach.reach(
+          history.holdSourceReadiness
+            ? `held-router-browser-handoff`
+            : `synchronous-router-browser-handoff`,
         )
-        expect(suspenseReads[0], `Suspense first hydration view`).toEqual(
-          firstSuspenseRead,
-        )
-        expect(hydrationErrors).toEqual([])
+        const firstBrowserSuspenseRead = suspenseReads[0]
+        expect(
+          ssrStreamHydrationMismatches([
+            {
+              reader: `ordinary`,
+              server: firstServerRead!,
+              hydration: ordinaryReads[0],
+            },
+            ...(history.sourceError
+              ? []
+              : [
+                  {
+                    reader: `Suspense`,
+                    server: { status: `ready`, names: firstSuspenseRead! },
+                    hydration: firstBrowserSuspenseRead
+                      ? { status: `ready`, names: firstBrowserSuspenseRead }
+                      : undefined,
+                  },
+                ]),
+          ]),
+          `each reader's first hydration view matches its own server view`,
+        ).toEqual([])
+        if (!history.sourceError) {
+          expect(hydrationErrors).toEqual([])
+        }
       } finally {
         await act(async () => {
           root?.unmount()
@@ -2824,6 +2930,7 @@ async function checkStreamCut(
       reach.reach(history.browserWrite ? `browser-different` : `browser-same`)
     }
   } finally {
+    releaseServerSource?.()
     vi.stubGlobal(`window`, browserWindow)
     finishRouterRender()
     await client.cleanup()
@@ -2842,8 +2949,45 @@ const createStreamReach = () =>
     `browser-same`,
     `split-hydration`,
     `together-hydration`,
+    `synchronous-readiness`,
+    `held-ordinary-first`,
+    `held-suspense-first`,
+    `held-router-browser-handoff`,
+    `synchronous-router-browser-handoff`,
+    `held-source-error`,
   ])
 describe(`stream render snapshot cut`, () => {
+  for (const ordinaryFirst of [false, true])
+    for (const splitHydration of [false, true])
+      it(`retains an ordinary loading view when its stream later fails, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () =>
+        checkStreamCut(
+          {
+            count: 0,
+            writes: 0,
+            ordinaryFirst,
+            ordinaryLast: !ordinaryFirst,
+            holdSourceReadiness: true,
+            sourceError: true,
+            splitHydration,
+          },
+          createStreamReach(),
+        ))
+  for (const count of [0, 1])
+    for (const ordinaryFirst of [false, true])
+      for (const splitHydration of [false, true])
+        it(`hydrates each held-source view with count=${count}, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () =>
+          checkStreamCut(
+            {
+              count,
+              writes: 0,
+              ordinaryFirst,
+              ordinaryLast: !ordinaryFirst,
+              holdSourceReadiness: true,
+              browserWrite: true,
+              splitHydration,
+            },
+            createStreamReach(),
+          ))
   it(`keeps an ordinary reader from blocking a shared Suspense preload`, () =>
     checkStreamCut(
       { count: 1, writes: 0, ordinaryFirst: true, browserWrite: true },
@@ -2875,32 +3019,52 @@ describe(`stream render snapshot cut`, () => {
   for (const campaign of [`fixed`, `random`] as const)
     it(`transports the rendered view (${campaign})`, async () => {
       const reach = createStreamReach()
-      await fc.assert(
-        fc.asyncProperty(
-          fc
-            .record({
-              count: fc.integer({ min: 0, max: 3 }),
-              writes: fc.integer({ min: 0, max: 3 }),
-              ordinaryFirst: fc.boolean(),
-              ordinaryLast: fc.boolean(),
-              browserWrite: fc.boolean(),
-              splitHydration: fc.boolean(),
-            })
-            .map((history) => ({
-              ...history,
-              ordinaryLast: !history.ordinaryFirst && history.ordinaryLast,
-            })),
-          (history) => checkStreamCut(history, reach),
-        ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(40), seed: 2229 }
-          : oraclePropertyOptions(40, `react.ssr-stream-cut`),
-      )
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc
+              .record({
+                count: fc.integer({ min: 0, max: 3 }),
+                writes: fc.integer({ min: 0, max: 3 }),
+                ordinaryFirst: fc.boolean(),
+                ordinaryLast: fc.boolean(),
+                browserWrite: fc.boolean(),
+                splitHydration: fc.boolean(),
+                holdSourceReadiness: fc.boolean(),
+                sourceError: fc.boolean(),
+              })
+              .map((history) => {
+                // A held provider needs an ordinary read to release it; a
+                // Suspense-only history retains synchronous source readiness.
+                const holdSourceReadiness =
+                  history.holdSourceReadiness &&
+                  (history.ordinaryFirst || history.ordinaryLast)
+                // Failure is held until a real ordinary loading read. Empty
+                // sources isolate lifecycle status from error-row retention.
+                const sourceError = history.sourceError && holdSourceReadiness
+                return {
+                  ...history,
+                  ordinaryLast: !history.ordinaryFirst && history.ordinaryLast,
+                  holdSourceReadiness,
+                  sourceError,
+                  count: sourceError ? 0 : history.count,
+                  writes: sourceError ? 0 : history.writes,
+                }
+              }),
+            (history) => checkStreamCut(history, reach),
+          ),
+          campaign === `fixed`
+            ? { numRuns: oracleRuns(40), seed: 2229 }
+            : oraclePropertyOptions(40, `react.ssr-stream-cut`),
+        )
+      } finally {
+        // Keep reached premises visible when the first refinement check fails.
+        console.info(
+          `react-stream-cut ${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
       reach.assertReached()
-      console.info(
-        `react-stream-cut ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
     })
 })
 

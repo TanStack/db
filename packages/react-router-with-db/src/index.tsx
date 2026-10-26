@@ -74,7 +74,7 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
     }
 
     const unsubscribe = dbClient.subscribe((event) => {
-      if (event.type !== `liveQueryAdded`) return
+      if (event.type === `liveQueryStreamError`) return
 
       if (!criticalStateCaptured) {
         bufferedQueryHashes.add(event.query.queryHash)

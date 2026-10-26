@@ -358,8 +358,8 @@ await dbClient.preloadLiveQuery({
 const result = useLiveInfiniteQuery(() => orderedTodos, { pageSize })
 ```
 
-An explicit `queryKey` also includes the query's limit and offset in its transport
-identity. Use the same initial window in the preload and the infinite hook.
+With an explicit `queryKey`, the DbClient query hash also includes limit and
+offset. Use the same initial window in the preload and the infinite hook.
 
 Custom dehydration filters must retain the query result that the markup requires.
 
@@ -439,7 +439,7 @@ snapshots synchronously during server rendering:
   client.hydrate(dehydratedDbState)
 </script>
 
-<DbProvider {client}>
+<DbProvider {client} hydrating>
   <Todos />
 </DbProvider>
 ```
@@ -447,6 +447,15 @@ snapshots synchronously during server rendering:
 Inside `Todos.svelte`, `useLiveQuery({ query })` can use collection descriptors
 directly. The browser subscription starts source sync and performs the same
 snapshot-to-live-result handoff as React.
+
+Set `hydrating` for each root initialized with Svelte's `hydrate()`. It preserves
+that root's server public snapshot even after another root publishes browser
+rows. Nested providers inherit it unless they specify another value. The
+provider clears it after mount, so later children read live rows. Omit it for
+ordinary `mount()` calls.
+
+Hooks that pass `client` explicitly also need a marked provider around their
+hydrated subtree. The client alone cannot identify hydration versus a fresh mount.
 
 Live demo: https://tanstack-db-ssr-demo.netlify.app/ssr-db
 

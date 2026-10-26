@@ -5,20 +5,14 @@
 '@tanstack/react-router-with-db': patch
 ---
 
-Resume Collection sync when a new subscriber follows a suspended render, while preserving cleanup during startup.
+Start the required Collection sync run when an ordinary subscriber follows an abandoned suspended render. Deferred acquisition still starts no idle source sync run or acquisition attempt.
 
-Reject ordinary subscriptions and deferred acquisition resumption during active cleanup. Effects created during that interval still return disposed handles.
+Ordinary subscription admission and deferred acquisition resumption throw during cleanup, including automatic GC. Effects created then return disposed handles. Failed setup releases partial ownership, and throwing callbacks cannot prevent healthy observers receiving cleanup status. Subscribers surviving cleanup retain demand for an explicit restart.
 
-Release partial observer and pooled-query subscriptions when setup fails or cleanup interrupts startup. Resumed subscriptions release abandoned render deferrals without restoring retired ownership. Admission checks retain an existing cleanup promise until a replacement sync run starts.
+SSR captures each reader's rows and Collection status. Hydration preserves that view through browser preloads, runtime errors, sibling commits, and delayed streamed records. Missing records reject when transport ends. Known pending results survive normal record-stream close. A new stream after client cleanup starts independently of prior failures.
 
-Subscribers that survive cleanup during admission retain demand for an explicit restart. Cleanup in a first-demand callback does not start a replacement implicitly.
+Empty loading SSR needs no preload. Rendering rows or readiness requires matching query preparation or explicit source Collection preparation. Streaming Suspense prepares its result. Unsupported preparation throws with guidance. Prepared non-streaming Suspense remains supported. The DbClient query hash includes an infinite query's initial limit and offset.
 
-Keep ordinary hook errors readable when deferred sync startup records an error. Explicit preloads still report source startup failures. Release channels acquired before synchronous cleanup registration or observer attachment fails.
+Apps without `DbClient` exclude its SSR implementation. Its API stays unchanged.
 
-Reject SSR reads of incidental server-only rows or readiness with an actionable preparation error. Preserve cold loading and normalized source hydration, consume prepared infinite-query snapshots, and register warm Suspense results for streaming.
-
-Capture prepared SSR query rows and readiness at render time. Keep loading captures separate from completed preloads, preserve pending streams, and allow browser writes before hydration. Support prepared non-streaming Suspense, require portable opaque query identity, and include limit and offset in explicit-key result identity.
-
-Keep an ordinary reader's initial loading view when a Suspense sibling completes the same streaming query. Forward replacement query records through the Router stream without discarding the earlier hydration view.
-
-Preserve server snapshots for later-hydrating boundaries after a sibling commits. Wait for missing streamed results instead of rendering local rows during hydration.
+Svelte roots initialized with `hydrate()` must set `hydrating` on `DbProvider`. Nested providers inherit it. Each provider clears initial hydration after mount so new children read live rows.

@@ -304,12 +304,11 @@ class LiveQueryObserverImpl<
       const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
-      const status =
-        this.clientBinding?.failed || liveStatus === `error`
-          ? (`error` as const)
-          : this.clientBinding?.seed
-            ? (this.clientBinding.seed.snapshot.status ?? `ready`)
-            : liveStatus
+      const status = this.clientBinding?.failed
+        ? (`error` as const)
+        : this.clientBinding?.seed
+          ? (this.clientBinding.seed.snapshot.status ?? `ready`)
+          : liveStatus
 
       // Bump the layout revision when the ordered key sequence changes
       // (membership, ordering, or an order-only move). Compare the key sequence
@@ -373,7 +372,7 @@ class LiveQueryObserverImpl<
 
     const entries =
       this.clientBinding?.seed &&
-      this.clientBinding.seed.snapshot.status !== `loading`
+      this.clientBinding.seed.snapshot.status === undefined
         ? this.clientBinding.seed.entries
         : this.readEntries(collection).entries
 
@@ -591,8 +590,13 @@ class LiveQueryObserverImpl<
       if (this.disposed || this.subscriptions.size === 0) return
 
       if (this.clientBinding?.seed) {
-        if (status === `ready`) this.clientBinding.scheduleHandoff()
-        if (status !== `error`) return
+        // Startup remains behind the hydration cut. A later provider error is
+        // already an owned publication and must be visible synchronously.
+        if (status === `error` && !this.blockDelivery)
+          this.clientBinding.handoff()
+        else if (status === `ready` || status === `error`)
+          this.clientBinding.scheduleHandoff()
+        return
       }
 
       if (status === `ready` && !collection.isLoadingSubset) {
@@ -712,6 +716,7 @@ class LiveQueryObserverImpl<
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
       if (
         collection.status === `ready` ||
+        collection.status === `error` ||
         this.readPersistedReadiness().status === `ready`
       ) {
         this.clientBinding.scheduleHandoff()

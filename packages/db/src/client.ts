@@ -22,6 +22,7 @@ import type { LiveQueryObserverClientHost } from './live-query-observer-client.j
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
+import type { Deferred } from './deferred.js'
 import type {
   CollectionConfig,
   InferSchemaInput,
@@ -152,7 +153,7 @@ export type DehydratedLiveQueryResult<
 > = {
   rows: Array<DehydratedCollectionRow<T, TKey>>
   /** An initial SSR view may precede query readiness. Omitted means ready. */
-  status?: `loading`
+  status?: `loading` | `error`
 }
 
 export type DehydratedDbState = {
@@ -351,6 +352,11 @@ export class DbClient {
   // A committed reader cannot consume a later boundary's server snapshot.
   // Retain transported records for server getters until this client cleans up.
   private hydratedLiveQueries = new Map<string, LiveQueryRecord>()
+  private ssrQueryWaiters = new Map<
+    string,
+    Deferred<void> | { cause: unknown }
+  >()
+  private ssrStreamFailure: { cause: unknown } | undefined
   private preloadedLiveQueries = new Map<
     string,
     {
@@ -455,7 +461,7 @@ export class DbClient {
       existing &&
       (existing.status === `pending` ||
         (existing.status === `success` &&
-          existing.snapshot?.status !== `loading`))
+          existing.snapshot?.status === undefined))
     ) {
       return { result: existing.promise }
     }
@@ -751,7 +757,48 @@ export class DbClient {
 
   /** @internal */
   _setSsrStreamingEnabled(enabled: boolean): void {
+    if (enabled && !this.ssrStreamingEnabled) {
+      this.ssrStreamFailure = undefined
+      this.ssrQueryWaiters.clear()
+    } else if (!enabled && this.ssrStreamingEnabled && !this.ssrStreamFailure)
+      this.failSsrQueryWaiters(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `The DB stream ended before the server-rendered query snapshot arrived.`
+            : codedMessage(248),
+        ),
+      )
     this.ssrStreamingEnabled = enabled
+  }
+
+  /** @internal Wait for transport without claiming or starting a local source. */
+  _waitForSsrLiveQuery(
+    queryHash: string,
+    forHydration = false,
+  ): Promise<void> | undefined {
+    let waiter = this.ssrQueryWaiters.get(queryHash)
+    if (waiter && `cause` in waiter) throw waiter.cause
+    if (!forHydration || this.hydratedLiveQueries.has(queryHash)) return
+    if (this.ssrStreamFailure) {
+      this.ssrQueryWaiters.set(queryHash, this.ssrStreamFailure)
+      throw this.ssrStreamFailure.cause
+    }
+    if (!this.ssrStreamingEnabled) return
+    if (!waiter) {
+      waiter = createDeferred<void>()
+      waiter.promise.catch(() => {})
+      this.ssrQueryWaiters.set(queryHash, waiter)
+    }
+    return waiter.promise
+  }
+
+  private failSsrQueryWaiters(cause: unknown): void {
+    // The wrapper distinguishes a terminal undefined cause from an open stream.
+    this.ssrStreamFailure ??= { cause }
+    for (const [queryHash, waiter] of this.ssrQueryWaiters) {
+      this.ssrQueryWaiters.set(queryHash, this.ssrStreamFailure)
+      if (`promise` in waiter) waiter.reject(this.ssrStreamFailure.cause)
+    }
   }
 
   /** @internal */
@@ -819,8 +866,17 @@ export class DbClient {
     const existing = this.liveQueries.get(queryHash)
     if (existing) {
       if (sources) this._assertLiveQuerySources(queryHash, sources)
-      if (snapshot.status === `loading`) existing.initialSnapshot ??= snapshot
+      if (
+        existing.snapshot &&
+        (snapshot.status === undefined || existing.initialSnapshot)
+      )
+        return
+      if (snapshot.status !== undefined) existing.initialSnapshot ??= snapshot
       existing.snapshot ??= snapshot
+      // A queued promise cannot carry an ordinary reader's later initial view.
+      // Advance transport without replacing that promise or its source claim.
+      existing.dehydratedAt = this.nextLiveQueryTimestamp()
+      this.emit({ type: `liveQueryUpdated`, query: existing })
       return
     }
     const record = this.createLiveQueryRecord(
@@ -828,7 +884,7 @@ export class DbClient {
       this.nextLiveQueryTimestamp(),
     )
     record.sources = sources
-    if (snapshot.status === `loading`) record.initialSnapshot = snapshot
+    if (snapshot.status !== undefined) record.initialSnapshot = snapshot
     this.liveQueries.set(queryHash, record)
     this.emit({ type: `liveQueryAdded`, query: record })
     record.succeed(snapshot)
@@ -848,7 +904,7 @@ export class DbClient {
       existing &&
       (existing.status === `pending` ||
         (existing.status === `success` &&
-          existing.snapshot?.status !== `loading`))
+          existing.snapshot?.status === undefined))
     ) {
       return existing.promise
     }
@@ -881,6 +937,7 @@ export class DbClient {
 
   /** @internal */
   _failPendingLiveQueries(error: unknown): void {
+    this.failSsrQueryWaiters(error)
     for (const record of this.liveQueries.values()) {
       if (record.status === `pending`) record.fail(error)
     }
@@ -924,6 +981,7 @@ export class DbClient {
       )
       if (failure) throw failure.reason
     } finally {
+      this._setSsrStreamingEnabled(false)
       this.transactionScope.clear()
       this.collectionsById.clear()
       this.pendingHydration.clear()
@@ -932,7 +990,6 @@ export class DbClient {
       this.preloadedLiveQueries.clear()
       this.liveQueryResources.clear()
       this.listeners.clear()
-      this.ssrStreamingEnabled = false
       this.ssrServerCleanupEnabled = false
       this.lastLiveQueryTimestamp = 0
     }
@@ -940,7 +997,13 @@ export class DbClient {
 
   private hydrateLiveQuery(dehydratedQuery: DehydratedLiveQuery): void {
     const existing = this.liveQueries.get(dehydratedQuery.queryHash)
-    if (existing && existing.dehydratedAt >= dehydratedQuery.dehydratedAt) {
+    // Browser preload time cannot order server transport versions. Apply the
+    // active-record guard only when that active record came from transport.
+    if (
+      existing &&
+      existing === this.hydratedLiveQueries.get(dehydratedQuery.queryHash) &&
+      existing.dehydratedAt >= dehydratedQuery.dehydratedAt
+    ) {
       return
     }
 
@@ -960,6 +1023,9 @@ export class DbClient {
     record.initialSnapshot =
       dehydratedQuery.initialSnapshot ?? dehydratedQuery.snapshot
     this.hydratedLiveQueries.set(record.queryHash, record)
+    const waiter = this.ssrQueryWaiters.get(record.queryHash)
+    if (waiter && `promise` in waiter) waiter.resolve()
+    this.ssrQueryWaiters.delete(record.queryHash)
     if (dehydratedQuery.promise) record.snapshot = dehydratedQuery.snapshot
     this.emit({ type: `liveQueryAdded`, query: record })
 

@@ -70,6 +70,7 @@ export class LiveQueryObserverClient<
 
   sync(forServerSnapshot = false): boolean {
     if (!this.queryHash || this.authoritative) return false
+    this.client._waitForSsrLiveQuery(this.queryHash)
     const query = this.client._getLiveQuery(this.queryHash, forServerSnapshot)
     if (!query) return false
     if (
@@ -80,7 +81,12 @@ export class LiveQueryObserverClient<
     ) {
       return this.markAuthoritative(query.dehydratedAt)
     }
-    if (query.status === `error`) {
+    if (
+      query.status === `error` &&
+      (this.usesSettledHydration ||
+        !forServerSnapshot ||
+        !query.initialSnapshot)
+    ) {
       const changed = !this.failed || this.error !== query.error
       this.error = query.error
       this.failed = true
@@ -103,14 +109,13 @@ export class LiveQueryObserverClient<
 
   getServerSnapshot(preloadRequested: boolean): LiveQuerySnapshot<T, TKey> {
     preloadRequested &&= this.client._isSsrStreamingEnabled()
-    if (preloadRequested) {
-      void this.host.observer.preloadForInitialRender().catch(() => {})
-    }
     if (
       typeof window !== `undefined` &&
       !this.authoritative &&
       this.queryHash
     ) {
+      const waiting = this.client._waitForSsrLiveQuery(this.queryHash, true)
+      if (waiting) throw waiting
       const query = this.client._getLiveQuery(this.queryHash, true)
       const snapshot = this.usesSettledHydration
         ? query?.snapshot
@@ -123,9 +128,12 @@ export class LiveQueryObserverClient<
         throw query.promise
       }
     }
+    if (preloadRequested) {
+      void this.host.observer.preloadForInitialRender().catch(() => {})
+    }
     const snapshot = this.host.read(true)
     const collection = this.collection
-    if (!collection || this.seed || snapshot.isError) return snapshot
+    if (!collection || this.seed) return snapshot
     // React also calls this getter in the browser during hydration. Only
     // server reads perform admission; transported seeds win over local activity.
     if (typeof window !== `undefined`) return snapshot
@@ -155,7 +163,13 @@ export class LiveQueryObserverClient<
       this.queryHash,
       {
         rows: entries.map(([key, value]) => ({ key, value })),
-        ...(snapshot.isReady ? {} : { status: `loading` as const }),
+        ...(snapshot.isReady
+          ? {}
+          : {
+              status: snapshot.isError
+                ? (`error` as const)
+                : (`loading` as const),
+            }),
       },
       sources,
     )
@@ -200,23 +214,28 @@ export class LiveQueryObserverClient<
     this.handoffScheduled = true
     queueMicrotask(() => {
       this.handoffScheduled = false
-      const collection = this.collection
-      if (
-        this.host.isDisposed() ||
-        !this.host.isAttached() ||
-        !collection ||
-        !this.seed ||
-        (collection.status !== `ready` && !this.host.persistedReady()) ||
-        collection.isLoadingSubset
-      )
-        return
-      const previous = this.seed.entries
-      const dehydratedAt = this.seed.dehydratedAt
-      const entries = Array.from(collection.entries()) as Array<[TKey, T]>
-      this.hydrationSeed = undefined
-      this.markAuthoritative(dehydratedAt)
-      this.host.publish(this.diffEntries(previous, entries), entries)
+      this.handoff()
     })
+  }
+
+  handoff(): void {
+    const collection = this.collection
+    if (
+      this.host.isDisposed() ||
+      !this.host.isAttached() ||
+      !collection ||
+      !this.seed ||
+      (collection.status !== `error` &&
+        ((collection.status !== `ready` && !this.host.persistedReady()) ||
+          collection.isLoadingSubset))
+    )
+      return
+    const previous = this.seed.entries
+    const dehydratedAt = this.seed.dehydratedAt
+    const entries = Array.from(collection.entries()) as Array<[TKey, T]>
+    this.hydrationSeed = undefined
+    this.markAuthoritative(dehydratedAt)
+    this.host.publish(this.diffEntries(previous, entries), entries)
   }
 
   assertSources(): void {
@@ -281,11 +300,12 @@ export class LiveQueryObserverClient<
     if (this.queryHash) {
       const query = this.query
       try {
+        this.client._waitForSsrLiveQuery(this.queryHash)
         if (sources)
           this.client._assertLiveQuerySources(this.queryHash, sources)
         if (
           query?.status === `pending` ||
-          (query?.status === `success` && query.snapshot?.status !== `loading`)
+          (query?.status === `success` && query.snapshot?.status === undefined)
         ) {
           if (pooledSource && this.collection)
             return Promise.all([query.promise, this.collection.preload()]).then(

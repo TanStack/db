@@ -5,7 +5,8 @@
  * only on whether the application imports DbClient, never on observer internals.
  *
  * These finite consumer programs cross ordinary, Suspense and infinite React
- * hooks. esbuild consumes the published minified ESM with production defines.
+ * hooks. esbuild consumes built ESM and minifies the consumer with production
+ * defines. Every aliased package must be rebuilt after its source changes.
  * At the final bundle checkpoint, SSR transport operations must be absent from
  * plain programs and present in DbClient controls. The controls prevent an
  * empty bundle or a misspelled operation from giving a false green. This checks
@@ -19,12 +20,13 @@ import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
-import { assertDbDistFresh } from '../packages/db/scripts/assert-dist-fresh.mjs'
+import { assertPackageDistFresh } from '../packages/db/scripts/assert-dist-fresh.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const packages = ['db', 'db-ivm', 'react-db']
 const ssrOperations = ['_captureServerQuery', '_hasSsrCollectionSnapshot']
 const calibrate = process.argv.includes('--calibrate')
-await assertDbDistFresh(root)
+await Promise.all(packages.map((pkg) => assertPackageDistFresh(root, pkg)))
 
 // Importing a hook creates no SSR capability. Explicitly importing DbClient
 // retains its transport implementation; the positive control needs every
@@ -41,7 +43,7 @@ for (const hook of [
         resolveDir: root,
       },
       alias: Object.fromEntries(
-        ['db', 'db-ivm', 'react-db'].map((pkg) => [
+        packages.map((pkg) => [
           `@tanstack/${pkg}`,
           join(root, 'packages', pkg, 'dist/esm/index.js'),
         ]),

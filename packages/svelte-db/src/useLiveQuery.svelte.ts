@@ -18,7 +18,7 @@ import {
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
-import { useOptionalDbClient } from './db-context.js'
+import { useDbContext } from './db-context.js'
 import type {
   ChangeMessage,
   Collection,
@@ -339,7 +339,8 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const contextDbClient = useOptionalDbClient()
+  const context = useDbContext()
+  const contextDbClient = context?.client
   // Source Collection IDs this hook's client-backed queries read, kept until
   // it unmounts.
   const sourceIdClaims = createLiveQuerySourceIdClaims()
@@ -494,7 +495,7 @@ export function useLiveQuery(
     onPreload: currentResolved.resumeDeferredCollections,
   })
   const initialSnapshot =
-    typeof window === `undefined`
+    typeof window === `undefined` || context?.hydrating
       ? currentObserver.getServerSnapshot()
       : currentObserver.getSnapshot()
 

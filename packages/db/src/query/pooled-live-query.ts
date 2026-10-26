@@ -2,6 +2,7 @@ import { SortedMap } from '../SortedMap.js'
 import { CleanupQueue } from '../collection/cleanup-queue.js'
 import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
 import { makeComparator } from '../utils/comparison.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
@@ -200,7 +201,9 @@ class Partition {
     const delivered = this.terminated
       ? { ...event, status: `error` as const }
       : event
-    for (const listener of [...this.statusListeners]) listener(delivered)
+    runAllCallbacks(
+      [...this.statusListeners].map((listener) => () => listener(delivered)),
+    )
   }
 
   addListener(group: PartitionGroup, listener: Listener): void {
@@ -541,28 +544,33 @@ class PooledLiveQuery {
     const group = this.partition.group(this.groupKey)
     this.partition.addListener(group, listener)
     this.listenerCount++
-    this.holdCollection()
-    if (options.includeInitialState) {
-      callback(
-        Array.from(this.entries(), ([key, value]) => ({
-          type: `insert`,
-          key,
-          value,
-        })),
-      )
-    }
     let subscribed = true
-    return {
-      unsubscribe: () => {
-        if (!subscribed) return
-        subscribed = false
-        this.partition.removeListener(group, listener)
-        if (--this.listenerCount === 0) {
-          this.collectionHold?.unsubscribe()
-          this.collectionHold = undefined
-        }
-      },
+    const unsubscribe = () => {
+      if (!subscribed) return
+      subscribed = false
+      this.partition.removeListener(group, listener)
+      if (--this.listenerCount === 0) {
+        this.collectionHold?.unsubscribe()
+        this.collectionHold = undefined
+      }
     }
+    try {
+      this.holdCollection()
+      if (options.includeInitialState) {
+        callback(
+          Array.from(this.entries(), ([key, value]) => ({
+            type: `insert`,
+            key,
+            value,
+          })),
+        )
+      }
+    } catch (error) {
+      // A failed bootstrap returned no handle; retire its listener now.
+      unsubscribe()
+      throw error
+    }
+    return { unsubscribe }
   }
 
   // While the view is observed, its built Collection stays subscribed, as

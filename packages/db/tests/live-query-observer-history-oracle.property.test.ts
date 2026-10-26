@@ -16,6 +16,143 @@ import type { ChangeMessage } from '../src/types.js'
 type Row = { id: string; version: number }
 
 /**
+ * A hydration seed owns the observer's view before subscription. A provider
+ * error before attachment therefore cannot change the first hydration read.
+ * Once subscribe has returned, a new provider error is a public publication:
+ * its listener and error snapshot must be visible before markError returns.
+ * These are the SSR first-view and ordinary runtime-error laws at the core
+ * observer boundary; the React runtime receiver checks the framework cut.
+ *
+ * This independent timing judgment crosses both observer modes, all portable
+ * seed statuses, and defined/undefined provider causes. Empty held sources
+ * isolate status from error row-retention policy. The pre-attachment path reads
+ * the seed before acquiring a subscription, then checks the terminal browser
+ * view after its scheduled handoff. The post-subscription path compares at the
+ * synchronous provider receipt, so an always-deferred repair cannot pass.
+ */
+describe(`observer hydration error timing`, () => {
+  const historyArbitrary = fc.record({
+    mode: fc.constantFrom(`granular` as const, `wholesale` as const),
+    errorAt: fc.constantFrom(
+      `before-attach` as const,
+      `after-subscribe` as const,
+    ),
+    seedStatus: fc.constantFrom(
+      `ready` as const,
+      `loading` as const,
+      `error` as const,
+    ),
+    definedCause: fc.boolean(),
+  })
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`publishes errors at their ownership checkpoint (${campaign})`, async () => {
+      const reach = createOracleReach(`observer-hydration-error`, [
+        `granular`,
+        `wholesale`,
+        `before-attach`,
+        `after-subscribe`,
+        `ready`,
+        `loading`,
+        `error`,
+        `defined-cause`,
+        `undefined-cause`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(historyArbitrary, async (history) => {
+          reach.beginHistory()
+          let fail: (cause: unknown) => void = () => {
+            throw new Error(`provider has not started`)
+          }
+          const source = createCollection<Row>({
+            getKey: (row) => row.id,
+            gcTime: 0,
+            sync: {
+              sync: ({ markError }) => {
+                fail = markError
+              },
+            },
+          })
+          const client = new DbClient()
+          client.hydrate({
+            collections: [],
+            liveQueries: [
+              {
+                queryHash: `hydration-error-timing`,
+                dehydratedAt: 1,
+                snapshot: {
+                  rows: [],
+                  ...(history.seedStatus === `ready`
+                    ? {}
+                    : { status: history.seedStatus }),
+                },
+              },
+            ],
+          })
+          const observer = createLiveQueryObserver(source, {
+            client,
+            mode: history.mode,
+            queryHash: `hydration-error-timing`,
+          })
+          const listener = vi.fn()
+          const cause = history.definedCause
+            ? new Error(`provider offline`)
+            : undefined
+          let stop: (() => void) | undefined
+          await withOracleCleanup(async () => {
+            source.startSyncImmediate()
+            if (history.errorAt === `before-attach`) fail(cause)
+            expect(
+              observer.getServerSnapshot().status,
+              `first hydration view belongs to the server`,
+            ).toBe(history.seedStatus)
+            stop = observer.subscribe(listener)
+            if (history.errorAt === `after-subscribe`) {
+              const prefix = listener.mock.calls.length
+              fail(cause)
+              expect(
+                listener.mock.calls.length,
+                `a subscribed provider error publishes synchronously`,
+              ).toBeGreaterThan(prefix)
+              expect(
+                observer.getSnapshot().status,
+                `provider receipt exposes the error`,
+              ).toBe(`error`)
+            }
+            await Promise.resolve()
+            expect(
+              observer.getSnapshot().status,
+              `browser runtime owns the settled subscription`,
+            ).toBe(`error`)
+            reach.reach(history.mode)
+            reach.reach(history.errorAt)
+            reach.reach(history.seedStatus)
+            reach.reach(
+              history.definedCause ? `defined-cause` : `undefined-cause`,
+            )
+          }, [
+            () => stop?.(),
+            () => observer.dispose(),
+            () => source.cleanup(),
+            () => client.cleanup(),
+          ])
+        }),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(64), seed: 2229 }
+          : oraclePropertyOptions(
+              64,
+              `live-query-observer.hydration-error-timing`,
+            ),
+      )
+      reach.assertReached()
+      console.info(
+        `observer-hydration-error ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+  }
+})
+
+/**
  * Failed subscription setup transfers no listener ownership to the observer:
  * the caller received no release handle. This is the resource counterpart of
  * the eligibility ledger below, and follows the observer's subscribe/dispose
