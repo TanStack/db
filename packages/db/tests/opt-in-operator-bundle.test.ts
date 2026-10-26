@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { describe, expect, it } from 'vitest'
@@ -81,7 +83,7 @@ async function bundledModules(names: Array<string>) {
 }
 
 // `concat` and `caseWhen` build select values but bring no operator code.
-const typicalApp = [
+const coreValues = [
   `createLiveQueryCollection`,
   `eq`,
   `and`,
@@ -89,6 +91,69 @@ const typicalApp = [
   `caseWhen`,
   `createCollection`,
 ]
+
+// Every value that a framework adapter imports from `@tanstack/db`. An
+// adapter app bundles these whatever operators it imports, so none of them may
+// bring an operator's code. `adapterImports()` below keeps this list current.
+const adapterValues = [
+  `BaseQueryBuilder`,
+  `UnhashableQueryIRError`,
+  `assertLiveQueryWindowManyResult`,
+  `compareLiveQueryWindowDependencies`,
+  `createEffect`,
+  `createLiveQueryCollection`,
+  `createLiveQueryObserver`,
+  `createLiveQueryWindowController`,
+  `createPacedMutations`,
+  `deepEquals`,
+  `fetchNextLiveQueryWindowPage`,
+  `getLiveQueryHash`,
+  `getLiveQueryWindowCollectionWarning`,
+  `getLiveQueryWindowInputKind`,
+  `getPreparedLiveQueryIdentity`,
+  `getPreparedLiveQuerySources`,
+  `getPublicCollection`,
+  `getStableValueHash`,
+  `isCollection`,
+  `isSingleResultCollection`,
+  `liveQueryWindowMatches`,
+  `normalizeLiveQueryWindowPageSize`,
+  `prepareLiveQueryValue`,
+  `resolveLiveQueryValue`,
+  `resolveLiveQueryWindowInput`,
+  `resumeDeferredLiveQueryCollections`,
+  `shouldPreserveLiveQueryWindowPageCount`,
+]
+
+const typicalApp = [...new Set([...coreValues, ...adapterValues])]
+
+/** The values that the framework adapters import from `@tanstack/db`. */
+function adapterImports() {
+  const packages = fileURLToPath(new URL(`../..`, import.meta.url))
+  const names = new Set<string>()
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) visit(path)
+      else if (/\.tsx?$/.test(entry.name))
+        for (const [, list] of readFileSync(path, `utf8`).matchAll(
+          /import\s*\{([^}]*)\}\s*from\s*'@tanstack\/db'/g,
+        ))
+          for (const name of list!.split(`,`).map((n) => n.trim()))
+            if (name && !name.startsWith(`type `))
+              names.add(name.split(/\s+as\s+/)[0]!)
+    }
+  }
+  for (const adapter of [
+    `react-db`,
+    `vue-db`,
+    `solid-db`,
+    `svelte-db`,
+    `angular-db`,
+  ])
+    visit(join(packages, adapter, `src`))
+  return [...names].sort()
+}
 
 /** The law: an operator's modules are in the bundle exactly when it is imported. */
 function expectOperators(
@@ -102,6 +167,10 @@ function expectOperators(
 }
 
 describe(`opt-in operator bundles`, () => {
+  it(`lists every value the framework adapters import`, () => {
+    expect(adapterImports()).toEqual([...adapterValues].sort())
+  })
+
   it.each(
     Object.entries(values).flatMap(([family, names]) =>
       names.map((name) => [name, family as Family] as const),

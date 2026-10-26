@@ -1317,7 +1317,7 @@ Each project gets its own top-5 issues, not 5 issues shared across all projects.
 
 ### toArray
 
-By default, each child result is a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
+`include()` makes each child result a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
 
 ```ts
 import { createLiveQueryCollection, eq, toArray } from '@tanstack/db'
@@ -1339,7 +1339,7 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
 )
 ```
 
-With `toArray()`, the project row is re-emitted whenever its issues change. Without it, the child `Collection` updates independently.
+With `toArray()`, the project row is re-emitted whenever its issues change. With `include()`, the child `Collection` updates independently.
 
 ### materialize
 

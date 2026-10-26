@@ -459,6 +459,26 @@ describe(`pooling is opt-in`, () => {
     ).toBeUndefined()
   })
 
+  // The public observation: every framework hook resolves its query here, so
+  // two equality-filtered queries without `pool` keep a source subscription
+  // each. On main before this change they shared one.
+  it(`keeps one source subscription per query without pool`, async () => {
+    const rows = source()
+    const queries = [1, 2].map((group) =>
+      resolveLiveQueryValue(
+        new BaseQueryBuilder()
+          .from({ row: rows })
+          .where(({ row }) => eq(row.group, group)),
+      )!,
+    )
+    const subscriptions = queries.map((query) =>
+      query.subscribeChanges(() => {}),
+    )
+    await Promise.all(queries.map((query) => query.preload()))
+    expect(rows.subscriberCount).toBe(2)
+    for (const subscription of subscriptions) subscription.unsubscribe()
+  })
+
   it(`does not pool when the hook passes pool: false`, () => {
     const rows = source()
     expect(

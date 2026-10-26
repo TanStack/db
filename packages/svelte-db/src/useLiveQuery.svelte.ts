@@ -179,7 +179,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *   q.from({ issues: issueCollection })
  *    .join({ persons: personCollection }, ({ issues, persons }) =>
  *      eq(issues.userId, persons.id)
- *    ))
+ *    )
  *    .select(({ issues, persons }) => ({
  *      id: issues.id,
  *      title: issues.title,

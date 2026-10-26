@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 import prettier from 'prettier'
 import ts from 'typescript'
 import {
+  componentScript,
   fingerprint,
   misspelling,
   parses,
@@ -89,21 +90,30 @@ for (const pkg of readdirSync(join(root, `packages`))) {
 
 // A fence closes with as many backticks as it opened with, so a ````ts
 // example can hold a ``` block.
-const fence = /^(`{3,})(ts|tsx|typescript)([^\n]*)\n([\s\S]*?)^\1[ \t]*$/gm
+const fence =
+  /^(`{3,})(ts|tsx|typescript|svelte|vue)([^\n]*)\n([\s\S]*?)^\1[ \t]*$/gm
 const snippets = []
 for (const file of markdown) {
   const text = readFileSync(file, `utf8`)
   for (const match of text.matchAll(fence)) {
     if (match[3].includes(`nocheck`)) continue
-    const line = text.slice(0, match.index).split(`\n`).length
+    let line = text.slice(0, match.index).split(`\n`).length
+    let code = match[4]
+    // A component example: check its TypeScript script, not its template.
+    if (match[2] === `svelte` || match[2] === `vue`) {
+      const script = componentScript(code)
+      if (!script) continue
+      code = script.code
+      line += script.offset
+    }
     snippets.push({
       file: relative(root, file),
       line,
-      code: match[4],
+      code,
       name: join(
         root,
         `.snippet-check`,
-        `${snippets.length}.${/<\/|<[A-Z][A-Za-z]*[ />]/.test(match[4]) ? `tsx` : `ts`}`,
+        `${snippets.length}.${/<\/|<[A-Z][A-Za-z]*[ />]/.test(code) ? `tsx` : `ts`}`,
       ),
     })
   }

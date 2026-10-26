@@ -17,10 +17,13 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import {
   AggregateFunctionNotInSelectError,
+  GroupingOperatorRequiredError,
+  IncludeOperatorRequiredError,
   NonAggregateExpressionNotInGroupByError,
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { createOracleReach } from '../oracle-reach.js'
 
 /**
  * # What does an aggregate query publish beside its aggregates?
@@ -83,8 +86,26 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * can compare with key values, so a missing key changes the branch taken. Group order is not part of the law, so rows are
  * compared in a fixed order.
  *
+ * A query also needs the operator code its select and grouping use. Group
+ * keys passed to `groupBy` bare carry no grouping compiler, so a grouped
+ * query whose select and HAVING hold no aggregate throws
+ * `GroupingOperatorRequiredError` unless it wraps its keys in `groupKeys()`;
+ * any aggregate brings the compiler. A query builder in a select value is a
+ * subquery only inside `include()`, `toArray()`, or `materialize()`: a bare
+ * one throws `IncludeOperatorRequiredError` when the select is built, as a
+ * field, inside a nested object, or in a conditional branch. Authority: the
+ * maintainer's decision in PR #2232 that these operators are opt-in and that
+ * a missing operator throws. When several errors apply, the query throws one
+ * of them; which one is not part of the law.
+ *
+ * Each history chooses whether a grouped query passes its keys bare, and
+ * where a nested include sits and whether it is wrapped. The property declares
+ * the states these laws need with `createOracleReach` and fails when a
+ * campaign does not reach each of them.
+ *
  * Limits: one parent field (`x`), one source field (`v`) and one group key
- * (`k`); numbers only.
+ * (`k`); numbers only. A nested include in a unionAll query is rejected
+ * before compilation, so the driver checks only that it throws.
  */
 
 const PROPERTY = `aggregate.select-shapes`
@@ -110,8 +131,11 @@ type Shape = {
    */
   having?: { part: Part; lit: number | string; selected?: string }
   spread?: `source` | `parent`
-  /** A nested include beside the aggregate. */
-  include?: boolean
+  /**
+   * A nested include beside the aggregate: wrapped in `toArray()` or bare, as
+   * a field, inside a nested object, or in both branches of a conditional.
+   */
+  include?: { wrap: `toArray` | `bare`; at: `field` | `nested` | `case` }
 }
 
 /**
@@ -214,11 +238,66 @@ function modelThrows(shape: Shape, grouping: Grouping): boolean {
     (shape.having?.selected === undefined &&
       shape.having !== undefined &&
       readsSourceOutsideAggregate(shape.having.part, grouping)) ||
-    shape.include === true ||
+    shape.include?.wrap === `toArray` ||
     Object.values(shape.fields).some((part) =>
       readsSourceOutsideAggregate(part, grouping),
     )
   )
+}
+
+type ModelError =
+  | `nonAggregate`
+  | `aggregateNotInSelect`
+  | `includeRequired`
+  | `groupingRequired`
+  | `nestedInclude`
+
+/** An aggregate in the select or HAVING brings the grouping compiler. */
+function shapeHasAggregate(shape: Shape): boolean {
+  return (
+    Object.values(shape.fields).some(hasAggregate) ||
+    (shape.having !== undefined &&
+      shape.having.selected === undefined &&
+      hasAggregate(shape.having.part))
+  )
+}
+
+/** Every error the model says applies. The query must throw one of them. */
+function modelErrors(
+  shape: Shape,
+  grouping: Grouping,
+  bareKeys: boolean,
+): Set<ModelError> {
+  const errors = new Set<ModelError>()
+  // A bare query builder is no include; the select rejects it when built.
+  if (shape.include?.wrap === `bare`) errors.add(`includeRequired`)
+  // An include is a top-level select value (db-core skill, "Includes
+  // rules"), so one inside a nested object or a conditional branch throws.
+  if (shape.include?.wrap === `toArray` && shape.include.at !== `field`)
+    errors.add(`nestedInclude`)
+  // Bare group keys carry no grouping compiler, and no aggregate brings one.
+  if (grouping !== `none` && bareKeys && !shapeHasAggregate(shape))
+    errors.add(`groupingRequired`)
+  const error = modelError(shape, grouping)
+  if (error) errors.add(error)
+  return errors
+}
+
+function errorName(error: unknown): ModelError | `other` {
+  if (error instanceof IncludeOperatorRequiredError) return `includeRequired`
+  if (error instanceof GroupingOperatorRequiredError) return `groupingRequired`
+  if (error instanceof NonAggregateExpressionNotInGroupByError)
+    return `nonAggregate`
+  if (error instanceof AggregateFunctionNotInSelectError)
+    return `aggregateNotInSelect`
+  // This error site throws a plain coded Error; tests run the development
+  // build, whose message names the rule.
+  if (
+    error instanceof Error &&
+    /must be at the top level of select\(\)/.test(error.message)
+  )
+    return `nestedInclude`
+  return `other`
 }
 
 function groupKeyOf(
@@ -431,7 +510,17 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
         ),
         { nil: undefined, freq: 5 },
       ),
-      include: fc.boolean().map((b) => (b ? true : undefined)),
+      include: fc.option(
+        fc.record({
+          wrap: fc.constantFrom(`toArray` as const, `bare` as const),
+          at: fc.constantFrom(
+            `field` as const,
+            `nested` as const,
+            `case` as const,
+          ),
+        }),
+        { nil: undefined, freq: 2 },
+      ),
       having: fc.option(
         fc.record({
           // A condition may read aggregates, selected as fields or not. One
@@ -541,13 +630,24 @@ function buildSelect(
   const fields: Record<string, any> = Object.fromEntries(
     Object.entries(s.fields).map(([key, p]) => [key, build(p, c, issue)]),
   )
-  if (s.include)
-    fields.nestedKids = toArray(
-      q
+  if (s.include) {
+    const { wrap, at } = s.include
+    // Each use builds its own child query, as separate select values do.
+    const kids = () => {
+      const child = q
         .from({ i: issueSource })
         .where(({ i }: any) => eq(i.k, c.k))
-        .select(({ i }: any) => ({ id: i.id })),
-    )
+        .select(({ i }: any) => ({ id: i.id }))
+      return wrap === `toArray` ? toArray(child) : child
+    }
+    // A constant condition, so the conditional reads no source field.
+    fields.nestedKids =
+      at === `field`
+        ? kids()
+        : at === `nested`
+          ? { inner: kids() }
+          : caseWhen(eq(1, 1), { inner: kids() }, { inner: kids() })
+  }
   if (s.spread === `source`) return { ...c, ...fields }
   if (s.spread === `parent`) return { ...issue, ...fields }
   return fields
@@ -560,8 +660,22 @@ async function runHistory(
   shadow: boolean,
   steps: ReadonlyArray<Step>,
   union = false,
+  bareKeys = false,
 ): Promise<void> {
   const grouped = grouping !== `none`
+  reach?.beginHistory()
+  for (const s of [top, nested]) {
+    if (s.include?.wrap === `bare`)
+      reach?.reach(`bare include: ${s.include.at}`)
+    if (s.include?.wrap === `toArray` && s.include.at === `case`)
+      reach?.reach(`toArray include in a conditional branch`)
+    if (grouped && bareKeys)
+      reach?.reach(
+        shapeHasAggregate(s)
+          ? `bare group keys beside an aggregate`
+          : `bare group keys without an aggregate`,
+      )
+  }
   // Each use builds a new list literal, as separate query callbacks do.
   keyExpression =
     grouping === `upper`
@@ -613,12 +727,11 @@ async function runHistory(
   // alias.
   const rowOf = (refs: any, alias: string | undefined) =>
     alias === undefined ? refs : refs[alias]
-  const group = (query: any, alias: string | undefined) =>
-    grouped
-      ? query.groupBy(
-          groupKeys((refs: any) => keyExpression(rowOf(refs, alias))),
-        )
-      : query
+  const group = (query: any, alias: string | undefined) => {
+    if (!grouped) return query
+    const keys = (refs: any) => keyExpression(rowOf(refs, alias))
+    return query.groupBy(bareKeys ? keys : groupKeys(keys))
+  }
   const having = (
     s: Shape,
     query: any,
@@ -691,18 +804,17 @@ async function runHistory(
     [`top`, topQuery, top],
     [`include`, includeQuery, nested],
   ] as const) {
-    const error = modelError(s, grouping)
+    const errors = modelErrors(s, grouping, bareKeys)
     // A nested include cannot correlate with a unionAll row, which has no
     // source alias, so the builder rejects it first.
-    const unionInclude = label === `top` && union && s.include === true
-    if (error) {
+    const unionInclude = label === `top` && union && s.include !== undefined
+    if (errors.size > 0) {
       expect(result.ok, `${label} compile throws`).toBe(false)
       if (!result.ok && !unionInclude)
-        expect(result.error, `${label} error class`).toBeInstanceOf(
-          error === `nonAggregate`
-            ? NonAggregateExpressionNotInGroupByError
-            : AggregateFunctionNotInSelectError,
-        )
+        expect(
+          [...errors],
+          `${label} error class (${String(result.error)})`,
+        ).toContain(errorName(result.error))
     } else {
       expect(result.ok, `${label} compiles`).toBe(true)
     }
@@ -794,31 +906,50 @@ const history = fc
       fc.boolean(),
       fc.array(step, { maxLength: 6 }),
       fc.boolean(),
+      fc.boolean(),
     ),
   )
+
+/** The states the operator laws need; each campaign must reach all of them. */
+const reachStates = [
+  `bare include: field`,
+  `bare include: nested`,
+  `bare include: case`,
+  `toArray include in a conditional branch`,
+  `bare group keys without an aggregate`,
+  `bare group keys beside an aggregate`,
+] as const
+let reach:
+  ReturnType<typeof createOracleReach<(typeof reachStates)[number]>> | undefined
 
 describe(`aggregate select shapes`, () => {
   it(`match the model across generated shapes (fixed campaign)`, async () => {
     // A repeatable baseline. Seed 2094 is arbitrary.
+    reach = createOracleReach(`${PROPERTY} (fixed)`, reachStates)
     await fc.assert(
       fc.asyncProperty(
         history,
-        ([top, nested, grouping, shadow, steps, union]) =>
-          runHistory(top, nested, grouping, shadow, steps, union),
+        ([top, nested, grouping, shadow, steps, union, bareKeys]) =>
+          runHistory(top, nested, grouping, shadow, steps, union, bareKeys),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
     )
+    reach.assertReached()
+    reach = undefined
   })
 
   it(`match the model across generated shapes (random or replayed)`, async () => {
+    reach = createOracleReach(`${PROPERTY} (random)`, reachStates)
     await fc.assert(
       fc.asyncProperty(
         history,
-        ([top, nested, grouping, shadow, steps, union]) =>
-          runHistory(top, nested, grouping, shadow, steps, union),
+        ([top, nested, grouping, shadow, steps, union, bareKeys]) =>
+          runHistory(top, nested, grouping, shadow, steps, union, bareKeys),
       ),
       oraclePropertyOptions(120, PROPERTY),
     )
+    reach.assertReached()
+    reach = undefined
   })
 
   // Pinned replay of a review counterexample: a grouped select value that

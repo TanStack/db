@@ -5,7 +5,7 @@ import {
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
-import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
+import { getPooledLiveQuerySource } from './query/pooled-source.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'

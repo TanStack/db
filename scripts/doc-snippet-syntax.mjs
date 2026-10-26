@@ -19,10 +19,10 @@ const isJsx = (node) =>
 
 /**
  * The tokens of an example, without what formatting changes, so a reformatted
- * example keeps its baseline entry: spacing, comments, commas, semicolons,
- * the parentheses around multi-line JSX, and the parentheses around a single
- * arrow parameter. Other parentheses stay, because moving one changes what
- * the code calls. The tree, not a token scan, finds JSX: a parenthesis in JSX
+ * example keeps its baseline entry: spacing, comments, trailing commas,
+ * semicolons, the parentheses around multi-line JSX, and the parentheses
+ * around a single arrow parameter. Other commas and parentheses stay, because
+ * moving one changes what the code calls. The tree, not a token scan, finds JSX: a parenthesis in JSX
  * text is text.
  */
 export function fingerprint(code, jsx) {
@@ -33,7 +33,6 @@ export function fingerprint(code, jsx) {
     const children = node.getChildren()
     if (children.length === 0) {
       if (
-        node.kind === ts.SyntaxKind.CommaToken ||
         node.kind === ts.SyntaxKind.SemicolonToken ||
         node.kind === ts.SyntaxKind.EndOfFileToken
       )
@@ -51,13 +50,16 @@ export function fingerprint(code, jsx) {
       node.parameters.length === 1 &&
       ts.isIdentifier(node.parameters[0].name) &&
       !node.parameters[0].type
-    for (const child of children)
-      if (!(
+    children.forEach((child, index) => {
+      const parameterParen =
         bareParameter &&
         (child.kind === ts.SyntaxKind.OpenParenToken ||
           child.kind === ts.SyntaxKind.CloseParenToken)
-      ))
-        visit(child)
+      // A trailing comma ends its list; other commas separate values.
+      const trailingComma =
+        child.kind === ts.SyntaxKind.CommaToken && index === children.length - 1
+      if (!parameterParen && !trailingComma) visit(child)
+    })
   }
   visit(parse(code, jsx))
   return tokens.join(` `)
@@ -126,10 +128,25 @@ export function misspelling(name, imported) {
   )
 }
 
+/**
+ * The TypeScript in a Svelte or Vue component example: its `<script>` block
+ * with `lang="ts"`, and the line it starts on, counted from the fence. The
+ * template is not TypeScript and is not checked. Undefined when the component
+ * has no TypeScript script.
+ */
+export function componentScript(code) {
+  const match =
+    /<script\b[^>]*\blang=["']ts["'][^>]*>\n?([\s\S]*?)<\/script>/.exec(code)
+  if (!match) return undefined
+  const start = match.index + match[0].indexOf(`>`) + 1
+  const offset = code.slice(0, start).split(`\n`).length - 1
+  return { code: match[1], offset: code[start] === `\n` ? offset + 1 : offset }
+}
+
 export function selfTest() {
   const imports = [
-    `leftJoin`,
-    `innerJoin`,
+    `include`,
+    `toArray`,
     `count`,
     `Collection`,
     `QueryClient`,
@@ -137,9 +154,10 @@ export function selfTest() {
     `eq`,
   ]
   const typos = {
-    lefJoin: `leftJoin`,
-    innerJion: `innerJoin`,
+    inclde: `include`,
+    toArry: `toArray`,
     useLiveQuey: `useLiveQuery`,
+    useLievQuery: `useLiveQuery`,
     collection: undefined,
     queryClient: undefined,
     counter: undefined,
@@ -163,19 +181,36 @@ export function selfTest() {
     if (parses(code, false) !== expected)
       throw new Error(`self-test: parses(${code}) is not ${expected}`)
 
+  const component = componentScript(
+    `<!-- A.svelte -->\n<script lang="ts">\nconst a = 1\n</script>\n<p>{a}</p>`,
+  )
+  if (component?.code !== `const a = 1\n` || component.offset !== 2)
+    throw new Error(
+      `self-test: componentScript read ${JSON.stringify(component)}`,
+    )
+  if (componentScript(`<script>\nconst a = 1\n</script>`) !== undefined)
+    throw new Error(
+      `self-test: componentScript read a script without lang="ts"`,
+    )
+  if (componentScript(`<script setup lang="ts">x</script>`)?.code !== `x`)
+    throw new Error(
+      `self-test: componentScript missed <script setup lang="ts">`,
+    )
+
   const imported = tanstackImports(
     [
-      `import Default, { lefJoin, type Colection } from '@tanstack/db'`,
+      `import Default, { inclde, type Colection } from '@tanstack/db'`,
       `import type { QueryClient } from '@tanstack/query-core'`,
       `import { notTanStack } from 'other'`,
     ].join(`\n`),
   )
-  if (imported.join() !== `Default,lefJoin,Colection,QueryClient`)
+  if (imported.join() !== `Default,inclde,Colection,QueryClient`)
     throw new Error(`self-test: tanstackImports found ${imported.join()}`)
 
   // Pairs that formatting can produce must keep one fingerprint.
   const same = [
     [`f(a, b,);`, `f(a, b)`],
+    [`const o = { a: 1, b: [1, 2,], }`, `const o = { a: 1, b: [1, 2] }`],
     [`list.map(x => x.id)`, `list.map((x) => x.id)`],
     [`return (<p>:)</p>)`, `return <p>:)</p>`],
     [
@@ -190,7 +225,9 @@ export function selfTest() {
 
   // Edits that change what the code does must change the fingerprint.
   const different = [
-    [`.join(leftJoin(src, on))`, `.join(leftJoin(src), on)`],
+    [`.where(eq(a, b))`, `.where(eq(a), b)`],
+    [`f(a, -b)`, `f(a - b)`],
+    [`eq(a, [b])`, `eq(a[b])`],
     [`f((a, b) => a)`, `f(a, b => a)`],
     [`eq(a.id, b.id)`, `eq(a.id, b.userId)`],
     [`'a b'`, `'ab'`],

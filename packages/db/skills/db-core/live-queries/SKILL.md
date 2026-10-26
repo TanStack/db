@@ -235,7 +235,7 @@ Embed a correlated subquery inside `select()` to produce hierarchical (nested)
 data. The subquery must contain a `where` with an `eq()` that correlates a
 parent field with a child field.
 
-### Collection includes (default)
+### Collection includes with include()
 
 Return a child `Collection` on each parent row:
 

@@ -45,6 +45,17 @@ export {
 export { groupKeys, type GroupKeys } from './builder/group-keys.js'
 export type { OperatorCallback } from './builder/types.js'
 
+// Operator code for query IR built by hand: `IR.Aggregate` takes the grouping
+// compiler, and `IR.IncludesSubquery` the include runtime.
+export {
+  grouping as groupingCompiler,
+  type Grouping,
+} from './compiler/grouping.js'
+export {
+  includesRuntime,
+  type IncludesRuntime,
+} from './live/includes-runtime.js'
+
 // Expression functions exports
 export {
   // Operators
