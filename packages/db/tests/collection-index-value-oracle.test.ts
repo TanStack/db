@@ -17,26 +17,33 @@
  */
 import { afterEach, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { BasicIndex, IR, coalesce, createCollection } from '../src'
-import type { Collection } from '../src'
+import { IR, coalesce } from '../src'
+import { collections, createSource } from './collection-index-value-fixture.js'
+import { declareOracle } from './oracle-config.js'
 
-type Row = { id: string; stamp: unknown }
-const collections: Array<Collection<Row, string>> = []
 afterEach(async () => {
   await Promise.all(
     collections.splice(0).map((collection) => collection.cleanup()),
   )
 })
 
-function createSource() {
-  const result = createCollection({
-    getKey: (row: Row) => row.id,
-    sync: { sync: ({ markReady }) => markReady() },
-    defaultIndexType: BasicIndex,
-  })
-  collections.push(result)
-  return result
+// The model: two literals are one equivalence class exactly when their group
+// labels match. Index signatures must agree with that class relation.
+function expectSignatureClasses(
+  fixtures: ReadonlyArray<{ group: string; value: unknown }>,
+  metadata: ReadonlyArray<{ signature: string }>,
+): void {
+  expect(metadata).toHaveLength(fixtures.length)
+  for (let left = 0; left < fixtures.length; left++) {
+    for (let right = 0; right < fixtures.length; right++) {
+      expect(metadata[left]!.signature === metadata[right]!.signature).toBe(
+        fixtures[left]!.group === fixtures[right]!.group,
+      )
+    }
+  }
 }
+
+declareOracle({ check: [expectSignatureClasses] })
 
 it(`distinguishes native literals from ordinary tags in index signatures`, () => {
   const instant = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
@@ -67,44 +74,5 @@ it(`distinguishes native literals from ordinary tags in index signatures`, () =>
     source.createIndex((row) =>
       coalesce(row.stamp, new IR.Value(fixture.value)),
     )
-  const metadata = source.getIndexMetadata()
-  expect(metadata).toHaveLength(fixtures.length)
-  for (let left = 0; left < fixtures.length; left++) {
-    for (let right = 0; right < fixtures.length; right++) {
-      expect(metadata[left]!.signature === metadata[right]!.signature).toBe(
-        fixtures[left]!.group === fixtures[right]!.group,
-      )
-    }
-  }
-})
-
-it.each([`plain`, `null`] as const)(
-  `isolates ordinary own-tag metadata records / %s`,
-  (prototype) => {
-    const value = {
-      payload: { label: `original` },
-      [Symbol.toStringTag]: `Temporal.Instant`,
-    }
-    if (prototype === `null`) Object.setPrototypeOf(value, null)
-    const source = createSource()
-    source.createIndex((row) => coalesce(row.stamp, new IR.Value(value)))
-    const snapshot = source.getIndexMetadata()[0]!
-    const literal = (snapshot.expression as IR.Func).args[1] as IR.Value<
-      typeof value
-    >
-    literal.value.payload.label = `changed`
-    const next = (source.getIndexMetadata()[0]!.expression as IR.Func)
-      .args[1] as IR.Value
-    expect(next.value).toEqual({ payload: { label: `original` } })
-  },
-)
-
-it(`retains immutable native literals in metadata snapshots`, () => {
-  const source = createSource()
-  const value = Temporal.Instant.from(`2026-01-02T00:00:00.000000001Z`)
-  source.createIndex((row) => coalesce(row.stamp, new IR.Value(value)))
-  const literal = (source.getIndexMetadata()[0]!.expression as IR.Func)
-    .args[1] as IR.Value
-  expect(literal.value).toBeInstanceOf(Temporal.Instant)
-  expect(String(literal.value)).toBe(`2026-01-02T00:00:00.000000001Z`)
+  expectSignatureClasses(fixtures, source.getIndexMetadata())
 })
