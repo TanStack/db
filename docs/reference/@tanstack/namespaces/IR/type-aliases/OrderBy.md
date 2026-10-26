@@ -7,4 +7,4 @@ title: OrderBy
 type OrderBy = OrderByClause[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L62)
+Defined in: [packages/db/src/query/ir.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L67)

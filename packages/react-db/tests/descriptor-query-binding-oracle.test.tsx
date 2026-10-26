@@ -82,7 +82,6 @@
  * start the source even though the earlier render never committed. These
  * histories do not cover arbitrary concurrent render schedules.
  */
-import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
@@ -94,6 +93,7 @@ import {
   prepareLiveQueryValue,
   toArray,
 } from '@tanstack/db'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'

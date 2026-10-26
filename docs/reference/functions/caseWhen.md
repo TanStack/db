@@ -9,7 +9,7 @@ title: caseWhen
 function caseWhen<C1, V1>(condition1, value1): CaseWhenResult<[V1], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:408](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L408)
+Defined in: [packages/db/src/query/builder/functions.ts:407](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L407)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -68,9 +68,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -83,7 +85,7 @@ function caseWhen<C1, V1, D>(
 defaultValue): CaseWhenResult<[V1, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:412](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L412)
+Defined in: [packages/db/src/query/builder/functions.ts:411](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L411)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -150,9 +152,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -166,7 +170,7 @@ function caseWhen<C1, V1, C2, V2>(
 value2): CaseWhenResult<[V1, V2], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L417)
+Defined in: [packages/db/src/query/builder/functions.ts:416](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L416)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -241,9 +245,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -258,7 +264,7 @@ function caseWhen<C1, V1, C2, V2, D>(
 defaultValue): CaseWhenResult<[V1, V2, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:428](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L428)
+Defined in: [packages/db/src/query/builder/functions.ts:427](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L427)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -341,9 +347,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -359,7 +367,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3>(
 value3): CaseWhenResult<[V1, V2, V3], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:441](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L441)
+Defined in: [packages/db/src/query/builder/functions.ts:440](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L440)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -450,9 +458,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -469,7 +479,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, D>(
 defaultValue): CaseWhenResult<[V1, V2, V3, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:456](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L456)
+Defined in: [packages/db/src/query/builder/functions.ts:455](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L455)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -568,9 +578,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -588,7 +600,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4>(
 value4): CaseWhenResult<[V1, V2, V3, V4], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:473](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L473)
+Defined in: [packages/db/src/query/builder/functions.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L472)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -695,9 +707,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -716,7 +730,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, D>(
 defaultValue): CaseWhenResult<[V1, V2, V3, V4, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:492](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L492)
+Defined in: [packages/db/src/query/builder/functions.ts:491](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L491)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -831,9 +845,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -853,7 +869,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, C5, V5>(
 value5): CaseWhenResult<[V1, V2, V3, V4, V5], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:513](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L513)
+Defined in: [packages/db/src/query/builder/functions.ts:512](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L512)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -976,9 +992,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -999,7 +1017,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, C5, V5, D>(
 defaultValue): CaseWhenResult<[V1, V2, V3, V4, V5, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:536](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L536)
+Defined in: [packages/db/src/query/builder/functions.ts:535](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L535)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -1130,9 +1148,11 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```
 
@@ -1155,7 +1175,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, C5, V5>(
    rest): any;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:561](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L561)
+Defined in: [packages/db/src/query/builder/functions.ts:560](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L560)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -1290,8 +1310,10 @@ caseWhen(
 ```ts
 caseWhen(gt(user.age, 18), {
   ...user,
-  posts: q
-    .from({ post: postsCollection })
-    .where(({ post }) => eq(post.userId, user.id)),
+  posts: include(
+    q
+      .from({ post: postsCollection })
+      .where(({ post }) => eq(post.userId, user.id)),
+  ),
 })
 ```

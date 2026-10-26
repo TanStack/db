@@ -10,6 +10,7 @@ import {
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
+import { createMockStream } from './electric-stream-mock'
 import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
@@ -53,33 +54,31 @@ const mockStream = {
   lastOffset: `-1` as string,
 }
 
-// Each stream owns its callback release. Prototype inheritance keeps the
-// shared request and resume controls live without sharing callback ownership.
-function createMockStream() {
-  let unsubscribe: (() => void) | undefined
-  let stopped = false
-  return Object.assign(Object.create(mockStream) as typeof mockStream, {
-    subscribe: (...args: Parameters<typeof mockSubscribe>) => {
-      const release: (() => void) | undefined = mockSubscribe(...args)
-      if (stopped) release?.()
-      else unsubscribe = release
-      return release
-    },
-    unsubscribeAll: () => {
-      mockStream.unsubscribeAll()
-      if (stopped) return
-      stopped = true
-      unsubscribe?.()
-    },
-  })
-}
-
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(createMockStream),
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
+})
+
+describe(`Electric stream mock`, () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it.each([false, true])(
+    `retires its mock callback when release occurs during subscribe: %s`,
+    (duringSubscribe) => {
+      const stream = createMockStream(mockStream)
+      const release = vi.fn()
+      mockSubscribe.mockImplementationOnce(() => {
+        if (duringSubscribe) stream.unsubscribeAll()
+        return release
+      })
+      stream.subscribe(() => {})
+      if (!duringSubscribe) stream.unsubscribeAll()
+      expect(release).toHaveBeenCalledOnce()
+    },
+  )
 })
 
 describe(`Electric Integration`, () => {

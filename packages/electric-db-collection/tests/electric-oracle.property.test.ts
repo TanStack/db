@@ -20,6 +20,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
+import { createMockStream } from './electric-stream-mock'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import {
   applyRetryModel,
@@ -185,34 +186,13 @@ function createDeferred<T>(): {
   return { promise, resolve, reject }
 }
 
-// Each stream owns its callback release. Prototype inheritance keeps the
-// shared request and resume controls live without sharing callback ownership.
-function createMockStream() {
-  let unsubscribe: (() => void) | undefined
-  let stopped = false
-  return Object.assign(Object.create(mockStream) as typeof mockStream, {
-    subscribe: (...args: Parameters<typeof mockSubscribe>) => {
-      const release: (() => void) | undefined = mockSubscribe(...args)
-      if (stopped) release?.()
-      else unsubscribe = release
-      return release
-    },
-    unsubscribeAll: () => {
-      mockStream.unsubscribeAll()
-      if (stopped) return
-      stopped = true
-      unsubscribe?.()
-    },
-  })
-}
-
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
     // Full SDK release clears this stream's callback, including when another
     // Collection has a separate stream using these shared request mocks.
-    ShapeStream: vi.fn(createMockStream),
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
 })
 
@@ -2886,7 +2866,9 @@ async function runSchedulerPermutation(
   } finally {
     await collection.cleanup()
     vi.mocked(ShapeStream).mockReset()
-    vi.mocked(ShapeStream).mockImplementation(() => createMockStream() as never)
+    vi.mocked(ShapeStream).mockImplementation(
+      () => createMockStream(mockStream) as never,
+    )
   }
 }
 
@@ -2914,21 +2896,6 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
   beforeEach(() => {
     resetElectricOracleMocks()
   })
-
-  it.each([false, true])(
-    `retires its mock callback when release occurs during subscribe: %s`,
-    (duringSubscribe) => {
-      const stream = createMockStream()
-      const release = vi.fn()
-      mockSubscribe.mockImplementationOnce(() => {
-        if (duringSubscribe) stream.unsubscribeAll()
-        return release
-      })
-      stream.subscribe(() => {})
-      if (!duringSubscribe) stream.unsubscribeAll()
-      expect(release).toHaveBeenCalledOnce()
-    },
-  )
 
   it.each([false, true])(
     `cleans direct traces after delivery failure and preserves the primary error (cleanup failure: %s)`,

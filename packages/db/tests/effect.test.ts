@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
-import { Query, createEffect, createTransaction, eq } from '../src/index.js'
 import {
   captureMicrotaskErrors,
   mockSyncCollectionOptions,

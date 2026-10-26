@@ -22,6 +22,7 @@ export * from './live-query-primitives.js'
 export * from './live-query-observer.js'
 export * from './live-query-window-binding.js'
 export {
+  configPool,
   getLiveQueryHash,
   getPreparedLiveQueryIdentity,
   getPreparedLiveQuerySources,

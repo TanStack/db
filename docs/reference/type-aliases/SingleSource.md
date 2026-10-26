@@ -7,7 +7,7 @@ title: SingleSource
 type SingleSource<TSource> = IsUnion<keyof TSource & string> extends true ? never : TSource;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L151)
+Defined in: [packages/db/src/query/builder/types.ts:152](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L152)
 
 ## Type Parameters
 
