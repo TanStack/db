@@ -134,6 +134,11 @@ after each edit and at the end of each turn. A hook sees only the edits that
 the harness's own edit tools make. After an edit through a shell command, or
 in a harness without these hooks, run `pnpm lint:changed` before you finish.
 
+The end-of-turn hook and `pnpm lint:changed` also report every oracle run
+budget that the branch lowered, and CI prints it as a warning. A lowered
+budget can be deliberate. Restore it, or explain the reason in the pull
+request.
+
 Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
 pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
 true exception needs a maintainer to change the rule in a reviewed pull

@@ -40,6 +40,10 @@ import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
 import oraclePlugin from './eslint-plugin-oracle/index.js'
+import {
+  describeLoweredRunBudget,
+  loweredRunBudgets,
+} from './check-oracle-run-counts.mjs'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
 
@@ -262,6 +266,27 @@ function selectFiles(input) {
     : { scope: `changed`, files: changedFiles() }
 }
 
+/**
+ * Lowered run budgets, for a report over the branch's changed files. A
+ * lowered budget can be deliberate, so it is a report for review, not a lint
+ * error.
+ */
+function runBudgetReport(scope) {
+  if (scope !== `changed`) return ``
+  return loweredRunBudgets()
+    .map(
+      (budget) =>
+        `${budget.file}: ${describeLoweredRunBudget(budget)}. Restore it, or explain why in the pull request.`,
+    )
+    .join(`\n`)
+}
+
 const input = readHookInput()
 const { scope, files } = selectFiles(input)
-respond(reportText(await lint(createLinter(), files)), input, scope)
+const report = [
+  reportText(await lint(createLinter(), files)),
+  runBudgetReport(scope),
+]
+  .filter(Boolean)
+  .join(`\n`)
+respond(report, input, scope)
