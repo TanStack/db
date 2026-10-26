@@ -6421,6 +6421,11 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  // Retention cleanup runs on a real 10 ms GC timer followed by a storage
+  // scan and a sync transaction. A loaded CI runner can take longer than the
+  // default 1 s wait, so these witnesses wait up to 5 s for it.
+  const retentionWait = { timeout: 5_000 }
+
   /**
    * ## A claim made during a held retention cleanup does not publish the cleaned owner
    *
@@ -6496,10 +6501,12 @@ describe(`query collection ownership lifecycle`, () => {
     const pendingBeforeExpiry =
       collection._state.pendingSyncedTransactions.length
     // The expiry's owner release is accepted but held behind the blocker.
-    await vi.waitFor(() =>
-      expect(
-        collection._state.pendingSyncedTransactions.length,
-      ).toBeGreaterThan(pendingBeforeExpiry),
+    await vi.waitFor(
+      () =>
+        expect(
+          collection._state.pendingSyncedTransactions.length,
+        ).toBeGreaterThan(pendingBeforeExpiry),
+      retentionWait,
     )
     const claimed = Promise.resolve(collection._sync.loadSubset(list))
     void claimed.catch(() => undefined)
@@ -6576,10 +6583,12 @@ describe(`query collection ownership lifecycle`, () => {
     collection._sync.unloadSubset(detail)
     const pendingBeforeExpiry =
       collection._state.pendingSyncedTransactions.length
-    await vi.waitFor(() =>
-      expect(
-        collection._state.pendingSyncedTransactions.length,
-      ).toBeGreaterThan(pendingBeforeExpiry),
+    await vi.waitFor(
+      () =>
+        expect(
+          collection._state.pendingSyncedTransactions.length,
+        ).toBeGreaterThan(pendingBeforeExpiry),
+      retentionWait,
     )
     const claimed = Promise.resolve(collection._sync.loadSubset(list))
     void claimed.catch(() => undefined)
@@ -6590,7 +6599,7 @@ describe(`query collection ownership lifecycle`, () => {
     await claimed
 
     collection._sync.unloadSubset(list)
-    await vi.waitFor(() => expect(rows(collection)).toEqual([]))
+    await vi.waitFor(() => expect(rows(collection)).toEqual([]), retentionWait)
   })
 
   /**
@@ -6626,7 +6635,7 @@ describe(`query collection ownership lifecycle`, () => {
     expect(rows(collection)).toEqual([shared.id])
 
     collection._sync.unloadSubset(list)
-    await vi.waitFor(() => expect(rows(collection)).toEqual([]))
+    await vi.waitFor(() => expect(rows(collection)).toEqual([]), retentionWait)
   })
 
   /**
@@ -6700,10 +6709,12 @@ describe(`query collection ownership lifecycle`, () => {
     const pendingBeforeExpiry =
       collection._state.pendingSyncedTransactions.length
     // The expiry's owner release is accepted but held behind the blocker.
-    await vi.waitFor(() =>
-      expect(
-        collection._state.pendingSyncedTransactions.length,
-      ).toBeGreaterThan(pendingBeforeExpiry),
+    await vi.waitFor(
+      () =>
+        expect(
+          collection._state.pendingSyncedTransactions.length,
+        ).toBeGreaterThan(pendingBeforeExpiry),
+      retentionWait,
     )
     const claimed = Promise.resolve(collection._sync.loadSubset(list))
     void claimed.catch(() => undefined)
@@ -6788,10 +6799,12 @@ describe(`query collection ownership lifecycle`, () => {
     collection._sync.unloadSubset(detail)
     const pendingBeforeExpiry =
       collection._state.pendingSyncedTransactions.length
-    await vi.waitFor(() =>
-      expect(
-        collection._state.pendingSyncedTransactions.length,
-      ).toBeGreaterThan(pendingBeforeExpiry),
+    await vi.waitFor(
+      () =>
+        expect(
+          collection._state.pendingSyncedTransactions.length,
+        ).toBeGreaterThan(pendingBeforeExpiry),
+      retentionWait,
     )
     const claimed = Promise.resolve(collection._sync.loadSubset(list))
     void claimed.catch(() => undefined)
@@ -6827,7 +6840,7 @@ describe(`query collection ownership lifecycle`, () => {
     await hydrated._sync.loadSubset(list)
     hydrated._sync.unloadSubset(peer)
     hydrated._sync.unloadSubset(list)
-    await vi.waitFor(() => expect(rows(hydrated)).toEqual([]))
+    await vi.waitFor(() => expect(rows(hydrated)).toEqual([]), retentionWait)
   })
 
   /**
