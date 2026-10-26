@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
-import { oracleRuns } from './oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
@@ -781,65 +785,76 @@ function expectHistory({ original, ops }: History): void {
 }
 
 // ---------------------------------------------------------------------------
-// Campaigns. `TANSTACK_DB_PROXY_REVERT_SEED` and
-// `TANSTACK_DB_PROXY_REVERT_PATH` select a direct replay.
+// Campaigns. Each generated property has a fixed campaign and a random
+// campaign over the same grammar and check. A path replay of one property
+// runs its recorded history once and every other test stands aside. A seed
+// alone reseeds the random campaigns.
 
-const replaySeed = process.env.TANSTACK_DB_PROXY_REVERT_SEED
-const replayPath = process.env.TANSTACK_DB_PROXY_REVERT_PATH
 const FIXED_SEED = 2026101
-const campaigns =
-  replaySeed === undefined && replayPath === undefined
-    ? [
-        { name: String(FIXED_SEED), seed: FIXED_SEED as number | undefined },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed: replaySeed === undefined ? undefined : Number(replaySeed),
-        },
-      ]
+const WRITE_HISTORY = `proxy.revert-history`
+const NESTED_ROUND_TRIPS = `proxy.revert-nested-round-trips`
+const CLASS_WRITES = `proxy.revert-class-writes`
+const PARTIAL_REVERTS = `proxy.revert-partial-reverts`
+const NATIVE_HISTORIES = `proxy.revert-native-histories`
+
+const it = oracleReplayTest(vitestIt)
 
 describe(`draft revert oracle`, () => {
-  for (const { name, seed } of campaigns) {
-    it(`matches the model across generated write histories (${name})`, () => {
-      if (replayPath !== undefined && replaySeed === undefined)
-        throw new Error(`TANSTACK_DB_PROXY_REVERT_PATH requires a seed`)
-      if (
-        replaySeed !== undefined &&
-        (replaySeed.trim() === `` ||
-          typeof seed !== `number` ||
-          !Number.isSafeInteger(seed))
-      )
-        throw new Error(`TANSTACK_DB_PROXY_REVERT_SEED must be an integer`)
-      fc.assert(fc.property(historyArb, expectHistory), {
-        numRuns: oracleRuns(400),
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  it(`matches the model across generated write histories (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(historyArb, expectHistory), {
+      numRuns: oracleRuns(400),
+      seed: FIXED_SEED,
     })
-    it(`matches the model across generated nested round trips (${name})`, () => {
-      fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
-        numRuns: oracleRuns(200),
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  })
+  oracleReplayTest(fcTest, WRITE_HISTORY).prop(
+    [historyArb],
+    oraclePropertyOptions(400, WRITE_HISTORY),
+  )(
+    `matches the model across generated write histories (random)`,
+    expectHistory,
+  )
+
+  it(`matches the model across generated nested round trips (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
+      numRuns: oracleRuns(200),
+      seed: FIXED_SEED,
     })
-    it(`matches the model across generated URL and keyless writes (${name})`, () => {
-      fc.assert(fc.property(classWriteArb, expectHistory), {
-        numRuns: oracleRuns(200),
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  })
+  oracleReplayTest(fcTest, NESTED_ROUND_TRIPS).prop(
+    [nestedRoundTripArb],
+    oraclePropertyOptions(200, NESTED_ROUND_TRIPS),
+  )(
+    `matches the model across generated nested round trips (random)`,
+    expectHistory,
+  )
+
+  it(`matches the model across generated URL and keyless writes (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(classWriteArb, expectHistory), {
+      numRuns: oracleRuns(200),
+      seed: FIXED_SEED,
     })
-    it(`matches the model across generated partial reverts (${name})`, () => {
-      fc.assert(fc.property(partialRevertArb, expectHistory), {
-        numRuns: oracleRuns(200),
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  })
+  oracleReplayTest(fcTest, CLASS_WRITES).prop(
+    [classWriteArb],
+    oraclePropertyOptions(200, CLASS_WRITES),
+  )(
+    `matches the model across generated URL and keyless writes (random)`,
+    expectHistory,
+  )
+
+  it(`matches the model across generated partial reverts (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(partialRevertArb, expectHistory), {
+      numRuns: oracleRuns(200),
+      seed: FIXED_SEED,
     })
-  }
+  })
+  oracleReplayTest(fcTest, PARTIAL_REVERTS).prop(
+    [partialRevertArb],
+    oraclePropertyOptions(200, PARTIAL_REVERTS),
+  )(
+    `matches the model across generated partial reverts (random)`,
+    expectHistory,
+  )
 
   // Positive execution witness: the fixed campaign reaches each operation, a
   // partial revert (some change survives one revert), a full revert, and a
@@ -1427,14 +1442,19 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
     }
   })
 
-  for (const { name, seed } of campaigns) {
-    it(`matches the model across generated native histories (${name})`, () => {
-      fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
-        numRuns: oracleRuns(400),
-        ...(seed === undefined ? {} : { seed }),
-      })
+  it(`matches the model across generated native histories (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
+      numRuns: oracleRuns(400),
+      seed: FIXED_SEED,
     })
-  }
+  })
+  oracleReplayTest(fcTest, NATIVE_HISTORIES).prop(
+    [nativeHistoryArb],
+    oraclePropertyOptions(400, NATIVE_HISTORIES),
+  )(
+    `matches the model across generated native histories (random)`,
+    expectNativeHistory,
+  )
 
   // Positive execution witness: the fixed campaign reaches a native write
   // that an assignment then replaces, and a mutator through a detached handle.

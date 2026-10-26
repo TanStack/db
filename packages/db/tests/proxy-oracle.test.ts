@@ -8,7 +8,11 @@ import {
   withArrayChangeTracking,
   withChangeTracking,
 } from '../src/proxy'
-import { oracleRuns } from './oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config'
 
 /**
  * # Does a draft behave like the native value it represents?
@@ -249,8 +253,8 @@ describe(`native array callback oracle`, () => {
     target: fc.integer({ min: 0, max: 5 }),
     delta: fc.integer({ min: -5, max: 5 }),
   })
-  // A fixed and a random campaign. TANSTACK_DB_PROXY_CALLBACK_SEED and
-  // TANSTACK_DB_PROXY_CALLBACK_PATH select a direct replay instead.
+  // A fixed and a random campaign. A path replay of
+  // `proxy.callback-history` runs only the random campaign, from its path.
   const callbackHistory = fc.record({
     values: fc.array(fc.integer({ min: -10, max: 10 }), {
       minLength: 1,
@@ -258,38 +262,24 @@ describe(`native array callback oracle`, () => {
     }),
     steps: fc.tuple(step, step),
   })
-  const replaySeed = process.env.TANSTACK_DB_PROXY_CALLBACK_SEED
-  const replayPath = process.env.TANSTACK_DB_PROXY_CALLBACK_PATH
-  const callbackCampaigns =
-    replaySeed === undefined && replayPath === undefined
-      ? [
-          { name: `2026103`, seed: 2026103 as number | undefined },
-          { name: `random`, seed: undefined },
-        ]
-      : [
-          {
-            name: `replay`,
-            seed: replaySeed === undefined ? undefined : Number(replaySeed),
-          },
-        ]
-  for (const { name, seed } of callbackCampaigns) {
-    it(`matches native two-step callback histories (${name})`, () => {
-      if (replayPath !== undefined && replaySeed === undefined)
-        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_PATH requires a seed`)
-      if (seed !== undefined && !Number.isSafeInteger(seed))
-        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_SEED must be an integer`)
+  const callbackProperty = fc.property(callbackHistory, ({ values, steps }) => {
+    assertArrayCallbacks(observeArrayCallbacks(values, steps))
+  })
+  oracleReplayTest(it)(
+    `matches native two-step callback histories (2026103)`,
+    () => {
+      fc.assert(callbackProperty, { seed: 2026103, numRuns: oracleRuns(200) })
+    },
+  )
+  oracleReplayTest(it, `proxy.callback-history`)(
+    `matches native two-step callback histories (random)`,
+    () => {
       fc.assert(
-        fc.property(callbackHistory, ({ values, steps }) => {
-          assertArrayCallbacks(observeArrayCallbacks(values, steps))
-        }),
-        {
-          numRuns: oracleRuns(200),
-          ...(seed === undefined ? {} : { seed }),
-          ...(replayPath === undefined ? {} : { path: replayPath }),
-        },
+        callbackProperty,
+        oraclePropertyOptions(200, `proxy.callback-history`),
       )
-    })
-  }
+    },
+  )
 
   it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
     `rejects a captured %s independently of the native authority`,

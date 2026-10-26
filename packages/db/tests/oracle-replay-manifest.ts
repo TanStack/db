@@ -7,7 +7,11 @@ import { registeredOracleProperties } from './oracle-config.js'
  * separate campaign gates. An absent or statistics-only entry must not be
  * promoted to assertion evidence merely because a process exited cleanly.
  */
-const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
+// Each group is [owner file, prefix, suffixes] and, when the owner runs the
+// properties from another module, the module that names them.
+const ownerGroups: ReadonlyArray<
+  readonly [string, string, string] | readonly [string, string, string, string]
+> = [
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
     `cleanup-queue`,
@@ -213,9 +217,163 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `persistence`,
     `retained-demand`,
   ],
-  // Owners of the replays that moved to the shared variables. The SQLite
-  // core-adapter contract's binding-capacity and baseline-lineage replays run
-  // through a host file that does not name them, so they have no named owner.
+  // Owners of properties that a module names and a host file runs carry
+  // that module as the fourth element.
+  [
+    `query-db-collection/tests/cursor-pagination.no-peek.test.ts`,
+    `cursor-pagination`,
+    `no-peek`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.oracle.test.ts`,
+    `cursor-pagination`,
+    `history backend-ownership partition reset failure`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.cache-oracle.test.ts`,
+    `cursor-pagination`,
+    `cache defaults cancellation`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.boundary-oracle.test.ts`,
+    `cursor-pagination`,
+    `nested-cancellation reader-abort`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination-oracle.integration.test.ts`,
+    `cursor-pagination`,
+    `manual-write`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.publication-oracle.test.ts`,
+    `cursor-pagination`,
+    `refresh-publication protocol-publication slice-work`,
+  ],
+  [
+    `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
+    `query-db`,
+    `refetch-ordered-prefix`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `request-authority`,
+  ],
+  [
+    `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
+    `replay`,
+    `ordered-window-faults`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
+    `sqlite-persistence`,
+    `binding-capacity`,
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
+    `sqlite-resume`,
+    `baseline-lineage`,
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
+    `sqlite-ordinary`,
+    `write-history independent-work`,
+    `db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `sqlite-persistence`,
+    `request-local-failure-buffered-source`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `generation-notice follower-remote-demand`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts`,
+    `sqlite-persistence`,
+    `optimistic-history`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
+    `sqlite-resume`,
+    `managed-claim-read retired-storage`,
+  ],
+  [
+    `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
+    `trailbase`,
+    `page-event`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
+    `sqlite-reload`,
+    `class`,
+  ],
+  [
+    `electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
+    `sqlite-reload`,
+    `class.electron`,
+  ],
+  [
+    `db/tests/query/where-predicate-publication-oracle.property.test.ts`,
+    `where-predicate`,
+    `publication`,
+  ],
+  [
+    `db/tests/query/join-result-key-oracle.property.test.ts`,
+    `join-result-key`,
+    `pairs`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-oracle.property.test.ts`,
+    `pooled-live-query`,
+    `publication`,
+  ],
+  [
+    `db/tests/flat-change-tracking-oracle.property.test.ts`,
+    `flat-change-tracking`,
+    `equivalence`,
+  ],
+  [
+    `db/tests/local-storage-value-fidelity-oracle.property.test.ts`,
+    `local-storage`,
+    `value-fidelity`,
+  ],
+  [
+    `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
+    `live-query-observer`,
+    `retained-snapshot`,
+  ],
+  [
+    `db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,
+    `bucket-facade`,
+    `rollback-history`,
+  ],
+  [
+    `db/tests/query/aggregate-select-oracle.property.test.ts`,
+    `aggregate`,
+    `select-shapes`,
+  ],
+  [
+    `db/tests/query/compiler/in-evaluator-oracle.property.test.ts`,
+    `evaluators`,
+    `in`,
+  ],
+  [
+    `db/tests/transaction-ownership-oracle.property.test.ts`,
+    `transaction-ownership`,
+    `settlement-release`,
+  ],
+  [
+    `db/tests/query/includes-work-counter-oracle.test.ts`,
+    `includes-work`,
+    `ordered-window`,
+  ],
+  [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
+  // Owners of the replays that moved to the shared variables.
   [
     `browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts`,
     `opfs-worker`,
@@ -225,6 +383,32 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `db/tests/indexed-db/cross-tab-history-oracle.test.ts`,
     `indexeddb`,
     `cross-tab-history`,
+  ],
+  [`db/tests/proxy-oracle.test.ts`, `proxy`, `callback-history`],
+  [
+    `db/tests/indexed-db/pending-history-oracle.test.ts`,
+    `indexeddb`,
+    `pending-history`,
+  ],
+  [
+    `db/tests/proxy-revert-oracle.property.test.ts`,
+    `proxy`,
+    `revert-history revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
+  ],
+  [
+    `db/tests/proxy-native-methods-oracle.property.test.ts`,
+    `proxy`,
+    `native-array-methods native-typed-methods`,
+  ],
+  [
+    `db-ivm/tests/hash-identity-oracle.property.test.ts`,
+    `ivm`,
+    `hash-identity hash-identity-cycles`,
+  ],
+  [
+    `db-ivm/tests/multiset-consolidate-oracle.property.test.ts`,
+    `ivm`,
+    `multiset-consolidate`,
   ],
   [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
@@ -252,6 +436,26 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `interruption-settlement`,
   ],
   [
+    `offline-transactions/tests/fifo-retry-oracle.property.test.ts`,
+    `offline`,
+    `fifo-retry`,
+  ],
+  [
+    `offline-transactions/tests/leadership-replay-oracle.property.test.ts`,
+    `offline`,
+    `leadership.serial-work leadership.report leadership.delayed-read leadership.startup leadership.stale-read leadership.storage-failure`,
+  ],
+  [
+    `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
+    `offline`,
+    `serializer.mutation-wire serializer.date-marker serializer.version-two`,
+  ],
+  [
+    `offline-transactions/tests/transaction-settlement-oracle.property.test.ts`,
+    `offline`,
+    `settlement.transaction settlement.retry-record settlement.admission settlement.retry-decision`,
+  ],
+  [
     `react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`,
     `op-sqlite`,
     `columnar-sql-aliases result-carrier-equivalence write-marker-aliases`,
@@ -264,12 +468,14 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
 ]
 
 const owners = new Map<string, string>()
-for (const [file, prefix, suffixes] of ownerGroups) {
+const sources = new Map<string, string>()
+for (const [file, prefix, suffixes, source] of ownerGroups) {
   for (const suffix of suffixes.split(` `)) {
     const property = `${prefix}.${suffix}`
     if (owners.has(property))
       throw new Error(`duplicate replay owner: ${property}`)
     owners.set(property, `packages/${file}`)
+    if (source !== undefined) sources.set(property, `packages/${source}`)
   }
 }
 
@@ -315,6 +521,8 @@ export type OracleReplayManifestEntry = {
   property: string
   status: `assertion` | `statistics-only` | `no-named-owner`
   file?: string
+  /** The module that names the property, when the owner file imports it. */
+  source?: string
   cwd?: string
   command?: string
   testNamePattern?: string
@@ -377,6 +585,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
     property,
     status,
     file,
+    ...(sources.has(property) ? { source: sources.get(property) } : {}),
     cwd,
     testNamePattern: directReplayTestName(property),
     command:

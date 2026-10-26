@@ -1,14 +1,18 @@
 import { runInNewContext } from 'node:vm'
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { MultiSet } from '../src/multiset.js'
 import {
   equalHashValues,
   hash,
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
-import { oracleRuns } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 import { captureHashSession } from './hash-session'
 
 /**
@@ -787,56 +791,47 @@ function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
 }
 
 // ---------------------------------------------------------------------------
-// Campaigns. `TANSTACK_DB_IVM_HASH_IDENTITY_SEED` and
-// `TANSTACK_DB_IVM_HASH_IDENTITY_PATH` select a direct replay.
+// Campaigns. Each generated property has a fixed campaign and a random
+// campaign over the same grammar and check. A path replay of one property
+// runs its recorded history once and every other test stands aside. A seed
+// alone reseeds the random campaigns.
 
-const replaySeed = process.env.TANSTACK_DB_IVM_HASH_IDENTITY_SEED
-const replayPath = process.env.TANSTACK_DB_IVM_HASH_IDENTITY_PATH
 const FIXED_SEED = 2026930
-const campaigns =
-  replaySeed === undefined && replayPath === undefined
-    ? [
-        { name: String(FIXED_SEED), seed: FIXED_SEED as number | undefined },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed: replaySeed === undefined ? undefined : Number(replaySeed),
-        },
-      ]
+const PAIR_IDENTITY = `ivm.hash-identity`
+const CYCLIC_IDENTITY = `ivm.hash-identity-cycles`
 
-function runOptions(seed: number | undefined) {
-  if (replayPath !== undefined && replaySeed === undefined)
-    throw new Error(`TANSTACK_DB_IVM_HASH_IDENTITY_PATH requires a seed`)
-  if (
-    replaySeed !== undefined &&
-    (replaySeed.trim() === `` ||
-      typeof seed !== `number` ||
-      !Number.isSafeInteger(seed))
-  )
-    throw new Error(`TANSTACK_DB_IVM_HASH_IDENTITY_SEED must be an integer`)
-  return {
-    numRuns: oracleRuns(300),
-    ...(seed === undefined ? {} : { seed }),
-    ...(replayPath === undefined ? {} : { path: replayPath }),
-  }
-}
+const it = oracleReplayTest(vitestIt)
 
 describe(`hash identity oracle`, () => {
-  for (const { name, seed } of campaigns) {
-    it(`matches the identity model across generated value pairs (${name})`, () => {
-      fc.assert(
-        fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
-          expectPair(pair, [left, right]),
-        ),
-        runOptions(seed),
-      )
+  it(`matches the identity model across generated value pairs (${FIXED_SEED})`, () => {
+    fc.assert(
+      fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
+        expectPair(pair, [left, right]),
+      ),
+      { numRuns: oracleRuns(300), seed: FIXED_SEED },
+    )
+  })
+  oracleReplayTest(fcTest, PAIR_IDENTITY).prop(
+    [pairArb, fc.nat(), fc.nat()],
+    oraclePropertyOptions(300, PAIR_IDENTITY),
+  )(
+    `matches the identity model across generated value pairs (random)`,
+    (pair, left, right) => expectPair(pair, [left, right]),
+  )
+
+  it(`matches constructed verdicts across generated cyclic values (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(cyclicArb, expectCyclicPair), {
+      numRuns: oracleRuns(300),
+      seed: FIXED_SEED,
     })
-    it(`matches constructed verdicts across generated cyclic values (${name})`, () => {
-      fc.assert(fc.property(cyclicArb, expectCyclicPair), runOptions(seed))
-    })
-  }
+  })
+  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop(
+    [cyclicArb],
+    oraclePropertyOptions(300, CYCLIC_IDENTITY),
+  )(
+    `matches constructed verdicts across generated cyclic values (random)`,
+    expectCyclicPair,
+  )
 
   // Positive execution witness: the fixed campaign reaches every value kind
   // and every mutation, with both verdicts.

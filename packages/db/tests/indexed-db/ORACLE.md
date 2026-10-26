@@ -362,7 +362,8 @@ pnpm exec playwright install chromium firefox webkit
 pnpm test:indexed-db:browser
 # Direct selected cross-tab history; the fixed campaign does not run first:
 TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.cross-tab-history pnpm test:indexed-db:oracles
-TANSTACK_INDEXEDDB_PENDING_SEED=<seed> TANSTACK_INDEXEDDB_PENDING_PATH=<path> pnpm test:indexed-db:oracles
+# Direct selected pending history; the fixed and other tests stand aside:
+TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.pending-history pnpm test:indexed-db:oracles
 TANSTACK_INDEXEDDB_BROWSER_SEED=<seed> TANSTACK_INDEXEDDB_BROWSER_PATH=<path> pnpm test:indexed-db:browser --project=chromium
 ```
 

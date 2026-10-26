@@ -40,7 +40,7 @@
  * a fixed seed, not skipped.
  *
  * The rule cannot see a run count lowered to any value above 1, a run count
- * or seed held in a variable, a test function renamed before its modifier is
+ * or seed held in a variable that is not a constant bound to a number, a test function renamed before its modifier is
  * read (`const t = it; t.skip(...)`), a call to a local helper that registers
  * tests under a condition, or a condition inside a loop's iterable, as in
  * `cases.filter(() => !process.env.CI)`. Reviewers still check those.
@@ -314,15 +314,21 @@ function findVariable(scope, name) {
 }
 
 /** A number literal, or a constant bound to one. */
-function isFixedSeed(node, sourceCode) {
-  if (isNumberLiteral(node)) return true
-  if (node.type !== `Identifier`) return false
+/** The number literal that `node` is, or that a constant `node` names. */
+function constantNumber(node, sourceCode) {
+  if (isNumberLiteral(node)) return node
+  if (node?.type !== `Identifier`) return undefined
   const definition = findVariable(sourceCode.getScope(node), node.name)?.defs[0]
-  return (
-    definition?.type === `Variable` &&
+  return definition?.type === `Variable` &&
     definition.parent.kind === `const` &&
     isNumberLiteral(definition.node.init)
-  )
+    ? definition.node.init
+    : undefined
+}
+
+/** A number literal, or a constant bound to one. */
+function isFixedSeed(node, sourceCode) {
+  return constantNumber(node, sourceCode) !== undefined
 }
 
 function propertyName(property) {
@@ -430,7 +436,7 @@ export default {
         const { root, names } = calleeChain(node.callee)
         if (runHelpers.has(root) && names.length === 0) {
           if (
-            isSingleRunLiteral(node.arguments[0]) &&
+            isSingleRunLiteral(constantNumber(node.arguments[0], sourceCode)) &&
             !isPinnedRunCount(node)
           ) {
             context.report({ node: node.arguments[0], messageId: `singleRun` })
@@ -494,17 +500,16 @@ export default {
       Property(node) {
         if (
           replaySelectionModule.test(context.filename) ||
-          propertyName(node) !== `numRuns` ||
-          !isNumberLiteral(node.value) ||
-          isPinnedRunCount(node.value)
+          propertyName(node) !== `numRuns`
         ) {
           return
         }
+        // A constant bound to a number literal counts as that literal.
+        const count = constantNumber(node.value, sourceCode)
+        if (count === undefined || isPinnedRunCount(node.value)) return
         context.report({
           node,
-          messageId: isSingleRunLiteral(node.value)
-            ? `singleRun`
-            : `literalRuns`,
+          messageId: isSingleRunLiteral(count) ? `singleRun` : `literalRuns`,
         })
       },
     }

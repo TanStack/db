@@ -269,7 +269,6 @@ describe(`guarded oracle replay`, () => {
   }, 40_000)
 
   it.each([
-    [`coverage-registry.claim-churn`, `no-named-owner`],
     [`includes.scenario-statistics`, `statistics-only`],
     [`absent.property`, `unknown oracle property`],
   ])(
@@ -364,28 +363,19 @@ describe(`oracle replay reporting`, () => {
 })
 
 describe(`named oracle replay manifest`, () => {
-  it(`accounts for every registry name without deleting unavailable names`, () => {
+  it(`accounts for every registry name`, () => {
     expect(
       new Set(oracleReplayManifest.map(({ property }) => property)),
     ).toEqual(registeredOracleProperties)
-    expect(
-      oracleReplayManifest.filter(({ property }) =>
-        /^(coverage-registry|predicate-subtraction|load-subset-full-flow)\./.test(
-          property,
-        ),
-      ),
-    ).toHaveLength(14)
-    expect(
-      oracleReplayManifest.filter(({ property }) =>
-        property.startsWith(`load-subset-refinement.`),
-      ),
-    ).toHaveLength(11)
   })
 
   it(`maps literal owners and all computed publication cells to source files`, () => {
     for (const entry of oracleReplayManifest) {
       if (entry.file === undefined) continue
-      const source = readFileSync(join(repositoryDirectory, entry.file), `utf8`)
+      const source = readFileSync(
+        join(repositoryDirectory, entry.source ?? entry.file),
+        `utf8`,
+      )
       if (
         entry.property.startsWith(`includes-publication.`) &&
         entry.property.split(`.`).length === 4
@@ -445,9 +435,25 @@ describe(`named oracle replay manifest`, () => {
         expect(Number(cell)).toBeLessThan(8)
         expect(source).toContain(`\`pagination.matrix.${family}-\${index}\``)
       } else {
-        expect(source).toContain(`\`${entry.property}\``)
+        // A module may spell the name in any string quotes.
+        expect(
+          [`\``, `'`, `"`].some((quote) =>
+            source.includes(`${quote}${entry.property}${quote}`),
+          ),
+          `${entry.source ?? entry.file} names ${entry.property}`,
+        ).toBe(true)
       }
     }
+  })
+
+  it(`names an owner for every registered property`, () => {
+    // A registered name that no file owns would pass replay validation and
+    // run nothing. Every new registered property must name its owner.
+    expect(
+      oracleReplayManifest
+        .filter(({ status }) => status === `no-named-owner`)
+        .map(({ property }) => property),
+    ).toEqual([])
   })
 
   it(`gives every index and pagination matrix property a direct test selector`, () => {

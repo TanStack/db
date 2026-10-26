@@ -28,6 +28,8 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     },
     `fc.assert(property, oraclePropertyOptions(12, 'cleanup-queue.history'))`,
     `fc.assert(property, { numRuns: oracleRuns(20) })`,
+    `const BINDING_RUNS = 12\nfc.assert(property, { numRuns: oracleRuns(BINDING_RUNS) })`,
+    `const fixedSeed = 7\nconst runs = 30\nfc.assert(property, { seed: fixedSeed, numRuns: runs })`,
     // A replay passes the recorded path, and a witness a fixed seed.
     `fc.check(property, { seed: failed.seed, path: failed.counterexamplePath, numRuns: 1 })`,
     `fc.check(property, { seed: 205203, numRuns: 1 })`,
@@ -310,6 +312,18 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
       code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\noracleReplayRequested() && it('law', () => check())`,
       languageOptions: { sourceType: `module` },
       errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `const BINDING_RUNS = 12\nfc.assert(property, { numRuns: BINDING_RUNS })`,
+      errors: [{ messageId: `literalRuns` }],
+    },
+    {
+      code: `const replayRuns = 1\nfc.assert(property, { numRuns: replayRuns })`,
+      errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `const base = 1\nfc.assert(property, oraclePropertyOptions(base, 'p'))`,
+      errors: [{ messageId: `singleRun` }],
     },
     {
       // A comment does not grant an exception.

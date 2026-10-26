@@ -34,7 +34,11 @@ export function oracleReplayReporter(
     return {}
   return {
     asyncReporter: async (details) => {
-      // All named assertion owners use async fast-check properties.
+      // fast-check accepts an async reporter only for an async property, and
+      // a sync reporter would lose the async failure formatter. The guarded
+      // runner therefore witnesses async properties. A synchronous owner fails
+      // loudly under it with fast-check's asyncReporter error; replay it
+      // directly with the shared TANSTACK_DB_ORACLE_* variables instead.
       // Statistics sampling has no assertion reporter and cannot earn reach.
       const witness: OracleReplayWitness = {
         property,
