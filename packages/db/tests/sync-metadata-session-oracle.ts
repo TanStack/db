@@ -121,7 +121,7 @@ export type SessionAction =
       undefinedValue?: boolean
     }
   | { type: `collectionDelete`; key: SessionCollectionKey }
-  | { type: `hold`; store?: boolean }
+  | { type: `hold`; store?: boolean; read?: boolean }
   | { type: `release` }
   | { type: `seed`; key: SessionRowKey; narrow?: boolean; bare?: boolean }
   | { type: `insertOverSeed`; key: SessionRowKey; metadata: boolean }
@@ -144,6 +144,12 @@ export type SessionLane = {
    * treats both kinds alike: neither changes what the source reads.
    */
   storeHold?: boolean
+  /**
+   * Whether `hold` may instead keep a wrapping sync's storage read in
+   * flight. The wrapper buffers a transaction committed then until the read
+   * ends. Like the other holds, it changes nothing the source reads.
+   */
+  readHold?: boolean
   /**
    * Whether `collectionSet` may store `undefined`. `get` cannot tell such a
    * key from an absent one, but `list()` includes it. The persisted lane
@@ -267,6 +273,19 @@ export const persistedSeedLane: SessionLane = {
  * metadata-keeping writes let a row's metadata stay a seed's after the
  * source wrote the row, so a later seed can replace it.
  */
+/**
+ * Source writes while a storage read is in flight, nested, through the
+ * persisted wrapper: a read hold keeps an on-demand load open, so the wrapper
+ * buffers transactions committed during it.
+ */
+export const persistedReadLane: SessionLane = {
+  name: `persisted-reads`,
+  maxDepth: 2,
+  seeds: false,
+  storeHold: true,
+  readHold: true,
+  insertsReplace: true,
+}
 export const persistedNestedSeedLane: SessionLane = {
   name: `persisted-nested-seeds`,
   maxDepth: 2,
@@ -373,9 +392,15 @@ export function sessionActionArbitrary(
         ]),
     weighted(
       3,
-      lane.storeHold
-        ? fc.boolean().map((store) => ({ type: `hold` as const, store }))
-        : fc.constant({ type: `hold` as const }),
+      lane.readHold === true
+        ? fc.constantFrom(`core`, `store`, `read`).map((kind) => ({
+            type: `hold` as const,
+            store: kind === `store`,
+            read: kind === `read`,
+          }))
+        : lane.storeHold
+          ? fc.boolean().map((store) => ({ type: `hold` as const, store }))
+          : fc.constant({ type: `hold` as const }),
     ),
     weighted(1, fc.constant({ type: `release` as const })),
   ]
@@ -440,8 +465,13 @@ export function historyRegimes(
 ): Set<string> {
   const model = createSessionModel(lane)
   const regimes = new Set<string>()
+  let reading = false
   for (const [step, action] of history.entries()) {
     if (!isLegal(lane, model, action)) continue
+    if (action.type === `hold` && action.read === true) reading = true
+    if (action.type === `release`) reading = false
+    if (reading && writesSource(action) && model.depth > 0)
+      regimes.add(`write during a storage read`)
     const before = {
       held: model.heldTransactions,
       depth: model.depth,
@@ -1141,8 +1171,11 @@ export type SessionDriver = {
   truncate: () => void
   collectionSet: (key: SessionCollectionKey, value: unknown) => void
   collectionDelete: (key: SessionCollectionKey) => void
-  /** `store` holds a wrapping sync's next durable step instead of core. */
-  hold: (store: boolean) => void
+  /**
+   * `store` holds a wrapping sync's next durable step instead of core;
+   * `read` keeps a wrapping sync's storage read in flight.
+   */
+  hold: (store: boolean, read?: boolean) => void
   release: () => Promise<void>
   seed?: (key: SessionRowKey, row: unknown, metadata: unknown) => void
   /** Whether a thrown error is core's duplicate-key rejection. */
@@ -1663,7 +1696,8 @@ function planAction(
       return (driver) => driver.collectionDelete(action.key)
     case `hold`:
       model.hold()
-      return (driver) => driver.hold(action.store === true)
+      return (driver) =>
+        driver.hold(action.store === true, action.read === true)
     case `release`:
       model.release()
       return (driver) => driver.release()

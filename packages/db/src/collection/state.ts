@@ -72,7 +72,12 @@ interface PendingSyncedTransaction<
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
   /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
-  preserveHydrationSeedKeys?: boolean
+  /**
+   * Keys whose writes keep their hydration-seed status and fix no adapter
+   * authority: a DbClient seed chunk's keys, or a wrapping sync's storage
+   * read's seed rows.
+   */
+  preserveHydrationSeedKeys?: ReadonlySet<TKey>
   /** Builds the error for an open transaction whose insert a replay invalidates. */
   duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
   /**
@@ -87,6 +92,7 @@ export type StagedSyncTransaction<TKey extends string | number> = {
   truncate?: boolean
   operations: ReadonlyArray<{ key: unknown }>
   rowMetadataWrites: ReadonlyMap<TKey, unknown>
+  preserveHydrationSeedKeys?: ReadonlySet<TKey>
 }
 
 export type PendingMetadataWrite =
@@ -1104,7 +1110,7 @@ export class CollectionStateManager<
           operation.type = disposition
         }
         this.applyPendingSyncOperation(projection, operation)
-        if (!transaction.preserveHydrationSeedKeys) {
+        if (!transaction.preserveHydrationSeedKeys?.has(key)) {
           projection.sourceKeys.add(key)
           if (transaction.committed) projection.acceptedSourceKeys.add(key)
         }
@@ -1283,10 +1289,7 @@ export class CollectionStateManager<
           this.syncedMetadata.clear()
           this.hydrationSeedKeys.clear()
           this.hydratedKeys.clear()
-          if (
-            !transaction.preserveHydrationSeedKeys &&
-            this.appliedAdapterKeys
-          ) {
+          if (this.appliedAdapterKeys) {
             this.hasAppliedAdapterTruncate = true
             this.appliedAdapterKeys.clear()
           }
@@ -1347,7 +1350,7 @@ export class CollectionStateManager<
           this.pendingLocalChanges.delete(key)
           this.pendingLocalOrigins.delete(key)
           if (!this.isDeferredSyncKey(key)) this.heldOptimisticRows.delete(key)
-          if (!transaction.preserveHydrationSeedKeys) {
+          if (!transaction.preserveHydrationSeedKeys?.has(key)) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
             // A write that brings a deleted row back keeps the metadata the
@@ -1361,7 +1364,7 @@ export class CollectionStateManager<
 
         for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
           if (
-            !transaction.preserveHydrationSeedKeys &&
+            !transaction.preserveHydrationSeedKeys?.has(key) &&
             !this.appliedAdapterKeys?.has(key)
           )
             this.appliedAdapterKeys?.set(key, false)

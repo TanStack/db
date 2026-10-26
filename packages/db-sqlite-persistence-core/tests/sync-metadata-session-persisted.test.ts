@@ -12,6 +12,7 @@ import {
   persistedFlatLane,
   persistedNestedLane,
   persistedNestedSeedLane,
+  persistedReadLane,
   persistedSeedLane,
   runSessionHistory,
   sessionCollectionKeys,
@@ -57,7 +58,8 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * `persisted-cached` (row 1 is in storage when the run starts),
  * `persisted-conflicts` (inner writes that land ahead of enclosing ones), and
  * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
- * row. Seeds use a `DbClient` that owns the persisted Collection. The adapter ignores
+ * row, and `persisted-reads`, whose read hold keeps an on-demand storage
+ * read in flight. Seeds use a `DbClient` that owns the persisted Collection. The adapter ignores
  * stored metadata, so restart and resume reads are outside these lanes.
  */
 
@@ -125,6 +127,7 @@ let run = 0
 async function createPersistedDriver(
   withClient = false,
   cached = false,
+  reads = false,
 ): Promise<SessionDriver> {
   const store = createHoldingAdapter(cached)
   const id = `sync-metadata-session-persisted-${run++}`
@@ -134,12 +137,15 @@ async function createPersistedDriver(
   const options = persistedCollectionOptions<Row, number>({
     id,
     getKey: (row) => row.id,
+    // A read hold needs an on-demand load to keep in flight.
+    ...(reads ? { syncMode: `on-demand` as const } : {}),
     sync: {
       sync: (actions) => {
         sync = actions
         actions.begin()
         actions.commit()
         actions.markReady()
+        return reads ? { loadSubset: () => true } : undefined
       },
     },
     onInsert: () =>
@@ -194,7 +200,13 @@ async function createPersistedDriver(
   }
   const metadata = () => sync.metadata!
   const read = (value: unknown) => (value === undefined ? absentMarker : value)
+  let readGate: { resolve: () => void } | undefined
+  let reading: Promise<unknown> | undefined
   const release = async () => {
+    readGate?.resolve()
+    readGate = undefined
+    await reading
+    reading = undefined
     store.releaseStore()
     const pending = blocker
     blocker = undefined
@@ -250,8 +262,23 @@ async function createPersistedDriver(
     truncate: () => sync.truncate(),
     collectionSet: (key, value) => metadata().collection.set(key, value),
     collectionDelete: (key) => metadata().collection.delete(key),
-    hold: (holdStore) => {
-      if (holdStore) store.holdNextStore()
+    hold: (holdStore, holdRead) => {
+      if (holdRead) {
+        let open!: () => void
+        const gate = new Promise<void>((resolve) => {
+          open = resolve
+        })
+        readGate = { resolve: open }
+        const loadSubset = store.adapter.loadSubset
+        store.adapter.loadSubset = async (...args) => {
+          await gate
+          store.adapter.loadSubset = loadSubset
+          return loadSubset(...args)
+        }
+        reading = Promise.resolve(
+          collection._sync.loadSubset({ limit: 100 + holdCount++ }),
+        ).catch(() => undefined)
+      } else if (holdStore) store.holdNextStore()
       else blocker = collection.insert({ id: 1000 + holdCount++, v: 0 })
     },
     release,
@@ -317,7 +344,11 @@ async function assertPersistedHistory(
   lane: SessionLane = persistedFlatLane,
 ): Promise<void> {
   const { mismatch } = await runSessionHistory(lane, history, () =>
-    createPersistedDriver(lane.seeds, lane.cached === true),
+    createPersistedDriver(
+      lane.seeds,
+      lane.cached === true,
+      lane.readHold === true,
+    ),
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
 }
@@ -627,6 +658,14 @@ const extraLanes: Array<{
       `duplicate source insert`,
       `store hold`,
     ],
+  },
+  // Writes while a storage read is in flight follow the same laws: the
+  // wrapper buffers their transactions until the read ends.
+  {
+    lane: persistedReadLane,
+    seed: 2_220_017,
+    runs: 150,
+    reach: [`write during a storage read`, `nested commit`, `store hold`],
   },
   // A seed's metadata still governs a row whose metadata an accepted
   // re-insert kept, here also when the re-insert committed ahead of the

@@ -11157,7 +11157,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
+  // The last write for a key wins (decision 12 and the row-metadata rules of
+  // 2026-10-05): an insert without metadata names the row's whole metadata,
+  // so it clears an explicit write before it in the same transaction, as it
+  // does outside hydration. Query writes a row before it stamps the row's
+  // owners, so its owners survive.
+  it(`clears row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
     const sync: SyncConfig<Todo, string> = {
@@ -11190,8 +11195,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     await collection.stateWhenReady()
     await flushAsyncWork()
 
-    expect(adapter.rowMetadata.get(`remote-1`)).toEqual(ownership)
-    expect(collection._state.syncedMetadata.get(`remote-1`)).toEqual(ownership)
+    expect(adapter.rowMetadata.get(`remote-1`)).toBeUndefined()
+    expect(collection._state.syncedMetadata.get(`remote-1`)).toBeUndefined()
   })
 
   it(`resets stale row metadata for a metadata-less insert with no queued metadata`, async () => {
@@ -14813,7 +14818,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     await readyPromise
   })
 
-  it(`preserves metadata only for rows supplied by the owning hydration`, async () => {
+  // A row the storage read supplies is a previous run's cache, a seed
+  // (decision 9). A source insert without metadata names the whole row, so
+  // it clears that row's metadata as it does for any seed (decision 12: a
+  // write during a storage read follows the same rules).
+  it(`clears a cached row's metadata when the source inserts it during the owning hydration`, async () => {
     const adapter = createRecordingAdapter([
       { id: `hydrated`, title: `Persisted baseline` },
     ])
@@ -14887,9 +14896,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }).toEqual({
         publicHydrated: { id: `hydrated`, title: `Source replacement` },
         publicNew: { id: `new`, title: `Genuinely new row` },
-        hydratedMetadata: { source: `persisted` },
+        hydratedMetadata: undefined,
         newMetadata: undefined,
-        durableMetadataMutations: [{ type: `delete`, key: `new` }],
+        durableMetadataMutations: [
+          { type: `delete`, key: `hydrated` },
+          { type: `delete`, key: `new` },
+        ],
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -15236,8 +15248,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           Promise.allSettled(receipts),
           `source begun during hydration settled`,
         )
-        // Accepted source writes follow the baseline; metadata survival belongs
-        // to the rows supplied by the original owning hydration, not later loads.
+        // Accepted source writes follow the baseline. The source's insert
+        // without metadata names the whole row, so it clears the cached row's
+        // metadata whichever load supplied it (decisions 9 and 12).
         expect({
           outcomes,
           loads,
@@ -15256,7 +15269,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           status: `ready`,
           publicRow: { ...baseline, title: `source` },
           durableRow: { ...baseline, title: `source` },
-          metadata: ownerSuppliesRow ? { owner: `persisted` } : undefined,
+          metadata: undefined,
         })
       } catch (error) {
         hasPrimaryFailure = true
@@ -16793,15 +16806,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
-  // The same targeted path must respect DbClient hydration authority. A seed
-  // key may also exist in older durable storage. Active complete and filtered
-  // demand, and retired demand, cannot let a peer delta replace that
-  // source-owned value. The filtered case makes the durable row leave the
-  // predicate while the hydrated seed still matches it. The ordinary row
-  // beside it proves the notice was processed, so a
-  // subject that simply drops all targeted messages cannot pass. The model is
-  // the authored durable snapshot with the protected seed overlaid; public
-  // rows and change keys are checked after the targeted commit publishes.
+  // A peer's notice reports a source write in this run, and the last write
+  // wins: it replaces a DbClient seed this tab holds, row and metadata
+  // (decision 11 in docs/contributing/oracle-reviews/
+  // 2026-10-22-sync-metadata-session.md). Before that decision this test held
+  // the seed against the peer. Active complete and filtered demand, and
+  // retired demand, each publish the peer's durable result for the seed key
+  // as for any public row. The filtered case makes the durable row leave the
+  // predicate. The ordinary row beside it proves the notice was processed.
+  // The model is the authored durable snapshot; public rows, the seed key's
+  // metadata, and change keys are checked after the targeted commit
+  // publishes.
   it.each(
     ([`active demand`, `active filter`, `retired demand`] as const).flatMap(
       (route) =>
@@ -16815,7 +16830,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
     ),
   )(
-    `preserves a hydrated seed and metadata during a targeted $mutation with $route ($metadataAction)`,
+    `replaces a hydrated seed and metadata with a peer's targeted $mutation with $route ($metadataAction)`,
     async ({ route, mutation, metadataAction }) => {
       const ordinary =
         route === `active filter`
@@ -17031,24 +17046,27 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await flushAsyncWork()
         const expected =
           route === `active filter`
-            ? new Map([
-                ...expectedTargetedSnapshot(before, authoredDurable, `Keep`),
-                [seed.id, seed] as const,
-              ])
+            ? expectedTargetedSnapshot(before, authoredDurable, `Keep`)
             : expectedScopedSnapshot(
                 before,
                 authoredDurable,
-                new Map([[seed.id, seed]]),
+                new Map(),
                 route === `active demand`,
               )
         expectExactSnapshot(publicRows(), expected)
-        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+        // Row metadata lives with a public row, so a seed key that the peer
+        // deleted or moved out of demand keeps none.
+        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(
+          metadataAction === `set` && expected.has(seed.id)
+            ? { owner: `peer durable` }
+            : undefined,
+        )
         expect(publishedSnapshots).toHaveLength(1)
         for (const snapshot of publishedSnapshots)
           expectExactSnapshot(snapshot, expected)
         expect(publishedOrdinaryValues).toEqual([durableOrdinary])
         expect(publishedKeys).toContain(ordinary.id)
-        expect(publishedKeys).not.toContain(seed.id)
+        expect(publishedKeys).toContain(seed.id)
       } catch (error) {
         hasPrimaryFailure = true
         throw error
@@ -17855,7 +17873,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
-  it(`rejects a source transaction that crosses a hydration cycle`, async () => {
+  // A source transaction binds to a storage read when it commits, so it may
+  // stay open across one (decision 12). Its insert is the last write to the
+  // row: it follows the read's row, and without metadata it clears the
+  // cached row's metadata.
+  it(`commits a source transaction that stays open across a hydration cycle`, async () => {
     const adapter = createRecordingAdapter()
     const firstEntered = createEventGate()
     const releaseFirst = createEventGate()
@@ -17916,11 +17938,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       const second = Promise.resolve(collection._sync.loadSubset(secondOptions))
       await secondEntered.promise
-      expect(() => sourceParams.commit()).toThrow(
-        `cannot cross a hydration cycle`,
-      )
+      const receipt = Promise.resolve(sourceParams.commit())
       releaseSecond.resolve()
       await second
+      await receipt
 
       expect({
         publicRow: stripVirtualProps(collection.get(`shared`)),
@@ -17928,9 +17949,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         durableMetadata: adapter.rowMetadata.get(`shared`),
         status: collection.status,
       }).toEqual({
-        publicRow: { id: `shared`, title: `second hydration` },
-        durableRow: { id: `shared`, title: `second hydration` },
-        durableMetadata: { owner: `second hydration` },
+        publicRow: { id: `shared`, title: `source value` },
+        durableRow: { id: `shared`, title: `source value` },
+        durableMetadata: undefined,
         status: `ready`,
       })
     } catch (error) {
@@ -17948,7 +17969,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`rejects a source transaction begun before hydration and committed after it`, async () => {
+  // Decision 12: a transaction begun before a storage read and committed
+  // after it applies. Its insert is the last write to the row.
+  it(`commits a source transaction begun before hydration and committed after it`, async () => {
     const adapter = createRecordingAdapter()
     const hydrationEntered = createEventGate()
     const releaseHydration = createEventGate()
@@ -17998,18 +18021,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       releaseHydration.resolve()
       await hydration
 
-      expect(() => sourceParams.commit()).toThrow(
-        `cannot cross a hydration cycle`,
-      )
+      await Promise.resolve(sourceParams.commit())
       expect({
         publicRow: stripVirtualProps(collection.get(`shared`)),
         durableRow: adapter.rows.get(`shared`),
         durableMetadata: adapter.rowMetadata.get(`shared`),
         status: collection.status,
       }).toEqual({
-        publicRow: { id: `shared`, title: `hydrated value` },
-        durableRow: { id: `shared`, title: `hydrated value` },
-        durableMetadata: { owner: `hydration` },
+        publicRow: { id: `shared`, title: `source value` },
+        durableRow: { id: `shared`, title: `source value` },
+        durableMetadata: undefined,
         status: `ready`,
       })
     } catch (error) {
@@ -18025,7 +18046,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`preserves full-reload metadata only for rows supplied by that reload`, async () => {
+  // A row the storage read supplies is a previous run's cache, a seed
+  // (decision 9). A source insert without metadata names the whole row, so
+  // it clears that row's metadata as it does for any seed (decision 12: a
+  // write during a storage read follows the same rules).
+  it(`clears a cached row's metadata when the source inserts it during a full reload`, async () => {
     const adapter = createRecordingAdapter()
     adapter.rowMetadata.set(`hydrated`, { source: `persisted` })
     adapter.rowMetadata.set(`new`, { source: `orphaned` })
@@ -18142,9 +18167,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }).toEqual({
         publicHydrated: { id: `hydrated`, title: `Source replacement` },
         publicNew: { id: `new`, title: `Genuinely new row` },
-        hydratedMetadata: { source: `persisted` },
+        hydratedMetadata: undefined,
         newMetadata: undefined,
-        durableMetadataMutations: [{ type: `delete`, key: `new` }],
+        durableMetadataMutations: [
+          { type: `delete`, key: `hydrated` },
+          { type: `delete`, key: `new` },
+        ],
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -20014,7 +20042,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`rejects a transaction begun before hydration at its write cut`, async () => {
+  // Decision 12: a transaction begun before a storage read may write and
+  // commit while it runs. When the read fails, its partial update publishes
+  // over the recovered durable baseline, as one begun during the read does
+  // (the next test).
+  it(`commits a transaction begun before a failing storage read`, async () => {
     const requestFailure = new Error(`incremental subset rejected`)
     const baseline: Todo = {
       id: `shared`,
@@ -20058,32 +20090,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void load.catch(() => undefined)
       await loadEntered.promise
 
-      expect(() =>
-        sourceParams.write({
-          type: `update`,
-          value: { id: baseline.id, title: `Source update` },
-        }),
-      ).toThrow(`cannot cross a hydration cycle`)
-      expect(() => sourceParams.commit()).toThrow(
-        `cannot cross a hydration cycle`,
-      )
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `Source update` },
+      })
+      const receipt = Promise.resolve(sourceParams.commit())
       rejectLoad.resolve()
 
       await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      const expected: Todo = { ...baseline, title: `Source update` }
       expect({
         status: collection.status,
         publicError: collection._lifecycle.getSyncError(),
         publicRow: stripVirtualProps(collection.get(baseline.id)),
         durableRow: adapter.rows.get(baseline.id),
-        recoverySnapshotCalls: adapter.loadResumeSnapshotCalls.filter(
-          ({ includeRows }) => includeRows === true,
-        ).length,
       }).toEqual({
         status: `ready`,
         publicError: undefined,
-        publicRow: undefined,
-        durableRow: baseline,
-        recoverySnapshotCalls: 0,
+        publicRow: expected,
+        durableRow: expected,
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -32036,6 +32062,7 @@ it.each([`named keys`, `a full reload`] as const)(
     const coordinator = createCoordinatorHarness()
     const collectionId = `remote-write-then-seed`
     const client = new DbClient()
+    let source!: TodoSyncParams
     const collection = client.collection(
       collectionOptions(
         persistedCollectionOptions<Todo, string>({
@@ -32044,6 +32071,7 @@ it.each([`named keys`, `a full reload`] as const)(
           syncMode: `on-demand`,
           sync: {
             sync: (params) => {
+              source = params
               params.markReady()
               return { loadSubset: () => true }
             },
@@ -32055,6 +32083,7 @@ it.each([`named keys`, `a full reload`] as const)(
     try {
       await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
       adapter.rows.set(`remote`, { id: `remote`, title: `written by a peer` })
+      adapter.rowMetadata.set(`remote`, { peer: true })
       coordinator.emit(
         {
           type: `tx:committed`,
@@ -32101,7 +32130,11 @@ it.each([`named keys`, `a full reload`] as const)(
         ],
       })
       await flushAsyncWork()
-      expect(collection.get(`remote`)?.title).toBe(`written by a peer`)
+      // The peer wrote the row and its metadata, so the seed supplies neither.
+      expect({
+        title: collection.get(`remote`)?.title,
+        metadata: source.metadata?.row.get(`remote`),
+      }).toEqual({ title: `written by a peer`, metadata: { peer: true } })
     } finally {
       await client.cleanup()
     }
@@ -32168,3 +32201,240 @@ it(`judges enclosing inserts again when a buffered inner transaction is abandone
   await flushAsyncWork()
   expect(source.metadata?.row.get(`1`)).toBeUndefined()
 })
+
+// A peer that deletes a row ends it for this session too. When this tab's
+// storage read validates its public keys and finds the row gone, the delete
+// is a source delete, so a later DbClient hydration seed cannot bring the row
+// back (D4). Recorded in
+// docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
+it(`keeps a row a peer deleted absent when a later seed arrives`, async () => {
+  const adapter = createRecordingAdapter([{ id: `cached`, title: `cached` }])
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `peer-delete-then-seed`
+  const client = new DbClient()
+  const collection = client.collection(
+    collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    ),
+  )
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+    const demand = {}
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(collection._sync.loadSubset(demand)),
+      `cached row loaded`,
+    )
+    expect(collection.get(`cached`)?.title).toBe(`cached`)
+    collection._sync.unloadSubset(demand)
+    adapter.rows.delete(`cached`)
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `peer-delete`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+      },
+      `peer`,
+      collectionId,
+    )
+    await vi.waitFor(() => expect(collection.has(`cached`)).toBe(false))
+    client.hydrate({
+      collections: [
+        {
+          collectionId,
+          rows: [
+            { key: `cached`, value: { id: `cached`, title: `stale seed` } },
+          ],
+        },
+      ],
+    })
+    await flushAsyncWork()
+    expect(collection.has(`cached`)).toBe(false)
+  } finally {
+    await client.cleanup()
+  }
+})
+
+// Writes while a storage read is in flight follow the same metadata rules as
+// other writes: the last write for a key wins, so an insert without metadata
+// clears an explicit write before it, and the source reads that clear
+// (read-your-writes). Recorded in
+// docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
+it(`clears an explicit metadata write with a later insert during a storage read`, async () => {
+  const adapter = createRecordingAdapter([])
+  let source!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `insert-clears-during-read`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.markReady()
+          return { loadSubset: () => true }
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+  source.begin()
+  source.write({
+    type: `insert`,
+    value: { id: `1`, title: `first` },
+    metadata: { m: 0 },
+  })
+  await atPersistedOracleCheckpoint(
+    Promise.resolve(source.commit()),
+    `first row applied`,
+  )
+  const gate = createDeferred()
+  const loadSubset = adapter.loadSubset
+  adapter.loadSubset = async (...args) => {
+    await gate.promise
+    return loadSubset(...args)
+  }
+  const loading = Promise.resolve(collection._sync.loadSubset({ limit: 5 }))
+  await flushAsyncWork()
+  source.begin()
+  source.metadata?.row.set(`1`, { explicit: true })
+  source.write({ type: `insert`, value: { id: `1`, title: `second` } })
+  expect(source.metadata?.row.get(`1`)).toBeUndefined()
+  const receipt = source.commit()
+  gate.resolve()
+  await loading
+  await receipt
+  await flushAsyncWork()
+  expect(source.metadata?.row.get(`1`)).toBeUndefined()
+})
+
+// A peer's write in this run replaces a DbClient seed this tab already holds
+// (decision 11), and a later seed does not bring the old seed back. An equal
+// re-insert of the peer's row by this tab's source keeps its metadata, as an
+// equal re-insert of a source row does. Recorded in
+// docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
+it.each([
+  `replaces a held seed`,
+  `keeps metadata on an equal re-insert`,
+] as const)(
+  `treats a row a peer wrote this run as a source row (%s)`,
+  async (check) => {
+    const adapter = createRecordingAdapter([])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `peer-row-is-source-${check.replace(/ /g, `-`)}`
+    const client = new DbClient()
+    let source!: TodoSyncParams
+    const collection = client.collection(
+      collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      ),
+    )
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+      if (check === `replaces a held seed`)
+        client.hydrate({
+          collections: [
+            {
+              collectionId,
+              rows: [
+                {
+                  key: `remote`,
+                  value: { id: `remote`, title: `earlier seed` },
+                  metadata: { seed: 0 },
+                },
+              ],
+            },
+          ],
+        })
+      await flushAsyncWork()
+      adapter.rows.set(`remote`, { id: `remote`, title: `written by a peer` })
+      adapter.rowMetadata.set(`remote`, { peer: true })
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `peer-write`,
+          latestRowVersion: 1,
+          requiresFullReload: false,
+          changedRows: [
+            {
+              key: `remote`,
+              value: { id: `remote`, title: `written by a peer` },
+            },
+          ],
+          deletedKeys: [],
+        },
+        `peer`,
+        collectionId,
+      )
+      await flushAsyncWork()
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({})),
+        `demand loaded`,
+      )
+      await vi.waitFor(() =>
+        expect(collection.get(`remote`)?.title).toBe(`written by a peer`),
+      )
+      if (check === `replaces a held seed`) {
+        client.hydrate({
+          collections: [
+            {
+              collectionId,
+              rows: [
+                {
+                  key: `remote`,
+                  value: { id: `remote`, title: `stale seed` },
+                  metadata: { seeded: true },
+                },
+              ],
+            },
+          ],
+        })
+      } else {
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `remote`, title: `written by a peer` },
+        })
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(source.commit()),
+          `equal re-insert applied`,
+        )
+      }
+      await flushAsyncWork()
+      expect({
+        title: collection.get(`remote`)?.title,
+        metadata: source.metadata?.row.get(`remote`),
+      }).toEqual({ title: `written by a peer`, metadata: { peer: true } })
+    } finally {
+      await client.cleanup()
+    }
+  },
+)

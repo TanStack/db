@@ -109,6 +109,7 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-conflicts`,
   `sync-metadata-session.persisted-cached`,
   `sync-metadata-session.persisted-nested-seeds`,
+  `sync-metadata-session.persisted-reads`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
   `collection-publication.metadata-rollback`,

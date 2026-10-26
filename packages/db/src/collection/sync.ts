@@ -36,6 +36,13 @@ import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
 import type { Deferred } from '../deferred'
 
+/**
+ * Internal marker on a sync write: an update that names the whole row, as an
+ * insert does. The persisted wrapper hands an insert it already judged this
+ * way. It is not part of the public sync API.
+ */
+export const syncWriteNamesWholeRow: unique symbol = Symbol()
+
 type DeferredLoadSubset = {
   options: LoadSubsetOptions
   deferred: Deferred<void>
@@ -263,18 +270,22 @@ export class CollectionSyncManager<
             }
 
             // An insert names the whole row, so it replaces the row even as
-            // an update. A wrapping sync that judged its insert already hands
-            // it on as such an update: its metadata then changes only
-            // through the wrapper's own writes.
+            // an update. A wrapping sync that judged its insert already marks
+            // it as such an update: its metadata then changes only through
+            // the wrapper's own writes.
             const message = {
               ...messageWithOptionalKey,
               type: messageType,
               key,
               originalSyncType:
-                messageWithOptionalKey.type === `insert`
+                messageWithOptionalKey.type === `insert` ||
+                (
+                  messageWithOptionalKey as {
+                    [syncWriteNamesWholeRow]?: true
+                  }
+                )[syncWriteNamesWholeRow]
                   ? (`insert` as const)
-                  : (messageWithOptionalKey as { originalSyncType?: `insert` })
-                      .originalSyncType,
+                  : undefined,
             } as OptimisticChangeMessage<TOutput, TKey> & {
               originalSyncType?: `insert`
             }
@@ -499,13 +510,6 @@ export class CollectionSyncManager<
       : undefined
   }
 
-  /** The pending transactions a source reads: none an invalidation ended. */
-  private getReadableSyncTransactions() {
-    return this.state.pendingSyncedTransactions.filter(
-      (transaction) => transaction.invalidationError === undefined,
-    )
-  }
-
   /** Record an explicit row metadata write and its place among the operations. */
   private writeExplicitRowMetadata(
     key: TKey,
@@ -530,11 +534,13 @@ export class CollectionSyncManager<
           // A source reads its own session: every accepted or open sync
           // transaction that no invalidation ended, newest first, then
           // applied state. A truncate hides older row metadata.
-          const pending = this.getReadableSyncTransactions()
+          const pending = this.state.pendingSyncedTransactions
           for (let index = pending.length - 1; index >= 0; index--) {
-            const write = pending[index]!.rowMetadataWrites.get(key)
+            const transaction = pending[index]!
+            if (transaction.invalidationError !== undefined) continue
+            const write = transaction.rowMetadataWrites.get(key)
             if (write) return write.type === `delete` ? undefined : write.value
-            if (pending[index]!.truncate) return undefined
+            if (transaction.truncate) return undefined
           }
           return this.state.syncedMetadata.get(key)
         },
@@ -552,9 +558,11 @@ export class CollectionSyncManager<
           if (!isCurrentSync()) return undefined
           // Newest first, like row metadata. A truncate keeps collection
           // metadata.
-          const pending = this.getReadableSyncTransactions()
+          const pending = this.state.pendingSyncedTransactions
           for (let index = pending.length - 1; index >= 0; index--) {
-            const write = pending[index]!.collectionMetadataWrites.get(key)
+            const transaction = pending[index]!
+            if (transaction.invalidationError !== undefined) continue
+            const write = transaction.collectionMetadataWrites.get(key)
             if (write) return write.type === `delete` ? undefined : write.value
           }
           return this.state.syncedCollectionMetadata.get(key)
@@ -578,7 +586,8 @@ export class CollectionSyncManager<
           // Every pending transaction applies over applied state, oldest
           // first, so the newest write for each key wins.
           const merged = new Map(this.state.syncedCollectionMetadata)
-          for (const transaction of this.getReadableSyncTransactions()) {
+          for (const transaction of this.state.pendingSyncedTransactions) {
+            if (transaction.invalidationError !== undefined) continue
             for (const [key, write] of transaction.collectionMetadataWrites) {
               if (write.type === `delete`) merged.delete(key)
               else merged.set(key, write.value)

@@ -133,6 +133,32 @@ encoding the author had extended without asking. Three more followed on
     row it lands on. A later seed alone does not change it, and neither does
     an open transaction's own write over the seed, but a transaction that
     commits after the seed and merges over it does.
+11. **A peer's write in this run is a source write (2026-10-26).** A
+    second high review found that rows a peer's source wrote in this run,
+    which reach this tab through storage, were treated as seeds or skipped
+    behind a `DbClient` seed. The maintainer adopted the recommendation that
+    follows D4: such a row and its metadata are source-written for this
+    session. It replaces a `DbClient` seed this tab holds, a later seed does
+    not supersede it, and an equal re-insert of it keeps metadata. The rule
+    of `origin/main` that "DbClient hydration seeds remain source-owned until
+    confirmed by the source" now yields to a peer's notice of a write in
+    this run; rows from a previous run stay seeds (decision 9). Eighteen
+    persisted-oracle cases that held the seed against a peer's targeted
+    notice were rewritten to this rule. Asked about them, the maintainer
+    answered "LWW is a good general heuristic here": among source writes,
+    the last one wins, and a seed is older than every source write (D4).
+12. **A source transaction may stay open across a storage read
+    (2026-10-26).** The new read-hold lane found that a commit threw "a
+    persisted sync transaction cannot cross a hydration cycle" when an
+    on-demand storage read started while the transaction was open. The
+    maintainer chose to support it: a transaction binds to a storage read
+    when it commits, not when it first writes, and writes during a read
+    follow the same metadata rules as other writes: the last write for a key
+    wins, so an insert without metadata clears an explicit write before it
+    and a cached row's metadata. The wrapper's earlier rules, that such an
+    insert kept an explicit write before it (on every path) and kept the
+    metadata of rows the read supplied, and that a commit crossing a read
+    threw, are retired; ten persisted-oracle cases were rewritten.
 
 ## Laws and sources
 
@@ -177,8 +203,10 @@ comparison. Drivers:
   `persistedCollectionOptions` over an in-memory adapter, with store and core
   holds; lanes `persisted-flat`, `persisted-nested`, `persisted-seeds`,
   `persisted-cached` (row 1 is in storage when the run starts; the model
-  holds it as a seed accepted before any action), `persisted-conflicts`, and
-  `persisted-nested-seeds`. The last crosses `DbClient` seeds with nesting
+  holds it as a seed accepted before any action), `persisted-conflicts`,
+  `persisted-nested-seeds`, and `persisted-reads`, whose read hold keeps an
+  on-demand storage read in flight while the source writes and commits
+  (decision 12). The last crosses `DbClient` seeds with nesting
   and the cached row, with the conflict lane's weighting; its
   `keepsMetadata` flag favours writes that keep metadata over writes that
   clear it, without excluding any action, so a later seed often meets
@@ -353,11 +381,16 @@ The repair keeps the existing structures and changes these rules.
   wrote, it is judged like any insert, whatever holds or seeds there are. In
   the replay, a seed beneath an open insert of a row the source also wrote
   keeps that insert's kind.
-- **Cached rows (decision 9).** A storage read marks each row it applies as
-  a seed unless core already holds the row as a source row, and its core
-  transaction preserves seed keys, as a `DbClient` hydration chunk does.
-  A later seed then replaces a cached row and its metadata until the source
-  writes them.
+- **Cached rows (decisions 9 and 11).** A storage read marks a row it
+  applies as a seed unless core holds it as a source row or a source wrote
+  it in this run, which the runtime records from this tab's handoffs and
+  peers' notices (a truncate or a full-reload notice makes every stored row
+  count as written). The read stays one transaction; core keeps seed status
+  only for its seed keys, and every other write of the read, a validation
+  delete included, is adapter work. A `DbClient` seed holds against stored
+  rows only until a source writes its key in this run.
+- **Writes during a storage read (decision 12).** They follow the ordinary
+  metadata rules, and a transaction binds to a read when it commits.
 
 ### Evidence block
 
@@ -463,9 +496,18 @@ The repair keeps the existing structures and changes these rules.
 ### Code weight
 
 `pnpm size:compare` against `427a7c31e` (`origin/main` after the second
-merge): the typical `app` scenario grows 117 bytes gzip; `@tanstack/db` as a
-whole package grows 327; `db-sqlite-persistence-core` grows 876;
-`query-db-collection` shrinks 14. The private-member mangle cache now
+merge): the typical `app` scenario grows 126 bytes gzip. The second high
+review's repairs cost `app` 9 bytes: the internal whole-row marker and
+readers that skip invalidated transactions in place. The marker is a bare
+`Symbol()`, because its `Symbol.for` description string alone cost 31
+bytes and the wrapper imports the symbol from `@tanstack/db`. Seed status
+became a key set on every seed transaction (a `DbClient` chunk passes its
+keys), so per-key storage reads cost no extra check. `@tanstack/db` as a
+whole package grows 375, `db-sqlite-persistence-core` 699 (876 before that
+round: removing the operation walk and the hydration-deferred metadata
+path paid for the new rules), and `query-db-collection` shrinks 14.
+
+Earlier rounds: the private-member mangle cache now
 covers the branch's new private methods. Removing Query's owner supplement
 saved 9 bytes, and tracking peer writes and judging enclosing inserts again
 after an abandoned transaction added 91 to persistence.
@@ -602,6 +644,28 @@ late-abort probe for E, a scaling experiment for D, and a churn count for H.
 | G: state internals are public for `client.ts` | Accepted design: the seed authority lookups moved to `client.ts` so that an app without `DbClient` ships 130 fewer gzip bytes |
 | A later seed merged into an outer re-insert's row by an inner update that commits ahead (random seed 50521469; also fails in core on `743a6ce14`) | Decision 10: the model now counts such a seed in the insert's kind. Witnesses `lateSeedUnderMergedUpdate` and `heldLateSeedUnderMergedUpdate` (core) and `lets an inner update merged over a later seed change an enclosing re-insert` (persisted). The held witness kills a core that keeps the insert's kind after the accepted inner write; without a hold the inner write applies and clears the seed mark, so that mutant is invisible there |
 | H: `appliedAdapterMetadataKeys` grows with every deleted key | Fixed: the deleted-key and metadata-key sets became one map, `appliedAdapterKeys`, from each key whose metadata an applied adapter write fixed to whether that write deleted the row. After 5000 keys were inserted and deleted it holds 5000 entries instead of 10000 across two sets; the deleted keys remain, as D4 requires. The hydration authority grid gains `delete,update` cells, which a mutant that loses the returning key's authority fails. `sourceWrittenKeys` in the wrapper is unchanged |
+## Fifth review round (second high review)
+
+A high review of `ad966ec12` raised ten items. The plan of oracle changes
+came first: per-key storage-read witnesses (peer metadata, a peer delete, a
+held seed, an equal re-insert), a read hold in the persisted grammar with
+the `persisted-reads` lane, a public-message witness, and scaling runs.
+
+| Finding | Disposition |
+|---|---|
+| R1: a storage read marked as seeds for its whole transaction lets a later seed replace a peer's metadata | Fixed. The read stays one transaction; core keeps seed status only for the keys it lists (`preserveHydrationSeedKeys` may be a key set). Witness `keeps a row another tab wrote this run…` now checks metadata; it failed on `749079331` and passes with the `origin/main` wrapper |
+| R1b: a DbClient seed held against a peer's write in this run | Fixed by decision 11; witness `treats a row a peer wrote this run as a source row (replaces a held seed)` |
+| R2: validation deletes inside a seed transaction lost delete authority | Fixed by the same per-key rule; witness `keeps a row a peer deleted absent when a later seed arrives` |
+| R3: a committed enclosing transaction stays judged against an abandoned buffered write | Refuted on the same path: the outer commit threw the hydration-cycle error, and after decision 12 the inner transaction either flushes or is dropped before the outer one commits |
+| R4: writes during a storage read used older metadata rules | Fixed by decision 12: one write path. Witness `clears an explicit metadata write with a later insert during a storage read` and the `persisted-reads` lane (reach `write during a storage read`) fail on `749079331` and on `origin/main` |
+| R5: `prependHydrationRows` did not shift partial-update indexes read by the staged-row walk | Resolved by removing the walk: each insert keeps its transaction's row from just before it |
+| R6: core honoured `originalSyncType` from any public write | Fixed: the wrapper marks a whole-row update with the internal `syncWriteNamesWholeRow` symbol. Witness `merges a public partial update whatever fields the message carries` |
+| R7: seed keys entered `sourceKeys` while staged | Refuted as unreachable: no caller classifies a seed-only row then |
+| R8: two sets of keys written in this run | Fixed: the runtime keeps one record, fed by this tab's handoffs and peers' notices. Witness `treats a row a peer wrote this run as a source row (keeps metadata on an equal re-insert)` |
+| R9: re-judgment was quadratic | Fixed by the same change as R5: 8000 implicit inserts re-judge in 2.5 ms (2000 took 18 ms). A mutant that judges against the transaction's whole row fails two witnesses and three campaigns |
+| R10: readers copied the pending queue on every read | Fixed: they skip invalidated transactions in place |
+| S1 (sibling): a commit threw when an on-demand read started during its transaction | Fixed by decision 12; the `persisted-reads` lane found it |
+
 ## Open
 
 Nothing in this bug class is known to be open. The limits in the evidence

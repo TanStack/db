@@ -353,16 +353,16 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
   const metadataKeys = new Set<TKey>()
   let truncated = state.hasAppliedAdapterTruncate
   for (const transaction of [
-    ...state.pendingSyncedTransactions.filter(
-      (pending) => pending.committed && !pending.preserveHydrationSeedKeys,
-    ),
+    ...state.pendingSyncedTransactions.filter((pending) => pending.committed),
     ...state.getStagedSyncTransactions(),
   ]) {
     if (transaction.truncate) truncated = true
     for (const operation of transaction.operations)
-      rowKeys.add(operation.key as TKey)
+      if (!transaction.preserveHydrationSeedKeys?.has(operation.key as TKey))
+        rowKeys.add(operation.key as TKey)
     for (const key of transaction.rowMetadataWrites.keys())
-      metadataKeys.add(key)
+      if (!transaction.preserveHydrationSeedKeys?.has(key))
+        metadataKeys.add(key)
   }
   const deleted = (key: TKey) => state.appliedAdapterKeys?.get(key) === true
   return {
@@ -1049,7 +1049,13 @@ export class DbClient {
         explicitRowMetadataWrites: new Map(),
         collectionMetadataWrites: new Map(),
         applied,
-        preserveHydrationSeedKeys: seedKind !== undefined,
+        // A seed chunk keeps its keys' seed status.
+        preserveHydrationSeedKeys: seedKind
+          ? new Set([
+              ...rows.map((row) => row.key),
+              ...rowMetadataWrites.keys(),
+            ])
+          : undefined,
       })
     }
 
