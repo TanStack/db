@@ -1177,6 +1177,15 @@ async function runLifecycle(): Promise<{
 //   stays ready throughout. Coverage never undoes or replaces optimistic
 //   state.
 //
+// A claim history covers cache-claim expiry. Session 1's load writes its
+// rows, then the adapter clock passes the cache claim's lifetime, and only
+// then does the load settle. Recording coverage reads SQLite under that
+// expired claim. Rows that applied cannot turn into a failed load, so the
+// query must not enter `error`, and the wrapper must recover the claim. In
+// a second claim history, session 2's claim expires after its restore read
+// and before its coverage check. An expired claim cannot vouch for the
+// restored rows, so D waits for the network instead of settling or failing.
+//
 // A further history checks that opting in keeps a synchronous answer
 // synchronous. The source writes its rows and returns `true`. A second request
 // for D, while D is already hydrated in this sync run, must report `true` to
@@ -1372,6 +1381,75 @@ async function runOptimisticWrite(): Promise<OptimisticObservation> {
     () => query.cleanup(),
     () => collection.cleanup(),
   ])
+}
+
+async function runClaimExpiredBeforeRecord(): Promise<{
+  queryStatus: string
+  rows: Array<string>
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const clock = { now: Date.now() }
+  const adapter = new SQLiteCorePersistenceAdapter({
+    driver,
+    now: () => clock.now,
+    cacheGenerationClaimTtlMs: 60_000,
+  })
+  const { collection, upstream } = onDemandSource(adapter, 0)
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+    await upstream.write([A1, A2])
+    // The claim expires after the rows committed and before the load settles.
+    clock.now += 10 * 60_000
+    upstream.settleOldest()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return {
+      queryStatus: query.status,
+      rows: query.toArray.map((row) => row.id).sort(),
+    }
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+async function runClaimExpiredBeforeCheck(): Promise<{ status: string }> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverD(driver)
+  const clock = { now: Date.now() }
+  const base = new SQLiteCorePersistenceAdapter({
+    driver,
+    now: () => clock.now,
+    cacheGenerationClaimTtlMs: 60_000,
+  })
+  // The restore publishes D's rows under a live claim. The claim expires
+  // just before the first read of D after that, the coverage check.
+  const holder: { collection?: Collection<Row, string, any> } = {}
+  const reads = { afterRestore: 0 }
+  const adapter = new Proxy(base, {
+    get(target, property) {
+      if (property === `loadSubset`) {
+        return (...args: Parameters<typeof target.loadSubset>) => {
+          if ((holder.collection?.toArray.length ?? 0) > 0) {
+            if (++reads.afterRestore === 1) clock.now += 10 * 60_000
+          }
+          return target.loadSubset(...args)
+        }
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === `function` ? value.bind(target) : value
+    },
+  })
+  const { collection, upstream } = onDemandSource(adapter, 0)
+  holder.collection = collection
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    // Claim recovery may rotate the cache and reacquire D, a second load.
+    await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    // Positive witness: the coverage check read D after the claim expired.
+    expect(reads.afterRestore).toBeGreaterThan(0)
+    return { status: query.status }
+  }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
 async function runSynchronousAnswer(): Promise<{
@@ -2219,6 +2297,19 @@ describe(`persisted demand coverage oracle`, () => {
       afterRollback: [`a1`, `a2`],
       readyThroughout: true,
     })
+  })
+
+  it(`does not fail a load whose rows applied when the cache claim expires before its coverage record`, async () => {
+    quietConsole()
+    expect(await runClaimExpiredBeforeRecord()).toEqual({
+      queryStatus: `ready`,
+      rows: [`a1`, `a2`],
+    })
+  })
+
+  it(`waits for the network when the cache claim expires before the coverage check`, async () => {
+    quietConsole()
+    expect(await runClaimExpiredBeforeCheck()).toEqual({ status: `loading` })
   })
 
   it(`keeps a synchronous answer for an already hydrated demand synchronous`, async () => {
