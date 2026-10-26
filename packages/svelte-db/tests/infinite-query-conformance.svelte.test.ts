@@ -11,6 +11,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import { flushSync, untrack } from 'svelte'
@@ -40,11 +41,12 @@ function finishSetup(dispose: () => void, initialize: () => void = flushSync) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
-      id: `infinite-conformance-svelte-${sourceSequence++}`,
+      id: collectionId ?? `infinite-conformance-svelte-${sourceSequence++}`,
       getKey: (row) => row.id,
       initialData: [...initialData],
     }),
@@ -245,7 +247,10 @@ function mountInputControllable(
 
 const svelteInfiniteDriver: InfiniteQueryDriver = {
   name: `svelte`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),

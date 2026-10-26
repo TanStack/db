@@ -1173,3 +1173,24 @@ export class UnhashableQueryIRError extends Error {
     this.name = `UnhashableQueryIRError`
   }
 }
+
+/**
+ * Error thrown when a mounted framework binding that compares query identity
+ * reads a different source Collection under a Collection ID it has already
+ * read, in an earlier query or the same one. The identity names each source by
+ * its ID, so the binding could otherwise keep a live query that reads the old
+ * source.
+ */
+export class SourceCollectionIdReuseError extends TanStackDBError {
+  constructor(
+    public readonly bindingName: string,
+    public readonly collectionId: string,
+  ) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[${bindingName}] Collection ID "${collectionId}" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.`
+        : codedMessage(245, { bindingName, collectionId }),
+    )
+    this.name = `SourceCollectionIdReuseError`
+  }
+}

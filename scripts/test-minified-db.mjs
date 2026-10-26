@@ -107,6 +107,7 @@ const errorGroups = {
   QueryOptimizerError: `QueryOptimizerError CannotCombineEmptyExpressionListError`,
   SetWindowReentrancyError: `SetWindowReentrancyError`,
   UnhashableQueryIRError: `UnhashableQueryIRError`,
+  SourceCollectionIdReuseError: `SourceCollectionIdReuseError`,
 }
 
 function checkErrorNames(db) {
