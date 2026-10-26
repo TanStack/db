@@ -1,16 +1,17 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
-import { createCollection } from '../../src/collection/index.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   createLiveQueryCollection,
   eq,
   inArray,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
   SetWindowFindOneLimitError,
@@ -1117,7 +1118,9 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
               groupChildren.select(({ child }) => ({ id: child.id })),
             )
           case `collection`:
-            return groupChildren.select(({ child }) => ({ id: child.id }))
+            return include(
+              groupChildren.select(({ child }) => ({ id: child.id })),
+            )
           case `nested`:
             return materialize(
               groupChildren.select(({ child }) => ({

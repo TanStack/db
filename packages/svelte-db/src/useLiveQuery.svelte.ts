@@ -18,7 +18,7 @@ import {
   resolveLiveQueryValue,
   resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
-import { useOptionalDbClient } from './db-context.js'
+import { useDbContext } from './db-context.js'
 import type {
   ChangeMessage,
   Collection,
@@ -29,7 +29,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
@@ -109,7 +109,7 @@ export interface UseLiveQueryReturnWithCollection<
 type MaybeGetter<T> = T | (() => T)
 
 export type UseLiveQueryConfig<TContext extends Context> =
-  LiveQueryCollectionConfig<TContext> & {
+  LiveQueryHookConfig<TContext> & {
     queryKey?: MaybeGetter<LiveQueryKey>
     client?: DbClient
   }
@@ -339,7 +339,8 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const contextDbClient = useOptionalDbClient()
+  const context = useDbContext()
+  const contextDbClient = context?.client
   // Source Collection IDs this hook's client-backed queries read, kept until
   // it unmounts.
   const sourceIdClaims = createLiveQuerySourceIdClaims()
@@ -457,10 +458,11 @@ export function useLiveQuery(
       } else if (isCollection(preparedValue)) {
         collection = preparedValue
       } else {
-        // Hydration keys the live-query Collection by identity.
+        // Hydration keys the live-query Collection by identity, so it never
+        // pools, even when the config passes a pool.
         collection = resolveLiveQueryValue(preparedValue, {
           gcTime: DEFAULT_GC_TIME_MS,
-          pool: !dbClient,
+          pool: dbClient ? false : undefined,
         })
       }
 
@@ -493,7 +495,10 @@ export function useLiveQuery(
     queryHash: currentResolved.queryHash,
     onPreload: currentResolved.resumeDeferredCollections,
   })
-  const initialSnapshot = currentObserver.getServerSnapshot()
+  const initialSnapshot =
+    typeof window === `undefined` || context?.hydrating
+      ? currentObserver.getServerSnapshot()
+      : currentObserver.getSnapshot()
 
   // Reactive state that gets updated granularly through change events
   const state = new SvelteMap<string | number, any>(initialSnapshot.state ?? [])

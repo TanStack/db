@@ -40,7 +40,6 @@
  * below runs dependency-list hook paths too. This does not assert a
  * process-wide Collection registry or other explicit-key semantics.
  */
-import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   SourceCollectionIdReuseError,
@@ -49,6 +48,7 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Component, Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'

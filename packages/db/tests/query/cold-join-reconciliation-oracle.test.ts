@@ -1,10 +1,6 @@
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it } from 'vitest'
-import { Func } from '../../src/query/ir.js'
-import { JoinConditionMustBeEqualityError } from '../../src/errors.js'
-import { createCollection } from '../../src/collection/index.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   Query,
   and,
@@ -13,6 +9,10 @@ import {
   gt,
   or,
 } from '../../src/query/index.js'
+import { Func } from '../../src/query/ir.js'
+import { JoinConditionMustBeEqualityError } from '../../src/errors.js'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   oraclePropertyOptions,
   oracleRuns,

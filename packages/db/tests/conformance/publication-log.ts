@@ -10,16 +10,26 @@
  */
 export function createPublicationLog() {
   const turns: Array<unknown> = []
+  const stateTurns: Array<ReadonlyArray<unknown>> = []
   let turnOpen = false
   return {
-    /** Record a published value, replacing an earlier one from this turn. */
-    record(value: unknown): void {
+    /**
+     * Record a published value and the keyed state map beside it, replacing
+     * an earlier record from this turn.
+     */
+    record(
+      value: unknown,
+      state: { values: () => Iterable<unknown> } | undefined,
+    ): void {
       const copy = Array.isArray(value) ? [...value] : value
+      const rows = state ? [...state.values()] : []
       if (turnOpen) {
         turns[turns.length - 1] = copy
+        stateTurns[stateTurns.length - 1] = rows
         return
       }
       turns.push(copy)
+      stateTurns.push(rows)
       turnOpen = true
       queueMicrotask(() => {
         turnOpen = false
@@ -27,5 +37,7 @@ export function createPublicationLog() {
     },
     /** The value published at the end of each turn, in order. */
     values: (): ReadonlyArray<unknown> => turns,
+    /** The state map's rows at the end of each turn, in order. */
+    stateValues: (): ReadonlyArray<unknown> => stateTurns,
   }
 }

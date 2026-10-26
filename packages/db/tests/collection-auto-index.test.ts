@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createLiveQueryCollection } from '../src'
 import { CollectionConfigurationError } from '../src/errors'
 import { createCollection } from '../src/collection/index.js'
 import {
@@ -11,7 +12,6 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { createSingleRowRefProxy } from '../src/query/builder/ref-proxy'
-import { createLiveQueryCollection } from '../src'
 import { PropRef } from '../src/query/ir'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import {
