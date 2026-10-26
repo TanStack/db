@@ -3,7 +3,7 @@ import {
   getLiveQueryStatusFlags,
   getPublicCollection,
   isSingleResultCollection,
-} from './live-query-adapter.js'
+} from './live-query-primitives.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'

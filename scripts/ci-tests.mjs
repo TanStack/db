@@ -21,6 +21,7 @@ const groups = {
   ],
   frameworks: [
     `@tanstack/react-db`,
+    `@tanstack/preact-db`,
     `@tanstack/react-router-with-db`,
     `@tanstack/solid-db`,
     `@tanstack/vue-db`,

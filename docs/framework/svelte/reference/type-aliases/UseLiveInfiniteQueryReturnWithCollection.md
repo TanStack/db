@@ -7,7 +7,7 @@ title: UseLiveInfiniteQueryReturnWithCollection
 type UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils> = Omit<UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult[]>, "data"> & object;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts:64](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L64)
+Defined in: [packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts:49](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L49)
 
 ## Type Declaration
 
