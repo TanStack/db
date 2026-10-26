@@ -2019,6 +2019,17 @@ class PersistedCollectionRuntime<
       : undefined
   }
 
+  // A reset or a new lifecycle makes an in-flight load obsolete (law 6 in
+  // `ARCHITECTURE.md`), so its settlement cannot record coverage.
+  captureResetEpoch(): () => boolean {
+    const { lifecycleGeneration, resetSequence, sourceTruncateGeneration } =
+      this
+    return () =>
+      lifecycleGeneration === this.lifecycleGeneration &&
+      resetSequence === this.resetSequence &&
+      sourceTruncateGeneration === this.sourceTruncateGeneration
+  }
+
   getLifecycleGeneration(): number {
     return this.lifecycleGeneration
   }
@@ -6436,9 +6447,14 @@ function createWrappedSyncConfig<
       // The load's rows committed first; this metadata-only source
       // transaction persists after them, so coverage never outlives a failed
       // row write.
+      // Only a current load records coverage. A reset makes the record
+      // obsolete before its commit could be aborted, so a current record
+      // fails only with a durable failure that already fails the runtime.
       const recordCoverage = async (
         demand: LoadSubsetOptions,
+        isCurrent: () => boolean,
       ): Promise<void> => {
+        if (!isCurrent()) return
         wrappedParams.begin()
         wrappedParams.metadata?.collection.set(demandCoverageKey(demand), {
           settledAt: Date.now(),
@@ -6631,9 +6647,11 @@ function createWrappedSyncConfig<
               // Returning a promise transfers its lease even if it rejects.
               // Only a synchronous throw leaves no upstream lease to release.
               const loaded = currentSource.loadSubset(loadOptions)
-              return persistedReadiness?.onDemand
-                ? Promise.resolve(loaded).then(() => recordCoverage(options))
-                : loaded
+              if (!persistedReadiness?.onDemand) return loaded
+              const isCurrent = runtime.captureResetEpoch()
+              return Promise.resolve(loaded).then(() =>
+                recordCoverage(options, isCurrent),
+              )
             } catch (error) {
               acquisition.forwarded = false
               acquisition.source = undefined

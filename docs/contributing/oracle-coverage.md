@@ -2604,10 +2604,12 @@ The persisted demand coverage oracle in
 owns the on-demand law: an opted-in wrapper may settle a demand's
 load from SQLite only when that exact demand has persisted demand coverage,
 after the configured wait or an upstream failure. Its bounded enumeration
-crosses nine session-1 histories (not requested, failed, overlapping filter,
-same filter with another window, same filter with another order, rejected
-durable row write, settled empty, settled, settled then truncated), two waits,
-and six
+crosses twelve session-1 histories (not requested, failed, overlapping
+filter, same filter with another window, same filter with another order,
+rejected durable row write, settled empty, settled, settled then truncated,
+and three in which a reset lands after the load's rows but before it settles:
+a source truncate, a completed scoped recovery that rotates the cache
+generation, and a scoped recovery still pending), two waits, and six
 session-2 upstream schedules (pending, early and late failure, early and late
 answer, late empty answer), over the real wrapper and
 `SQLiteCorePersistenceAdapter` on `node:sqlite`. Session 1 creates coverage
@@ -2618,7 +2620,9 @@ load measures its own wait and settles on its own restored rows, that
 release aborts the upstream load, and that coverage survives release. A joined history checks that the network-first
 wait releases an eager and an on-demand source only when the on-demand demand
 is covered, read directly and through an outer live query, with the joined row
-visible at release. Model-level calibration shows that sixteen wrong designs (thirteen
+visible at release. A third shape reaches the on-demand source through two
+live queries; covering only the inner query's demand must not release the
+wait. Model-level calibration shows that seventeen wrong designs (fourteen
 single-demand, two lifecycle, one joined) each differ from the law at a named
 case. Before the implementation, every
 production case failed at setup because `initialRender` rejected
@@ -2629,7 +2633,14 @@ every case passes; the [implementation review](oracle-reviews/2026-10-21-persist
 the wait, error a covered demand on upstream failure, write coverage before
 the load settles, measure the wait from the sync run, keep coverage across a
 truncate, let an on-demand opt-in permit fallback alone, or read the root
-query's demands instead of the owning inner query's each fail named cases; a gate that ignores the
+query's demands instead of the owning inner query's each fail named cases.
+A review then found three more defects, and the in-flight histories and the
+two-reader shape reproduced each one on unchanged production: an obsolete load
+recorded coverage after a truncate or rotation (22 cells), a coverage record
+during pending recovery failed the session-1 load (12 cells), and the first
+live query reached on a source stood for every reader (one cell). After the
+repair, mutants that restore each defect, or that check only for a truncate,
+fail those cases; a gate that ignores the
 eager deadline fails the persisted-readiness oracle instead. The Electric
 progressive witness in
 `packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
@@ -2648,9 +2659,14 @@ opt-in permit fallback alone fails both. Ordered windows, cursor
 pages, and later demand in session 2 (including a demand key that ignores
 offset or cursor but honors limit, which no history distinguishes),
 optimistic writes on a covered demand, a failure before the restore
-publishes, cache-claim rotation, must-refetch, schema reset,
+publishes, cache-claim expiry rotation, must-refetch, schema reset,
 and Suspense over a real
-persisted on-demand Collection remain open.
+persisted on-demand Collection remain open. A coordinator other than the
+default `SingleProcessCoordinator`, as in multi-tab Browser and Electron
+setups, is outside this law by maintainer decision (2026-10-26): demand there
+routes through the coordinator, so a covered demand neither settles from
+SQLite nor records coverage. A probe shows a covered demand staying loading
+offline even in the leader tab. No oracle history exercises a coordinator.
 
 ## Deferred contracts and evidence
 

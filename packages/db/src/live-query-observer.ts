@@ -29,7 +29,11 @@ const noop = () => {}
 interface PersistedSourceEntry {
   collection: Collection<any, any, any>
   readiness: PersistedReadinessSource
-  /** The live query whose demands an on-demand source serves. */
+  /**
+   * The live query whose demands an on-demand source serves. A source read
+   * by several live queries has one entry per owner, so every demand the
+   * query reaches on it gates local rendering.
+   */
   demandOwner: Collection<any, any, any> | undefined
 }
 
@@ -44,13 +48,13 @@ function collectPersistedReadinessSources(
     collection: Collection<any, any, any>,
     owner?: Collection<any, any, any>,
   ): boolean => {
-    if (seen.has(collection)) return true
-    seen.add(collection)
     // A few integrations provide Collection-compatible objects without config.
     const config = (collection as { config?: typeof collection.config }).config
     if (!config) return false
     const builder = getBuilderFromConfig(config)
     if (builder) {
+      if (seen.has(collection)) return true
+      seen.add(collection)
       return builder
         .getSourceCollections()
         .every((source) => visit(source, collection))

@@ -885,7 +885,10 @@ has failed. The upstream load continues as work the wrapper owns. Its later
 rows are ordinary source writes. Releasing the demand, or cleanup, aborts it.
 Coverage proves completeness when the covered load settled. It proves neither
 freshness nor broader extent than the exact demand (law 7). A demand without
-coverage settles only when its upstream load does.
+coverage settles only when its upstream load does. A load that a reset made
+obsolete records no coverage (law 6). This settlement applies only under the
+default single-process coordinator; under a multi-tab coordinator, demand
+routes through the coordinator and waits for its upstream load.
 
 Lazy-demand growth requests only uncovered keys. When contraction or churn
 would leave fragmented coverage, the controller requests one complete current

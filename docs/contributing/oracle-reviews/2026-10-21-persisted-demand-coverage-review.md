@@ -154,3 +154,59 @@ owns these. Each needs a witness:
   fails both.
 
 This record claims a new law, not the closure of a bug class.
+
+## 2026-10-26: code-review findings after merging `main`
+
+Merge head: `5c0e04dce` (merges `main` at `5649a07d4`; the network-first wait
+now lives in `waitForPersistedInitialRender`, and the on-demand gate moved
+into it). Oracle extension: `e4add5b18`. Repair: the next commit.
+
+A code review reported ten findings. Four were defects under the accepted
+contract, one needed a product decision, and the rest were refuted or a cost
+only. The oracle was extended first and run against unchanged production:
+
+- three session-1 histories put a reset after a load's rows and before it
+  settles: a source truncate, a completed scoped recovery that rotates the
+  cache generation, and a scoped recovery still pending;
+- Part 3 adds a shape that reaches the on-demand source through two live
+  queries, with a history that covers only the inner query's demand.
+
+RED on `5c0e04dce`: 35 failed and 137 passed of 172, all by assertion at a
+named checkpoint. In 22 cells an obsolete load recorded coverage. In 12 cells
+a coverage record during pending recovery failed the session-1 load. The
+two-reader inner-only history released the wait.
+
+Repair: a load records coverage only if no lifecycle change, reset (rotation
+or scoped recovery), or source truncate happened since it was forwarded
+upstream. The observer gives an on-demand source one gate entry for each live
+query that reads it. Because scoped recovery marks a reset before it can abort
+the coverage commit, the epoch check also closes the failed-record case; a
+`.catch` on the commit had no reachable history and was removed.
+
+GREEN: 172 of 172. Also `db` 13,462, `db-sqlite-persistence-core` 1,535,
+`react-db` 601, and the Electric and Query DB witnesses pass. Solid did not
+run: its test environment needs a package that the registry proxy blocks.
+
+Mutants, all killed by assertion with no timeout or unreached checkpoint:
+
+| Mutant | Outcome |
+| --- | --- |
+| Restore the original: any settled load records coverage | 34 cells fail across all three in-flight histories |
+| Narrow fix: check only for a source truncate | 23 cells fail in the two scoped-recovery histories |
+| Restore the original gate: the first live query reached on a source stands for all | The two-reader inner-only history fails |
+
+By maintainer decision (2026-10-26), multi-tab coordinators are outside the
+law: under a coordinator other than `SingleProcessCoordinator`, demand routes
+through the coordinator, so a covered demand neither settles from SQLite nor
+records coverage. A probe showed a covered demand staying loading offline even
+in the leader tab. The coverage map, law record, architecture paragraph, and
+guide state the limit.
+
+Refuted: scoped recovery and reload truncates keep coverage (they refresh
+memory only; rotation starts a fresh storage target and schema reset deletes
+collection metadata); a raw on-demand root releases early (granular mode waits
+for its load; wholesale mode requests no demand online or offline). Cost only,
+no law: a source's literal `true` becomes a promise, and each load writes one
+metadata record. Accepted: coverage keys grow until a truncate or expiry
+(#2211).
+

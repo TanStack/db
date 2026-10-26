@@ -207,6 +207,11 @@ the rows and writing the coverage must not leave coverage without rows.
 - **Optimistic writes while offline.** An optimistic mutation that touches a
   covered demand's rows is outside this law. Optimistic overlay rules apply as
   usual, and this proposal has no witness for them.
+- **Multi-tab coordinators.** By maintainer decision (2026-10-26), the law
+  covers only the default `SingleProcessCoordinator`. Under a Browser or
+  Electron multi-tab coordinator, demand routes through the coordinator, so a
+  covered demand neither settles from SQLite nor records coverage; it waits
+  for the network as before.
 - **Electric's own load.** Electric's upstream load may stay pending after the
   wrapper settles from SQLite. Its release and abort ownership need a receiving
   test.
