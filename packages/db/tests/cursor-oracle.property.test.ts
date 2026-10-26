@@ -10,8 +10,9 @@ import {
   oracleRuns,
 } from './oracle-config.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
+import { orderBy } from './cursor-order-terms.js'
 import { evaluateReferenceExpression } from './reference-expression-oracle.js'
-import type { OrderBy } from '../src/query/ir.js'
+import type { Term } from './cursor-order-terms.js'
 
 /**
  * A cursor denotes the strict suffix after one ordered boundary. The
@@ -37,11 +38,6 @@ const fixedCampaign = oracleReplayTest(fcTest)
 const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 const fixedSeed = 20260930
-
-type Term = {
-  direction: `asc` | `desc`
-  nulls: `first` | `last`
-}
 
 const termArbitrary = fc.record<Term>({
   direction: fc.constantFrom(`asc`, `desc`),
@@ -82,13 +78,6 @@ function compareTuple(
     if (compared !== 0) return compared
   }
   return 0
-}
-
-function orderBy(terms: ReadonlyArray<Term>): OrderBy {
-  return terms.map((compareOptions, index) => ({
-    expression: new PropRef([`column${index}`]),
-    compareOptions,
-  }))
 }
 
 function row(values: ReadonlyArray<unknown>): Record<string, unknown> {

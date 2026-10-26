@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { PropRef } from '../src/query/ir.js'
 import { buildCursor, canExpressCursorOrder } from '../src/utils/cursor.js'
 import { evaluateReferenceExpression } from './reference-expression-oracle.js'
+import { orderBy } from './cursor-order-terms.js'
 import type { OrderBy } from '../src/query/ir.js'
 
-function orderBy(
+function orderByPaths(
   ...terms: ReadonlyArray<readonly [string, `asc` | `desc`, `first` | `last`]>
 ): OrderBy {
   return terms.map(([path, direction, nulls]) => ({
@@ -25,32 +26,35 @@ function matches(
 
 describe(`buildCursor`, () => {
   it(`uses direction for one non-null term`, () => {
-    expect(matches(orderBy([`rank`, `asc`, `first`]), [10], { rank: 11 })).toBe(
-      true,
-    )
-    expect(matches(orderBy([`rank`, `asc`, `first`]), [10], { rank: 9 })).toBe(
-      false,
-    )
-    expect(matches(orderBy([`rank`, `desc`, `first`]), [10], { rank: 9 })).toBe(
-      true,
-    )
     expect(
-      matches(orderBy([`rank`, `desc`, `first`]), [10], { rank: 11 }),
+      matches(orderByPaths([`rank`, `asc`, `first`]), [10], { rank: 11 }),
+    ).toBe(true)
+    expect(
+      matches(orderByPaths([`rank`, `asc`, `first`]), [10], { rank: 9 }),
+    ).toBe(false)
+    expect(
+      matches(orderByPaths([`rank`, `desc`, `first`]), [10], { rank: 9 }),
+    ).toBe(true)
+    expect(
+      matches(orderByPaths([`rank`, `desc`, `first`]), [10], { rank: 11 }),
     ).toBe(false)
   })
 
   it(`places nullish values according to the term`, () => {
-    const nullsFirst = orderBy([`rank`, `asc`, `first`])
+    const nullsFirst = orderByPaths([`rank`, `asc`, `first`])
     expect(matches(nullsFirst, [null], { rank: 0 })).toBe(true)
     expect(matches(nullsFirst, [null], { rank: undefined })).toBe(false)
 
-    const nullsLast = orderBy([`rank`, `asc`, `last`])
+    const nullsLast = orderByPaths([`rank`, `asc`, `last`])
     expect(matches(nullsLast, [0], { rank: null })).toBe(true)
     expect(matches(nullsLast, [null], { rank: 0 })).toBe(false)
   })
 
   it(`rejects composite cursors with mixed-direction terms`, () => {
-    const order = orderBy([`group`, `asc`, `first`], [`rank`, `desc`, `last`])
+    const order = orderByPaths(
+      [`group`, `asc`, `first`],
+      [`rank`, `desc`, `last`],
+    )
 
     expect(() => buildCursor(order, [1, 10])).toThrow(
       `Only leading-column cursors are supported`,
@@ -59,7 +63,10 @@ describe(`buildCursor`, () => {
   })
 
   it(`uses the leading term for a partial composite cursor`, () => {
-    const order = orderBy([`first`, `asc`, `first`], [`second`, `asc`, `first`])
+    const order = orderByPaths(
+      [`first`, `asc`, `first`],
+      [`second`, `asc`, `first`],
+    )
     expect(matches(order, [1], { first: 2, second: 0 })).toBe(true)
     expect(matches(order, [1], { first: 0, second: 2 })).toBe(false)
     expect(canExpressCursorOrder(order, [1])).toBe(true)
@@ -117,7 +124,7 @@ describe(`buildCursor properties`, () => {
     )
     expect(buildCursor([], [])).toBeUndefined()
     expect(
-      buildCursor(orderBy([`column0`, `asc`, `first`]), []),
+      buildCursor(orderBy([{ direction: `asc`, nulls: `first` }]), []),
     ).toBeUndefined()
   })
 })
