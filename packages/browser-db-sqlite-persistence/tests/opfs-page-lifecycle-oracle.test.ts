@@ -17,10 +17,24 @@ import type {
  * value. A restored page must open a new connection. Completed init and execute
  * requests leave the connection active until pagehide or close. Listener and
  * worker resources release exactly once even when init or close fails.
+ * Explicit close ends admission when it starts: a later execute is refused
+ * without reaching the worker, and a concurrent close shares the first close's
+ * outcome. A response that arrives while close is in flight settles its own
+ * request. Work still pending when close settles rejects with AbortError,
+ * whether close succeeds or reports a worker error. Pagehide or a Worker
+ * terminal event during close wins: close and pending siblings reject with that
+ * event's failure.
+ *
+ * The real worker answers earlier requests before close; the request-order
+ * oracle owns that law. This file's controlled worker can answer in any order,
+ * so the close lane also checks that pending work settles when close settles
+ * first.
  *
  * Controlled page and worker objects implement only the browser event and
  * message grammar. Generated products vary pending request kind, delivery
- * stage, persisted flag, execute count, release direction, and terminal event.
+ * stage, persisted flag, execute count, release direction, terminal event,
+ * responses answered during close, close outcome, admission during close, and
+ * an interruption during close.
  * The driver observes exact requests, settlements, errors, listener counts,
  * held responses, close, and termination against this state machine. Fixed
  * open histories check the default, overridden, and zero-boundary deadlines
@@ -58,6 +72,18 @@ type MixedExecuteHistory = {
   persisted: boolean
   releaseDirection: ReleaseDirection
 }
+
+type CloseHistory = {
+  executeCount: number
+  answeredDuringClose: number
+  releaseDirection: ReleaseDirection
+  closeCode: BrowserOPFSWorkerErrorCode | undefined
+  concurrentClose: boolean
+  executeDuringClose: boolean
+  interruption: CloseInterruption
+}
+
+type CloseInterruption = `none` | `pagehide` | TerminalEventType
 
 type TerminalEventHistory = {
   pending: RequestKind
@@ -326,8 +352,83 @@ const pagehideAbort = {
 }
 
 const closedConnection = {
-  name: `InvalidPersistedCollectionConfigError`,
+  name: `SQLiteConnectionClosedError`,
   message: `Browser OPFS worker connection is closed`,
+}
+
+const closeAbort = {
+  name: `AbortError`,
+  message: `The SQLite connection is closed`,
+}
+
+// Which of `count` held responses a partial release delivers.
+function isReleased(
+  index: number,
+  count: number,
+  released: number,
+  direction: ReleaseDirection,
+): boolean {
+  return direction === `fifo` ? index < released : index >= count - released
+}
+
+// The close model: answered siblings keep their rows, the rest abort at close
+// settlement, admission after close starts is refused, and every close call
+// observes the worker's close outcome. An interruption before the close
+// response is a terminal event: it rejects the close request and every pending
+// sibling with its own failure, and the close response never arrives.
+function expectedCloseSettlements(history: CloseHistory): Array<Settlement> {
+  const interruptionFailure =
+    history.interruption === `none`
+      ? undefined
+      : history.interruption === `pagehide`
+        ? pagehideAbort
+        : terminalEventFailures[history.interruption]
+  const pendingFailure = interruptionFailure ?? closeAbort
+  const closeOutcome: Omit<Settlement, `label`> =
+    interruptionFailure !== undefined
+      ? { status: `rejected`, observation: interruptionFailure }
+      : history.closeCode === undefined
+        ? { status: `fulfilled`, observation: `closed` }
+        : {
+            status: `rejected`,
+            observation: {
+              name: workerFailureContracts[history.closeCode].name,
+              message: `${workerFailureContracts[history.closeCode].messagePrefix}controlled close failure`,
+            },
+          }
+  return [
+    ...Array.from({ length: history.executeCount }, (_, index): Settlement =>
+      isReleased(
+        index,
+        history.executeCount,
+        history.answeredDuringClose,
+        history.releaseDirection,
+      )
+        ? {
+            label: `execute-${index}`,
+            status: `fulfilled`,
+            observation: [{ sql: `SELECT ${index}` }],
+          }
+        : {
+            label: `execute-${index}`,
+            status: `rejected`,
+            observation: pendingFailure,
+          },
+    ),
+    { label: `close`, ...closeOutcome },
+    ...(history.concurrentClose
+      ? [{ label: `concurrent-close`, ...closeOutcome }]
+      : []),
+    ...(history.executeDuringClose
+      ? [
+          {
+            label: `execute-during-close`,
+            status: `rejected` as const,
+            observation: closedConnection,
+          },
+        ]
+      : []),
+  ]
 }
 
 const terminalEventFailures = {
@@ -586,11 +687,12 @@ async function runMixedExecuteHistory(
     const expected = Array.from(
       { length: history.executeCount },
       (_, index): Settlement => {
-        const fulfilled =
-          history.releaseDirection === `fifo`
-            ? index < history.completedBeforePagehide
-            : index >= history.executeCount - history.completedBeforePagehide
-        return fulfilled
+        return isReleased(
+          index,
+          history.executeCount,
+          history.completedBeforePagehide,
+          history.releaseDirection,
+        )
           ? {
               label: `execute-${index}`,
               status: `fulfilled`,
@@ -608,6 +710,95 @@ async function runMixedExecuteHistory(
       completed.map(({ settlement }) => settlement),
       expected,
     )
+    await expectPostDisposalNoReach(database, worker)
+  } finally {
+    await cleanupEnvironment()
+  }
+}
+
+async function runCloseHistory(history: CloseHistory): Promise<void> {
+  const page = installEnvironment({
+    heldResponseType: `execute`,
+    closeErrorCode: history.closeCode,
+  })
+  const settlements: Array<Settlement> = []
+
+  try {
+    const database = await openBrowserWASQLiteOPFSDatabase({
+      databaseName: `oracle.sqlite`,
+    })
+    const worker = ControlledWorker.instances[0]!
+    const tracked: Array<Promise<TrackedResult<unknown>>> = Array.from(
+      { length: history.executeCount },
+      (_, index) =>
+        track(
+          `execute-${index}`,
+          database.execute(`SELECT ${index}`),
+          (rows) => rows,
+          settlements,
+        ),
+    )
+    await Promise.resolve()
+    expect(worker.heldResponseCount).toBe(history.executeCount)
+
+    const closing = track(
+      `close`,
+      Promise.resolve(database.close!()),
+      () => `closed`,
+      settlements,
+    )
+    tracked.push(closing)
+    if (history.concurrentClose) {
+      tracked.push(
+        track(
+          `concurrent-close`,
+          Promise.resolve(database.close!()),
+          () => `closed`,
+          settlements,
+        ),
+      )
+    }
+    if (history.executeDuringClose) {
+      tracked.push(
+        track(
+          `execute-during-close`,
+          database.execute(`SELECT 99`),
+          (rows) => rows,
+          settlements,
+        ),
+      )
+    }
+    // The close response is produced in a later microtask, so these responses
+    // arrive while close is in flight.
+    worker.releaseHeldResponses(
+      history.answeredDuringClose,
+      history.releaseDirection,
+    )
+    if (history.interruption === `pagehide`) {
+      page.dispatchPageHide(false)
+    } else if (history.interruption !== `none`) {
+      worker.emitTerminalEvent(history.interruption)
+    }
+
+    // Close settlement is the checkpoint. Awaiting every tracked promise here
+    // would turn an unsettled sibling into a timeout instead of a mismatch.
+    await closing
+    await Promise.resolve()
+    const expected = expectedCloseSettlements(history)
+    expectSettlementSet(settlements, expected)
+    expectSettlementSet(
+      (await Promise.all(tracked)).map(({ settlement }) => settlement),
+      expected,
+    )
+    expect(worker.requests.map(({ type }) => type)).toEqual([
+      `init`,
+      ...Array.from({ length: history.executeCount }, () => `execute`),
+      `close`,
+    ])
+    expect(worker.heldResponseCount).toBe(
+      history.executeCount - history.answeredDuringClose,
+    )
+    expectDisposed(page, worker)
     await expectPostDisposalNoReach(database, worker)
   } finally {
     await cleanupEnvironment()
@@ -767,6 +958,9 @@ const terminalEventRuns = Number(
 )
 const terminalEventPath =
   process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_PATH
+const closeSeed = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED ?? 1848)
+const closeRuns = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_RUNS ?? 32)
+const closePath = process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_PATH
 const replayRequested = [
   process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED,
   lifecyclePath,
@@ -776,6 +970,8 @@ const replayRequested = [
   failurePath,
   process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED,
   terminalEventPath,
+  process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED,
+  closePath,
 ].some((value) => value !== undefined)
 
 type OracleCampaign = {
@@ -832,6 +1028,32 @@ const failureHistory = fc.record({
   ),
 })
 
+const closeCodes = [
+  undefined,
+  `PERSISTENCE_UNAVAILABLE`,
+  `INVALID_CONFIG`,
+  `INTERNAL`,
+] as const satisfies ReadonlyArray<BrowserOPFSWorkerErrorCode | undefined>
+
+const closeInterruptions = [
+  `none`,
+  `pagehide`,
+  `error`,
+  `messageerror`,
+] as const satisfies ReadonlyArray<CloseInterruption>
+
+const closeHistory = fc.integer({ min: 0, max: 3 }).chain((executeCount) =>
+  fc.record({
+    executeCount: fc.constant(executeCount),
+    answeredDuringClose: fc.integer({ min: 0, max: executeCount }),
+    releaseDirection: fc.constantFrom<ReleaseDirection>(`fifo`, `reverse`),
+    closeCode: fc.constantFrom(...closeCodes),
+    concurrentClose: fc.boolean(),
+    executeDuringClose: fc.boolean(),
+    interruption: fc.constantFrom(...closeInterruptions),
+  }),
+)
+
 const terminalEventHistory = fc.record({
   pending: fc.constantFrom<RequestKind>(`init`, `execute`, `close`),
   eventType: fc.constantFrom<TerminalEventType>(`error`, `messageerror`),
@@ -880,6 +1102,41 @@ const mixedExamples: Array<[MixedExecuteHistory]> = [2, 3].flatMap(
     ),
 )
 
+// Direction matters only for a partial release.
+const closeExamples: Array<[CloseHistory]> = [0, 1, 2, 3].flatMap(
+  (executeCount) =>
+    Array.from({ length: executeCount + 1 }, (_, answered) => answered).flatMap(
+      (answeredDuringClose) =>
+        (answeredDuringClose > 0 && answeredDuringClose < executeCount
+          ? ([`fifo`, `reverse`] as const)
+          : ([`fifo`] as const)
+        ).flatMap((releaseDirection) =>
+          closeInterruptions.flatMap((interruption) =>
+            // An interruption hides the close response, so its outcome code
+            // adds no distinct expectation.
+            (interruption === `none`
+              ? closeCodes
+              : ([undefined] as const)
+            ).flatMap((closeCode) =>
+              [false, true].flatMap((concurrentClose) =>
+                [false, true].map((executeDuringClose): [CloseHistory] => [
+                  {
+                    executeCount,
+                    answeredDuringClose,
+                    releaseDirection,
+                    closeCode,
+                    concurrentClose,
+                    executeDuringClose,
+                    interruption,
+                  },
+                ]),
+              ),
+            ),
+          ),
+        ),
+    ),
+)
+
 const failureExamples: Array<[FailureHistory]> = (
   [`init`, `close`] as const
 ).flatMap((stage) =>
@@ -905,12 +1162,17 @@ Law/source: the README Notes section requires pagehide to synchronously dispose
 the dedicated worker and reject pending work with AbortError. It gives opening
 a default deadline and permits caller abort; either must dispose a pending
 worker. Its capability bullet and the public sqlite-persistence-core errors
-define terminal failures.
+define terminal failures. Its close bullet ends admission when close starts and
+aborts work still pending when close settles.
 The worker protocol defines the three response-error classifications.
 Domain/histories: pending init/execute/close; one to three sibling queries;
 pagehide before response production, after production, or after delivery; mixed
 completed/pending siblings; both persisted values; Worker error/messageerror;
 late delivery; repeated disposal; and every response code at init and close.
+Explicit close varies zero to three pending siblings, how many answer while
+close is in flight and in which order, every close outcome, a concurrent close,
+an execute submitted during close, and pagehide or a Worker terminal event
+before the close response.
 Fixed open cases cover default, overridden, minimum-positive, and disabled
 deadlines; pending and pre-aborted signals; an abort during synchronous option
 evaluation; a late response; and no cancellation after successful open.
@@ -919,7 +1181,8 @@ uses a declarative public error table and derives outcomes from history, without
 consulting the production request map, disposal flag, or completion order.
 Production path/checkpoint: the public OPFS opener and database methods using a
 controlled Worker. Compare immediately when pagehide returns, after settlement,
-after late delivery, and after post-disposal next use.
+after late delivery, and after post-disposal next use. Explicit close compares
+at close settlement, before any held response is released.
 Observed: raw settlement multiplicity plus order-independent sibling outcomes,
 exact values/errors, positive and negative request reach, listener ownership,
 and termination count. Synthetic events and a fake worker do not prove real
@@ -1186,6 +1449,24 @@ describe(`OPFS page lifecycle oracle`, () => {
     })(
       `rejects pending work across Worker terminal event paths (${campaign.label})`,
       runTerminalEventHistory,
+    )
+  }
+
+  for (const campaign of oracleCampaigns(
+    closeSeed,
+    process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED !== undefined,
+    closePath,
+    replayRequested,
+  )) {
+    fcTest.prop([closeHistory], {
+      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+      numRuns: closeRuns,
+      ...(campaign.path === undefined ? {} : { path: campaign.path }),
+      examples: closeExamples,
+      verbose: true,
+    })(
+      `settles pending work and refuses new work across explicit close (${campaign.label})`,
+      runCloseHistory,
     )
   }
 

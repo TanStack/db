@@ -5,6 +5,8 @@ import {
 import {
   findIndexForField,
   optimizeExpressionWithIndexes,
+  supportsOrderedIndexStructure,
+  supportsOrderedRange,
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
 import { getPropRefPropertyPath } from '../query/ir.js'
@@ -351,12 +353,18 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         fieldPath,
         collection as CollectionImpl<T, TKey>,
         compareOpts,
+        supportsOrderedIndexStructure,
       )
 
       // Find the index
-      const index = findIndexForField(collection, fieldPath, compareOpts)
+      const index = findIndexForField(
+        collection,
+        fieldPath,
+        compareOpts,
+        supportsOrderedRange,
+      )
 
-      if (index && index.supports(`gt`)) {
+      if (index) {
         // Use index optimization
         const filterFn = (key: TKey): boolean => {
           const value = collection.get(key)

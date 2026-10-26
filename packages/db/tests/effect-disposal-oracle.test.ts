@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { flushPromises } from './utils.js'
+import { captureMicrotaskErrors, flushPromises } from './utils.js'
 
 /**
  * # What does concurrent effect disposal mean?
@@ -11,14 +11,24 @@ import { flushPromises } from './utils.js'
  * The Collection acquisition lease contract requires one release opportunity.
  * Abort and adapter-unload callbacks may call `dispose()` again while that
  * attempt is running. Each caller must remain pending until the handler
- * settles, then observe the same fulfillment or normalized error.
+ * settles, then observe the same outcome.
+ *
+ * An adapter's `unloadSubset` that throws is an adapter bug (ARCHITECTURE.md).
+ * The source subscription reports the thrown value uncaught, once and with
+ * its own identity, and the release fails nothing. So a release failure is
+ * not a disposal outcome: every caller fulfills, and the one report is the
+ * only trace of the failure.
  *
  * This finite matrix crosses the two reentry sites, a pending or synchronous
- * batch handler, and success, Error, or `undefined` failure. The model is the
- * per-caller relation above: one release, no early caller settlement, and one
- * common result. The controlled adapter establishes one acquisition and throws
- * synchronously on unload. This does not cover providers with asynchronous
- * unload, multiple acquisitions, or a handler that awaits its own disposal.
+ * batch handler, and a release that succeeds, throws an Error, or throws
+ * `undefined`. The model is the per-caller relation above: one release, no
+ * early caller settlement, one common fulfillment, and exactly the thrown
+ * value reported uncaught. A design that rejects the callers, swallows the
+ * failure, or reports it again from a reentrant dispose fails the comparison.
+ * The controlled adapter establishes one acquisition and throws synchronously
+ * on unload. This does not cover providers with asynchronous unload, multiple
+ * acquisitions, a handler that awaits its own disposal, or cleanup failures
+ * other than a source release.
  */
 const scenarios = ([`abort`, `release`] as const).flatMap((reentry) =>
   [false, true].flatMap((pendingHandler) =>
@@ -35,6 +45,14 @@ describe(`Effect disposal outcome oracle`, () => {
     `joins all callers to one attempt: %j`,
     async ({ reentry, pendingHandler, outcome }) => {
       const failure = new Error(`release failed`)
+      // The thrown value the model expects to see reported, if any.
+      const reported =
+        outcome === `error`
+          ? [failure]
+          : outcome === `undefined`
+            ? [undefined]
+            : []
+      const uncaught = captureMicrotaskErrors()
       const handler = createDeferred<void>()
       let nested: Promise<void> | undefined
       let batches = 0
@@ -109,29 +127,24 @@ describe(`Effect disposal outcome oracle`, () => {
         }
         handler.resolve()
         const observed = await results
-        const firstReason =
-          observed[0].status === `rejected` ? observed[0].reason : undefined
         for (const result of observed) {
-          expect(result.status).toBe(
-            outcome === `success` ? `fulfilled` : `rejected`,
-          )
-          if (result.status === `rejected`) {
-            if (outcome === `error`) expect(result.reason).toBe(failure)
-            else {
-              expect(result.reason).toBeInstanceOf(Error)
-              expect(result.reason).toMatchObject({ message: `undefined` })
-            }
-            expect(result.reason).toBe(firstReason)
-          }
-          expect(result).toEqual(observed[0])
+          expect(result).toEqual({ status: `fulfilled`, value: undefined })
         }
-        // A settled failed attempt does not make the acquisition lease retryable.
+        await flushPromises()
+        expect(uncaught.errors).toHaveLength(reported.length)
+        uncaught.errors.forEach((error, index) =>
+          expect(Object.is(error, reported[index])).toBe(true),
+        )
+        // A finished attempt does not make the acquisition lease retryable.
         await effect.dispose()
+        await flushPromises()
         expect(releases).toBe(1)
+        expect(uncaught.errors).toHaveLength(reported.length)
       } catch (error) {
         primaryFailure = { error }
       }
       handler.resolve()
+      uncaught.restore()
       const cleanupFailures: Array<unknown> = []
       try {
         await Promise.allSettled([nested, effect.dispose()])

@@ -196,6 +196,7 @@ export class CollectionSyncManager<
 
     const syncCallbackEpoch = ++this.syncCallbackEpoch
     const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
+    let loadedSubsetsInvalidationQueued = false
     this.lifecycle.setStatus(`loading`)
     if (!isCurrentSync()) return
     const finishReadyFailures = this.lifecycle.deferReadyFailures()
@@ -345,6 +346,19 @@ export class CollectionSyncManager<
             pendingTransaction.truncate = true
             pendingTransaction.truncateMarkReady = options?.markReady ?? true
             this.state.refreshPendingSyncedProjection()
+          },
+          invalidateLoadedSubsets: () => {
+            if (!isCurrentSync() || loadedSubsetsInvalidationQueued) return
+            // One revalidation per turn, after the refetch's rows apply.
+            loadedSubsetsInvalidationQueued = true
+            queueMicrotask(() => {
+              loadedSubsetsInvalidationQueued = false
+              if (!isCurrentSync()) return
+              this._events.emit(`loadedSubsets:invalidated`, {
+                type: `loadedSubsets:invalidated`,
+                collection: this.collection,
+              })
+            })
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
@@ -578,6 +592,9 @@ export class CollectionSyncManager<
   public preload(): Promise<void> {
     try {
       this.lifecycle.assertCanStartSync()
+      // A direct reader owns this demand even if an earlier render left a
+      // sync start deferred. Its preload must be able to start the source.
+      if (this.syncStartDeferred) this.resumeStart()
     } catch (error) {
       return Promise.reject(error)
     }

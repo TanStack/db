@@ -176,7 +176,10 @@ try {
 
   const adapter = options.persistence.adapter
   durableRows = async () => {
-    const snapshot = await adapter.loadResumeSnapshot(collectionId)
+    const snapshot = await adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
     return sortedRows(snapshot.rows.map(({ value }) => value as Item))
   }
   if (mode === `hold`) {

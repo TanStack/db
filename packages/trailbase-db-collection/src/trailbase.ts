@@ -188,9 +188,9 @@ export function trailBaseCollectionOptions<
       const { begin, write, commit, markReady, markError, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
-
       const cleanup = () => {
         cancelled = true
+        settleListener()
         cancelEventReader()
         if (periodicCleanupTask !== undefined) {
           clearInterval(periodicCleanupTask)
@@ -198,10 +198,44 @@ export function trailBaseCollectionOptions<
         }
       }
 
-      // NOTE: We cache cursors from prior fetches. TanStack/db expects that
-      // cursors can be derived from a key, which is not true for TB, since
-      // cursors are encrypted. This is leaky and therefore not ideal.
+      // TrailBase cursors are opaque. Cache a cursor by its last fetched key
+      // for callers that supply an established lastKey on a later request.
+      // CollectionSubscription does not derive lastKey from local snapshots,
+      // so its ordered requests use the offset fallback.
       const cursors = new Map<string | number, string>()
+
+      let listening = false
+      // Orders this run's change events against its list calls. Only loads
+      // in flight compare against it, so it is kept only while one runs.
+      let eventSequence = 0
+      const eventSequenceByKey = new Map<TKey, number>()
+      let loadsInFlight = 0
+      // Settles when the listener runs, cannot start (with the failure), or
+      // the session cleans up, so a waiting load never depends on the order
+      // of their continuations.
+      let settleListener!: (failure?: { error: unknown }) => void
+      const listenerSettled = new Promise<{ error: unknown } | undefined>(
+        (resolve) => {
+          settleListener = resolve
+        },
+      )
+
+      // Wait for the listener, but let the caller's abort end the wait even
+      // when the subscription never resolves.
+      async function waitForListener(signal: AbortSignal | undefined) {
+        if (!signal) return listenerSettled
+        let onAbort!: () => void
+        const aborted = new Promise<undefined>((resolve) => {
+          onAbort = () => resolve(undefined)
+          signal.addEventListener(`abort`, onAbort, { once: true })
+        })
+        try {
+          return await Promise.race([listenerSettled, aborted])
+        } finally {
+          // The request signal can outlive this wait; do not keep its listener.
+          signal.removeEventListener(`abort`, onAbort)
+        }
+      }
 
       // Load (more) data.
       // A caller that aborts sees `AbortError`. Pages a commit accepted still
@@ -209,6 +243,12 @@ export function trailBaseCollectionOptions<
       async function load(opts: LoadSubsetOptions) {
         if (cancelled) return
         if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
+        if (!listening) {
+          const failure = await waitForListener(opts.signal)
+          if (cancelled) return
+          if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
+          if (failure) throw failure.error
+        }
 
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
@@ -230,69 +270,85 @@ export function trailBaseCollectionOptions<
         }
         const appliedPages: Array<Promise<void>> = []
 
-        while (true) {
-          const limit = Math.min(remaining, 256)
-          let response
-          try {
-            response = await config.recordApi.list({
-              pagination: {
-                limit,
-                offset,
-                cursor,
-              },
-              order,
-              filters,
-            })
-          } catch (error) {
-            if (cancelled) return
-            if (opts.signal?.aborted) break
-            throw error
-          }
-          if (cancelled) return
-          // Check the signal before commit to discard a stale page.
-          if (opts.signal?.aborted) break
-
-          const length = response.records.length
-          if (length === 0) {
-            // Drained - read everything.
-            break
-          }
-
-          begin()
-
-          for (let i = 0; i < Math.min(length, remaining); ++i) {
-            write({
-              type: `insert`,
-              value: parse(response.records[i]!),
-            })
-          }
-
-          // An accepted page always applies.
-          const applied = commit(opts.signal)
-          if (applied !== true) {
-            appliedPages.push(applied)
-          }
-          if (cancelled || opts.signal?.aborted) break
-
-          remaining -= length
-
-          // Drained or read enough.
-          if (length < limit || remaining <= 0) {
-            if (response.cursor) {
-              cursors.set(
-                getKey(parse(response.records.at(-1)!)),
-                response.cursor,
-              )
+        loadsInFlight++
+        try {
+          while (true) {
+            const limit = Math.min(remaining, 256)
+            let response
+            // A change event after this point is newer than the page.
+            const listedAfter = eventSequence
+            try {
+              response = await config.recordApi.list({
+                pagination: {
+                  limit,
+                  offset,
+                  cursor,
+                },
+                order,
+                filters,
+              })
+            } catch (error) {
+              if (cancelled) return
+              if (opts.signal?.aborted) break
+              throw error
             }
-            break
-          }
+            if (cancelled) return
+            // Check the signal before commit to discard a stale page.
+            if (opts.signal?.aborted) break
 
-          // Update params for next iteration.
-          if (offset !== undefined) {
-            offset += length
-          } else {
-            cursor = response.cursor
+            const length = response.records.length
+            if (length === 0) {
+              // Drained - read everything.
+              break
+            }
+
+            begin()
+
+            for (let i = 0; i < Math.min(length, remaining); ++i) {
+              const value = parse(response.records[i]!)
+              const key = getKey(value)
+              // The listener already applied a newer change for this row.
+              if ((eventSequenceByKey.get(key) ?? 0) > listedAfter) continue
+              // A page row is a full row. An update creates a missing row and
+              // replaces a held one, including one an accepted event queued.
+              write({ type: `update`, value })
+            }
+
+            // An accepted page always applies.
+            const applied = commit(opts.signal)
+            if (applied !== true) {
+              appliedPages.push(applied)
+            }
+            if (cancelled || opts.signal?.aborted) break
+
+            remaining -= length
+
+            // Drained or read enough.
+            if (length < limit || remaining <= 0) {
+              // Core subscriptions cannot send lastKey, so retaining their
+              // cursors only grows this cache. Direct callers can use the key
+              // from a completed page as their next opaque boundary.
+              if (
+                response.cursor &&
+                (opts.subscription === undefined || lastKey !== undefined)
+              ) {
+                cursors.set(
+                  getKey(parse(response.records.at(-1)!)),
+                  response.cursor,
+                )
+              }
+              break
+            }
+
+            // Update params for next iteration.
+            if (offset !== undefined) {
+              offset += length
+            } else {
+              cursor = response.cursor
+            }
           }
+        } finally {
+          if (--loadsInFlight === 0) eventSequenceByKey.clear()
         }
 
         await Promise.all(appliedPages)
@@ -314,7 +370,9 @@ export function trailBaseCollectionOptions<
           let value: TItem | undefined
           if (`Insert` in event) {
             value = parse(event.Insert as TRecord)
-            write({ type: `insert`, value })
+            // A page may already hold a newer value for this row, so an
+            // insert is written as a full-row update; it creates a missing row.
+            write({ type: `update`, value })
           } else if (`Delete` in event) {
             value = parse(event.Delete as TRecord)
             write({ type: `delete`, value })
@@ -327,6 +385,9 @@ export function trailBaseCollectionOptions<
           void commit()
 
           if (value) {
+            ++eventSequence
+            if (loadsInFlight > 0)
+              eventSequenceByKey.set(getKey(value), eventSequence)
             seenIds.setState((curr: Map<string, number>) => {
               const newIds = new Map(curr)
               newIds.set(String(getKey(value)), Date.now())
@@ -367,6 +428,8 @@ export function trailBaseCollectionOptions<
                 console.error(`TrailBase subscription failed`, error)
               }
             })
+          listening = true
+          settleListener()
 
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
@@ -381,6 +444,7 @@ export function trailBaseCollectionOptions<
         } catch (error) {
           // An abandoned startup must not cancel a replacement session's reader.
           if (cancelled) return
+          settleListener({ error })
           cancelEventReader()
           if (collection.status === `loading`) {
             markError(error)

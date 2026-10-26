@@ -92,7 +92,15 @@ export class CollectionSubscriber<
     // Used as a fallback for status transitions not covered by direct tracking
     // (e.g., truncate-triggered reloads that call trackLoadSubsetPromise directly).
     const onStatusChange = (event: SubscriptionStatusChangeEvent) => {
-      if (this.collectionConfigBuilder.isLazySource(this.sourceId)) return
+      if (this.collectionConfigBuilder.isLazySource(this.sourceId)) {
+        // A joined source's finished load can clear the gate that holds an
+        // ordered publication, and settling it may deliver no row. Run the
+        // graph so the held changes publish.
+        if (event.status === `ready`) {
+          this.collectionConfigBuilder.scheduleGraphRun()
+        }
+        return
+      }
       const subscription = event.subscription as CollectionSubscription
       if (event.status === `loadingSubset`) {
         this.ensureLoadingPromise(subscription)
@@ -212,11 +220,23 @@ export class CollectionSubscriber<
       update.ready instanceof Promise,
     )
     if (update.ready instanceof Promise) {
-      void update.ready.then(
-        () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
-        (error) =>
-          this.collectionConfigBuilder.failDemand(plan.id, generation, error),
-      )
+      const settleWith = (ready: Promise<unknown>) =>
+        void ready.then(
+          () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
+          (error) => {
+            // A truncate replay aborts the acquisition it supersedes. Its
+            // replacement decides the demand; a real failure rejects it too.
+            const replacement = subscription.pendingTruncateReplacement
+            if (replacement) settleWith(replacement)
+            else
+              this.collectionConfigBuilder.failDemand(
+                plan.id,
+                generation,
+                error,
+              )
+          },
+        )
+      settleWith(update.ready)
     } else {
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
     }
@@ -296,7 +316,11 @@ export class CollectionSubscriber<
       if (!subscription) return
       const changesArray = Array.isArray(changes) ? changes : [...changes]
 
-      this.orderedLoader?.onSourceChanges(changesArray, this.sentToD2Rows)
+      this.orderedLoader?.onSourceChanges(
+        changesArray,
+        this.sentToD2Rows,
+        (key) => this.collection._hasOptimisticOverlay(key),
+      )
 
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
@@ -332,9 +356,24 @@ export class CollectionSubscriber<
       this.orderedLoader?.resetCursor()
     })
 
+    // The sync adapter reports that served pages may have shifted after its
+    // own refetch. Re-establish the window with a bounded repair.
+    const revalidationUnsubscribe = this.collection.on(
+      `loadedSubsets:invalidated`,
+      () => {
+        const loader = this.orderedLoader
+        if (!loader) return
+        loader.revalidateLoadedCoverage()
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+          this.collectionConfigBuilder.getSyncRunGeneration(),
+        )
+      },
+    )
+
     // Clean up truncate listener when subscription is unsubscribed
     subscription.on(`unsubscribed`, () => {
       truncateUnsubscribe()
+      revalidationUnsubscribe()
       subscriptionHolder.current = undefined
       this.orderedLoader?.dispose()
       this.orderedLoader = undefined

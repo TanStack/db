@@ -3,6 +3,7 @@ import { compileQuery } from '../compiler/index.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
+  SetWindowFindOneLimitError,
   SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
@@ -25,6 +26,7 @@ import {
   extractCollectionFromSource,
   extractCollectionSources,
   extractCollectionsFromQuery,
+  sourcePermitsInitialReadiness,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
@@ -57,9 +59,15 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
-   * Sets the offset and limit of an ordered query.
-   * Is a no-op if the query is not ordered.
+   * Sets the offset and limit of the query's window, its ordered view. A
+   * windowed query has an `orderBy`. A `findOne` keeps its compiled limit (1,
+   * or 0 for `.limit(0).findOne()`); an ordered `findOne` has a movable window,
+   * and an unordered one is a fixed one-row result that accepts only its
+   * compiled limit at offset 0.
    *
+   * @throws `SetWindowRequiresOrderByError` if the query is neither windowed
+   * nor a `findOne`, or an unordered `findOne` would move its offset.
+   * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -172,6 +180,14 @@ export class CollectionConfigBuilder<
   private windowFailed = false
   private syncRunGeneration = 0
   private windowOperationGeneration = 0
+  // Counts setWindow calls, deferred or not. A separate count from window
+  // operations, so a deferred call does not drop the settlement of a move
+  // that already applied.
+  private windowRequestGeneration = 0
+  // The newest call's settlement. An older call that a newer one superseded
+  // resolves only once it settles, so an awaited call reflects the window
+  // that won. A superseded call that fails still rejects with its own error.
+  private latestWindowRequest: Promise<void> | undefined
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections = createSourceRecord<OrderByOptimizationInfo>()
 
@@ -185,12 +201,15 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
-    this.initialWindow = this.query.orderBy?.length
-      ? {
-          offset: this.query.offset ?? 0,
-          limit: this.query.limit ?? Infinity,
-        }
-      : undefined
+    this.initialWindow =
+      this.query.orderBy?.length || this.query.singleResult
+        ? {
+            offset: this.query.offset ?? 0,
+            limit: this.query.singleResult
+              ? Math.min(this.query.limit ?? 1, 1)
+              : (this.query.limit ?? Infinity),
+          }
+        : undefined
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
@@ -290,6 +309,16 @@ export class CollectionConfigBuilder<
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
+    // A findOne keeps its compiled limit, and only an ordered one moves.
+    if (this.query.singleResult) {
+      if (!this.query.orderBy?.length && (options.offset ?? 0) !== 0)
+        throw new SetWindowRequiresOrderByError()
+      if (
+        (options.limit ?? this.initialWindow!.limit) !==
+        this.initialWindow!.limit
+      )
+        throw new SetWindowFindOneLimitError()
+    }
     if (
       this.activeWindowOperation ||
       this.isGraphRunning ||
@@ -308,22 +337,31 @@ export class CollectionConfigBuilder<
       offset: options.offset ?? baseWindow?.offset,
       limit: options.limit ?? baseWindow?.limit,
     }
+    const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      return sourceRecovery.then(async () => {
+      const deferred: Promise<void> = sourceRecovery.then(async () => {
+        // A newer call wins, even if this deferred one resumes after it.
+        if (request !== this.windowRequestGeneration) {
+          await this.latestWindowRequest
+          return
+        }
         const settlement = this.setWindow(requestedWindow)
+        // The resumed call settles on behalf of this one.
+        this.latestWindowRequest = deferred
         if (settlement !== true) await settlement
       })
+      return (this.latestWindowRequest = deferred)
     }
     if (this.hasFailedSourceRecovery()) {
-      return Promise.reject(
+      return (this.latestWindowRequest = Promise.reject(
         this.lastSubsetError ??
           new Error(
             devBuild() && process.env.NODE_ENV !== `production`
               ? `Source recovery failed`
               : codedMessage(147),
           ),
-      )
+      ))
     }
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
@@ -371,13 +409,17 @@ export class CollectionConfigBuilder<
     const settlement = loadOperation?.wait() ?? true
     if (settlement === true) {
       this.settledWindow = requestedWindow
+      this.latestWindowRequest = undefined
       return true
     }
-    return settlement.then(
+    return (this.latestWindowRequest = settlement.then(
       () => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
           this.settledWindow = requestedWindow
         }
+        return request === this.windowRequestGeneration
+          ? undefined
+          : this.latestWindowRequest
       },
       (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
@@ -386,11 +428,12 @@ export class CollectionConfigBuilder<
         }
         throw error
       },
-    )
+    ))
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
-    // Only return window if this is a windowed query (has orderBy and windowFn)
+    // A windowed query or an ordered findOne returns its window. An unordered
+    // findOne returns its fixed result: offset 0 and its compiled limit.
     const window = this.settledWindow ?? this.initialWindow
     if (!this.windowFn || !window) {
       return undefined
@@ -1213,13 +1256,8 @@ export class CollectionConfigBuilder<
   }
 
   private allRequiredSourcesReady() {
-    return this.collectionSources.every(
-      (source) =>
-        // Only on-demand sources settle through route demand. Eager
-        // loadSubset calls return immediately, so they must reach ready.
-        (this.lazySources.has(source.sourceId) &&
-          source.collection.config.syncMode === `on-demand`) ||
-        source.collection.isReady(),
+    return this.collectionSources.every(({ collection }) =>
+      sourcePermitsInitialReadiness(collection),
     )
   }
 
@@ -1311,7 +1349,9 @@ export class CollectionConfigBuilder<
         lazyCallbacks.setDemand = (plan, keys) =>
           collectionSubscriber.setDemand(subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
-          if (plan.initialKeys.size > 0) {
+          // A window requested before start with a nonzero offset can drop
+          // the rows a static filter names, so it gets no static demand.
+          if (plan.initialKeys.size > 0 && !this.currentWindow?.offset) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
           }
         }

@@ -78,12 +78,19 @@ replacement.
 | Stream render-time results | none | `routerWithDbClient(router, dbClient)` |
 | React query identity | dependency array | derived IR, or `queryKey` when needed |
 
+Building or extending a Query keeps descriptors in its plan without starting
+their source Collections. The client-aware hook or `dbClient.preloadLiveQuery()`
+binds the finished plan when it consumes it. Reuse the original unbound Query
+across clients; a prepared Query contains Collections from the client that
+prepared it.
+
 ### Minimal React Pattern
 
 ```tsx
 import {
   DbClient,
   DbProvider,
+  Query,
   collectionOptions,
   eq,
   useDbClient,
@@ -139,6 +146,26 @@ root.render(
 )
 ```
 
+A descriptor query can also be defined outside React, without a `DbClient` at
+definition time:
+
+```tsx
+const openTodosQuery = new Query()
+  .from({ todo: todoCollection })
+  .where(({ todo }) => eq(todo.status, 'open'))
+
+function OpenTodos() {
+  const { data } = useLiveQuery({ query: openTodosQuery })
+  return <span>{data.length} open todos</span>
+}
+```
+
+The consuming hook binds this query to its `DbProvider` client. The same query
+can be used with `dbClient.preloadLiveQuery({ query: openTodosQuery })` on the
+server, or under another provider with a different client. For that reuse, the
+descriptor must have a reusable factory. Executing a descriptor query without
+a client throws when the source Collection is needed.
+
 The factory matters when config contains mutable adapter state or closures.
 Every `DbClient` gets a fresh config and collection instance. First-party
 adapter option creators already attach an equivalent factory, so this is also
@@ -188,6 +215,20 @@ render. Adapter sync and queued on-demand loads start when React commits the
 external-store subscription, so the initial markup still matches the server.
 The snapshot remains visible while the source is loading. Once the browser live
 query is ready, DB publishes one handoff from the snapshot to the live result.
+
+A hydrated query hash identifies a portable result, but the payload does not
+contain the server's Collection objects. The first browser hook that commits a
+subscription, or the first browser `preloadLiveQuery()` call, claims the local
+source Collections for that reusable result. While the result is pending or
+successful, later local consumers with the same hash must use those Collection
+objects in the same query positions. A different source object with the same ID
+is rejected; give a genuinely different query a distinct `queryKey`. A newer
+hydration chunk updates the result without changing its established claim.
+`useLiveSuspenseQuery` can preload during render, claiming a source even if
+React never commits that render. A failed stream releases its claim, so a newer
+hydrated result can accept the first healthy local source. Once a subscribed
+live result becomes authoritative, the client consumes the stream;
+a later observer uses its own source Collection, even under the same hash.
 
 ### Server
 
@@ -374,7 +415,7 @@ result, and pass that state to a client hydration boundary:
 ```tsx
 export default function Page() {
   const dbClient = new DbClient()
-  void dbClient.preloadLiveQuery(openTodosQuery)
+  void dbClient.preloadLiveQuery({ query: openTodosQuery })
 
   const state = dbClient.dehydrate({
     shouldDehydrateCollection: () => false,
@@ -538,10 +579,11 @@ Common reasons to add `queryKey`:
   the structured query
 - a render path where derived identity becomes measurably expensive
 
-Before 1.0, DB warns when structured IR cannot be hashed and preserves the
-legacy mount-stable identity. The query still works, but captured values inside
-opaque logic are not reactive unless they are represented in `queryKey`. In 1.0,
-an unhashable query without `queryKey` will throw.
+When structured IR cannot be hashed and the query has no `queryKey`, a hook
+that compares identity throws `UnhashableQueryIRError`: React and Preact hooks,
+and any hook backed by a `DbClient`, which matches queries by identity hash. An
+empty `queryKey` counts as none. Represent the values that opaque logic
+captures in `queryKey`, so the query recompiles when they change.
 
 DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
@@ -694,7 +736,7 @@ Preload a live query when the browser only needs the rendered result:
 
 ```tsx
 const dbClient = new DbClient()
-await dbClient.preloadLiveQuery(openTodosQuery)
+await dbClient.preloadLiveQuery({ query: openTodosQuery })
 
 return {
   dbState: dbClient.dehydrate(),
@@ -730,8 +772,8 @@ Still supported:
 Warnings:
 
 - React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` warns in development and keeps legacy
-  mount-stable identity until 1.0. In 1.0 it will throw.
+- Opaque query IR without `queryKey` throws `UnhashableQueryIRError` in a
+  hook that compares identity (React, Preact, or any `DbClient`-backed hook).
 - Expensive derived identity warns in development and suggests `queryKey`.
 
 Required for SSR:

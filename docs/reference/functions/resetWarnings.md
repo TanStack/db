@@ -7,7 +7,7 @@ title: resetWarnings
 function resetWarnings(): void;
 ```
 
-Defined in: [packages/db/src/utils.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L423)
+Defined in: [packages/db/src/utils.ts:447](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L447)
 
 **`Internal`**
 

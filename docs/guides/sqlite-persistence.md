@@ -77,6 +77,14 @@ This Collection has no `sync` option. Its normal insert, update, and delete hand
 
 ### Manual transactions on a local Collection
 
+Local persistence reserves the utility names `acceptMutations`,
+`getLeadershipState`, and `forceReloadSubset`. If caller-supplied `utils`
+contains one of these properties, `persistedCollectionOptions` throws
+`InvalidPersistedCollectionConfigError` before it resolves persistence.
+This also applies to inherited properties and properties whose value is
+`undefined`. Other custom utility names remain available. Collections with a
+`sync` option retain their adapter utilities without this local-only restriction.
+
 For a Collection without a `sync` option, normal Collection mutations persist automatically. A manual transaction must call `acceptMutations` in its mutation function:
 
 ```ts
@@ -228,7 +236,11 @@ The `sync` option determines which mode the wrapper uses:
 | `sync` present | Load persisted rows, then apply source sync transactions. The source remains responsible for current data. |
 | `sync` absent | Load and save local rows through a loopback sync adapter. The Collection has no remote source. |
 
-The wrapper also supports `syncMode: 'on-demand'`. In that mode, it loads rows for active query demand rather than loading every stored row into the Collection.
+The wrapper also supports `syncMode: 'on-demand'`. In that mode, it loads rows for active query demand rather than loading every stored row into the Collection. When no query needs rows, a peer reload or schema reset checks rows already visible in the Collection but does not add unrelated stored rows.
+
+Built-in SQLite adapters use managed generations for on-demand caches. If a cache claim expires, the wrapper retires the old source callbacks, cleans up that source session, rotates the cache, and calls a custom source's `sync` function again. A custom source does not need a restart hook. Query and Electric provide `restartAfterScopedRecovery` to control their own restart; their hooks must retire old callbacks immediately and start replacement loads after `cacheRotated` resolves.
+
+An on-demand cache is not yet a certified offline snapshot. The first managed generation does not import legacy cache tables, and a private replacement created after claim expiry is not the next run's shared cache. A later launch must refetch those subsets from the source.
 
 ## Render after SQLite restore
 

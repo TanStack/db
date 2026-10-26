@@ -89,5 +89,7 @@
   "ObjectStoreNotFoundError": 176,
   "NameRequiredError": 177,
   "GetKeyRequiredError": 178,
-  "DuplicateTransactionIdError": 233
+  "DuplicateTransactionIdError": 233,
+  "SetWindowFindOneLimitError": 244,
+  "SourceCollectionIdReuseError": 245
 }

@@ -4,7 +4,8 @@
  * value model and its limits live in structured-clone-oracle.ts. Each finite
  * history preserves one untouched nested field through a scalar update, peer
  * read, export/import replacement and fresh descriptor restore. Atomic rejection
- * crosses insert/import and first/middle/last uncloneable nested values.
+ * crosses insert/import and first/middle/last uncloneable nested values, and
+ * reports each as a SerializationError.
  *
  * The driver uses real Collection APIs and fake-IDB, with controlled delivery.
  * Every checkpoint compares public, peer, export and raw durable values, plus
@@ -12,6 +13,7 @@
  */
 import { expect, it } from 'vitest'
 import {
+  SerializationError,
   createCollection,
   createIndexedDB,
   indexedDBCollectionOptions,
@@ -93,7 +95,7 @@ for (const kind of valueKinds) {
             entry === 'insert'
               ? writer.insert(batch).isPersisted.promise
               : writer.utils.importData(batch)
-          await expect(outcome).rejects.toBeDefined()
+          await expect(outcome).rejects.toBeInstanceOf(SerializationError)
           await checkpoint(`${entry} rejection at ${badIndex}`)
           expect(
             await readStore(h.db, '_versions'),

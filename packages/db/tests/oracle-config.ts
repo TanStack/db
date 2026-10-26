@@ -3,6 +3,10 @@ import { oracleReplayReporter } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `persisted-options.types.core`,
+  `persisted-options.types.browser`,
+  `persisted-options.utilities.core`,
+  `persisted-options.utilities.browser`,
   `cursor-pagination.no-peek`,
   `cursor-pagination.history`,
   `cursor-pagination.cache`,
@@ -18,13 +22,21 @@ const staticOracleProperties = [
   `cursor-pagination.partition`,
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
+  `query-db.refetch-ordered-prefix`,
+  `ordered-loader.request-authority`,
+  `replay.ordered-window-faults`,
   `oracle-replay.calibration`,
+  `structural-identity.equal-representations`,
+  `structural-identity.independent-values`,
+  `opfs-worker.diagnostics`,
   `sqlite-persistence.source-fifo-order`,
   `sqlite-persistence.abort-graph`,
   `sqlite-persistence.owner-isolation`,
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
+  `sqlite-persistence.optimistic-history`,
   `trailbase.lifecycle`,
+  `trailbase.page-event`,
   `electric.bound-descriptor-history`,
   `electric.persisted-tag-history`,
   `electric.match-reentry`,
@@ -34,6 +46,12 @@ const staticOracleProperties = [
   `electric.sdk-dnf-membership`,
   `electric-recovery.publication-stream-convergence`,
   `sqlite-resume.startup-generation`,
+  `sqlite-resume.managed-claim-read`,
+  `sqlite-resume.retired-storage`,
+  `sqlite-reload.class`,
+  `sqlite-reload.class.electron`,
+  `persistence.generation-notice`,
+  `persistence.follower-remote-demand`,
   `sqlite-ordinary.write-history`,
   `sqlite-ordinary.independent-work`,
   `collection-sync.reentrant-drain`,
@@ -58,6 +76,7 @@ const staticOracleProperties = [
   `cursor.partial-local-order`,
   `cursor.repeat-construction`,
   `index-update.reference-model`,
+  `index-update.nullish-membership`,
   `index-update.exact-identity`,
   `index-update.custom-comparator`,
   `query-identity.compiled-output`,
@@ -66,6 +85,7 @@ const staticOracleProperties = [
   `join-result-key.pairs`,
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
+  `local-storage.value-fidelity`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
@@ -79,6 +99,7 @@ const staticOracleProperties = [
   `live-query-observer.wholesale-history`,
   `live-query-observer.retained-snapshot`,
   `bucket-facade.rollback-history`,
+  `aggregate.select-shapes`,
   `evaluators.in`,
   `transaction-ownership.settlement-release`,
   `includes-collection.layout-swap`,
@@ -104,6 +125,7 @@ const staticOracleProperties = [
   `includes-work.correlated-links`,
   `includes-work.join-free`,
   `includes-work.join-targets`,
+  `includes-work.ordered-window`,
   `includes-publication.atomic-parent-replacement`,
   `includes-publication.child-scalar`,
   `includes-publication.optimistic-rollback`,
@@ -146,6 +168,9 @@ const staticOracleProperties = [
   `ordered-work.consumer-parity`,
   `ordered-work.eager-indexed-window`,
   `ordered-work.eager-joined-window`,
+  `ordered-work.eager-joined-gap`,
+  `ordered-work.eager-full-join`,
+  `ordered-work.eager-held-load`,
   `ordered-work.lifecycle`,
   `ordered-work.nullable-lifecycle`,
   `pagination.async-cursor`,
@@ -388,10 +413,14 @@ export function oracleRandomParameters(
   return {
     numRuns,
     seed: replaySeed,
+    // A path replays one recorded counterexample, so the replay runs once.
+    // From a path with one segment, fast-check would otherwise run `numRuns`
+    // histories that start at that index.
     ...(property !== undefined &&
     replayPath !== undefined &&
     replayProperty === property
       ? {
+          numRuns: 1,
           path: replayPath,
           ...oracleReplayReporter(property, replaySeed, replayPath),
         }
@@ -400,6 +429,18 @@ export function oracleRandomParameters(
 }
 
 const { multiplier, ...replay } = readOracleRunConfig()
+
+/**
+ * Whether a path replay is selected. It replays one property's recorded
+ * history, so a test that is not that property stands aside with
+ * `it.skipIf(oracleReplayRequested())`. A seed without a path only reseeds
+ * the random campaigns, so every test still runs. The `oracle/no-disabled`
+ * lint rule accepts only this condition, so a replay selection cannot switch
+ * an oracle test off in ordinary runs.
+ */
+export function oracleReplayRequested(): boolean {
+  return replay.replayPath !== undefined
+}
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
 export function oracleRuns(baseRuns: number): number {

@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-sqlite-persistence-core",
-  "version": "0.4.8",
+  "version": "0.4.12",
   "description": "SQLite persisted collection core for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -20,7 +20,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "test:oracles": "vitest --run --coverage.enabled=false tests/persisted-options.test.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

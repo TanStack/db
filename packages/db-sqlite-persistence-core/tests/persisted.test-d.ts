@@ -281,6 +281,7 @@ describe(`persisted collection types`, () => {
       | {
           requiredIndexSignatures?: ReadonlyArray<string>
           includeRows?: boolean
+          cacheGenerationClaimId?: string
         }
       | undefined
     >()

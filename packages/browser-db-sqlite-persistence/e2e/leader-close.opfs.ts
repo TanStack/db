@@ -12,6 +12,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import type { Collection, SyncConfig } from '@tanstack/db'
+import type { HydrationPersistenceAdapter } from '../../db-sqlite-persistence-core/src/index'
 
 type Row = { id: string; title: string }
 type SourceParams = Parameters<SyncConfig<Row, string>['sync']>[0]
@@ -146,7 +147,10 @@ window.__leaderCloseProbe = {
   commitNext: issueSourceCommit,
   durableState: async () => {
     if (!adapter) throw new Error(`adapter unavailable`)
-    const snapshot = await adapter.loadResumeSnapshot(`messages`)
+    const snapshot = await adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: `messages`,
+    })
     return {
       ids: snapshot.rows.map(({ value }) => String(value.id)).sort(),
       cursor:
@@ -261,31 +265,36 @@ try {
     // The coordinator's ordinary route receives the scheduler's scoped
     // adapter. Intercept that exact adapter after its durable write, before
     // the RPC response, so the hold reaches the real host path.
-    const originalRegular = adapter.runInRegularScope?.bind(adapter)
-    if (!originalRegular) throw new Error(`regular scope unavailable`)
-    adapter.runInRegularScope = (task) =>
-      originalRegular((scopedAdapter) =>
-        task({
-          ...scopedAdapter,
-          applyCommittedTx: async (collectionId, tx) => {
-            if (
-              hold === `before` &&
-              tx.mutations.some((mutation) => mutation.key === `crossing`)
-            ) {
-              heldAtCommitBoundary = true
-              await new Promise<void>(() => {})
-            }
-            await scopedAdapter.applyCommittedTx(collectionId, tx)
-            if (
-              (hold === `after` || hold === `after-peer`) &&
-              tx.mutations.some((mutation) => mutation.key === `crossing`)
-            ) {
-              heldAtCommitBoundary = true
-              await new Promise<void>(() => {})
-            }
-          },
-        }),
-      )
+    const originalScope = adapter.runInRegularScope
+    const originalRegular = originalScope?.bind(adapter)
+    if (!originalScope || !originalRegular)
+      throw new Error(`regular scope unavailable`)
+    adapter.runInRegularScope = Object.assign(
+      <T>(task: (adapter: HydrationPersistenceAdapter) => Promise<T>) =>
+        originalRegular((scopedAdapter) =>
+          task({
+            ...scopedAdapter,
+            applyCommittedTx: async (collectionId, tx) => {
+              if (
+                hold === `before` &&
+                tx.mutations.some((mutation) => mutation.key === `crossing`)
+              ) {
+                heldAtCommitBoundary = true
+                await new Promise<void>(() => {})
+              }
+              await scopedAdapter.applyCommittedTx(collectionId, tx)
+              if (
+                (hold === `after` || hold === `after-peer`) &&
+                tx.mutations.some((mutation) => mutation.key === `crossing`)
+              ) {
+                heldAtCommitBoundary = true
+                await new Promise<void>(() => {})
+              }
+            },
+          }),
+        ),
+      { afterQueuedWork: originalScope.afterQueuedWork },
+    )
   }
   collection = createCollection(options)
   await collection.preload()

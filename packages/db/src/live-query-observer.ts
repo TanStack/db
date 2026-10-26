@@ -3,8 +3,9 @@ import {
   getLiveQueryStatusFlags,
   getPublicCollection,
   isSingleResultCollection,
-} from './live-query-adapter.js'
+} from './live-query-primitives.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
+import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
@@ -619,6 +620,10 @@ class LiveQueryObserverImpl<
 
   subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
     if (this.disposed) throw new LiveQueryObserverDisposedError()
+    if (this.subscriptions.size === 0 && this.client && this.queryHash) {
+      const { sources } = this.getSourceInfo()
+      if (sources) this.client._assertLiveQuerySources(this.queryHash, sources)
+    }
 
     const record: SubscriptionRecord<T, TKey> = { listener, active: true }
     this.subscriptions.add(record)
@@ -860,11 +865,12 @@ class LiveQueryObserverImpl<
   }
 
   private registerClientResource(): void {
+    const config: object | undefined = this.collection?.config
     if (
       this.unregisterClientResource ||
       !this.client?._isSsrServerCleanupEnabled() ||
-      !this.collection ||
-      !getBuilderFromConfig(this.collection.config)
+      !config ||
+      !getBuilderFromConfig(config)
     ) {
       return
     }
@@ -948,15 +954,38 @@ class LiveQueryObserverImpl<
     if (failure) throw failure.error
   }
 
+  private getSourceInfo(): {
+    sources: ReadonlyArray<Collection<any, any, any>> | undefined
+    pooledSource: Collection<any, any, any> | undefined
+  } {
+    const collection = this.collection
+    const config = collection?.config
+    const pooledSource = collection && getPooledLiveQuerySource(collection)
+    const sources = config
+      ? getBuilderFromConfig(config)?.getSourceCollections()
+      : pooledSource
+        ? [pooledSource]
+        : undefined
+    return { sources, pooledSource: pooledSource || undefined }
+  }
+
   preload(): Promise<void> {
     if (this.preloadPromise) return this.preloadPromise
 
+    const { sources, pooledSource } = this.getSourceInfo()
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending` || query?.status === `success`) {
-        // The client stream answers this preload, but it is still a request
-        // for this Collection's data, so its deferred acquisition may resume.
         try {
+          if (sources)
+            this.client._assertLiveQuerySources(this.queryHash, sources)
+          if (pooledSource && this.collection) {
+            return Promise.all([query.promise, this.collection.preload()]).then(
+              () => {},
+            )
+          }
+          // The client stream answers this preload, but it is still a request
+          // for this Collection's data, so its deferred acquisition may resume.
           this.collection?._markPreload()
         } catch (error) {
           return Promise.reject(error)
@@ -973,6 +1002,7 @@ class LiveQueryObserverImpl<
         ? this.client._registerLiveQuery(
             this.queryHash,
             collectionPromise.then(() => this.dehydrate()),
+            sources,
           )
         : collectionPromise
     this.preloadPromise = preloadPromise
@@ -1020,103 +1050,31 @@ class LiveQueryObserverImpl<
     if (this.initialRenderPromise) return this.initialRenderPromise
 
     const network = this.preload()
-    const clientQuery =
+    const currentClientQuery = () =>
       this.client && this.queryHash
         ? this.client._getLiveQuery(this.queryHash)
         : undefined
-    const clientStream =
-      clientQuery?.promise === network ? clientQuery : undefined
     if (this.collection) INITIAL_RENDER_PRELOADS.add(this.collection)
 
-    const unsubscribers: Array<() => void> = []
-    let cancel!: () => void
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const initialRender = new Promise<void>((resolve, reject) => {
-      let networkReady = false
-      // React can start a new observer after the client stream has failed.
-      let failedClientStream =
-        clientQuery?.status === `error` ? clientQuery : undefined
-      let networkFailed = failedClientStream !== undefined
-      let networkError: unknown = failedClientStream?.error
-      let settled = false
-      const finish = (failure?: { error: unknown }) => {
-        if (settled) return
-        settled = true
-        if (failure) reject(failure.error)
-        else {
+    // The persistence adapter supplies the network-first wait with its
+    // readiness, so an app with no persisted source does not ship it.
+    const { promise: initialRender, cancel } =
+      sources[0]!.readiness.waitForInitialRender({
+        sources,
+        network,
+        clientQuery: currentClientQuery(),
+        currentClientQuery,
+        collectionStatus: () => this.collection?.status,
+        readPersisted: () => this.readPersistedReadiness(),
+        onReady: () => {
           this.initialRenderReady = true
-          resolve()
-        }
-      }
-      cancel = () => finish({ error: new LiveQueryObserverDisposedError() })
-      this.cancelInitialRenderWait = cancel
-      const check = () => {
-        if (settled) return
-        if (timer !== undefined) {
-          clearTimeout(timer)
-          timer = undefined
-        }
-        if (networkReady) {
-          finish()
-          return
-        }
-        const persisted = this.readPersistedReadiness()
-        const networkDeadlineAt = Math.max(
-          ...sources.map((source) =>
-            source.readiness.getOrStartNetworkDeadline(),
-          ),
-        )
-        const remainingNetworkMs = Math.max(0, networkDeadlineAt - Date.now())
-        const deadlinePassed = remainingNetworkMs === 0
-        const sourceFailed = sources.some(
-          (source) => source.collection.status === `error`,
-        )
-        const clientStreamFailed =
-          failedClientStream !== undefined &&
-          this.client !== undefined &&
-          this.queryHash !== undefined &&
-          this.client._getLiveQuery(this.queryHash) === failedClientStream
-        if (
-          networkFailed &&
-          !sourceFailed &&
-          (this.collection?.status === `error` || !clientStreamFailed)
-        ) {
-          finish({ error: networkError })
-        } else if (
-          (deadlinePassed || networkFailed) &&
-          persisted.status === `ready`
-        ) {
-          finish()
-        } else if (networkFailed && persisted.status === `error`) {
-          finish({ error: networkError ?? persisted.error })
-        } else if (!deadlinePassed && !networkFailed) {
-          timer = setTimeout(check, remainingNetworkMs)
-        }
-      }
-      for (const source of sources) {
-        unsubscribers.push(source.readiness.subscribe(check))
-      }
-      void network.then(
-        () => {
-          networkReady = true
-          check()
         },
-        (error) => {
-          networkFailed = true
-          networkError = error
-          failedClientStream =
-            clientStream?.status === `error` ? clientStream : undefined
-          check()
-        },
-      )
-      check()
-    })
+      })
+    this.cancelInitialRenderWait = cancel
     const promise = initialRender.finally(() => {
       if (this.cancelInitialRenderWait === cancel) {
         this.cancelInitialRenderWait = undefined
       }
-      unsubscribers.forEach((unsubscribe) => unsubscribe())
-      if (timer !== undefined) clearTimeout(timer)
       if (this.initialRenderPromise === promise) {
         this.initialRenderPromise = undefined
       }

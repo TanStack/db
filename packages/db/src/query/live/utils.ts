@@ -2,7 +2,11 @@ import { MultiSet } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { collectCollectionSources, isExpressionLike } from '../ir.js'
+import {
+  collectCollectionSources,
+  isExpressionLike,
+  requireCollectionSource,
+} from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
@@ -30,6 +34,20 @@ export function extractCollectionsFromQuery(
 export { collectCollectionSources as extractCollectionSources }
 
 /**
+ * Whether a source permits initial-query readiness, which live queries and
+ * `skipInitial` Effects share. An on-demand source serves its consumer through
+ * subset demand, whose settlement each consumer tracks, so its own Collection
+ * readiness does not gate the consumer; that readiness can lag, as a
+ * progressive source's background full sync does. An eager source serves no
+ * subset demand, so it must reach ready.
+ */
+export function sourcePermitsInitialReadiness(
+  collection: Pick<Collection, `config` | `isReady`>,
+): boolean {
+  return collection.config.syncMode === `on-demand` || collection.isReady()
+}
+
+/**
  * Helper function to extract the collection that is referenced in the query's FROM clause.
  * The FROM clause may refer directly to a collection or indirectly to a subquery.
  */
@@ -40,6 +58,8 @@ export function extractCollectionFromSource(query: {
 
   if (from.type === `collectionRef`) {
     return from.collection
+  } else if (from.type === `descriptorRef`) {
+    return requireCollectionSource(from)
   } else if (from.type === `queryRef`) {
     // Recursively extract from subquery
     return extractCollectionFromSource(from.query)

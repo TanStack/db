@@ -9,10 +9,39 @@ Start by making the law clear enough that someone could predict an observation
 without reading production. The hard part is deciding what is owed, to whom,
 under which conditions, and when. An executable model enacts that account.
 
-Read [the oracle guide](../../../docs/contributing/oracle-tests.md),
+Use this skill whenever an oracle changes, or the production driver, history
+grammar, or comparison that it uses. This includes a change made while you fix
+a bug, fix a review finding, or evaluate review findings.
+
+Read [how oracle work is scored](../../../AGENTS.md#how-oracle-work-is-scored)
+first. Auditors check the order of your work and penalize shortcuts.
+
+Work in this order when a production change is part of the task:
+
+1. State the law and its authority.
+2. Extend the history grammar, driver, or observation until generated
+   histories reach the state where the law matters. Declare that state with
+   `createOracleReach` (ORC-015).
+3. Run the extended oracle on the unchanged production code and record the RED
+   failure.
+4. Change production, with the oracle running after each attempt.
+5. Record the GREEN result and a hostile mutant that fails.
+
+Do not change production before step 3. If a model rule disagrees with
+production, find its authority before you edit either one. A rule that you
+change only so that it matches production output is model hacking.
+
+Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
 [the glossary](../../../docs/contributing/glossary.md), and the relevant owner
 and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).
 Follow the subsystem reading requirements in AGENTS.md.
+
+Keep unit tests and standalone concrete type assertions out of oracle files
+(ORC-016). Fixed regressions are inputs to the same model, driver, and
+comparison as the broader campaign, without their own expected answers.
+Compile-time oracles generate legal TypeScript inputs and compare public
+types with a reusable independent law; a matrix of fixed assertions does not
+satisfy this requirement. Supplemental examples belong in ordinary test files.
 
 Use the [instrument library](../../../docs/contributing/instruments/index.md)
 when there is a material uncertainty. Select cards within the authorized task;
@@ -46,7 +75,8 @@ predictions, and the experiment that could discriminate them. Implement tests
 when requested by the task. A proposal with unresolved authority can be explored
 in a scratch model; do not silently make it a product expectation.
 
-At closeout, connect the law to the evidence actually obtained: which histories
+At closeout, write the evidence block from AGENTS.md (law, reach, RED, GREEN,
+mutant, limits). Connect the law to the evidence actually obtained: which histories
 and paths ran, which wrong behavior was rejected, and what remains untested.
 Use concise prose suited to the change; no particular report template is
 required. When changing repository coverage, update the existing owner and

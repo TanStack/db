@@ -158,11 +158,13 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
 
   // Window errors
   UnhashableQueryIRError: [['query.fnSelect', 'function select']],
+  SourceCollectionIdReuseError: [['useLiveQuery', 'todos']],
   DatabaseRequiredError: [[]],
   ObjectStoreNotFoundError: [['todos', 'app', ['users', 'posts']]],
   NameRequiredError: [[]],
   GetKeyRequiredError: [[]],
   SetWindowReentrancyError: [[]],
+  SetWindowFindOneLimitError: [[]],
 
   // Error classes with just message parameter (no special handling)
   // These inherit from base Error not TanStackDBError:

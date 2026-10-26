@@ -1,6 +1,7 @@
 import {
   InvalidPersistedCollectionConfigError,
   SingleProcessCoordinator,
+  resolvePersistedStorageTarget,
 } from '@tanstack/db-sqlite-persistence-core'
 import { ElectronCollectionCoordinator } from './electron-coordinator'
 import {
@@ -9,10 +10,13 @@ import {
 } from './protocol'
 import type {
   CommittedTxAnchor,
+  HydrationPersistenceAdapter,
+  PersistedCacheGenerationClaim,
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
   PersistedCollectionPersistence,
   PersistedIndexSpec,
+  PersistedStorageTarget,
   PersistedTx,
   ReconciledCommittedTx,
   SQLitePullSinceResult,
@@ -99,7 +103,7 @@ function createSerializableLoadSubsetOptions(
 
 type RendererRequestExecutor = <TMethod extends ElectronPersistenceMethod>(
   method: TMethod,
-  collectionId: string,
+  target: string | PersistedStorageTarget,
   payload: ElectronPersistencePayloadMap[TMethod],
   resolution?: ElectronPersistenceResolution,
 ) => Promise<ElectronPersistenceResultMap[TMethod]>
@@ -108,22 +112,49 @@ function createRendererRequestExecutor(options: {
   invoke: ElectronPersistenceInvoke
   channel?: string
   timeoutMs?: number
+  claimCollections: Map<string, string>
 }): RendererRequestExecutor {
   const channel = options.channel ?? DEFAULT_ELECTRON_PERSISTENCE_CHANNEL
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
 
   return async <TMethod extends ElectronPersistenceMethod>(
     method: TMethod,
-    collectionId: string,
+    target: string | PersistedStorageTarget,
     payload: ElectronPersistencePayloadMap[TMethod],
     resolution?: ElectronPersistenceResolution,
   ) => {
+    const storageTarget = typeof target === `string` ? undefined : target
+    const collectionId = storageTarget
+      ? resolvePersistedStorageTarget(storageTarget).collectionId
+      : target
+    const isGenerationRequest =
+      method === `claimCacheGeneration` ||
+      method === `rotateCacheGeneration` ||
+      method === `renewCacheGenerationClaim` ||
+      method === `releaseCacheGenerationClaim`
+    const managedTarget = storageTarget?.kind === `managed`
+    const logicalCollectionId =
+      resolution?.logicalCollectionId ??
+      (managedTarget
+        ? options.claimCollections.get(storageTarget.claimId)
+        : isGenerationRequest
+          ? collectionId
+          : undefined)
+    if ((managedTarget || isGenerationRequest) && !logicalCollectionId) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Electron managed cache request requires a known logical Collection ID`,
+      )
+    }
     const request = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
+      storageTarget,
       method,
-      resolution,
+      resolution:
+        managedTarget || isGenerationRequest
+          ? { ...resolution, mode: `sync-present`, logicalCollectionId }
+          : resolution,
       payload,
     } as ElectronPersistenceRequest
 
@@ -162,14 +193,38 @@ function createRendererRequestExecutor(options: {
   }
 }
 
+// The renderer has no shared driver scheduler. Its queued reads are its
+// hydration scopes; its writes take the writer Web Lock, which also orders
+// them against an election term.
+class RendererQueuedWork {
+  private readonly unsettled = new Set<Promise<void>>()
+
+  track<T>(work: Promise<T>): Promise<T> {
+    const done = work.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.unsettled.add(done)
+    void done.then(() => this.unsettled.delete(done))
+    return work
+  }
+
+  // Settles once every hydration scope outstanding at the call settles.
+  afterQueuedWork(): Promise<void> {
+    return Promise.all(this.unsettled).then(() => undefined)
+  }
+}
+
 type ElectronRendererResolvedAdapter =
   PersistedCollectionPersistence[`adapter`] & {
     loadCollectionMetadata: (
-      collectionId: string,
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<Array<{ key: string; value: unknown }>>
     scanRows: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       options?: { metadataOnly?: boolean },
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<
       Array<{
         key: string | number
@@ -178,17 +233,22 @@ type ElectronRendererResolvedAdapter =
       }>
     >
     pullSince: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       fromRowVersion: number,
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<SQLitePullSinceResult<string | number>>
-    getStreamPosition: (collectionId: string) => Promise<{
+    getStreamPosition: (
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
+    ) => Promise<{
       latestTerm: number
       latestSeq: number
       latestRowVersion: number
     }>
     reserveLeadershipTerm: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       observedTerm: number,
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<{
       latestTerm: number
       latestSeq: number
@@ -198,20 +258,30 @@ type ElectronRendererResolvedAdapter =
 
 function createResolvedRendererAdapter(
   executeRequest: RendererRequestExecutor,
+  claimCollections: Map<string, string>,
+  managedCacheGenerations: boolean,
+  queuedWork: RendererQueuedWork,
   resolution?: ElectronPersistenceResolution,
 ): ElectronRendererResolvedAdapter {
-  return {
+  const adapter: ElectronRendererResolvedAdapter = {
     loadSubset: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       subsetOptions: LoadSubsetOptions,
-      ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+      ctx?: {
+        requiredIndexSignatures?: ReadonlyArray<string>
+        cacheGenerationClaimId?: string
+      },
     ) => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       const result = await executeRequest(
         `loadSubset`,
-        collectionId,
+        target,
         {
           options: createSerializableLoadSubsetOptions(subsetOptions),
-          ctx,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
@@ -222,57 +292,79 @@ function createResolvedRendererAdapter(
       }>
     },
     loadResumeSnapshot: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       ctx?: {
         requiredIndexSignatures?: ReadonlyArray<string>
         includeRows?: boolean
+        cacheGenerationClaimId?: string
       },
     ) => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       return executeRequest(
         `loadResumeSnapshot`,
-        collectionId,
-        { ctx },
+        target,
+        { ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
       )
     },
     applyCommittedTx: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       tx: PersistedTx<Record<string, unknown>, string | number>,
     ): Promise<void> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        tx.cacheGenerationClaimId,
+      )
       await executeRequest(
         `applyCommittedTx`,
-        collectionId,
+        target,
         {
-          tx: tx as PersistedTx<ElectronPersistedRow, ElectronPersistedKey>,
+          tx: { ...tx, cacheGenerationClaimId: access.claimId } as PersistedTx<
+            ElectronPersistedRow,
+            ElectronPersistedKey
+          >,
         },
         resolution,
       )
     },
     reconcileCommittedTx: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       tx: PersistedTx<Record<string, unknown>, string | number>,
       anchor: CommittedTxAnchor,
     ): Promise<ReconciledCommittedTx> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        tx.cacheGenerationClaimId,
+      )
       return executeRequest(
         `reconcileCommittedTx`,
-        collectionId,
-        { tx, anchor },
+        target,
+        { tx: { ...tx, cacheGenerationClaimId: access.claimId }, anchor },
         resolution,
       )
     },
     loadCollectionMetadata: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<Array<{ key: string; value: unknown }>> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       return executeRequest(
         `loadCollectionMetadata`,
-        collectionId,
-        {},
+        target,
+        { ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
       )
     },
     scanRows: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       options?: { metadataOnly?: boolean },
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<
       Array<{
         key: string | number
@@ -280,10 +372,14 @@ function createResolvedRendererAdapter(
         metadata?: unknown
       }>
     > => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       const result = await executeRequest(
         `scanRows`,
-        collectionId,
-        { options },
+        target,
+        { options, ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
       )
       return result as Array<{
@@ -293,64 +389,177 @@ function createResolvedRendererAdapter(
       }>
     },
     ensureIndex: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       signature: string,
       spec: PersistedIndexSpec,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<void> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       await executeRequest(
         `ensureIndex`,
-        collectionId,
+        target,
         {
           signature,
           spec,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
     },
     markIndexRemoved: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       signature: string,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<void> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       await executeRequest(
         `markIndexRemoved`,
-        collectionId,
+        target,
         {
           signature,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
     },
     pullSince: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       fromRowVersion: number,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<SQLitePullSinceResult<string | number>> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       const result = await executeRequest(
         `pullSince`,
-        collectionId,
+        target,
         {
           fromRowVersion,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
       return result as SQLitePullSinceResult<string | number>
     },
     getStreamPosition: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<{
       latestTerm: number
       latestSeq: number
       latestRowVersion: number
     }> => {
-      return executeRequest(`getStreamPosition`, collectionId, {}, resolution)
-    },
-    reserveLeadershipTerm: async (collectionId, observedTerm) =>
-      executeRequest(
-        `reserveLeadershipTerm`,
-        collectionId,
-        { observedTerm },
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
+      return executeRequest(
+        `getStreamPosition`,
+        target,
+        { ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
-      ),
+      )
+    },
+    claimCacheGeneration: async (
+      collectionId: string,
+    ): Promise<PersistedCacheGenerationClaim> => {
+      const claim = await executeRequest(
+        `claimCacheGeneration`,
+        collectionId,
+        {},
+        resolution,
+      )
+      claimCollections.set(claim.claimId, collectionId)
+      return claim
+    },
+    rotateCacheGeneration: async (
+      collectionId: string,
+      claimId: string,
+      resetMetadata?: { key: string; value: unknown },
+      expectedStorageCollectionId?: string,
+    ): Promise<PersistedCacheGenerationClaim> => {
+      const claim = await executeRequest(
+        `rotateCacheGeneration`,
+        collectionId,
+        { claimId, resetMetadata, expectedStorageCollectionId },
+        resolution,
+      )
+      claimCollections.delete(claimId)
+      claimCollections.set(claim.claimId, collectionId)
+      return claim
+    },
+    renewCacheGenerationClaim: (
+      storageCollectionId: string,
+      claimId: string,
+    ): Promise<number | undefined> => {
+      const collectionId = claimCollections.get(claimId)
+      if (!collectionId) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Unknown electron persisted cache claim "${claimId}"`,
+        )
+      }
+      return executeRequest(
+        `renewCacheGenerationClaim`,
+        collectionId,
+        { storageCollectionId, claimId },
+        resolution,
+      )
+    },
+    releaseCacheGenerationClaim: async (claimId: string): Promise<void> => {
+      const collectionId = claimCollections.get(claimId)
+      if (!collectionId) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Unknown electron persisted cache claim "${claimId}"`,
+        )
+      }
+      await executeRequest(
+        `releaseCacheGenerationClaim`,
+        collectionId,
+        { claimId },
+        resolution,
+      )
+      claimCollections.delete(claimId)
+    },
+    reserveLeadershipTerm: async (target, observedTerm, ctx) => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
+      return executeRequest(
+        `reserveLeadershipTerm`,
+        target,
+        {
+          observedTerm,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
+        },
+        resolution,
+      )
+    },
+    runInHydrationScope: <T>(
+      task: (scopedAdapter: HydrationPersistenceAdapter) => Promise<T>,
+    ) => queuedWork.track(Promise.resolve().then(() => task(adapter))),
+    isHydrationScopeScheduled: () => false,
+    // Work runs directly; the main process serializes it.
+    runInRegularScope: Object.assign(
+      <T>(task: (scopedAdapter: HydrationPersistenceAdapter) => Promise<T>) =>
+        task(adapter),
+      { afterQueuedWork: () => queuedWork.afterQueuedWork() },
+    ),
   }
+  if (!managedCacheGenerations) {
+    adapter.claimCacheGeneration = undefined
+    adapter.rotateCacheGeneration = undefined
+    adapter.renewCacheGenerationClaim = undefined
+    adapter.releaseCacheGenerationClaim = undefined
+  }
+  return adapter
 }
 
 export type ElectronIpcRendererLike = {
@@ -366,6 +575,8 @@ export type ElectronSQLitePersistenceOptions = {
   channel?: string
   timeoutMs?: number
   coordinator?: PersistedCollectionCoordinator
+  /** Set false when a custom main-process adapter does not manage cache generations. */
+  managedCacheGenerations?: boolean
 }
 
 function resolveInvoke(
@@ -387,31 +598,36 @@ function resolveInvoke(
 export function createElectronSQLitePersistence(
   options: ElectronSQLitePersistenceOptions,
 ): PersistedCollectionPersistence {
+  const queuedWork = new RendererQueuedWork()
   const invoke = resolveInvoke(options)
   const coordinator = options.coordinator ?? new SingleProcessCoordinator()
+  const claimCollections = new Map<string, string>()
   const executeRequest = createRendererRequestExecutor({
     invoke,
     channel: options.channel,
     timeoutMs: options.timeoutMs,
+    claimCollections,
   })
   const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
 
   const getAdapterForCollection = (
+    collectionId: string | undefined,
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ) => {
-    const schemaVersionKey =
-      schemaVersion === undefined ? `schema:default` : `schema:${schemaVersion}`
-    const cacheKey = `mode:${mode}|${schemaVersionKey}`
+    const cacheKey = JSON.stringify([collectionId, mode, schemaVersion])
     const cachedAdapter = adapterCache.get(cacheKey)
     if (cachedAdapter) {
       return cachedAdapter
     }
 
-    const adapter = createResolvedRendererAdapter(executeRequest, {
-      mode,
-      schemaVersion,
-    })
+    const adapter = createResolvedRendererAdapter(
+      executeRequest,
+      claimCollections,
+      options.managedCacheGenerations ?? true,
+      queuedWork,
+      { mode, schemaVersion, logicalCollectionId: collectionId },
+    )
     adapterCache.set(cacheKey, adapter)
     return adapter
   }
@@ -421,7 +637,7 @@ export function createElectronSQLitePersistence(
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ): PersistedCollectionPersistence => {
-    const adapter = getAdapterForCollection(mode, schemaVersion)
+    const adapter = getAdapterForCollection(collectionId, mode, schemaVersion)
     if (coordinator instanceof ElectronCollectionCoordinator) {
       if (collectionId === undefined) {
         coordinator.setAdapter(adapter)

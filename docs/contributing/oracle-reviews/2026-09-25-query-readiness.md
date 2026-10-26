@@ -108,7 +108,7 @@ The preservation contract was frozen before the final grammar changes:
 | DG-P6 | A fulfilled Promise parent remains owned when its continuation throws; repair debt is recorded without retiring the successful acquisition. | Acquisition ownership and repair contract |
 | DG-P7 | Nullable multi-term ordering varies each term's direction and null placement independently. | Public order-by semantics |
 | DG-P8 | Readiness evidence includes rows and status; work evidence includes the exact acquisition and release trace. | Oracle observation contract |
-| DG-P9 | A primary oracle mismatch remains primary while every cleanup failure remains distinguishable and every cleanup is attempted. | `oracle-tests.md` ORC-010 |
+| DG-P9 | A primary oracle mismatch remains primary while every cleanup failure remains distinguishable and every cleanup is attempted. | `oracle-rubric.md` ORC-010 |
 | DG-P10 | Explicit-window, replay, repair, and Effect scheduling laws keep their existing owners; this grammar does not silently absorb them. | Coverage map and user-confirmed scope |
 
 The surviving grammar has four separate subgrammars rather than one artificial

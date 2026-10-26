@@ -1,8 +1,8 @@
-import { expect } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import { withCollectionConfigFactory } from '../src/client'
-import { denormalizeUndefined } from '../src/utils/comparison.js'
+import { normalizeValue } from '../src/utils/comparison.js'
 import { CleanupQueue } from '../src/collection/cleanup-queue.js'
 import type {
   CollectionConfig,
@@ -12,6 +12,8 @@ import type {
 } from '../src/index.js'
 import type { IndexConstructor } from '../src/indexes/base-index'
 import type { WithVirtualProps } from '../src/virtual-props.js'
+import type { Transaction } from '../src/transactions.js'
+import type { Collection } from '../src/collection/index.js'
 
 export type OutputWithVirtual<
   T extends object,
@@ -510,6 +512,30 @@ export function mockSyncCollectionOptionsNoInitialState<
 }
 
 // Utility to flush microtasks and promises
+/**
+ * Capture errors rethrown from microtasks, as the ordered loader reports an
+ * adapter's failing lease release. Callbacks still run in their turn.
+ */
+export function captureMicrotaskErrors(): {
+  errors: Array<unknown>
+  restore: () => void
+} {
+  const queue = globalThis.queueMicrotask.bind(globalThis)
+  const errors: Array<unknown> = []
+  const spy = vi
+    .spyOn(globalThis, `queueMicrotask`)
+    .mockImplementation((callback) =>
+      queue(() => {
+        try {
+          callback()
+        } catch (error) {
+          errors.push(error)
+        }
+      }),
+    )
+  return { errors, restore: () => spy.mockRestore() }
+}
+
 export const flushPromises = () =>
   new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -599,16 +625,25 @@ export function withExpectedRejection<T>(
 type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (
   | { sortedValues: Array<unknown>; valueMap: Map<unknown, Set<TKey>> }
   | {
-      valueMap: Map<unknown, { keys: Set<TKey> }>
+      valueMap: Map<
+        unknown,
+        {
+          keys: Map<TKey, unknown>
+          buckets?: Map<unknown, Set<TKey>>
+        }
+      >
       orderedEntries: {
         size: number
-        minKey: () => unknown
-        maxKey: () => unknown
+        minKey: () => { value: unknown }
+        maxKey: () => { value: unknown }
         forRange: (
           low: unknown,
           high: unknown,
           includeHigh: boolean,
-          onFound: (key: unknown, bucket: { keys: Set<TKey> }) => void,
+          onFound: (
+            key: { value: unknown },
+            group: { keys: Map<TKey, unknown> },
+          ) => void,
         ) => void
       }
     }
@@ -630,12 +665,14 @@ export function indexedKeysSet<TKey>(index: object): Set<TKey> {
 }
 
 /** Test inspection of an index's value buckets keyed by indexed value. */
-export function valueMapData<TKey>(index: object): Map<unknown, Set<TKey>> {
+export function valueMapData<TKey>(
+  index: object,
+): Map<unknown, Pick<Set<TKey>, 'size' | 'has'>> {
   const [internals] = indexInternals<TKey>(index)
   if (`sortedValues` in internals) return internals.valueMap
-  const result = new Map<unknown, Set<TKey>>()
-  for (const [key, bucket] of internals.valueMap) {
-    result.set(denormalizeUndefined(key), bucket.keys)
+  const result = new Map<unknown, Pick<Set<TKey>, 'size' | 'has'>>()
+  for (const [key, group] of internals.valueMap) {
+    result.set(key, group.buckets?.get(key) ?? group.keys)
   }
   return result
 }
@@ -649,14 +686,14 @@ export function orderedEntriesArray<TKey>(
   if (`sortedValues` in internals) {
     entries = internals.sortedValues.map((value) => [
       value,
-      internals.valueMap.get(value) ?? new Set(),
+      internals.valueMap.get(normalizeValue(value)) ?? new Set(),
     ])
   } else {
     const tree = internals.orderedEntries
     entries = []
     if (tree.size > 0) {
-      tree.forRange(tree.minKey(), tree.maxKey(), true, (key, bucket) => {
-        entries.push([denormalizeUndefined(key), bucket.keys])
+      tree.forRange(tree.minKey(), tree.maxKey(), true, (key, group) => {
+        entries.push([key.value, new Set(group.keys.keys())])
       })
     }
   }
@@ -677,4 +714,37 @@ export function resetCleanupQueue(): void {
   if (holder.instance?.timeoutId != null)
     clearTimeout(holder.instance.timeoutId)
   holder.instance = null
+}
+
+/**
+ * Record each transaction a Collection's mutations manager creates, such as
+ * the one a direct write makes for itself, which the call may not return when
+ * it throws. Call `restore` when done.
+ */
+export function captureCreatedTransactions(
+  collection: Collection<any, any, any>,
+): {
+  created: Array<Transaction<any>>
+  restore: () => void
+} {
+  const manager = (
+    collection as unknown as {
+      _mutations: {
+        createTransaction: (...args: Array<unknown>) => Transaction<any>
+      }
+    }
+  )._mutations
+  const createTransaction = manager.createTransaction
+  const created: Array<Transaction<any>> = []
+  manager.createTransaction = (...args) => {
+    const transaction = createTransaction.apply(manager, args)
+    created.push(transaction)
+    return transaction
+  }
+  return {
+    created,
+    restore: () => {
+      manager.createTransaction = createTransaction
+    },
+  }
 }

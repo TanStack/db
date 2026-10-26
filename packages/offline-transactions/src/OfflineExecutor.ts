@@ -26,7 +26,6 @@ import { createOfflineAction } from './api/OfflineAction'
 // TanStack DB primitives
 
 // Replay
-import { withNestedSpan, withSpan } from './telemetry/tracer'
 import { NonRetriableError } from './types'
 import type {
   CreateOfflineActionOptions,
@@ -40,6 +39,9 @@ import type {
   StorageDiagnostic,
 } from './types'
 import type { Transaction } from '@tanstack/db'
+
+/** How many settled ids an executor remembers to reject late waiters. */
+const SETTLED_TRANSACTIONS_REMEMBERED = 1000
 
 export class OfflineExecutor {
   private config: OfflineConfig
@@ -74,6 +76,12 @@ export class OfflineExecutor {
       reject: (error: Error) => void
     }
   > = new Map()
+
+  /**
+   * Ids this executor settled, oldest first. A waiter for one of them has
+   * nothing left to wait for. An unknown id can still arrive from another tab.
+   */
+  private readonly settledTransactions = new Set<string>()
 
   // Track restoration transactions for cleanup when offline transactions complete
   private restorationTransactions: Map<string, Transaction> = new Map()
@@ -268,77 +276,66 @@ export class OfflineExecutor {
   }
 
   private async initialize(): Promise<void> {
-    return withSpan(`executor.initialize`, {}, async (span) => {
-      try {
-        // Probe storage and create adapter
-        const { storage, diagnostic } = await this.createStorage()
-        if (this.disposed) {
-          this.initResolve()
-          return
-        }
-
-        // Cast to writable to set readonly properties
-        ;(this as any).storage = storage
-        ;(this as any).storageDiagnostic = diagnostic
-        ;(this as any).mode = diagnostic.mode
-
-        span.setAttribute(`storage.mode`, diagnostic.mode)
-        span.setAttribute(`storage.code`, diagnostic.code)
-
-        if (!storage) {
-          // Online-only mode - notify callback and skip offline setup
-          if (this.config.onStorageFailure) {
-            this.config.onStorageFailure(diagnostic)
-          }
-          span.setAttribute(`result`, `online-only`)
-          this.initResolve()
-          return
-        }
-
-        // Storage available - set up offline components
-        this.outbox = new OutboxManager(storage, this.config.collections)
-        this.executor = new TransactionExecutor(
-          this.scheduler,
-          this.outbox,
-          this.config,
-          this,
-        )
-        this.leaderElection = this.createLeaderElection()
-
-        // Request leadership first
-        const isLeader = await this.leaderElection.requestLeadership()
-        // Disposal may have run while leadership was pending.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (this.disposed) {
-          this.leaderElection.releaseLeadership()
-          this.initResolve()
-          return
-        }
-        this.isLeaderState = isLeader
-        span.setAttribute(`isLeader`, isLeader)
-
-        // Set up event listeners after leadership is established
-        // This prevents the callback from being called multiple times
-        this.setupEventListeners()
-
-        // Notify initial leadership state
-        if (this.config.onLeadershipChange) {
-          this.config.onLeadershipChange(isLeader)
-        }
-
-        if (isLeader) {
-          await this.loadAndReplayTransactions()
-        }
-        span.setAttribute(`result`, `offline-enabled`)
+    try {
+      // Probe storage and create adapter
+      const { storage, diagnostic } = await this.createStorage()
+      if (this.disposed) {
         this.initResolve()
-      } catch (error) {
-        console.warn(`Failed to initialize offline executor:`, error)
-        span.setAttribute(`result`, `failed`)
-        this.initReject(
-          error instanceof Error ? error : new Error(String(error)),
-        )
+        return
       }
-    })
+
+      // Cast to writable to set readonly properties
+      ;(this as any).storage = storage
+      ;(this as any).storageDiagnostic = diagnostic
+      ;(this as any).mode = diagnostic.mode
+
+      if (!storage) {
+        // Online-only mode - notify callback and skip offline setup
+        if (this.config.onStorageFailure) {
+          this.config.onStorageFailure(diagnostic)
+        }
+        this.initResolve()
+        return
+      }
+
+      // Storage available - set up offline components
+      this.outbox = new OutboxManager(storage, this.config.collections)
+      this.executor = new TransactionExecutor(
+        this.scheduler,
+        this.outbox,
+        this.config,
+        this,
+      )
+      this.leaderElection = this.createLeaderElection()
+
+      // Request leadership first
+      const isLeader = await this.leaderElection.requestLeadership()
+      // Disposal may have run while leadership was pending.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (this.disposed) {
+        this.leaderElection.releaseLeadership()
+        this.initResolve()
+        return
+      }
+      this.isLeaderState = isLeader
+
+      // Set up event listeners after leadership is established
+      // This prevents the callback from being called multiple times
+      this.setupEventListeners()
+
+      // Notify initial leadership state
+      if (this.config.onLeadershipChange) {
+        this.config.onLeadershipChange(isLeader)
+      }
+
+      if (isLeader) {
+        await this.loadAndReplayTransactions()
+      }
+      this.initResolve()
+    } catch (error) {
+      console.warn(`Failed to initialize offline executor:`, error)
+      this.initReject(error instanceof Error ? error : new Error(String(error)))
+    }
   }
 
   private async loadAndReplayTransactions(): Promise<void> {
@@ -441,37 +438,33 @@ export class OfflineExecutor {
     // Wait for initialization to complete
     await this.initPromise
 
-    return withNestedSpan(
-      `executor.persistTransaction`,
-      {
-        'transaction.id': transaction.id,
-        'transaction.mutationFnName': transaction.mutationFnName,
-      },
-      async (span) => {
-        if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
-          span.setAttribute(`result`, `rejected_not_admitted`)
-          throw new NonRetriableError(`Offline transaction was not admitted`)
-        }
+    if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
+      throw new NonRetriableError(`Offline transaction was not admitted`)
+    }
 
-        try {
-          this.executor.assertHealthy()
-          await this.outbox.add(transaction)
-          // A shared queue error belongs to its execution, not every caller
-          // that durably admitted a transaction. Per-ID signals settle callers.
-          this.executor.execute(transaction).catch((error) => {
-            console.warn(`Failed to execute transactions:`, error)
-          })
-          span.setAttribute(`result`, `persisted`)
-        } catch (error) {
-          console.error(
-            `Failed to persist offline transaction ${transaction.id}:`,
-            error,
-          )
-          span.setAttribute(`result`, `failed`)
-          throw error
-        }
-      },
-    )
+    try {
+      this.executor.assertHealthy()
+      await this.outbox.add(transaction)
+      // A shared queue error belongs to its execution, not every caller
+      // that durably admitted a transaction. Per-ID signals settle callers.
+      this.executor.execute(transaction).catch((error) => {
+        console.warn(`Failed to execute transactions:`, error)
+      })
+    } catch (error) {
+      console.error(
+        `Failed to persist offline transaction ${transaction.id}:`,
+        error,
+      )
+      throw error
+    }
+  }
+
+  private rememberSettled(transactionId: string): void {
+    this.settledTransactions.add(transactionId)
+    if (this.settledTransactions.size > SETTLED_TRANSACTIONS_REMEMBERED)
+      this.settledTransactions.delete(
+        this.settledTransactions.values().next().value!,
+      )
   }
 
   // Method for OfflineTransaction to wait for completion
@@ -480,6 +473,10 @@ export class OfflineExecutor {
     if (existing) {
       return existing.promise
     }
+    if (this.settledTransactions.has(transactionId))
+      throw new Error(
+        `Offline transaction ${transactionId} already settled; wait for it before it settles`,
+      )
 
     const deferred: {
       promise: Promise<any>
@@ -498,6 +495,7 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
+    this.rememberSettled(transactionId)
     const deferred = this.pendingTransactionPromises.get(transactionId)
     if (deferred) {
       deferred.resolve(result)
@@ -510,6 +508,7 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal failure
   rejectTransaction(transactionId: string, error: Error): void {
+    this.rememberSettled(transactionId)
     const deferred = this.pendingTransactionPromises.get(transactionId)
     if (deferred) {
       deferred.reject(error)

@@ -704,13 +704,17 @@ export function max(arg: ExpressionLike): Aggregate {
 /**
  * List of comparison function names that can be used with indexes
  */
-export const comparisonFunctions = [
+export const indexableOperations = [
   `eq`,
   `gt`,
   `gte`,
   `lt`,
   `lte`,
   `in`,
+] as const
+
+export const comparisonFunctions = [
+  ...indexableOperations,
   `like`,
   `ilike`,
 ] as const

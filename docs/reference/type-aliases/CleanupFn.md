@@ -7,7 +7,7 @@ title: CleanupFn
 type CleanupFn = () => void | () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:412](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L412)
+Defined in: [packages/db/src/types.ts:429](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L429)
 
 Ends one sync run and releases its adapter-owned resources.
 

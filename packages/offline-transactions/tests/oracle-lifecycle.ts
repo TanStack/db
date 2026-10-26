@@ -29,6 +29,25 @@ export async function atOracleCheckpoint<T>(
   }
 }
 
+/**
+ * Record unhandled process rejections until `cleanup` runs. Call `cleanup` in
+ * a `finally` block.
+ */
+export function captureUnhandledRejections(): {
+  rejections: Array<unknown>
+  cleanup: () => void
+} {
+  const rejections: Array<unknown> = []
+  const onUnhandled = (reason: unknown) => rejections.push(reason)
+  process.on(`unhandledRejection`, onUnhandled)
+  return {
+    rejections,
+    cleanup: () => {
+      process.off(`unhandledRejection`, onUnhandled)
+    },
+  }
+}
+
 export async function cleanupOfflineOracle(
   actions: Array<() => void | Promise<unknown>>,
   hasPrimaryFailure: boolean,

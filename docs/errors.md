@@ -753,7 +753,7 @@ Unsupported join source type: custom
 Development builds show the full message. For example:
 
 ```text
-Non-aggregate expression 'field' in SELECT must also appear in GROUP BY clause
+Non-aggregate expression 'field' must also appear in GROUP BY clause
 ```
 
 <a id="error-71"></a>
@@ -793,7 +793,7 @@ Unknown expression type in HAVING clause: custom
 Development builds show the full message. For example:
 
 ```text
-Cannot write item because it cannot be JSON serialized: circular reference
+Cannot write item because its storage cannot represent it: circular reference
 ```
 
 <a id="error-75"></a>
@@ -897,7 +897,7 @@ Internal error: compiler returned aliases without inputs: alias1, alias2. This i
 Development builds show the full message. For example:
 
 ```text
-setWindow() can only be called on collections with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
+setWindow() can only move a window on a query with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
 ```
 
 <a id="error-85"></a>
@@ -978,6 +978,26 @@ Development builds show the full message. For example:
 
 ```text
 A Collection already tracks an unsettled transaction with id "tx-1". Give each transaction a unique id.
+```
+
+<a id="error-244"></a>
+
+## Error 244: `SetWindowFindOneLimitError`
+
+Development builds show the full message. For example:
+
+```text
+setWindow() cannot change the limit of a findOne() query.
+```
+
+<a id="error-245"></a>
+
+## Error 245: `SourceCollectionIdReuseError`
+
+Development builds show the full message. For example:
+
+```text
+[useLiveQuery] Collection ID "todos" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.
 ```
 
 ## Other errors and log messages
@@ -1238,12 +1258,12 @@ caseWhen() conditions must be expression-like values
 
 <a id="error-113"></a>
 
-## Error 113: `query/builder/index.ts`
+## Error 113: `query/ir.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.
+Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.
 ```
 
 <a id="error-114"></a>
@@ -2360,6 +2380,16 @@ Development builds show this message, with `${...}` replaced by values:
 [LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
 ```
 
+<a id="error-234"></a>
+
+## Error 234: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.
+```
+
 <a id="error-235"></a>
 
 ## Error 235: `query/live/bucket-facade-adapter.ts`
@@ -2378,4 +2408,84 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().
+```
+
+<a id="error-237"></a>
+
+## Error 237: `query/builder/query-ir.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query must resolve to a QueryBuilder; received ${received}.
+```
+
+<a id="error-238"></a>
+
+## Error 238: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
+```
+
+<a id="error-239"></a>
+
+## Error 239: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Include query is missing a captured parent projection for "${ref.path.join(`.`)}".
+```
+
+<a id="error-240"></a>
+
+## Error 240: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade retired with rows the graph did not retract
+```
+
+<a id="error-241"></a>
+
+## Error 241: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A live query's child collection cannot be cleaned up directly. Clean up the live query instead.
+```
+
+<a id="error-242"></a>
+
+## Error 242: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LocalStorage sync belongs to its options Collection.
+```
+
+<a id="error-243"></a>
+
+## Error 243: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A windowed or findOne result row has no include route
+```
+
+<a id="error-246"></a>
+
+## Error 246: `live-query-window-binding.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.
 ```

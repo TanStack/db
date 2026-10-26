@@ -23,7 +23,6 @@ import {
   expectIndexUsage,
   indexedKeysSet,
   orderedEntriesArray,
-  orderedEntriesArrayReversed,
   stripVirtualProps,
   valueMapData,
   withIndexTracking,
@@ -1738,12 +1737,7 @@ describe(`Collection Indexes`, () => {
       const index = groupedCollection.createIndex((row) => row.value)
 
       expect(index.takeFromStart(2)).toEqual([`first`, `second`])
-      expect(orderedEntriesArray(index)[0]?.[1]).toEqual(
-        new Set([`first`, `second`]),
-      )
-      expect(orderedEntriesArrayReversed(index)[0]?.[1]).toEqual(
-        new Set([`first`, `second`]),
-      )
+      expect(index.takeReversedFromEnd(2)).toEqual([`second`, `first`])
     })
 
     it(`should return all matching rows for a range predicate on a custom-comparator index`, async () => {
@@ -2317,7 +2311,7 @@ describe(`Collection Indexes`, () => {
         startSync: true,
         defaultIndexType: BTreeIndex,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             for (const item of specialData) {
               write({
@@ -2326,6 +2320,7 @@ describe(`Collection Indexes`, () => {
               })
             }
             commit()
+            markReady()
           },
         },
       })

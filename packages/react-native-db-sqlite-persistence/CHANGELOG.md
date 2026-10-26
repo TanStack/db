@@ -1,5 +1,35 @@
 # @tanstack/react-native-db-sqlite-persistence
 
+## 0.2.37
+
+### Patch Changes
+
+- Updated dependencies [[`5a1b286`](https://github.com/TanStack/db/commit/5a1b286910bdf56917a76732ba160c99d7b1ad66)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.12
+
+## 0.2.36
+
+### Patch Changes
+
+- Updated dependencies [[`92b11b0`](https://github.com/TanStack/db/commit/92b11b006edc46cea23ae4423046bf9eb29fc50e)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.11
+
+## 0.2.35
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.10
+
+## 0.2.34
+
+### Patch Changes
+
+- Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Require explicit eager or claim-bound managed targets for SQLite adapter data operations, and forward them through Electron IPC protocol v6. Bare collection IDs no longer work at this lower-level adapter boundary. ([#2069](https://github.com/TanStack/db/pull/2069))
+
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`5d2a4b0`](https://github.com/TanStack/db/commit/5d2a4b00cffa8d8b9a1b89f708b4b71c2ff46ff3)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.9
+
 ## 0.2.33
 
 ### Patch Changes

@@ -1,15 +1,17 @@
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   CommittedTxAnchor,
+  PersistedCacheGenerationClaim,
   PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
+  PersistedStorageTarget,
   PersistedTx,
   ReconciledCommittedTx,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 4 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 6 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -18,6 +20,7 @@ export type ElectronPersistedKey = string | number
 export type ElectronPersistenceResolution = {
   mode: PersistedCollectionMode
   schemaVersion?: number
+  logicalCollectionId?: string
 }
 
 export type ElectronPersistenceMethod =
@@ -31,24 +34,33 @@ export type ElectronPersistenceMethod =
   | `markIndexRemoved`
   | `pullSince`
   | `getStreamPosition`
+  | `claimCacheGeneration`
+  | `rotateCacheGeneration`
+  | `renewCacheGenerationClaim`
+  | `releaseCacheGenerationClaim`
   | `reserveLeadershipTerm`
 
 export type ElectronPersistencePayloadMap = {
   loadSubset: {
     options: LoadSubsetOptions
-    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> }
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      cacheGenerationClaimId?: string
+    }
   }
   loadResumeSnapshot: {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      cacheGenerationClaimId?: string
     }
   }
-  loadCollectionMetadata: {}
+  loadCollectionMetadata: { ctx?: { cacheGenerationClaimId?: string } }
   scanRows: {
     options?: {
       metadataOnly?: boolean
     }
+    ctx?: { cacheGenerationClaimId?: string }
   }
   applyCommittedTx: {
     tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
@@ -60,15 +72,32 @@ export type ElectronPersistencePayloadMap = {
   ensureIndex: {
     signature: string
     spec: PersistedIndexSpec
+    ctx?: { cacheGenerationClaimId?: string }
   }
   markIndexRemoved: {
     signature: string
+    ctx?: { cacheGenerationClaimId?: string }
   }
   pullSince: {
     fromRowVersion: number
+    ctx?: { cacheGenerationClaimId?: string }
   }
-  getStreamPosition: {}
-  reserveLeadershipTerm: { observedTerm: number }
+  getStreamPosition: { ctx?: { cacheGenerationClaimId?: string } }
+  claimCacheGeneration: {}
+  rotateCacheGeneration: {
+    claimId: string
+    resetMetadata?: { key: string; value: unknown }
+    expectedStorageCollectionId?: string
+  }
+  renewCacheGenerationClaim: {
+    storageCollectionId: string
+    claimId: string
+  }
+  releaseCacheGenerationClaim: { claimId: string }
+  reserveLeadershipTerm: {
+    observedTerm: number
+    ctx?: { cacheGenerationClaimId?: string }
+  }
 }
 
 export type ElectronPersistenceResultMap = {
@@ -102,6 +131,10 @@ export type ElectronPersistenceResultMap = {
     latestSeq: number
     latestRowVersion: number
   }
+  claimCacheGeneration: PersistedCacheGenerationClaim
+  rotateCacheGeneration: PersistedCacheGenerationClaim
+  renewCacheGenerationClaim: number | undefined
+  releaseCacheGenerationClaim: null
   reserveLeadershipTerm: {
     latestTerm: number
     latestSeq: number
@@ -122,6 +155,8 @@ export type ElectronPersistenceRequestByMethod = {
     v: number
     requestId: string
     collectionId: string
+    /** Required for data operations; preserves eager or managed identity across IPC. */
+    storageTarget?: PersistedStorageTarget
     resolution?: ElectronPersistenceResolution
     method: Method
     payload: ElectronPersistencePayloadMap[Method]

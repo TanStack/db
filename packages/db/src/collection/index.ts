@@ -227,6 +227,13 @@ export interface Collection<
  *
  */
 
+type CollectionConstructionConfig = CollectionConfig<
+  any,
+  string | number,
+  any,
+  UtilsRecord
+> & { schema?: StandardSchemaV1 }
+
 // Overload for when schema is provided and utils is required (not optional)
 // We can't infer the Utils type from the CollectionConfig because it will always be optional
 // So we omit it from that type and instead infer it from the extension `& { utils: TUtils }`
@@ -345,9 +352,7 @@ export function createCollection<
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any, UtilsRecord> & {
-    schema?: StandardSchemaV1
-  },
+  options: CollectionConstructionConfig,
 ): Collection<any, string | number, UtilsRecord, any, any> {
   // The literal comparison lets production bundlers erase the check and import.
   if (devBuild() && process.env.NODE_ENV !== `production`) {
@@ -355,14 +360,23 @@ export function createCollection(
   }
 
   const claimOptions = (
-    options as typeof options & { [collectionOptionsClaim]?: () => void }
+    options as typeof options & {
+      [collectionOptionsClaim]?: () => void | (() => void)
+    }
   )[collectionOptionsClaim]
-  claimOptions?.()
+  return constructWithClaim(options, claimOptions?.())
+}
 
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options,
-  )
-  return collection
+function constructWithClaim(
+  options: CollectionConstructionConfig,
+  releaseClaim: void | (() => void),
+): Collection<any, string | number, UtilsRecord, any, any> {
+  try {
+    return new CollectionImpl<any, string | number, any, any, any>(options)
+  } catch (error) {
+    releaseClaim?.()
+    throw error
+  }
 }
 
 type CollectionImplConfig<
@@ -728,6 +742,26 @@ export class CollectionImpl<
     return this._state.has(key)
   }
 
+  /** Maximum number of source rows whose visible projection a local write can hide. */
+  public _optimisticOverlaySize(): number {
+    return (
+      this._state.optimisticDeletes.size + this._state.optimisticUpserts.size
+    )
+  }
+
+  /** Whether a local write obscures this key's authoritative source row. */
+  public _hasOptimisticOverlay(key: TKey): boolean {
+    return (
+      this._state.optimisticDeletes.has(key) ||
+      this._state.optimisticUpserts.has(key)
+    )
+  }
+
+  /** Whether an accepted sync transaction is not yet visible. */
+  public _hasHeldSyncTransaction(): boolean {
+    return this._state.hasHeldSyncTransaction()
+  }
+
   /**
    * Get the current size of the collection (cached)
    */
@@ -1067,19 +1101,13 @@ export class CollectionImpl<
   }
 
   /**
-   * Gets the current state of the collection as a Map, but only resolves when data is available
-   * Waits for the first sync commit to complete before resolving
+   * Gets the current state of the collection as a Map once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately.
-    // This read still asks for data, so it counts as a preload.
-    if (this.size > 0 || this.isReady()) {
-      return this.afterPreloadMark(() => Promise.resolve(this.state))
-    }
-
-    // Use preload to ensure the collection starts loading, then return the state
     return this.preload().then(() => this.state)
   }
 
@@ -1093,19 +1121,13 @@ export class CollectionImpl<
   }
 
   /**
-   * Gets the current state of the collection as an Array, but only resolves when data is available
-   * Waits for the first sync commit to complete before resolving
+   * Gets the current state of the collection as an Array once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately.
-    // This read still asks for data, so it counts as a preload.
-    if (this.size > 0 || this.isReady()) {
-      return this.afterPreloadMark(() => Promise.resolve(this.toArray))
-    }
-
-    // Use preload to ensure the collection starts loading, then return the array
     return this.preload().then(() => this.toArray)
   }
 

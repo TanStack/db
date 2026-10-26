@@ -208,9 +208,9 @@ export class UserListComponent {
 
 > **Note:** React hooks derive query identity from structured query IR by
 > default. Dependency arrays are still accepted for backwards compatibility,
-> but warn in development and will be removed in 1.0. Unhashable queries also
-> warn and keep legacy mount-stable identity until 1.0; add `queryKey` to make
-> captured opaque values reactive. See the [React Adapter
+> but warn in development and will be removed in 1.0. In React and Preact, an
+> unhashable query without `queryKey` throws `UnhashableQueryIRError`. See the
+> [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 
 For server rendering and hydration, live query preloading transports the ordered
@@ -240,12 +240,23 @@ function UserSearch({ search }: { search: string }) {
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
 
-React development builds detect both cases. Before 1.0, opaque, unhashable IR
-warns and keeps legacy mount-stable identity; repeated expensive identity
-derivation also warns once. Both warnings point to the same `queryKey` escape
-hatch.
+Query identity matters where a hook compares it to decide whether to compile
+again: React and Preact compare it on every render, and a `DbClient` matches
+preloaded and hydrated queries by it. Those hooks throw
+`UnhashableQueryIRError` when they compile an opaque, unhashable query without
+`queryKey`; an empty `queryKey` counts as none. React development builds also
+warn once when deriving identity becomes expensive, pointing to the same
+`queryKey` escape hatch. Vue, Solid, Angular, and Svelte without a `DbClient`
+compile again whenever their reactive reads change, so they need no identity
+and accept any query.
 
-For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
+The derived identity names each source by its Collection ID. While a hook that
+compares identity is mounted, each Collection ID its queries read must keep
+naming one source Collection object; a different object under an ID the hook
+already read throws `SourceCollectionIdReuseError` instead of returning rows
+from the old source.
+
+For more details on framework integration, see the [React](../framework/react/overview), [Preact](../framework/preact/overview), [Vue](../framework/vue/overview), [Solid](../framework/solid/overview), [Svelte](../framework/svelte/overview), and [Angular](../framework/angular/overview) adapter documentation.
 
 ### Using with React Suspense
 
@@ -1525,11 +1536,16 @@ const departmentStats = createCollection(liveQueryCollectionOptions({
 ```
 
 > [!NOTE]
-> In `groupBy` queries, the properties in your `select` clause must either be:
+> In `groupBy` queries, and in a `select` that uses an aggregate without
+> `groupBy`, every property in your `select` clause must have one value per group.
+> Each property must be one of these, or an expression built only from them:
 > - An aggregate function (like `count`, `sum`, `avg`)
 > - A property that was used in the `groupBy` clause
+> - A literal value
+> - In an included subquery, a field of the parent row
 >
-> You cannot select properties that are neither aggregated nor grouped.
+> A source field outside an aggregate throws, and so does a spread. The same rule
+> applies to `having`, which can also read `$selected`.
 
 > [!WARNING]
 > `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions (`count`, `sum`, `max`, etc.) to compute for each group. Since `fn.select()` is an opaque JavaScript function, the compiler cannot inspect it. Use the standard `.select()` API when combining with `groupBy()`.

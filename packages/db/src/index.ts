@@ -8,17 +8,17 @@ export * from './SortedMap'
 export * from './transactions'
 export * from './client.js'
 export { withCollectionConfigFactory } from './client.js'
+/** @internal First-party adapter ownership marker. */
+export { collectionOptionsClaim } from './collection-options.js'
 export * from './types'
 export * from './proxy'
 export * from './query/index.js'
 export * from './optimistic-action'
+export type { LiveQueryKey, LiveQueryOptions } from './live-query-options'
+/** @internal Unstable layer for the first-party framework adapters. */
 export * from './live-query-adapter'
-export * from './live-query-observer'
 /** @internal First-party persistence adapter capability. */
 export * from './persisted-readiness'
-export * from './live-query-options'
-/** @internal Unstable adapter primitive for RFC #1623. */
-export * from './live-query-window-controller'
 export * from './local-only'
 export * from './local-storage'
 export {
@@ -129,3 +129,5 @@ export { operators, type OperatorName } from './query/builder/functions.js'
 
 /** @internal Shared native ordering for first-party persistence. */
 export { compareTemporalValues } from './utils/comparison'
+/** @internal Used by first-party collection adapters. */
+export { makeComparator } from './utils/comparison'

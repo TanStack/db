@@ -948,7 +948,7 @@ export class NonAggregateExpressionNotInGroupByError extends GroupByError {
   constructor(alias: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`
+        ? `Non-aggregate expression '${alias}' must also appear in GROUP BY clause`
         : codedMessage(70, { alias }),
     )
   }
@@ -996,7 +996,7 @@ export class SerializationError extends StorageError {
   constructor(operation: string, originalError: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Cannot ${operation} item because it cannot be JSON serialized: ${originalError}`
+        ? `Cannot ${operation} item because its storage cannot represent it: ${originalError}`
         : codedMessage(74, { operation, originalError }),
     )
   }
@@ -1128,9 +1128,22 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
   constructor() {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `setWindow() can only be called on collections with an ORDER BY clause. ` +
+        ? `setWindow() can only move a window on a query with an ORDER BY clause. ` +
             `Add .orderBy() to your query to enable window movement.`
         : codedMessage(84),
+    )
+  }
+}
+
+/**
+ * Error thrown when setWindow would change the limit of a findOne() query.
+ */
+export class SetWindowFindOneLimitError extends QueryCompilationError {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `setWindow() cannot change the limit of a findOne() query.`
+        : codedMessage(244),
     )
   }
 }
@@ -1158,5 +1171,26 @@ export class UnhashableQueryIRError extends Error {
         : codedMessage(87, { path, reason }),
     )
     this.name = `UnhashableQueryIRError`
+  }
+}
+
+/**
+ * Error thrown when a mounted framework binding that compares query identity
+ * reads a different source Collection under a Collection ID it has already
+ * read, in an earlier query or the same one. The identity names each source by
+ * its ID, so the binding could otherwise keep a live query that reads the old
+ * source.
+ */
+export class SourceCollectionIdReuseError extends TanStackDBError {
+  constructor(
+    public readonly bindingName: string,
+    public readonly collectionId: string,
+  ) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[${bindingName}] Collection ID "${collectionId}" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.`
+        : codedMessage(245, { bindingName, collectionId }),
+    )
+    this.name = `SourceCollectionIdReuseError`
   }
 }

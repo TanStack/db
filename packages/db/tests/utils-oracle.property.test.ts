@@ -8,12 +8,16 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * established examples in `utils.test.ts`, promises change-event equality for
  * its supported value classes. This oracle checks bounded equality and
  * inequality laws for those classes, not general graph isomorphism.
- *
  * Independent value constructors exercise reflexivity, symmetry, copied
  * structure, and changed-leaf inequality for primitives, arrays, records,
- * dates, regexes, typed bytes, and selected Temporal types. Cross-type values
- * remain unequal. Separate bounded graph laws construct corresponding rings
- * and acyclic copies without reusing the production walk.
+ * dates, regexes, typed bytes, and selected Temporal types. Named cross-type
+ * pairs remain unequal, even when a primitive displays or encodes a Date or
+ * RegExp value. Published #1519 keeps equivalent Temporal.Duration forms
+ * distinct for query `eq`. The `deepEquals` API and #1901's change-message
+ * reconstruction law carry that field distinction to Collection events: a
+ * changed public Duration row cannot be suppressed because its display text
+ * matches. Separate bounded graph laws construct corresponding rings and
+ * acyclic copies without reusing the production walk.
  *
  * Arbitrary different cycle topologies are outside this model. Naming that
  * exclusion matters: more random examples cannot establish semantics the
@@ -88,6 +92,9 @@ const arbitraryPrimitive = fc.oneof(
 )
 
 const arbitraryDate = fc.date().map((d) => new Date(d.getTime()))
+const arbitraryFiniteDate = fc
+  .integer({ min: -1_000_000_000_000, max: 2_000_000_000_000 })
+  .map((time) => new Date(time))
 
 const arbitraryRegExp = fc
   .tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`, `m`, `gim`))
@@ -119,6 +126,30 @@ const arbitraryTemporalDuration = fc
   .map(([hours, minutes, seconds]) =>
     Temporal.Duration.from({ hours, minutes, seconds }),
   )
+
+// One nonzero intrinsic field at a time is a legal Duration. Every campaign
+// enumerates all ten fields at generated magnitudes 1–9 and both signs. Each
+// field has an equal fresh copy, a changed-field neighbor, and an opposite-sign
+// value, so its exact value affects change-event equality independently of
+// production comparison.
+const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+
+const adjacentDurationUnits = [
+  [`seconds`, `milliseconds`],
+  [`milliseconds`, `microseconds`],
+  [`microseconds`, `nanoseconds`],
+] as const
 
 // Same-type value arbitraries for testing equivalence properties
 // Mixed Date/Temporal inequality has its own generated and fixed witnesses below.
@@ -190,8 +221,9 @@ const arbitraryDefinedValue = arbitrarySingleValue.filter(
 // independently generated values, so both equal and unequal pairs are legal.
 // The fixed witnesses exercise those two outcomes; deleting either outcome
 // would leave an always-true or always-false comparator undetected. The
-// distinct-type grammar is deliberately restricted to Date/Temporal pairs;
-// it does not claim every cross-class combination. String lengths, integer
+// generated distinct-type grammar names Date/Temporal pairs, Date versus its
+// ISO text and epoch number, and RegExp versus its source text; it does not
+// claim every cross-class combination. String lengths, integer
 // magnitude, and object keys are fast-check defaults; explicit array/record
 // bounds are 0–5 for equivalence and 0–10 for structural copies, bytes 0–50,
 // Float32Array 0–10, Temporal years 1–9999/months 1–12/days 1–28, and
@@ -691,6 +723,53 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`cross-type comparisons`, () => {
+    // A Date's display and numeric timestamp encode the same instant, but
+    // change-event equality keeps the Date value class distinct. The finite
+    // generator makes both encodings legal; the 2023 case preserves the old
+    // unit test's exact operands.
+    it(`keeps a 2023 Date distinct from its old primitive probes`, () => {
+      const date = new Date(`2023-01-01T00:00:00Z`)
+      expectCopyAndChanged(
+        date,
+        new Date(`2023-01-01T00:00:00Z`),
+        new Date(`2023-01-02T00:00:00Z`),
+      )
+      assertDistinctTypes(date, `2023-01-01T00:00:00Z`, deepEquals)
+      assertDistinctTypes(date, date.getTime(), deepEquals)
+    })
+
+    // RegExp source text does not acquire the regex's value class, even when
+    // it spells the same pattern. The source and flags still govern equality
+    // between two genuine RegExps in the laws below.
+    it(`keeps /abc/g distinct from its old source-text probe`, () => {
+      expectCopyAndChanged(/abc/g, /abc/g, /abc/i)
+      expectCopyAndChanged(/abc/g, /abc/g, /def/g)
+      expectEqualityPair(/test/i, /test/i, true)
+      assertDistinctTypes(/abc/g, `abc`, deepEquals)
+    })
+
+    it(`rejects primitive-coercing equality for Date and RegExp`, () => {
+      const date = new Date(`2023-01-01T00:00:00Z`)
+      const dateAsNumber = (left: unknown, right: unknown) =>
+        (left instanceof Date ? left.getTime() : left) ===
+        (right instanceof Date ? right.getTime() : right)
+      const dateAsString = (left: unknown, right: unknown) =>
+        (left instanceof Date ? left.toISOString() : left) ===
+        (right instanceof Date ? right.toISOString() : right)
+      const regexpAsSource = (left: unknown, right: unknown) =>
+        (left instanceof RegExp ? left.source : left) ===
+        (right instanceof RegExp ? right.source : right)
+      expect(() =>
+        assertDistinctTypes(date, date.getTime(), dateAsNumber),
+      ).toThrow(`distinct types must be unequal (forward)`)
+      expect(() =>
+        assertDistinctTypes(date, date.toISOString(), dateAsString),
+      ).toThrow(`distinct types must be unequal (forward)`)
+      expect(() => assertDistinctTypes(/abc/g, `abc`, regexpAsSource)).toThrow(
+        `distinct types must be unequal (forward)`,
+      )
+    })
+
     utilsProperty([arbitraryDate, arbitraryTemporalDuration])(
       `generated Date and Temporal.Duration are unequal in both directions`,
       (date, duration) => assertDistinctTypes(date, duration, deepEquals),
@@ -1129,11 +1208,15 @@ describe(`deepEquals property-based tests`, () => {
         const changedFlags = regex.flags.includes(`i`)
           ? regex.flags.replace(`i`, ``)
           : `${regex.flags}i`
+        // The source neighbor keeps flags fixed; a source-blind comparator
+        // must fail even when generated flags happen to match.
+        const changedSource = new RegExp(`${regex.source}(?:x)`, regex.flags)
         expectCopyAndChanged(
           regex,
           copy,
           new RegExp(regex.source, changedFlags),
         )
+        expectEqualityPair(regex, changedSource, false)
       },
     )
 
@@ -1162,6 +1245,69 @@ describe(`deepEquals property-based tests`, () => {
           seconds: duration.seconds + 1,
         })
         expectCopyAndChanged(duration, copy, changed)
+      },
+    )
+
+    utilsProperty([arbitraryFiniteDate])(
+      `Date differs from its ISO text and epoch number in both directions`,
+      (date) => {
+        assertDistinctTypes(date, date.toISOString(), deepEquals)
+        assertDistinctTypes(date, date.getTime(), deepEquals)
+      },
+    )
+
+    utilsProperty([arbitraryRegExp])(
+      `RegExp differs from its source text in both directions`,
+      (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
+    )
+
+    // The source fields, rather than Temporal's display or ordered duration,
+    // form the reference identity. The production path is deepEquals in both
+    // directions; its direct result is compared after each constructed pair.
+    // Every field is exercised at a positive magnitude, its neighbor, and its
+    // negative counterpart. No one field may be ignored or compared by magnitude.
+    utilsProperty([fc.integer({ min: 1, max: 9 })])(
+      `each Temporal.Duration field determines change-event equality`,
+      (value) => {
+        for (const field of durationFields) {
+          const original = Temporal.Duration.from({ [field]: value })
+          const copy = Temporal.Duration.from({ [field]: value })
+          const changed = Temporal.Duration.from({ [field]: value + 1 })
+          const opposite = Temporal.Duration.from({ [field]: -value })
+          expectCopyAndChanged(original, copy, changed)
+          expectEqualityPair(original, opposite, false)
+        }
+      },
+    )
+
+    it(`keeps one second distinct from 1000 milliseconds with the same display`, () => {
+      const seconds = Temporal.Duration.from({ seconds: 1 })
+      const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
+      expect(seconds.toString()).toBe(milliseconds.toString())
+      expectEqualityPair(seconds, milliseconds, false)
+    })
+
+    // This generated grammar varies magnitude and sign while enumerating every
+    // adjacent subsecond unit boundary. Both constructors encode the same
+    // displayed elapsed time, but the single nonzero source field differs.
+    // #1519's query equality distinction and #1901's event reconstruction
+    // law together predict inequality in both directions here. This rejects
+    // a comparator that checks seconds alone before using display text.
+    utilsProperty([fc.integer({ min: 1, max: 9 })])(
+      `adjacent Duration units remain unequal despite matching display`,
+      (magnitude) => {
+        for (const sign of [-1, 1] as const) {
+          for (const [coarser, finer] of adjacentDurationUnits) {
+            const left = Temporal.Duration.from({
+              [coarser]: sign * magnitude,
+            })
+            const right = Temporal.Duration.from({
+              [finer]: sign * magnitude * 1000,
+            })
+            expect(left.toString()).toBe(right.toString())
+            expectEqualityPair(left, right, false)
+          }
+        }
       },
     )
   })

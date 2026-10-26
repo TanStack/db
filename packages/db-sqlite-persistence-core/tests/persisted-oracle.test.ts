@@ -22,6 +22,7 @@ import {
 } from '../../db/tests/oracle-config.js'
 import {
   IndeterminateCommitError,
+  InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
@@ -41,6 +42,7 @@ import type {
   CollectionReset,
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
+  PersistedStorageTarget,
   PersistedSyncWrappedOptions,
   PersistedTx,
   PersistenceAdapter,
@@ -81,11 +83,23 @@ import type {
  * replay replaces earlier source rows; later sync transactions apply to that
  * replacement. The settled-result oracle below compares queued and completed
  * persistence reads against the same independent snapshot algebra.
+ * A descriptor with mutable persistence state has one Collection owner only
+ * after construction succeeds. A synchronous construction failure leaves it
+ * unclaimed, so a corrected retry can own and use it; a third construction
+ * cannot displace that successful owner. Controlled startup failures do not
+ * establish asynchronous or native-host resource teardown.
  * Existing admission tests separately retain the rejection of transactions
  * still open when another persistence read begins. They characterize the
  * current restriction; they do not establish that reading makes work obsolete.
  * Buffered hydration transactions retain the row metadata ownership captured
  * from their original persistence read.
+ * A managed on-demand cache has a separate claim boundary. Once its claim
+ * expires, old rows and source callbacks cannot populate the replacement
+ * generation. A source with its own restart hook controls that handoff; a
+ * custom source without one is cleaned up and reentered with fresh callbacks.
+ * Recovery reacquires active subsets, current index declarations,
+ * and a renewal timer after the source restarts. A transient renewal error
+ * alone does not establish claim loss; adapter operations still check claims.
  *
  * `foldDurabilityLedger` is the independent model for append-only source
  * obligations. The recording adapter is a plain durable-state model: Maps for
@@ -117,7 +131,9 @@ import type {
  * conformance portfolio have separate owners. This file proves the role
  * partition for non-single-process remote demand: an ownerless elected node
  * does not route, while a follower may route to the elected owner's registered
- * source. Native SQLite hosts, live Electric service behavior, adapter
+ * source. During scoped recovery a follower takes a current-generation commit
+ * notice from the elected owner as source evidence and publishes its demanded
+ * durable rows; a notice from any other sender still requests a refetch. Native SQLite hosts, live Electric service behavior, adapter
  * cancellation, and the open B2-failure/E4 schedule remain separate evidence.
  */
 
@@ -131,10 +147,75 @@ type Todo = {
 
 type TodoSyncParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 
+// A complete durable row is a value, including its exact set of fields. The
+// model deliberately uses only Maps and authored input rows; it does not
+// classify production sync writes or copy their update/replace algorithm.
+// Active complete demand admits every durable key. Without demand, a notice
+// may validate previously public keys, but cannot publish an unseen key.
+// DbClient hydration seeds remain source-owned until confirmed by the source.
+// Other rows in this model came from an earlier durable read; accepted source
+// rows belong to the separate source-precedence model below. Copy authored
+// values so a subject mutation cannot alter the expected result by aliasing.
+function expectedScopedSnapshot(
+  previouslyPublic: ReadonlyMap<string, Todo>,
+  durable: ReadonlyMap<string, Todo>,
+  protectedSeeds: ReadonlyMap<string, Todo>,
+  completeDemand: boolean,
+): Map<string, Todo> {
+  const expected = completeDemand
+    ? new Map(
+        Array.from(
+          durable,
+          ([key, row]) => [key, structuredClone(row)] as const,
+        ),
+      )
+    : new Map(
+        Array.from(previouslyPublic.keys())
+          .filter((key) => durable.has(key))
+          .map((key) => [key, structuredClone(durable.get(key)!)] as const),
+      )
+  for (const [key, row] of protectedSeeds)
+    expected.set(key, structuredClone(row))
+  return expected
+}
+
+// Targeted notices are changes to the durable relation, not complete rows in
+// the message. An active predicate admits the durable rows it matches; after
+// demand retirement, only keys that were public remain eligible for checking.
+// This simple title predicate is the model's authored scope, independent of
+// the production predicate compiler and targeted-invalidation classifier.
+function expectedTargetedSnapshot(
+  previouslyPublic: ReadonlyMap<string, Todo>,
+  durable: ReadonlyMap<string, Todo>,
+  activeTitle: string | undefined,
+): Map<string, Todo> {
+  return new Map(
+    Array.from(durable)
+      .filter(([key, row]) =>
+        activeTitle === undefined
+          ? previouslyPublic.has(key)
+          : row.title === activeTitle,
+      )
+      .map(([key, row]) => [key, structuredClone(row)] as const),
+  )
+}
+
+function expectExactSnapshot(
+  actual: ReadonlyMap<string, Todo>,
+  expected: ReadonlyMap<string, Todo>,
+): void {
+  expect(Array.from(actual.keys()).sort()).toEqual(
+    Array.from(expected.keys()).sort(),
+  )
+  for (const [key, row] of expected) expect(actual.get(key)).toStrictEqual(row)
+}
+
 const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
 const describeUnlessOracleReplay =
   requestedOracleReplayProperty === undefined ||
-  requestedOracleReplayProperty === `persistence.retained-demand`
+  requestedOracleReplayProperty === `persistence.retained-demand` ||
+  requestedOracleReplayProperty === `persistence.generation-notice` ||
+  requestedOracleReplayProperty === `persistence.follower-remote-demand`
     ? describe
     : describe.skip
 
@@ -215,6 +296,14 @@ type RecordingAdapter = PersistenceAdapter & {
   collectionMetadata: Map<string, unknown>
 }
 
+// This fixture records the addressed storage name; it does not decide whether
+// the target's managed claim is valid. The SQLite owner judges that boundary.
+function recordedStorageId(target: PersistedStorageTarget): string {
+  return target.kind === `eager`
+    ? target.collectionId
+    : target.storageCollectionId
+}
+
 function createRecordingAdapter(
   initialRows: Array<Todo> = [],
 ): RecordingAdapter {
@@ -233,7 +322,7 @@ function createRecordingAdapter(
     loadResumeSnapshotCalls: [],
     loadSubset: (collectionId, options, ctx) => {
       adapter.loadSubsetCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         options,
         requiredIndexSignatures: ctx?.requiredIndexSignatures ?? [],
       })
@@ -247,7 +336,7 @@ function createRecordingAdapter(
     },
     loadResumeSnapshot: (collectionId, options) => {
       adapter.loadResumeSnapshotCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         includeRows: options?.includeRows,
         requiredIndexSignatures: options?.requiredIndexSignatures ?? [],
       })
@@ -273,7 +362,7 @@ function createRecordingAdapter(
       })
     },
     loadCollectionMetadata: (collectionId) => {
-      adapter.loadCollectionMetadataCalls.push(collectionId)
+      adapter.loadCollectionMetadataCalls.push(recordedStorageId(collectionId))
       return Promise.resolve(
         Array.from(adapter.collectionMetadata.entries()).map(
           ([key, value]) => ({
@@ -293,7 +382,7 @@ function createRecordingAdapter(
       ),
     applyCommittedTx: (collectionId, tx) => {
       adapter.applyCommittedTxCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         tx: {
           term: tx.term,
           seq: tx.seq,
@@ -353,11 +442,17 @@ function createRecordingAdapter(
       return Promise.resolve()
     },
     ensureIndex: (collectionId, signature) => {
-      adapter.ensureIndexCalls.push({ collectionId, signature })
+      adapter.ensureIndexCalls.push({
+        collectionId: recordedStorageId(collectionId),
+        signature,
+      })
       return Promise.resolve()
     },
     markIndexRemoved: (collectionId, signature) => {
-      adapter.markIndexRemovedCalls.push({ collectionId, signature })
+      adapter.markIndexRemovedCalls.push({
+        collectionId: recordedStorageId(collectionId),
+        signature,
+      })
       return Promise.resolve()
     },
   }
@@ -796,12 +891,18 @@ it.each([false, true])(
       if (first) {
         first = false
         if (committedBeforeClose) {
-          await adapter.applyCommittedTx(collectionId, tx)
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            tx,
+          )
           durableFirstTx = tx
         }
         throw error
       }
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -820,7 +921,10 @@ it.each([false, true])(
         ? durableFirstTx!
         : { ...tx, term: 2, seq: 1, rowVersion: 1 }
       if (!alreadyApplied)
-        await adapter.applyCommittedTx(collectionId, committed)
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          committed,
+        )
       return {
         type: `rpc:reconcileCommittedTx:res`,
         rpcId: `controlled-reconciliation`,
@@ -967,7 +1071,10 @@ it(`keeps the original receipt position after a peer write and fails closed on r
 
   coordinator.requestApplyCommittedTx = async (id, tx) => {
     originalTx = { ...tx, term: 1, seq: 1, rowVersion: 1 }
-    await adapter.applyCommittedTx(id, originalTx)
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: id },
+      originalTx,
+    )
     const peerTx: PersistedTx = {
       ...tx,
       txId: `peer-after-original`,
@@ -986,7 +1093,7 @@ it(`keeps the original receipt position after a peer write and fails closed on r
         { type: `set`, key: `cursor`, value: `peer` },
       ],
     }
-    await adapter.applyCommittedTx(id, peerTx)
+    await adapter.applyCommittedTx({ kind: `eager`, collectionId: id }, peerTx)
     throw error
   }
   coordinator.reconcileCommittedTx = (id, tx, anchor) => {
@@ -1046,6 +1153,168 @@ it(`keeps the original receipt position after a peer write and fails closed on r
       status: `incompatible`,
     })
   } finally {
+    await collection.cleanup()
+  }
+})
+
+// A logical subset owner can retire while a managed cache claim is being
+// renewed. The independent ownership law says only a retained demand may
+// establish a physical remote acquisition. Hold renewal after the wrapper's
+// admission check, then either retire or retain the request before releasing
+// the gate. Compare coordinator acquisition work when the load settles; the
+// retained neighbor proves this cut still permits one valid acquisition.
+it.each([false, true])(
+  `starts remote acquisition after claim renewal only when demand remains retained (retire=%s)`,
+  async (retire) => {
+    const adapter = createRecordingAdapter()
+    const renewalEntered = createEventGate()
+    const releaseRenewal = createEventGate()
+    let holdRenewal = false
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `review-claim-storage`,
+      claimId: `review-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      if (holdRenewal) {
+        renewalEntered.resolve()
+        await releaseRenewal.promise
+      }
+      return Date.now() + 10_000
+    }
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: `review-rotated-storage`,
+      claimId: `review-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const coordinator = createFailStopCoordinatorHarness(`review-unload`)
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `review-unload`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              loadSubset: async () => {},
+              restartAfterScopedRecovery: () => {},
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+    try {
+      await collection.stateWhenReady()
+      holdRenewal = true
+      const load = Promise.resolve(collection._sync.loadSubset(options))
+      await atPersistedOracleCheckpoint(
+        renewalEntered.promise,
+        `claim renewal entered`,
+      )
+      if (retire) collection._sync.unloadSubset(options)
+      releaseRenewal.resolve()
+      await atPersistedOracleCheckpoint(load, `late load settled`)
+      expect(coordinator.remoteEnsureCalls).toHaveLength(retire ? 0 : 1)
+    } finally {
+      releaseRenewal.resolve()
+      await collection.cleanup()
+    }
+  },
+)
+
+// A cache read can lose its claim at the post-read check. The reference
+// ownership law keeps the admitted demand through rotation and gives it one
+// replacement acquisition. Hold that acquisition to compare both its work
+// count and the caller's settlement before and after source completion.
+// The neighboring pre-read loss and peer-notice histories exercise different
+// rotation cuts; this one specifically reaches the post-read renewal cut.
+it(`does not request a rotated in-flight subset twice`, async () => {
+  const adapter = createRecordingAdapter()
+  const coordinator = createFailStopCoordinatorHarness(`review-duplicate`)
+  const ensureStarted = createEventGate()
+  const releaseEnsure = createEventGate()
+  coordinator.requestEnsureRemoteSubset = async (_id, options) => {
+    coordinator.remoteEnsureCalls.push(options)
+    ensureStarted.resolve()
+    await releaseEnsure.promise
+  }
+  let storageId = `review-duplicate-old`
+  let loseClaim = false
+  let loseAfterRead = false
+  const originalLoadSubset = adapter.loadSubset.bind(adapter)
+  adapter.loadSubset = async (...args) => {
+    const rows = await originalLoadSubset(...args)
+    if (loseAfterRead) {
+      loseAfterRead = false
+      loseClaim = true
+    }
+    return rows
+  }
+  adapter.claimCacheGeneration = async () => ({
+    storageCollectionId: storageId,
+    claimId: `review-duplicate-claim`,
+    expiresAtMs: Date.now() + 10_000,
+  })
+  adapter.renewCacheGenerationClaim = async () =>
+    loseClaim ? undefined : Date.now() + 10_000
+  adapter.rotateCacheGeneration = async () => {
+    loseClaim = false
+    storageId = `review-duplicate-new`
+    return {
+      storageCollectionId: storageId,
+      claimId: `review-duplicate-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    }
+  }
+  adapter.releaseCacheGenerationClaim = async () => {}
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `review-duplicate`,
+      syncMode: `on-demand`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: async () => {},
+            restartAfterScopedRecovery: () => {},
+          }
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  try {
+    await collection.stateWhenReady()
+    loseAfterRead = true
+    const load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+    await atPersistedOracleCheckpoint(
+      ensureStarted.promise,
+      `replacement acquisition`,
+    )
+    await flushAsyncWork()
+    expect(storageId).toBe(`review-duplicate-new`)
+    expect(coordinator.remoteEnsureCalls).toHaveLength(1)
+    let settled = false
+    void load.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await flushAsyncWork()
+    expect(settled).toBe(false)
+    releaseEnsure.resolve()
+    await atPersistedOracleCheckpoint(load, `replacement demand settlement`)
+    expect(coordinator.remoteEnsureCalls).toHaveLength(1)
+  } finally {
+    releaseEnsure.resolve()
     await collection.cleanup()
   }
 })
@@ -1281,6 +1550,120 @@ it.each([`sparse slot`, `extra array property`] as const)(
   },
 )
 
+// A reconciliation reload compares the resulting public snapshot, not the raw
+// durable relation. A DbClient seed can be absent from storage or have an older
+// durable value while an ordinary row is unchanged. The independent model
+// overlays that seed on the durable relation, then expects zero new change
+// batches at the settled reload checkpoint. The ordinary row makes a delete-
+// then-reinsert shortcut observable even though final rows would match.
+it.each([`absent`, `older`] as const)(
+  `does not republish an unchanged row beside an %s hydrated seed`,
+  async (seedCache) => {
+    const ordinary = { id: `ordinary`, title: `Durable` }
+    const seed = { id: `seed`, title: `Hydrated` }
+    const olderSeed = { id: seed.id, title: `Older durable` }
+    const adapter = createRecordingAdapter([
+      ordinary,
+      ...(seedCache === `older` ? [olderSeed] : []),
+    ])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `reconciliation-seed-${seedCache}`
+    let source!: TodoSyncParams
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const client = new DbClient()
+    const seedMetadata = { owner: `hydrated` }
+    client.hydrate({
+      collections: [
+        {
+          collectionId,
+          rows: [{ key: seed.id, value: seed, metadata: seedMetadata }],
+        },
+      ],
+    })
+    const collection = client.collection(descriptor)
+    const demand = {}
+    let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset(demand)
+      const expected = new Map<string, Todo>([
+        [ordinary.id, ordinary],
+        [seed.id, seed],
+      ])
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      expectExactSnapshot(publicRows(), expected)
+      expect(source.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+      const eventKeys: Array<string> = []
+      subscription = collection.subscribeChanges(
+        (changes) => {
+          eventKeys.push(...changes.map(({ key }) => String(key)))
+        },
+        { includeInitialState: false },
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId },
+        { txId: `repeat`, term: 1, seq: 1, rowVersion: 1, mutations: [] },
+      )
+      const reloadSettled = createEventGate()
+      adapter.runInHydrationScope = async (task) => {
+        const result = await task(adapter)
+        reloadSettled.resolve()
+        return result
+      }
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `repeat`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+          reconciliationReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await atPersistedOracleCheckpoint(
+        reloadSettled.promise,
+        `seed reconciliation reload settled`,
+      )
+      await flushAsyncWork()
+      expectExactSnapshot(publicRows(), expected)
+      expect(source.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+      expect(eventKeys).toEqual([])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      subscription?.unsubscribe()
+      collection._sync.unloadSubset(demand)
+      await cleanupPersistedOracle([() => client.cleanup()], hasPrimaryFailure)
+    }
+  },
+)
+
 // A real version gap can arrive after a baseline row was published while the
 // coordinator offers no pullSince capability. The independent durable ledger
 // has versions 1, 2, and 3; the passive Collection sees only version 3's notice.
@@ -1293,13 +1676,16 @@ it(`publishes a durable gap reload without an empty intermediate snapshot`, asyn
   coordinator.pullSince = undefined
   const collectionId = `source-atomic-gap-fallback`
   const durableWrite = (id: string, term: number, rowVersion: number) =>
-    adapter.applyCommittedTx(collectionId, {
-      txId: id,
-      term,
-      seq: 1,
-      rowVersion,
-      mutations: [{ type: `insert`, key: id, value: { id, title: id } }],
-    })
+    adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: id,
+        term,
+        seq: 1,
+        rowVersion,
+        mutations: [{ type: `insert`, key: id, value: { id, title: id } }],
+      },
+    )
   await durableWrite(`old`, 1, 1)
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
@@ -1391,15 +1777,18 @@ it(`recovers a missed commit across a no-write election`, async () => {
       term: number,
       rowVersion: number,
     ) => {
-      await adapter.applyCommittedTx(collectionId, {
-        txId,
-        term,
-        seq: 1,
-        rowVersion,
-        mutations: [
-          { type: `insert`, key: txId, value: { id: txId, title: txId } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId,
+          term,
+          seq: 1,
+          rowVersion,
+          mutations: [
+            { type: `insert`, key: txId, value: { id: txId, title: txId } },
+          ],
+        },
+      )
     }
     await durableWrite(`missed`, 1, 1)
     // The controlled ledger jumps over term 2 without simulating its election.
@@ -1477,15 +1866,18 @@ it(`recovers missed rows after position-only resume certification`, async () => 
       term: number,
       rowVersion: number,
     ) =>
-      adapter.applyCommittedTx(collectionId, {
-        txId,
-        term,
-        seq: 1,
-        rowVersion,
-        mutations: [
-          { type: `insert`, key: txId, value: { id: txId, title: txId } },
-        ],
-      })
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId,
+          term,
+          seq: 1,
+          rowVersion,
+          mutations: [
+            { type: `insert`, key: txId, value: { id: txId, title: txId } },
+          ],
+        },
+      )
     await durableWrite(`missed`, 1, 1)
     await durableWrite(`received`, 3, 2)
     await atPersistedOracleCheckpoint(
@@ -2092,7 +2484,10 @@ it(`reconciles a source receipt queued behind persisted hydration`, async () => 
       expect(scopedAdapter).toBeDefined()
       throw uncertain
     }
-    await (scopedAdapter ?? adapter).applyCommittedTx(collectionId, tx)
+    await (scopedAdapter ?? adapter).applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      tx,
+    )
     return {
       type: `rpc:applyCommittedTx:res`,
       rpcId: tx.txId,
@@ -2113,7 +2508,10 @@ it(`reconciles a source receipt queued behind persisted hydration`, async () => 
     reconcileEntered.resolve()
     await releaseReconcile.promise
     const committed = { ...tx, term: 2, seq: 1, rowVersion: 1 }
-    await (scopedAdapter ?? adapter).applyCommittedTx(collectionId, committed)
+    await (scopedAdapter ?? adapter).applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      committed,
+    )
     return {
       type: `rpc:reconcileCommittedTx:res`,
       rpcId: tx.txId,
@@ -4042,6 +4440,524 @@ async function createTerminalFailureHarness(
 }
 
 describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
+  // A descriptor's one-owner claim is consumed by a constructed Collection,
+  // not by a constructor attempt that failed before binding the runtime.
+  // The independent admission model has unclaimed and claimed states; this
+  // invalid-then-corrected history must remain unclaimed after the first
+  // throw. The checkpoint is the second createCollection call and its later
+  // durable write. A successful first construction is checked below.
+  it(`permits a corrected descriptor after construction fails before owner binding`, async () => {
+    const adapter = createRecordingAdapter()
+    const options = persistedCollectionOptions<Todo, string>({
+      id: `failed-construction-retry`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      persistence: { adapter },
+    })
+    expect(() => createCollection(options)).toThrow(/autoIndex/)
+    options.defaultIndexType = BasicIndex
+    const collection = createCollection(options)
+    let unexpectedThird: typeof collection | undefined
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      expect(() => {
+        unexpectedThird = createCollection(options)
+      }).toThrow(InvalidPersistedCollectionConfigError)
+      const receipt = collection.insert({ id: `owned`, title: `Retried owner` })
+      await receipt.isPersisted.promise
+      expect(stripVirtualProps(collection.get(`owned`))).toEqual({
+        id: `owned`,
+        title: `Retried owner`,
+      })
+      expect(adapter.rows.get(`owned`)).toEqual({
+        id: `owned`,
+        title: `Retried owner`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => unexpectedThird?.cleanup(), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // Law: only a successfully constructed Collection consumes an options
+  // descriptor. The same unclaimed -> claimed admission model applies if a
+  // synchronous collaborator fails after sync startup begins. The first
+  // attempt must expose that failure; after correction, the same descriptor
+  // must construct and persist normally. This tests the public constructor
+  // and durability receipt, rather than inspecting the private claim flag.
+  // Both local-only and wrapped-source startup bind through distinct paths.
+  // A subscription ledger checks that the failed attempt has no live listener,
+  // the corrected owner has one, and cleanup releases it.
+  it.each([`local-only`, `wrapped source`] as const)(
+    `permits a corrected %s descriptor after sync-start construction fails`,
+    async (mode) => {
+      const adapter = createRecordingAdapter()
+      const coordinator = createCoordinatorHarness()
+      coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+        await adapter.applyCommittedTx({ kind: `eager`, collectionId }, tx)
+        return {
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+      }
+      const subscribe = coordinator.subscribe.bind(coordinator)
+      const fault = new Error(`coordinator subscription failed`)
+      let failSubscription = true
+      let activeSubscriptions = 0
+      coordinator.subscribe = (...args) => {
+        if (failSubscription) throw fault
+        const unsubscribe = subscribe(...args)
+        activeSubscriptions++
+        return () => {
+          activeSubscriptions--
+          unsubscribe()
+        }
+      }
+      const base = {
+        id: `failed-sync-start-construction-retry-${mode}`,
+        getKey: (row: Todo) => row.id,
+        startSync: true as const,
+        persistence: { adapter, coordinator },
+      }
+      let source!: TodoSyncParams
+      const construct =
+        mode === `wrapped source`
+          ? (() => {
+              const options = persistedCollectionOptions<Todo, string>({
+                ...base,
+                sync: {
+                  sync: (params) => {
+                    source = params
+                    params.markReady()
+                  },
+                },
+              })
+              return () => createCollection(options)
+            })()
+          : (() => {
+              const options = persistedCollectionOptions<Todo, string>(base)
+              return () => createCollection(options)
+            })()
+      expect(construct).toThrow(fault)
+      expect(activeSubscriptions).toBe(0)
+      failSubscription = false
+      const collection = construct()
+      let unexpectedThird: typeof collection | undefined
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        expect(activeSubscriptions).toBe(1)
+        if (mode === `wrapped source`) await flushAsyncWork()
+        expect(() => {
+          unexpectedThird = construct()
+        }).toThrow(InvalidPersistedCollectionConfigError)
+        const row = { id: `owned`, title: `Retried owner` }
+        if (mode === `wrapped source`) {
+          source.begin()
+          source.write({ type: `insert`, value: row })
+          await source.commit()
+        } else {
+          await collection.insert(row).isPersisted.promise
+        }
+        expect(stripVirtualProps(collection.get(`owned`))).toEqual({
+          id: `owned`,
+          title: `Retried owner`,
+        })
+        expect(adapter.rows.get(`owned`)).toEqual({
+          id: `owned`,
+          title: `Retried owner`,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [
+            () => unexpectedThird?.cleanup(),
+            () => collection.cleanup(),
+            () => {
+              expect(activeSubscriptions).toBe(0)
+            },
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // A persisted options descriptor owns one mutable runtime. The independent
+  // ownership rule is one Collection per descriptor, including a spread copy:
+  // copying fields cannot create a second runtime. The public creation boundary
+  // must reject the second Collection before it can redirect the first one's
+  // writes. Fresh descriptors remain legal and are covered elsewhere here and
+  // by DbClient materialization. The checkpoint is createCollection itself,
+  // then the first owner's durable receipt and public row after the rejection.
+  it.each([`same object`, `spread copy`] as const)(
+    `keeps one persisted options runtime bound to its first Collection (%s)`,
+    async (reuse) => {
+      const adapter = createRecordingAdapter()
+      const options = persistedCollectionOptions<Todo, string>({
+        id: `one-owner-${reuse}`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      })
+      const first = createCollection(options)
+      let second: typeof first | undefined
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        expect(() => {
+          second = createCollection(
+            reuse === `same object` ? options : { ...options },
+          )
+        }).toThrow(InvalidPersistedCollectionConfigError)
+
+        const receipt = first.insert({ id: `owned`, title: `First owner` })
+        await receipt.isPersisted.promise
+        expect(stripVirtualProps(first.get(`owned`))).toEqual({
+          id: `owned`,
+          title: `First owner`,
+        })
+        expect(adapter.rows.get(`owned`)).toEqual({
+          id: `owned`,
+          title: `First owner`,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second?.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // The same ownership rule applies when an upstream sync source is wrapped.
+  // A source commit through the first Collection must remain public and durable
+  // after a second Collection is rejected at admission.
+  it.each([`same object`, `spread copy`] as const)(
+    `keeps a wrapped sync source bound to its first Collection (%s)`,
+    async (reuse) => {
+      const adapter = createRecordingAdapter()
+      let source!: TodoSyncParams
+      const options = persistedCollectionOptions<Todo, string>({
+        id: `one-source-owner-${reuse}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      })
+      const first = createCollection(options)
+      let second: typeof first | undefined
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        expect(() => {
+          second = createCollection(
+            reuse === `same object` ? options : { ...options },
+          )
+        }).toThrow(InvalidPersistedCollectionConfigError)
+
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `owned`, title: `First source` },
+        })
+        await Promise.resolve(source.commit())
+        expect(stripVirtualProps(first.get(`owned`))).toEqual({
+          id: `owned`,
+          title: `First source`,
+        })
+        expect(adapter.rows.get(`owned`)).toEqual({
+          id: `owned`,
+          title: `First source`,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second?.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Selecting only the public sync config bypasses the descriptor's claim.
+  // The runtime's fallback guard must reject that second Collection before
+  // changing the first owner's controls. This is a legal JavaScript copy of
+  // the exposed config, not a second independent persisted options runtime.
+  it.each([`local-only`, `sync-present`] as const)(
+    `preserves the first owner after a copied sync config is rejected (%s)`,
+    async (mode) => {
+      const adapter = createRecordingAdapter()
+      let source!: TodoSyncParams
+      const base = {
+        id: `selected-sync-${mode}`,
+        getKey: (row: Todo) => row.id,
+        persistence: { adapter },
+      }
+      const options =
+        mode === `sync-present`
+          ? persistedCollectionOptions<Todo, string>({
+              ...base,
+              sync: {
+                sync: (params) => {
+                  source = params
+                  params.markReady()
+                },
+              },
+            })
+          : persistedCollectionOptions<Todo, string>(base)
+      const first = createCollection(options)
+      const second = createCollection({
+        id: `unclaimed-${mode}`,
+        getKey: (row: Todo) => row.id,
+        sync: options.sync,
+        startSync: false,
+      })
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        if (mode === `sync-present`) {
+          source.begin()
+          source.write({
+            type: `insert`,
+            value: { id: `owned`, title: `First source` },
+          })
+        }
+        expect(() => second.startSyncImmediate()).toThrow(
+          InvalidPersistedCollectionConfigError,
+        )
+
+        if (mode === `sync-present`) {
+          await Promise.resolve(source.commit())
+        } else {
+          await first.insert({ id: `owned`, title: `First owner` }).isPersisted
+            .promise
+        }
+        expect(first.has(`owned`)).toBe(true)
+        expect(second.has(`owned`)).toBe(false)
+        expect(adapter.rows.get(`owned`)?.id).toBe(`owned`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Construction, rather than first sync startup, assigns the descriptor's
+  // Collection owner. A lazy wrapped source leaves a legal interval in which a
+  // second Collection can select only its public sync field and start first.
+  // The independent admission rule still gives the first constructed owner
+  // the runtime; the selected copy must fail before it installs controls.
+  it(`rejects a selected sync that starts before its lazy descriptor owner`, async () => {
+    const adapter = createRecordingAdapter()
+    let source!: TodoSyncParams
+    const options = persistedCollectionOptions<Todo, string>({
+      id: `lazy-selected-sync-owner`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter },
+    })
+    const first = createCollection(options)
+    const selected = createCollection({
+      id: `lazy-selected-sync-copy`,
+      getKey: (row: Todo) => row.id,
+      sync: options.sync,
+      startSync: false,
+    })
+    let hasPrimaryFailure = false
+    try {
+      expect(() => selected.startSyncImmediate()).toThrow(
+        InvalidPersistedCollectionConfigError,
+      )
+      first.startSyncImmediate()
+      await first.stateWhenReady()
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `owned`, title: `Original owner` },
+      })
+      await Promise.resolve(source.commit())
+      expect(stripVirtualProps(first.get(`owned`))).toEqual({
+        id: `owned`,
+        title: `Original owner`,
+      })
+      expect(selected.has(`owned`)).toBe(false)
+      expect(adapter.rows.get(`owned`)).toEqual({
+        id: `owned`,
+        title: `Original owner`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => selected.cleanup(), () => first.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not reuse a persisted runtime after its Collection cleans up`, async () => {
+    const options = persistedCollectionOptions<Todo, string>({
+      id: `cleaned-up-owner`,
+      getKey: (row) => row.id,
+      persistence: { adapter: createRecordingAdapter() },
+    })
+    const first = createCollection(options)
+    await first.cleanup()
+    expect(() => createCollection(options)).toThrow(
+      InvalidPersistedCollectionConfigError,
+    )
+  })
+
+  // Cleanup ends a sync run, not the descriptor's permanent Collection claim.
+  // Selecting only the wrapped sync field omits the public claim hook, so this
+  // history checks the runtime guard after cleanup and the original owner's
+  // ability to restart. The two modes cross local and upstream source controls.
+  it.each([`local-only`, `sync-present`] as const)(
+    `rejects a copied sync owner after cleanup and permits the first owner to restart (%s)`,
+    async (mode) => {
+      const adapter = createRecordingAdapter()
+      let source!: TodoSyncParams
+      const base = {
+        id: `cleaned-selected-sync-${mode}`,
+        getKey: (row: Todo) => row.id,
+        persistence: { adapter },
+      }
+      const options =
+        mode === `sync-present`
+          ? persistedCollectionOptions<Todo, string>({
+              ...base,
+              sync: {
+                sync: (params) => {
+                  source = params
+                  params.markReady()
+                },
+              },
+            })
+          : persistedCollectionOptions<Todo, string>(base)
+      const first = createCollection(options)
+      const second = createCollection({
+        id: `post-cleanup-copy-${mode}`,
+        getKey: (row: Todo) => row.id,
+        sync: options.sync,
+        startSync: false,
+      })
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        await first.cleanup()
+        expect(() => second.startSyncImmediate()).toThrow(
+          InvalidPersistedCollectionConfigError,
+        )
+
+        const replacementReady = createEventGate()
+        const unsubscribe = first.on(`status:ready`, () =>
+          replacementReady.resolve(),
+        )
+        try {
+          first.startSyncImmediate()
+          await atPersistedOracleCheckpoint(
+            replacementReady.promise,
+            `original persisted owner restarts`,
+          )
+        } finally {
+          unsubscribe()
+        }
+
+        if (mode === `sync-present`) {
+          source.begin()
+          source.write({
+            type: `insert`,
+            value: { id: `after-restart`, title: `First source` },
+          })
+          await Promise.resolve(source.commit())
+        } else {
+          await first.insert({ id: `after-restart`, title: `First owner` })
+            .isPersisted.promise
+        }
+        expect(first.has(`after-restart`)).toBe(true)
+        expect(second.has(`after-restart`)).toBe(false)
+        expect(adapter.rows.get(`after-restart`)?.id).toBe(`after-restart`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`materializes one independent persisted runtime for each DbClient`, async () => {
+    const adapter = createRecordingAdapter([{ id: `stored`, title: `Stored` }])
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: `client-owned-persistence`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      }),
+    )
+    const firstClient = new DbClient()
+    const secondClient = new DbClient()
+    let hasPrimaryFailure = false
+    try {
+      const first = firstClient.collection(descriptor)
+      const second = secondClient.collection(descriptor)
+      expect(first).not.toBe(second)
+      await Promise.all([first.stateWhenReady(), second.stateWhenReady()])
+      expect(stripVirtualProps(first.get(`stored`))).toEqual({
+        id: `stored`,
+        title: `Stored`,
+      })
+      expect(stripVirtualProps(second.get(`stored`))).toEqual({
+        id: `stored`,
+        title: `Stored`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => secondClient.cleanup(), () => firstClient.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`preserves exact reconciliation context for an indeterminate commit`, () => {
     const cause = new Error(`response channel closed`)
     const error = new IndeterminateCommitError({
@@ -4717,7 +5633,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`waits for a pending single-process subset load before unloading it`, async () => {
+  // Acquisition release gives the owner its cancellation opportunity before
+  // the source load settles. A load that needs unload to settle is legal;
+  // waiting for that load before calling unload deadlocks scoped recovery.
+  it(`unloads a pending single-process subset before waiting for its source load`, async () => {
     const coordinator = new SingleProcessCoordinator(`single-release-order`)
     let releaseLoad = (): void => {}
     const loadGate = new Promise<void>((resolve) => {
@@ -4752,17 +5671,20 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         .then(() => {
           releaseSettled = true
         })
-      await Promise.resolve()
+      await atPersistedOracleCheckpoint(
+        release,
+        `release before source settlement`,
+      )
 
       const beforeLoadRelease = { events: [...events], releaseSettled }
       expect(beforeLoadRelease).toEqual({
-        events: [`load-start`],
-        releaseSettled: false,
+        events: [`load-start`, `unload`],
+        releaseSettled: true,
       })
 
       releaseLoad()
       await Promise.all([load, release])
-      expect(events).toEqual([`load-start`, `load-finish`, `unload`])
+      expect(events).toEqual([`load-start`, `unload`, `load-finish`])
     } finally {
       releaseLoad()
       unregisterOwner()
@@ -5169,6 +6091,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ).toEqual({ limit: 0, offset: Number.MAX_SAFE_INTEGER })
   })
 
+  it(`transports an explicit source refetch without changing subset data`, () => {
+    expect(toTransportedLoadSubsetOptions({ limit: 1, refetch: true })).toEqual(
+      {
+        limit: 1,
+        refetch: true,
+      },
+    )
+    expect(() =>
+      toTransportedLoadSubsetOptions({ refetch: `true` } as never),
+    ).toThrow(`options.refetch`)
+  })
+
   it(`reports and rethrows a single-process owner unload rejection`, async () => {
     const coordinator = new SingleProcessCoordinator(`single-unload-error`)
     const unloadError = new Error(`single-process owner unload failed`)
@@ -5412,6 +6346,49 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         },
       }),
     ).toThrow(InvalidPersistedCollectionCoordinatorError)
+  })
+
+  // Every coordinator method the runtime calls is part of the contract, so a
+  // coordinator missing any one of them fails at configuration, naming it,
+  // rather than later inside message dispatch.
+  it.each([
+    `getNodeId`,
+    `subscribe`,
+    `publish`,
+    `isLeader`,
+    `ensureLeadership`,
+    `requestEnsureRemoteSubset`,
+    `requestReleaseRemoteSubset`,
+    `registerRemoteSubsetOwner`,
+    `requestEnsurePersistedIndex`,
+    `requestApplyCommittedTx`,
+  ] as const)(`rejects a coordinator without %s`, (method) => {
+    const complete: Record<string, unknown> = {
+      getNodeId: () => `node-1`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => true,
+      ensureLeadership: async () => {},
+      requestEnsureRemoteSubset: async () => {},
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: async () => ({ term: 1, seq: 1 }),
+    }
+    delete complete[method]
+
+    expect(() =>
+      persistedCollectionOptions<Todo, string>({
+        id: `coordinator-without-${method}`,
+        getKey: (item) => item.id,
+        persistence: {
+          adapter: createNoopAdapter(),
+          coordinator: complete as unknown as PersistedCollectionCoordinator,
+        },
+      }),
+    ).toThrow(
+      `Invalid persisted collection coordinator: missing required "${method}" method`,
+    )
   })
 
   it(`rejects an incomplete coordinator before starting a rich sync source`, async () => {
@@ -9611,7 +10588,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const publishCallsBefore = coordinator.publishCalls.length
     adapter.loadSubset = (collectionId, options, context) => {
       adapter.loadSubsetCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         options,
         requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
       })
@@ -9856,7 +10833,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const loadCallsBefore = adapter.loadSubsetCalls.length
       adapter.loadSubset = (collectionId, options, context) => {
         adapter.loadSubsetCalls.push({
-          collectionId,
+          collectionId: recordedStorageId(collectionId),
           options,
           requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
         })
@@ -11282,7 +12259,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         entry === `reset` ? createCoordinatorHarness() : undefined
       if (coordinator) {
         coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
-          await adapter.applyCommittedTx(collectionId, tx)
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            tx,
+          )
           return {
             type: `rpc:applyCommittedTx:res`,
             rpcId: tx.txId,
@@ -12923,7 +13903,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await releaseFirstDurability.promise
         return { ...persistenceResponse, rpcId: tx.txId }
       }
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -14286,23 +15269,2310 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // An on-demand Collection has no unconstrained persisted row demand before
+  // its first subset request. A coordinator notification changes durable
+  // authority but cannot manufacture that demand. The independent model has
+  // zero or one active demand: zero requests no new rows; one unconstrained
+  // demand requests the durable snapshot. A retired demand may leave its old
+  // public row visible, so a peer full-reload notice must validate that row
+  // immediately. The notice may not add unrelated durable rows. This history
+  // checks both full-reload cuts and the later demand's public Collection and
+  // adapter-call boundaries.
+  // The reset history below applies the same demand law at a new cache epoch.
+  it(`validates visible rows on a no-demand full reload without adding stored rows`, async () => {
+    const stored = { id: `stored`, title: `Durable row` }
+    const retained = { id: `retained`, title: `Still durable` }
+    const adapter = createRecordingAdapter([stored, retained])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `zero-demand-full-reload`
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      expect(collection.has(`stored`)).toBe(false)
+      expect(adapter.loadSubsetCalls).toHaveLength(0)
+      const metadataReadsBefore = adapter.loadCollectionMetadataCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `zero-demand-reload`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(adapter.loadCollectionMetadataCalls).toHaveLength(
+          metadataReadsBefore + 1,
+        ),
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(adapter.loadSubsetCalls).toHaveLength(0)
+      expect(collection.has(`stored`)).toBe(false)
+
+      const demand = {}
+      await collection._sync.loadSubset(demand)
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      expect(stripVirtualProps(collection.get(`stored`))).toEqual(stored)
+      collection._sync.unloadSubset(demand)
+
+      // A peer removes the row after demand retirement. Its full-reload notice
+      // must retract the visible row without creating a new row demand.
+      adapter.rows.delete(`stored`)
+      const metadataReadsAfterRetirement =
+        adapter.loadCollectionMetadataCalls.length
+      const validationReads = adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `retired-demand-reload`,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() => {
+        expect(adapter.loadResumeSnapshotCalls).toHaveLength(
+          validationReads + 1,
+        )
+        expect(collection.has(`stored`)).toBe(false)
+      })
+      expect(adapter.loadCollectionMetadataCalls).toHaveLength(
+        metadataReadsAfterRetirement,
+      )
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      const newDemand = {}
+      await collection._sync.loadSubset(newDemand)
+      expect(adapter.loadSubsetCalls).toHaveLength(2)
+      expect(adapter.loadResumeSnapshotCalls).toHaveLength(validationReads + 1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      collection._sync.unloadSubset(newDemand)
+
+      // A bounded subset proves nothing about keys outside that subset.
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = (id, options, context) =>
+        options.limit === 0
+          ? Promise.resolve([])
+          : loadSubset(id, options, context)
+      const emptyPage = { limit: 0 }
+      await collection._sync.loadSubset(emptyPage)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      collection._sync.unloadSubset(emptyPage)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // A reset changes the durable cache epoch, not the Collection's demand.
+  // The independent snapshot rule permits only keys already public when no
+  // subset is retained: validate them against the new durable state, and add
+  // no unrelated key. These controlled histories enter through the reset
+  // notification and compare the public snapshot after its hydration scope
+  // settles. They cover empty, changed, and deleted visible-key scopes, not
+  // native-host notification delivery.
+  it.each([`empty`, `updated`, `deleted`] as const)(
+    `keeps a no-demand reset scoped to previously visible rows (%s)`,
+    async (history) => {
+      const visible = { id: `visible`, title: `Old row` }
+      const unrelated = { id: `unrelated`, title: `Stored only` }
+      const adapter = createRecordingAdapter(
+        history === `empty` ? [unrelated] : [visible],
+      )
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `reset-visible-scope-${history}`
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let hasPrimaryFailure = false
+      try {
+        collection.startSyncImmediate()
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `reset visible scope ready`,
+        )
+        if (history !== `empty`) {
+          const demand = {}
+          await collection._sync.loadSubset(demand)
+          collection._sync.unloadSubset(demand)
+        }
+        expect(collection.has(visible.id)).toBe(history !== `empty`)
+
+        if (history === `updated`) {
+          adapter.rows.set(visible.id, { ...visible, title: `New row` })
+        } else if (history === `deleted`) {
+          adapter.rows.delete(visible.id)
+        }
+        adapter.rows.set(unrelated.id, unrelated)
+
+        const resetSettled = createEventGate()
+        adapter.runInHydrationScope = async (task) => {
+          const result = await task(adapter)
+          resetSettled.resolve()
+          return result
+        }
+        const subsetReads = adapter.loadSubsetCalls.length
+        coordinator.emit(
+          { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+          undefined,
+          collectionId,
+        )
+        await atPersistedOracleCheckpoint(
+          resetSettled.promise,
+          `reset visible scope published`,
+        )
+        expect({
+          publicRows: new Map(
+            Array.from(collection.values(), (row) => [
+              row.id,
+              stripVirtualProps(row),
+            ]),
+          ),
+          subsetReads: adapter.loadSubsetCalls.length,
+        }).toEqual({
+          publicRows: new Map(
+            history === `updated`
+              ? [[visible.id, { ...visible, title: `New row` }]]
+              : [],
+          ),
+          subsetReads,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // A DbClient-hydrated row is already public but has not been confirmed by
+  // the source. A complete persisted read can validate source-owned public
+  // rows, but an absent or older cache row cannot revoke the hydration seed.
+  // The independent model gives the seed precedence until a source change
+  // confirms its key. These histories cross an unconstrained demand, a
+  // no-demand peer notice, and a bounded empty-demand peer notice with absent,
+  // older, and equal durable rows. At the settled Collection checkpoint, the
+  // public row and change log must still equal the seed. The ordinary
+  // non-hydrated correction is checked above.
+  it.each(
+    (
+      [
+        `complete demand`,
+        `no-demand peer notice`,
+        `bounded peer notice`,
+      ] as const
+    ).flatMap((path) =>
+      ([`absent`, `older`, `equal`] as const).map((durable) => ({
+        path,
+        durable,
+      })),
+    ),
+  )(
+    `keeps a DbClient hydration seed across $path with $durable durable data`,
+    async ({ path, durable }) => {
+      const seed = { id: `seed`, title: `Hydrated row` }
+      const stored =
+        durable === `absent`
+          ? []
+          : [
+              {
+                id: `seed`,
+                title: durable === `equal` ? seed.title : `Old row`,
+              },
+            ]
+      const adapter = createRecordingAdapter(stored)
+      if (path === `bounded peer notice`) {
+        const loadSubset = adapter.loadSubset.bind(adapter)
+        adapter.loadSubset = async (...args) => {
+          const rows = await loadSubset(...args)
+          return args[1].limit === 0 ? [] : rows
+        }
+      }
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `hydrated-validation-${path}-${durable}`
+      const descriptor = collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const client = new DbClient()
+      client.hydrate({
+        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+      })
+      const collection = client.collection(descriptor)
+      const changes: Array<string> = []
+      const subscription = collection.subscribeChanges((batch) => {
+        changes.push(...batch.map((change) => `${change.type}:${change.key}`))
+      })
+      let hasPrimaryFailure = false
+      const boundedDemand = { limit: 0 }
+      try {
+        await collection.stateWhenReady()
+        expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+        if (path === `bounded peer notice`) {
+          await collection._sync.loadSubset(boundedDemand)
+          expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+        }
+        if (path === `complete demand`) {
+          const demand = {}
+          await collection._sync.loadSubset(demand)
+          collection._sync.unloadSubset(demand)
+        } else {
+          const reads = adapter.loadResumeSnapshotCalls.length
+          const subsetReads = adapter.loadSubsetCalls.length
+          coordinator.emit(
+            {
+              type: `tx:committed`,
+              term: 1,
+              seq: 1,
+              txId: `hydrated-validation`,
+              latestRowVersion: 1,
+              requiresFullReload: true,
+            },
+            undefined,
+            collectionId,
+          )
+          await vi.waitFor(() => {
+            if (path === `bounded peer notice`)
+              expect(adapter.loadSubsetCalls).toHaveLength(subsetReads + 1)
+            else expect(adapter.loadResumeSnapshotCalls).toHaveLength(reads + 1)
+          })
+          await flushAsyncWork()
+          await flushAsyncWork()
+        }
+        expect({
+          publicRow: stripVirtualProps(collection.get(seed.id)),
+          changes,
+        }).toEqual({ publicRow: seed, changes: [] })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        if (path === `bounded peer notice`)
+          collection._sync.unloadSubset(boundedDemand)
+        subscription.unsubscribe()
+        await cleanupPersistedOracle(
+          [() => client.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Preserving the seed cannot make an active reload ignore other rows. The
+  // independent snapshot rule keeps the unconfirmed seed, replaces complete
+  // durable values, removes absent ordinary keys, and admits new requested
+  // keys. A second notice checks that the seed's protection survived the first
+  // publication. The row values are observed after each settled peer notice.
+  it(`preserves a hydration seed while replacing the rest of an active snapshot`, async () => {
+    const seed = { id: `seed`, title: `Hydrated` }
+    const old = { id: `ordinary`, title: `Old`, detail: `remove this field` }
+    const removed = { id: `removed`, title: `Removed` }
+    const adapter = createRecordingAdapter([old, removed])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `mixed-hydration-replacement`
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const client = new DbClient()
+    client.hydrate({
+      collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+    })
+    const collection = client.collection(descriptor)
+    const demand = { limit: 10 }
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset(demand)
+      expect(collection._hasHydratedKey(seed.id)).toBe(true)
+      const fresh = { id: `ordinary`, title: `Fresh` }
+      const added = { id: `added`, title: `New` }
+      adapter.rows.set(fresh.id, fresh)
+      adapter.rows.delete(removed.id)
+      adapter.rows.set(added.id, added)
+      const firstReads =
+        adapter.loadSubsetCalls.length + adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `mixed-first`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(
+          adapter.loadSubsetCalls.length +
+            adapter.loadResumeSnapshotCalls.length,
+        ).toBe(firstReads + 1),
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect({
+        seed: stripVirtualProps(collection.get(seed.id)),
+        ordinary: stripVirtualProps(collection.get(old.id)),
+        removed: collection.has(removed.id),
+        added: stripVirtualProps(collection.get(added.id)),
+        seedProtected: collection._hasHydratedKey(seed.id),
+      }).toEqual({
+        seed,
+        ordinary: fresh,
+        removed: false,
+        added,
+        seedProtected: true,
+      })
+
+      adapter.rows.set(seed.id, { id: seed.id, title: `Stale cache` })
+      const secondReads =
+        adapter.loadSubsetCalls.length + adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `mixed-second`,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(
+          adapter.loadSubsetCalls.length +
+            adapter.loadResumeSnapshotCalls.length,
+        ).toBe(secondReads + 1),
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+      expect(collection._hasHydratedKey(seed.id)).toBe(true)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      collection._sync.unloadSubset(demand)
+      await cleanupPersistedOracle([() => client.cleanup()], hasPrimaryFailure)
+    }
+  })
+
+  // A full-reload notice makes row metadata for absent public keys obsolete,
+  // even when no subset demand remains. The reference snapshot has zero orphan
+  // metadata keys; a public row's presence changes whether the wrapper reads
+  // a durable row snapshot, but not that judgment. The sync metadata API is
+  // the observable boundary at the settled notice checkpoint. A source
+  // metadata-only transaction establishes the orphan through the real path.
+  it.each([false, true])(
+    `clears orphan row metadata after a no-demand peer reload (public row=%s)`,
+    async (hasPublicRow) => {
+      const row = { id: `visible`, title: `Visible row` }
+      const adapter = createRecordingAdapter(hasPublicRow ? [row] : [])
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `zero-demand-orphan-${hasPublicRow}`
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (value) => value.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        if (hasPublicRow) {
+          const demand = {}
+          await collection._sync.loadSubset(demand)
+          collection._sync.unloadSubset(demand)
+        }
+        expect(collection.has(row.id)).toBe(hasPublicRow)
+        source.begin()
+        source.metadata?.row.set(`ghost`, { obsolete: true })
+        await whenSyncAccepted(source.commit())
+        expect(source.metadata?.row.get(`ghost`)).toEqual({ obsolete: true })
+        expect(collection.has(row.id)).toBe(hasPublicRow)
+        expect(adapter.rows.has(row.id)).toBe(hasPublicRow)
+        const metadataReads = adapter.loadCollectionMetadataCalls.length
+        const snapshotReads = adapter.loadResumeSnapshotCalls.length
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 2,
+            txId: `orphan-peer-reload`,
+            latestRowVersion: 2,
+            requiresFullReload: true,
+          },
+          undefined,
+          collectionId,
+        )
+        await vi.waitFor(() =>
+          expect(
+            adapter.loadCollectionMetadataCalls.length +
+              adapter.loadResumeSnapshotCalls.length,
+          ).toBe(metadataReads + snapshotReads + 1),
+        )
+        await flushAsyncWork()
+        await flushAsyncWork()
+        expect({
+          orphan: source.metadata?.row.get(`ghost`),
+          publicRow: stripVirtualProps(collection.get(row.id)),
+        }).toEqual({
+          orphan: undefined,
+          publicRow: hasPublicRow ? row : undefined,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // An equal durable value and row metadata require no public change batch.
+  // This controlled history reaches the real sync metadata controls, then
+  // retires its only demand before a peer notice. The Collection event log at
+  // the settled notice checkpoint distinguishes a no-op from a redundant
+  // update; core always supplies metadata controls to this adapter.
+  it(`does not republish an unchanged metadata-bearing row after demand retirement`, async () => {
+    const row = { id: `same`, title: `Unchanged` }
+    const adapter = createRecordingAdapter([row])
+    adapter.rowMetadata.set(row.id, { owner: `durable` })
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `metadata-noop-peer`
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (value) => value.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      const demand = {}
+      await collection._sync.loadSubset(demand)
+      collection._sync.unloadSubset(demand)
+      expect(source.metadata?.row.get(row.id)).toEqual({ owner: `durable` })
+      const changes: Array<string> = []
+      const subscription = collection.subscribeChanges((batch) => {
+        changes.push(...batch.map((change) => `${change.type}:${change.key}`))
+      })
+      try {
+        const reads = adapter.loadResumeSnapshotCalls.length
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `same-metadata-peer`,
+            latestRowVersion: 1,
+            requiresFullReload: true,
+          },
+          undefined,
+          collectionId,
+        )
+        await vi.waitFor(() =>
+          expect(adapter.loadResumeSnapshotCalls).toHaveLength(reads + 1),
+        )
+        await flushAsyncWork()
+        await flushAsyncWork()
+        expect({
+          row: stripVirtualProps(collection.get(row.id)),
+          metadata: source.metadata?.row.get(row.id),
+          changes,
+        }).toEqual({ row, metadata: { owner: `durable` }, changes: [] })
+      } finally {
+        subscription.unsubscribe()
+      }
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // A fresh acquisition of the same constrained demand must not keep a row
+  // that its settled storage result excludes. The peer notice arrives after
+  // demand retirement and must first correct the prior public rows without
+  // publishing unrelated durable rows.
+  // This controlled predicate has exactly one possible matching key.
+  it(`corrects retired rows on a peer notice before constrained reacquisition`, async () => {
+    const stored = { id: `stored`, title: `Durable row` }
+    const retained = { id: `retained`, title: `Old durable value` }
+    const adapter = createRecordingAdapter([stored, retained])
+    adapter.rowMetadata.set(`retained`, { source: `old` })
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    adapter.loadSubset = async (id, options, context) =>
+      (await loadSubset(id, options, context)).filter(
+        (row) => !options.where || row.key === `stored`,
+      )
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `retired-constrained-demand`
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const demand = {
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`id`]),
+        new IR.Value(`stored`),
+      ]),
+    }
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      const originalDemand = {}
+      await collection._sync.loadSubset(originalDemand)
+      expect(stripVirtualProps(collection.get(`stored`))).toEqual(stored)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      expect(source.metadata!.row.get(`retained`)).toEqual({ source: `old` })
+      collection._sync.unloadSubset(originalDemand)
+
+      adapter.rows.delete(`stored`)
+      adapter.rowMetadata.delete(`retained`)
+      adapter.rows.set(`retained`, {
+        id: `retained`,
+        title: `New durable value`,
+      })
+      adapter.rows.set(`unrequested`, {
+        id: `unrequested`,
+        title: `Not in the filtered demand`,
+      })
+      const metadataReads = adapter.loadCollectionMetadataCalls.length
+      const validationReads = adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `constrained-peer-delete`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() => {
+        expect(adapter.loadResumeSnapshotCalls).toHaveLength(
+          validationReads + 1,
+        )
+        expect(collection.has(`stored`)).toBe(false)
+      })
+      expect(adapter.loadCollectionMetadataCalls).toHaveLength(metadataReads)
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(collection.get(`retained`)?.title).toBe(`New durable value`)
+      expect(source.metadata!.row.get(`retained`)).toBeUndefined()
+      expect(collection.has(`unrequested`)).toBe(false)
+      await collection._sync.loadSubset(demand)
+      expect(adapter.loadSubsetCalls).toHaveLength(2)
+      expect(adapter.loadResumeSnapshotCalls).toHaveLength(validationReads + 1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(collection.get(`retained`)?.title).toBe(`New durable value`)
+      expect(collection.has(`unrequested`)).toBe(false)
+      collection._sync.unloadSubset(demand)
+
+      await collection._sync.loadSubset(demand)
+      expect(adapter.loadResumeSnapshotCalls).toHaveLength(validationReads + 1)
+      collection._sync.unloadSubset(demand)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // Law: a complete persisted value replaces the old value in every field,
+  // including field absence. This follows the durable snapshot contract and
+  // the chosen demand-scoped notice/reset contract above. The model at the top
+  // of this file selects keys using demand and seed authority, then takes the
+  // authored durable value whole. The legal grammar crosses complete demand,
+  // retired-demand peer notice, and retired-demand reset with field removal,
+  // addition, present-undefined transitions in a custom adapter, and scalar
+  // replacement. Field-only changes keep title unchanged to reject a
+  // comparator that watches title alone. The Collection and coordinator are
+  // the driver; whole public rows at the settled publication checkpoint are
+  // the observation. The old title-only checks could not see a retained field.
+  // The removal arm reconstructs that counterexample. Removing it would lose
+  // the stale-field witness; removing a route would lose its distinct admission
+  // path. Addition and scalar change are neighboring controls, not a claim
+  // about arbitrary nested values. Keys agree with row IDs and the fixture has
+  // no accepted source transaction; a mismatched key or source-owned ordinary
+  // row is outside this grammar and has a separate owner below.
+  // Built-in SQLite drops undefined object fields during encoding, so those
+  // two arms exercise the generic adapter boundary only; removal of a defined
+  // field is the receiving SQLite-representable case.
+  it.each(
+    (
+      [`complete demand`, `retired peer notice`, `retired reset`] as const
+    ).flatMap((route) =>
+      (
+        [
+          `remove`,
+          `remove with metadata`,
+          `add`,
+          `remove undefined`,
+          `add undefined`,
+          `scalar`,
+        ] as const
+      ).map((shape) => ({
+        route,
+        shape,
+      })),
+    ),
+  )(
+    `publishes exact durable row shape within $route ($shape)`,
+    async ({ route, shape }) => {
+      const ordinary: Todo =
+        shape === `add undefined`
+          ? { id: `ordinary`, title: `Old` }
+          : shape === `remove undefined`
+            ? { id: `ordinary`, title: `Old`, detail: undefined }
+            : { id: `ordinary`, title: `Old`, detail: `obsolete` }
+      const removed = { id: `removed`, title: `Old` }
+      const seed = { id: `seed`, title: `Hydrated`, detail: `source-owned` }
+      const unseen = { id: `unseen`, title: `Only in storage` }
+      const fresh: Todo =
+        shape === `remove` ||
+        shape === `remove with metadata` ||
+        shape === `remove undefined`
+          ? { id: ordinary.id, title: ordinary.title }
+          : shape === `add`
+            ? { ...ordinary, payload: { rank: 1 } }
+            : shape === `add undefined`
+              ? { ...ordinary, detail: undefined }
+              : { ...ordinary, title: `Fresh` }
+      const expectedFresh = structuredClone(fresh)
+      const before = new Map<string, Todo>([
+        [ordinary.id, structuredClone(ordinary)],
+        [removed.id, structuredClone(removed)],
+        [seed.id, structuredClone(seed)],
+      ])
+      const after = new Map<string, Todo>([
+        [fresh.id, fresh],
+        [unseen.id, unseen],
+        [seed.id, { id: seed.id, title: `Older durable seed` }],
+      ])
+      const adapter = createRecordingAdapter([ordinary, removed])
+      if (shape === `remove with metadata`)
+        adapter.rowMetadata.set(ordinary.id, { source: `durable` })
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `exact-shape-${route}-${shape}`
+      let source!: TodoSyncParams
+      const descriptor = collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const client = new DbClient()
+      client.hydrate({
+        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+      })
+      const collection = client.collection(descriptor)
+      const firstDemand = { limit: 10 }
+      const publishedOrdinaryValues: Array<Todo> = []
+      const publishedChanges: Array<string> = []
+      const publishedSnapshots: Array<Map<string, Todo>> = []
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset(firstDemand)
+        expectExactSnapshot(publicRows(), before)
+        if (route !== `complete demand`)
+          collection._sync.unloadSubset(firstDemand)
+        // An initial-state subscription would itself acquire subset demand.
+        // Observe subsequent changes without changing this route's demand.
+        subscription = collection.subscribeChanges(
+          (batch) => {
+            publishedSnapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            publishedChanges.push(
+              ...batch.map((change) => `${change.type}:${change.key}`),
+            )
+            for (const change of batch) {
+              if (change.key === ordinary.id && change.type !== `delete`) {
+                publishedOrdinaryValues.push(
+                  structuredClone(stripVirtualProps(change.value)),
+                )
+              }
+            }
+          },
+          { includeInitialState: false },
+        )
+        const subsetReadsBeforeRevision = adapter.loadSubsetCalls.length
+
+        adapter.rows.clear()
+        for (const [key, row] of after) adapter.rows.set(key, row)
+        // The peer/reset signal and its subsequent durable read describe one
+        // coherent generation. Direct fixture row edits do not advance the
+        // recording adapter's transaction ledger, so supply that position here.
+        const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+        adapter.loadResumeSnapshot = async (...args) => ({
+          ...(await loadResumeSnapshot(...args)),
+          latestTerm: route === `retired peer notice` ? 1 : 0,
+          latestSeq: route === `retired peer notice` ? 1 : 0,
+          latestRowVersion: route === `retired peer notice` ? 1 : 0,
+          resetEpoch: route === `retired reset` ? 1 : 0,
+        })
+        const expected = expectedScopedSnapshot(
+          before,
+          after,
+          new Map([[seed.id, before.get(seed.id)!]]),
+          route === `complete demand`,
+        )
+        const published = createEventGate()
+        const runInHydrationScope = adapter.runInHydrationScope?.bind(adapter)
+        adapter.runInHydrationScope = async (task) => {
+          const result = await (runInHydrationScope?.(task) ?? task(adapter))
+          published.resolve()
+          return result
+        }
+        if (route === `complete demand`) {
+          const completeDemand = {}
+          await collection._sync.loadSubset(completeDemand)
+          collection._sync.unloadSubset(completeDemand)
+        } else if (route === `retired peer notice`) {
+          coordinator.emit(
+            {
+              type: `tx:committed`,
+              term: 1,
+              seq: 1,
+              txId: `exact-shape`,
+              latestRowVersion: 1,
+              requiresFullReload: true,
+            },
+            undefined,
+            collectionId,
+          )
+          await atPersistedOracleCheckpoint(
+            published.promise,
+            `exact-shape peer notice published`,
+          )
+        } else {
+          coordinator.emit(
+            { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+            undefined,
+            collectionId,
+          )
+          await atPersistedOracleCheckpoint(
+            published.promise,
+            `exact-shape reset published`,
+          )
+        }
+        expectExactSnapshot(publicRows(), expected)
+        expect(publishedSnapshots).toHaveLength(1)
+        for (const snapshot of publishedSnapshots)
+          expectExactSnapshot(snapshot, expected)
+        if (shape === `remove with metadata`)
+          expect(source.metadata?.row.get(ordinary.id)).toStrictEqual({
+            source: `durable`,
+          })
+        expect(adapter.loadSubsetCalls).toHaveLength(
+          subsetReadsBeforeRevision + (route === `complete demand` ? 1 : 0),
+        )
+        expect(publishedOrdinaryValues.length).toBeGreaterThan(0)
+        for (const row of publishedOrdinaryValues)
+          expect(row).toStrictEqual(expectedFresh)
+        expect(publishedChanges).toContain(`delete:removed`)
+        expect(
+          publishedChanges.some((change) => change.endsWith(`:seed`)),
+        ).toBe(false)
+        if (route === `complete demand`)
+          expect(publishedChanges).toContain(`insert:unseen`)
+        else
+          expect(
+            publishedChanges.some((change) => change.endsWith(`:unseen`)),
+          ).toBe(false)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        if (route === `complete demand`)
+          collection._sync.unloadSubset(firstDemand)
+        await cleanupPersistedOracle(
+          [() => client.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Law: a small peer delta must lead to the same demand-scoped public rows as
+  // the committed durable relation. The wire value is a partial source patch,
+  // so its omitted predicate and payload fields are not evidence of absence.
+  // A retired demand validates previously public keys but admits no new key.
+  // The model above chooses from authored full durable rows; the recording
+  // adapter applies the patch before the notice and is checked against that
+  // authored state. The driver then delivers the real targeted-notice entry
+  // point. A change callback establishes the publication checkpoint, and the
+  // comparison checks exact public keys and row fields. `stay` omits the
+  // predicate field, `enter` omits an existing payload field, and `leave`
+  // changes the predicate; each has a neighboring route with no active demand.
+  // These controlled notices do not prove native SQLite sender or host delivery.
+  it.each(
+    ([`active filter`, `retired demand`] as const).flatMap((route) =>
+      ([`stay`, `enter`, `leave`] as const).map((transition) => ({
+        route,
+        transition,
+      })),
+    ),
+  )(
+    `publishes the durable result of a targeted partial $transition with $route`,
+    async ({ route, transition }) => {
+      const old: Todo = {
+        id: `ordinary`,
+        title: transition === `enter` ? `Other` : `Keep`,
+        detail: `retained field`,
+      }
+      const patch: Partial<Todo> & Pick<Todo, `id`> =
+        transition === `stay`
+          ? { id: old.id, detail: `new detail` }
+          : { id: old.id, title: transition === `enter` ? `Keep` : `Other` }
+      const durable: Todo = {
+        ...old,
+        ...patch,
+      }
+      const unseen: Todo = { id: `unseen`, title: `Keep` }
+      const adapter = createRecordingAdapter([old])
+      const originalLoad = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = async (id, options, context) =>
+        (await originalLoad(id, options, context)).filter(
+          (row) => !options.where || row.value.title === `Keep`,
+        )
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `targeted-partial-${route}-${transition}`
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const demand =
+        route === `active filter`
+          ? {
+              where: new IR.Func(`eq`, [
+                new IR.PropRef([`title`]),
+                new IR.Value(`Keep`),
+              ]),
+            }
+          : {}
+      const published = createEventGate()
+      const publishedSnapshots: Array<Map<string, Todo>> = []
+      const publishedOrdinaryValues: Array<Todo> = []
+      const publishedChanges: Array<string> = []
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset(demand)
+        const before = new Map(
+          Array.from(publicRows(), ([key, row]) => [key, structuredClone(row)]),
+        )
+        expectExactSnapshot(
+          before,
+          new Map(
+            route === `active filter` && transition === `enter`
+              ? []
+              : [[old.id, old]],
+          ),
+        )
+        if (route === `retired demand`) collection._sync.unloadSubset(demand)
+        subscription = collection.subscribeChanges(
+          (batch) => {
+            publishedSnapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            publishedChanges.push(
+              ...batch.map((change) => `${change.type}:${change.key}`),
+            )
+            for (const change of batch) {
+              if (change.key === old.id && change.type !== `delete`)
+                publishedOrdinaryValues.push(
+                  structuredClone(stripVirtualProps(change.value)),
+                )
+            }
+            published.resolve()
+          },
+          { includeInitialState: false },
+        )
+        const mutations: PersistedTx[`mutations`] = [
+          { type: `update`, key: old.id, value: patch },
+          ...(route === `retired demand`
+            ? [{ type: `insert` as const, key: unseen.id, value: unseen }]
+            : []),
+        ]
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId },
+          {
+            txId: `targeted-partial`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations,
+          },
+        )
+        const authoredDurable = new Map<string, Todo>([
+          [old.id, durable],
+          ...(route === `retired demand`
+            ? ([[unseen.id, unseen]] as Array<[string, Todo]>)
+            : []),
+        ])
+        expectExactSnapshot(adapter.rows, authoredDurable)
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `targeted-partial`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [
+              { key: old.id, value: patch },
+              ...(route === `retired demand`
+                ? [{ key: unseen.id, value: unseen }]
+                : []),
+            ],
+            deletedKeys: [],
+          },
+          undefined,
+          collectionId,
+        )
+        await atPersistedOracleCheckpoint(
+          published.promise,
+          `targeted partial notice published`,
+        )
+        await flushAsyncWork()
+        const expected = expectedTargetedSnapshot(
+          before,
+          authoredDurable,
+          route === `active filter` ? `Keep` : undefined,
+        )
+        expectExactSnapshot(publicRows(), expected)
+        expect(publishedSnapshots).toHaveLength(1)
+        for (const snapshot of publishedSnapshots)
+          expectExactSnapshot(snapshot, expected)
+        if (expected.has(old.id)) {
+          expect(publishedOrdinaryValues).toHaveLength(1)
+          expect(publishedOrdinaryValues[0]).toStrictEqual(durable)
+        } else {
+          expect(publishedChanges).toContain(`delete:${old.id}`)
+        }
+        if (route === `retired demand`)
+          expect(
+            publishedChanges.some((change) => change.endsWith(`:unseen`)),
+          ).toBe(false)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        if (route === `active filter`) collection._sync.unloadSubset(demand)
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Active demands form a union, not a first-match or last-match choice. A
+  // targeted row can leave title=Keep while entering title=Other. Both
+  // constrained demands remain active. The two acquisition orders reject
+  // first-match and last-match shortcuts; a complete-demand shortcut cannot
+  // pass either case. The adapter branches on the authored demand identity
+  // only to supply controlled provider rows. The independent expectation is
+  // the durable row admitted by title=Other. The callback and next task-turn
+  // Collection snapshots must both contain the full row.
+  it.each([`Keep first`, `Other first`] as const)(
+    `keeps a targeted row requested by either active subset (%s)`,
+    async (route) => {
+      const old = { id: `ordinary`, title: `Keep`, detail: `retained` }
+      const patch = { id: old.id, title: `Other` }
+      const durable = { ...old, ...patch }
+      const keepDemand = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`title`]),
+          new IR.Value(`Keep`),
+        ]),
+      }
+      const otherDemand = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`title`]),
+          new IR.Value(`Other`),
+        ]),
+      }
+      const adapter = createRecordingAdapter([old])
+      const originalLoad = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = async (id, options, context) => {
+        const title =
+          options.where === keepDemand.where
+            ? `Keep`
+            : options.where === otherDemand.where
+              ? `Other`
+              : undefined
+        expect(title).toBeDefined()
+        return (await originalLoad(id, options, context)).filter(
+          (row) => row.value.title === title,
+        )
+      }
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `targeted-union-${route}`
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const demands =
+        route === `Keep first`
+          ? [keepDemand, otherDemand]
+          : [otherDemand, keepDemand]
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      const published = createEventGate()
+      const snapshots: Array<Map<string, Todo>> = []
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        for (const demand of demands) await collection._sync.loadSubset(demand)
+        expectExactSnapshot(publicRows(), new Map([[old.id, old]]))
+        subscription = collection.subscribeChanges(
+          () => {
+            snapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            published.resolve()
+          },
+          { includeInitialState: false },
+        )
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId },
+          {
+            txId: `targeted-union`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [{ type: `update`, key: old.id, value: patch }],
+          },
+        )
+        expectExactSnapshot(adapter.rows, new Map([[old.id, durable]]))
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `targeted-union`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [{ key: old.id, value: patch }],
+            deletedKeys: [],
+          },
+          undefined,
+          collectionId,
+        )
+        await atPersistedOracleCheckpoint(
+          published.promise,
+          `targeted union notice published`,
+        )
+        await flushAsyncWork()
+        const expected = new Map([[old.id, durable]])
+        expectExactSnapshot(publicRows(), expected)
+        expect(snapshots).toHaveLength(1)
+        for (const snapshot of snapshots)
+          expectExactSnapshot(snapshot, expected)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        for (const demand of demands) collection._sync.unloadSubset(demand)
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // A filtered acquisition proves only its predicate. Retiring an earlier
+  // broad demand does not itself delete the rows it exposed. When a new
+  // title=Keep demand is active, its persisted read of B says nothing about
+  // previously public A outside that predicate. The independent model keeps
+  // A unless durable evidence changes or deletes it, and applies the complete
+  // durable B value. The same authored durable state and demands cross targeted
+  // full-reload, and reset peer notices; their public snapshots must agree after
+  // publication. Updated and deleted A reject a repair that merely preserves
+  // an obsolete out-of-filter row. A DbClient seed stays source-owned across
+  // every peer route, whether the durable snapshot lacks it or holds an older
+  // value. The reset route must preserve it without an empty publication.
+  it.each(
+    ([`targeted`, `full reload`, `reset`] as const).flatMap((notice) =>
+      ([`unchanged`, `updated`, `deleted`] as const).flatMap((outsideChange) =>
+        ([`absent`, `older`] as const).map((seedCache) => ({
+          notice,
+          outsideChange,
+          seedCache,
+        })),
+      ),
+    ),
+  )(
+    `validates a previously public $outsideChange row and an $seedCache seed after a $notice notice`,
+    async ({ notice, outsideChange, seedCache }) => {
+      const outside = { id: `outside`, title: `Other` }
+      const outsideUpdated = { ...outside, title: `Other now` }
+      const inside = { id: `inside`, title: `Keep`, detail: `old` }
+      const insideUpdated = { ...inside, detail: `new` }
+      const seed = { id: `seed`, title: `Keep`, detail: `source-owned` }
+      const storedSeed = { id: seed.id, title: `Other`, detail: `older` }
+      const adapter = createRecordingAdapter([
+        outside,
+        inside,
+        ...(seedCache === `older` ? [storedSeed] : []),
+      ])
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = async (id, options, context) =>
+        (await loadSubset(id, options, context)).filter(
+          (row) => !options.where || row.value.title === `Keep`,
+        )
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `mixed-demand-notice-${notice}-${outsideChange}-${seedCache}`
+      const descriptor = collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const client = new DbClient()
+      client.hydrate({
+        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+      })
+      const collection = client.collection(descriptor)
+      const broadDemand = {}
+      const filteredDemand = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`title`]),
+          new IR.Value(`Keep`),
+        ]),
+      }
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      const before = new Map<string, Todo>([
+        [outside.id, outside],
+        [inside.id, inside],
+        [seed.id, seed],
+      ])
+      const durableExpected = new Map<string, Todo>([
+        ...(outsideChange === `deleted`
+          ? []
+          : [
+              [
+                outside.id,
+                outsideChange === `updated` ? outsideUpdated : outside,
+              ] as [string, Todo],
+            ]),
+        [insideUpdated.id, insideUpdated],
+        ...(seedCache === `older`
+          ? ([[storedSeed.id, storedSeed]] as Array<[string, Todo]>)
+          : []),
+      ])
+      const expected = new Map([...durableExpected, [seed.id, seed] as const])
+      const published = createEventGate()
+      const snapshots: Array<Map<string, Todo>> = []
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset(broadDemand)
+        expectExactSnapshot(publicRows(), before)
+        collection._sync.unloadSubset(broadDemand)
+        await collection._sync.loadSubset(filteredDemand)
+        expectExactSnapshot(publicRows(), before)
+        subscription = collection.subscribeChanges(
+          () => {
+            snapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            published.resolve()
+          },
+          { includeInitialState: false },
+        )
+        const mutations: PersistedTx[`mutations`] = [
+          {
+            type: `update`,
+            key: insideUpdated.id,
+            value: { id: insideUpdated.id, detail: `new` },
+          },
+          ...(outsideChange === `updated`
+            ? ([
+                {
+                  type: `update`,
+                  key: outside.id,
+                  value: { id: outside.id, title: outsideUpdated.title },
+                },
+              ] as PersistedTx[`mutations`])
+            : outsideChange === `deleted`
+              ? ([
+                  { type: `delete`, key: outside.id, value: outside },
+                ] as PersistedTx[`mutations`])
+              : []),
+        ]
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId },
+          {
+            txId: `mixed-demand-notice`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            truncate: notice === `reset`,
+            mutations:
+              notice === `reset`
+                ? Array.from(durableExpected, ([key, value]) => ({
+                    type: `insert` as const,
+                    key,
+                    value,
+                  }))
+                : mutations,
+          },
+        )
+        expectExactSnapshot(adapter.rows, durableExpected)
+        const envelope: TxCommitted | CollectionReset =
+          notice === `reset`
+            ? { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 }
+            : notice === `full reload`
+              ? {
+                  type: `tx:committed`,
+                  term: 1,
+                  seq: 1,
+                  txId: `mixed-demand-notice`,
+                  latestRowVersion: 1,
+                  requiresFullReload: true,
+                }
+              : {
+                  type: `tx:committed`,
+                  term: 1,
+                  seq: 1,
+                  txId: `mixed-demand-notice`,
+                  latestRowVersion: 1,
+                  requiresFullReload: false,
+                  changedRows: mutations
+                    .filter((mutation) => mutation.type !== `delete`)
+                    .map((mutation) => ({
+                      key: mutation.key,
+                      value: mutation.value,
+                    })),
+                  deletedKeys: outsideChange === `deleted` ? [outside.id] : [],
+                }
+        coordinator.emit(envelope, undefined, collectionId)
+        await atPersistedOracleCheckpoint(
+          published.promise,
+          `mixed-demand peer publication`,
+        )
+        await flushAsyncWork()
+        expect(snapshots).toHaveLength(1)
+        for (const snapshot of snapshots)
+          expectExactSnapshot(snapshot, expected)
+        expectExactSnapshot(publicRows(), expected)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        collection._sync.unloadSubset(filteredDemand)
+        await cleanupPersistedOracle(
+          [() => client.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // The same targeted path must respect DbClient hydration authority. A seed
+  // key may also exist in older durable storage. Active complete and filtered
+  // demand, and retired demand, cannot let a peer delta replace that
+  // source-owned value. The filtered case makes the durable row leave the
+  // predicate while the hydrated seed still matches it. The ordinary row
+  // beside it proves the notice was processed, so a
+  // subject that simply drops all targeted messages cannot pass. The model is
+  // the authored durable snapshot with the protected seed overlaid; public
+  // rows and change keys are checked after the targeted commit publishes.
+  it.each(
+    ([`active demand`, `active filter`, `retired demand`] as const).flatMap(
+      (route) =>
+        ([`replacement`, `partial update`, `deletion`] as const).flatMap(
+          (mutation) =>
+            ([`set`, `delete`] as const).map((metadataAction) => ({
+              route,
+              mutation,
+              metadataAction,
+            })),
+        ),
+    ),
+  )(
+    `preserves a hydrated seed and metadata during a targeted $mutation with $route ($metadataAction)`,
+    async ({ route, mutation, metadataAction }) => {
+      const ordinary =
+        route === `active filter`
+          ? { id: `ordinary`, title: `Keep`, detail: `old` }
+          : { id: `ordinary`, title: `Old durable` }
+      const ordinaryPatch =
+        route === `active filter`
+          ? { id: ordinary.id, detail: `fresh` }
+          : { id: ordinary.id, title: `Fresh durable` }
+      const durableOrdinary = { ...ordinary, ...ordinaryPatch }
+      const seed = {
+        id: `seed`,
+        title: route === `active filter` ? `Keep` : `Hydrated seed`,
+        detail: `source-owned`,
+      }
+      const storedSeed = {
+        id: `seed`,
+        title: route === `active filter` ? `Keep` : `Older durable seed`,
+        detail: `older`,
+      }
+      const seedMutation: PersistedTx[`mutations`][number] =
+        mutation === `deletion`
+          ? { type: `delete`, key: seed.id, value: storedSeed }
+          : mutation === `partial update`
+            ? {
+                type: `update`,
+                key: seed.id,
+                value:
+                  route === `active filter`
+                    ? { id: seed.id, title: `Other` }
+                    : { id: seed.id, detail: `still older` },
+              }
+            : {
+                type: `update`,
+                key: seed.id,
+                value: {
+                  id: seed.id,
+                  title:
+                    route === `active filter` ? `Other` : `Still older durable`,
+                  detail: `older`,
+                },
+              }
+      const durableSeed: Todo | undefined =
+        mutation === `deletion`
+          ? undefined
+          : mutation === `partial update`
+            ? route === `active filter`
+              ? { ...storedSeed, title: `Other` }
+              : { ...storedSeed, detail: `still older` }
+            : {
+                ...storedSeed,
+                title:
+                  route === `active filter` ? `Other` : `Still older durable`,
+              }
+      const adapter = createRecordingAdapter([ordinary, storedSeed])
+      adapter.rowMetadata.set(seed.id, { owner: `older durable` })
+      if (route === `active filter`) {
+        const originalLoad = adapter.loadSubset.bind(adapter)
+        adapter.loadSubset = async (id, options, context) =>
+          (await originalLoad(id, options, context)).filter(
+            (row) => !options.where || row.value.title === `Keep`,
+          )
+      }
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `targeted-seed-${route}`
+      let sourceParams!: TodoSyncParams
+      const descriptor = collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const client = new DbClient()
+      const seedMetadata = { owner: `hydrated source` }
+      client.hydrate({
+        collections: [
+          {
+            collectionId,
+            rows: [{ key: seed.id, value: seed, metadata: seedMetadata }],
+          },
+        ],
+      })
+      const collection = client.collection(descriptor)
+      const demand =
+        route === `active filter`
+          ? {
+              where: new IR.Func(`eq`, [
+                new IR.PropRef([`title`]),
+                new IR.Value(`Keep`),
+              ]),
+            }
+          : {}
+      const published = createEventGate()
+      const publishedKeys: Array<string> = []
+      const publishedOrdinaryValues: Array<Todo> = []
+      const publishedSnapshots: Array<Map<string, Todo>> = []
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset(demand)
+        const before = new Map<string, Todo>([
+          [ordinary.id, ordinary],
+          [seed.id, seed],
+        ])
+        expectExactSnapshot(publicRows(), before)
+        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+        if (route === `retired demand`) collection._sync.unloadSubset(demand)
+        subscription = collection.subscribeChanges(
+          (batch) => {
+            publishedSnapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            publishedKeys.push(...batch.map((change) => String(change.key)))
+            for (const change of batch) {
+              if (change.key === ordinary.id && change.type !== `delete`)
+                publishedOrdinaryValues.push(
+                  structuredClone(stripVirtualProps(change.value)),
+                )
+            }
+            published.resolve()
+          },
+          { includeInitialState: false },
+        )
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId },
+          {
+            txId: `targeted-seed`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [
+              {
+                type: `update`,
+                key: ordinary.id,
+                value: ordinaryPatch,
+              },
+              seedMutation,
+            ],
+            rowMetadataMutations: [
+              metadataAction === `set`
+                ? {
+                    type: `set`,
+                    key: seed.id,
+                    value: { owner: `peer durable` },
+                  }
+                : { type: `delete`, key: seed.id },
+            ],
+          },
+        )
+        const authoredDurable = new Map<string, Todo>([
+          [ordinary.id, durableOrdinary],
+          ...(durableSeed
+            ? ([[seed.id, durableSeed]] as Array<[string, Todo]>)
+            : []),
+        ])
+        expectExactSnapshot(adapter.rows, authoredDurable)
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `targeted-seed`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [
+              { key: ordinary.id, value: ordinaryPatch },
+              ...(seedMutation.type === `delete`
+                ? []
+                : [{ key: seed.id, value: seedMutation.value }]),
+            ],
+            deletedKeys: seedMutation.type === `delete` ? [seed.id] : [],
+            rowMetadataMutations: [
+              metadataAction === `set`
+                ? {
+                    type: `set`,
+                    key: seed.id,
+                    value: { owner: `peer durable` },
+                  }
+                : { type: `delete`, key: seed.id },
+            ],
+          },
+          undefined,
+          collectionId,
+        )
+        await atPersistedOracleCheckpoint(
+          published.promise,
+          `targeted seed notice published`,
+        )
+        await flushAsyncWork()
+        const expected =
+          route === `active filter`
+            ? new Map([
+                ...expectedTargetedSnapshot(before, authoredDurable, `Keep`),
+                [seed.id, seed] as const,
+              ])
+            : expectedScopedSnapshot(
+                before,
+                authoredDurable,
+                new Map([[seed.id, seed]]),
+                route === `active demand`,
+              )
+        expectExactSnapshot(publicRows(), expected)
+        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+        expect(publishedSnapshots).toHaveLength(1)
+        for (const snapshot of publishedSnapshots)
+          expectExactSnapshot(snapshot, expected)
+        expect(publishedOrdinaryValues).toEqual([durableOrdinary])
+        expect(publishedKeys).toContain(ordinary.id)
+        expect(publishedKeys).not.toContain(seed.id)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        if (route !== `retired demand`) collection._sync.unloadSubset(demand)
+        await cleanupPersistedOracle(
+          [() => client.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Hydration authority is temporary. A DbClient seed wins over durable data
+  // only until an accepted source transaction confirms that key. After its
+  // applied receipt, a later peer transaction has ordinary durable authority.
+  // The model is the source-confirmed row or absence followed by the peer's
+  // complete durable result. A source insert or update permits a later peer
+  // update or delete; a source delete permits a later peer insert. Targeted and full-reload
+  // notices use different production paths, but both must publish the same
+  // public result at their settled change callback and afterward. An ordinary
+  // sibling changes in every notice, so perpetual seed protection reaches the
+  // exact-row comparison rather than only timing out waiting for a callback.
+  // This is the neighboring witness to the protected-seed histories above: an
+  // implementation that protects every hydrated key forever fails here.
+  it.each(
+    ([`targeted`, `full reload`] as const).flatMap((notice) => [
+      { notice, confirmation: `update` as const, change: `update` as const },
+      { notice, confirmation: `update` as const, change: `delete` as const },
+      { notice, confirmation: `insert` as const, change: `update` as const },
+      { notice, confirmation: `insert` as const, change: `delete` as const },
+      { notice, confirmation: `delete` as const, change: `insert` as const },
+    ]),
+  )(
+    `ends hydration protection after source $confirmation before a $notice peer $change`,
+    async ({ notice, confirmation, change }) => {
+      const seed = { id: `seed`, title: `Hydrated`, detail: `seed field` }
+      const confirmed = { id: seed.id, title: `Source`, detail: `source field` }
+      const peer = { id: seed.id, title: `Peer`, detail: `peer field` }
+      const ordinary = { id: `ordinary`, title: `Old ordinary` }
+      const ordinaryPeer = { id: ordinary.id, title: `New ordinary` }
+      const adapter = createRecordingAdapter([ordinary])
+      const coordinator = createCoordinatorHarness()
+      coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+        await adapter.applyCommittedTx({ kind: `eager`, collectionId }, tx)
+        return {
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+      }
+      const collectionId = `confirmed-seed-${confirmation}-${notice}-${change}`
+      let source!: TodoSyncParams
+      const descriptor = collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const client = new DbClient()
+      client.hydrate({
+        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+      })
+      const collection = client.collection(descriptor)
+      const demand = {}
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      const published = createEventGate()
+      const snapshots: Array<Map<string, Todo>> = []
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset(demand)
+        expectExactSnapshot(
+          publicRows(),
+          new Map([
+            [seed.id, seed],
+            [ordinary.id, ordinary],
+          ]),
+        )
+
+        source.begin()
+        source.write(
+          confirmation === `delete`
+            ? { type: `delete`, key: seed.id }
+            : { type: confirmation, value: confirmed },
+        )
+        await source.commit()
+        const confirmedRows = new Map<string, Todo>([
+          ...(confirmation === `delete`
+            ? []
+            : ([[seed.id, confirmed]] as Array<[string, Todo]>)),
+          [ordinary.id, ordinary],
+        ])
+        expectExactSnapshot(publicRows(), confirmedRows)
+        expectExactSnapshot(adapter.rows, confirmedRows)
+
+        subscription = collection.subscribeChanges(
+          () => {
+            snapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            published.resolve()
+          },
+          { includeInitialState: false },
+        )
+        const mutations: PersistedTx[`mutations`] = [
+          { type: `update`, key: ordinary.id, value: ordinaryPeer },
+          change === `delete`
+            ? { type: `delete`, key: seed.id, value: confirmed }
+            : { type: change, key: seed.id, value: peer },
+        ]
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId },
+          {
+            txId: `confirmed-seed-peer`,
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            mutations,
+          },
+        )
+        const expected = new Map<string, Todo>(
+          change !== `delete`
+            ? [
+                [seed.id, peer],
+                [ordinary.id, ordinaryPeer],
+              ]
+            : [[ordinary.id, ordinaryPeer]],
+        )
+        expectExactSnapshot(adapter.rows, expected)
+        const envelope: TxCommitted =
+          notice === `full reload`
+            ? {
+                type: `tx:committed`,
+                term: 1,
+                seq: 2,
+                txId: `confirmed-seed-peer`,
+                latestRowVersion: 2,
+                requiresFullReload: true,
+              }
+            : {
+                type: `tx:committed`,
+                term: 1,
+                seq: 2,
+                txId: `confirmed-seed-peer`,
+                latestRowVersion: 2,
+                requiresFullReload: false,
+                changedRows:
+                  change !== `delete`
+                    ? [
+                        { key: seed.id, value: peer },
+                        { key: ordinary.id, value: ordinaryPeer },
+                      ]
+                    : [{ key: ordinary.id, value: ordinaryPeer }],
+                deletedKeys: change === `delete` ? [seed.id] : [],
+              }
+        coordinator.emit(envelope, undefined, collectionId)
+        await atPersistedOracleCheckpoint(
+          published.promise,
+          `confirmed seed peer publication`,
+        )
+        await flushAsyncWork()
+        expect(snapshots).toHaveLength(1)
+        for (const snapshot of snapshots)
+          expectExactSnapshot(snapshot, expected)
+        expectExactSnapshot(publicRows(), expected)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        collection._sync.unloadSubset(demand)
+        await cleanupPersistedOracle(
+          [() => client.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // A source transaction can write the same key more than once. The durable
+  // store folds operations in order, but the targeted notice separates all
+  // changed rows from deleted keys. Delete -> update and update -> delete have
+  // identical wire arrays and opposite durable outcomes, so a receiver cannot
+  // reconstruct either result from that envelope alone. The independent case
+  // table authors the final durable relation; the recording adapter checks
+  // that each operation sequence reaches it before the notice is delivered.
+  // A same-key insert also shares the targeted changedRows shape with an
+  // update, yet replaces rather than merges the durable row. Both active
+  // complete and retired demand compare the public row at each callback and
+  // after the next task turn. Two updates are a neighboring control that
+  // retains the old field omitted by each patch.
+  it.each(
+    ([`active demand`, `retired demand`] as const).flatMap((route) =>
+      (
+        [
+          `delete then update`,
+          `update then delete`,
+          `two updates`,
+          `insert replacement`,
+        ] as const
+      ).map((sequence) => ({ route, sequence })),
+    ),
+  )(
+    `follows durable same-key order for targeted $sequence with $route`,
+    async ({ route, sequence }) => {
+      const old = { id: `row`, title: `Old`, detail: `old detail` }
+      const fresh = { id: old.id, title: `Fresh` }
+      const detailPatch = { id: old.id, detail: `new detail` }
+      const titlePatch = { id: old.id, title: `Fresh` }
+      const mutations: PersistedTx[`mutations`] =
+        sequence === `delete then update`
+          ? [
+              { type: `delete`, key: old.id, value: old },
+              { type: `update`, key: old.id, value: fresh },
+            ]
+          : sequence === `update then delete`
+            ? [
+                { type: `update`, key: old.id, value: fresh },
+                { type: `delete`, key: old.id, value: old },
+              ]
+            : sequence === `insert replacement`
+              ? [{ type: `insert`, key: old.id, value: fresh }]
+              : [
+                  { type: `update`, key: old.id, value: detailPatch },
+                  { type: `update`, key: old.id, value: titlePatch },
+                ]
+      const authoredDurable = new Map<string, Todo>(
+        sequence === `update then delete`
+          ? []
+          : sequence === `delete then update` ||
+              sequence === `insert replacement`
+            ? [[old.id, fresh]]
+            : [[old.id, { ...old, ...detailPatch, ...titlePatch }]],
+      )
+      const adapter = createRecordingAdapter([old])
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `targeted-order-${route}-${sequence}`
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const demand = {}
+      const published = createEventGate()
+      const publishedSnapshots: Array<Map<string, Todo>> = []
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset(demand)
+        expectExactSnapshot(publicRows(), new Map([[old.id, old]]))
+        if (route === `retired demand`) collection._sync.unloadSubset(demand)
+        subscription = collection.subscribeChanges(
+          () => {
+            publishedSnapshots.push(
+              new Map(
+                Array.from(publicRows(), ([key, row]) => [
+                  key,
+                  structuredClone(row),
+                ]),
+              ),
+            )
+            published.resolve()
+          },
+          { includeInitialState: false },
+        )
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId },
+          {
+            txId: `targeted-order`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations,
+          },
+        )
+        expectExactSnapshot(adapter.rows, authoredDurable)
+        const changedRows =
+          sequence === `two updates`
+            ? [
+                { key: old.id, value: detailPatch },
+                { key: old.id, value: titlePatch },
+              ]
+            : [{ key: old.id, value: fresh }]
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `targeted-order`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows,
+            deletedKeys:
+              sequence === `two updates` || sequence === `insert replacement`
+                ? []
+                : [old.id],
+          },
+          undefined,
+          collectionId,
+        )
+        await atPersistedOracleCheckpoint(
+          published.promise,
+          `targeted same-key notice published`,
+        )
+        await flushAsyncWork()
+        const expected = expectedScopedSnapshot(
+          new Map([[old.id, old]]),
+          authoredDurable,
+          new Map(),
+          route === `active demand`,
+        )
+        expectExactSnapshot(publicRows(), expected)
+        expect(publishedSnapshots).toHaveLength(1)
+        for (const snapshot of publishedSnapshots)
+          expectExactSnapshot(snapshot, expected)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        subscription?.unsubscribe()
+        if (route === `active demand`) collection._sync.unloadSubset(demand)
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Hostile output controls calibrate the same comparison used above and by
+  // the captured-read source history. A missing key, an obsolete defined
+  // field, and an obsolete own-undefined field must all be rejected. These
+  // controls do not substitute for the production RED witnesses above.
+  it(`rejects omitted keys and retained fields at the exact snapshot comparison`, () => {
+    const expected = new Map<string, Todo>([
+      [`shared`, { id: `shared`, title: `Current` }],
+      [`new`, { id: `new`, title: `New` }],
+    ])
+    expect(() =>
+      expectExactSnapshot(
+        new Map([[`shared`, { id: `shared`, title: `Current` }]]),
+        expected,
+      ),
+    ).toThrow()
+    for (const detail of [`obsolete`, undefined]) {
+      expect(() =>
+        expectExactSnapshot(
+          new Map<string, Todo>([
+            [`shared`, { id: `shared`, title: `Current`, detail }],
+            [`new`, { id: `new`, title: `New` }],
+          ]),
+          expected,
+        ),
+      ).toThrow()
+    }
+  })
+
   // Persisted rows are a baseline for newer sync-adapter changes. The maintainer
   // decision recorded in issue-2036-admission-follow-up.md gives accepted sync
   // transactions precedence over that baseline. A persistence read cannot revoke
   // acceptance. A later truncate replay can supersede earlier source writes.
   //
+  // A distinct overlap holds a complete read after it has captured the old
+  // durable value. A source change submitted during that wait must prevail at
+  // settlement after its receipt; the runtime may defer acceptance until the
+  // held read ends.
+  // The model is the authored baseline followed by one source operation. It
+  // crosses same-key replacement/deletion and a new key absent from the read;
+  // no intermediate publication timing is assumed before its receipt settles.
+  it.each([`insert same`, `insert new`, `update`, `delete`] as const)(
+    `keeps a source %s after a captured complete read`,
+    async (operation) => {
+      const old = { id: `shared`, title: `Persisted` }
+      const fresh = {
+        id: operation === `insert new` ? `new` : `shared`,
+        title: `Source`,
+      }
+      const expectedRows = new Map<string, Todo>(
+        operation === `delete`
+          ? []
+          : operation === `insert new`
+            ? [
+                [old.id, structuredClone(old)],
+                [fresh.id, structuredClone(fresh)],
+              ]
+            : [[fresh.id, structuredClone(fresh)]],
+      )
+      const adapter = createRecordingAdapter([old])
+      const originalLoad = adapter.loadSubset.bind(adapter)
+      const readEntered = createEventGate()
+      const releaseRead = createEventGate()
+      adapter.loadSubset = async (...args) => {
+        const captured = (await originalLoad(...args)).map((row) => ({
+          ...row,
+          value: structuredClone(row.value),
+        }))
+        readEntered.resolve()
+        await releaseRead.promise
+        return captured
+      }
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `captured-complete-read-${operation}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const demand = {}
+      let pendingRead: Promise<unknown> | undefined
+      let receipt: Promise<unknown> | undefined
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        pendingRead = Promise.resolve(collection._sync.loadSubset(demand))
+        void pendingRead.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          readEntered.promise,
+          `complete read captured durable baseline`,
+        )
+        source.begin()
+        source.write(
+          operation === `delete`
+            ? { type: `delete`, key: old.id }
+            : {
+                type: operation.startsWith(`insert`) ? `insert` : `update`,
+                value: fresh,
+              },
+        )
+        receipt = Promise.resolve(source.commit())
+        void receipt.catch(() => undefined)
+        await flushAsyncWork()
+        expect(collection.get(old.id)?.title).not.toBe(old.title)
+        releaseRead.resolve()
+        await atPersistedOracleCheckpoint(
+          Promise.all([pendingRead, receipt]),
+          `captured complete read and source receipt settled`,
+        )
+        expectExactSnapshot(
+          new Map(
+            Array.from(collection.values(), (row) => [
+              row.id,
+              stripVirtualProps(row),
+            ]),
+          ),
+          expectedRows,
+        )
+        expectExactSnapshot(adapter.rows, expectedRows)
+        expect(collection.status).toBe(`ready`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releaseRead.resolve()
+        collection._sync.unloadSubset(demand)
+        await cleanupPersistedOracle(
+          [
+            () => Promise.allSettled([pendingRead, receipt]),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
   // This bounded grammar crosses insert/update/delete with no truncate replay,
   // replay before the change, and replay after it. Each history runs with the
   // persistence read already finished and with accepted commits waiting behind
   // that read. Both schedules must satisfy the same independent result below.
   // Eager and on-demand Collections receive reset/full-reload notifications;
-  // on-demand Collections also acquire a subset. Notifications only request a
-  // reread here: schema changes and invalidated resume points are outside this
-  // law. The controlled coordinator does not prove cross-tab transport delivery.
+  // on-demand Collections acquire bounded or complete subsets. A full reload
+  // with no demand validates already public rows without publishing unrelated
+  // stored rows. The controlled coordinator does not prove host delivery.
   it.each(
     (
       [
         { syncMode: `on-demand`, route: `subset` },
+        { syncMode: `on-demand`, route: `complete subset` },
         { syncMode: `on-demand`, route: `collection-reset` },
         { syncMode: `on-demand`, route: `full-reload` },
         { syncMode: `eager`, route: `collection-reset` },
@@ -14363,7 +17633,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
       }
       coordinator.requestApplyCommittedTx = async (id, tx) => {
-        await adapter.applyCommittedTx(id, tx)
+        await adapter.applyCommittedTx({ kind: `eager`, collectionId: id }, tx)
         return {
           type: `rpc:applyCommittedTx:res`,
           rpcId: tx.txId,
@@ -14397,13 +17667,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           persistence: { adapter, coordinator },
         }),
       )
-      const options = { limit: 100 }
+      const options = route === `complete subset` ? {} : { limit: 100 }
       const sourceSteps =
         truncateReplay === `none`
           ? [`network`]
           : truncateReplay === `before`
             ? [`replacement`, `network`]
             : [`network`, `replacement`]
+      const noDemandRead =
+        syncMode === `on-demand` &&
+        route !== `subset` &&
+        route !== `complete subset`
 
       // Independent snapshot algebra: a later replacement discards everything
       // before it. Otherwise the baseline survives only when there is no
@@ -14419,6 +17693,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 : [storedOnly, gateRow]),
               ...(operation === `delete` ? [] : [networkRow]),
             ]
+      const expectedPublicRows =
+        noDemandRead && truncateReplay === `none`
+          ? [gateRow, ...(operation === `delete` ? [] : [networkRow])]
+          : expectedRows
       const expectedMetadata = new Map<string, unknown>([
         ...(truncateReplay === `none`
           ? []
@@ -14457,7 +17735,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           persistenceEntered.promise,
           `precedence predecessor held`,
         )
-        if (route === `subset`) {
+        if (route === `subset` || route === `complete subset`) {
           retainOperation(collection._sync.loadSubset(options))
         } else if (route === `collection-reset`) {
           coordinator.emit({
@@ -14539,10 +17817,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             status: `fulfilled`,
             value: undefined,
           })),
-          trace: [`persisted read`, ...sourceSteps],
-          readRows: [[storedRow, storedOnly, gateRow]],
+          trace: [...(noDemandRead ? [] : [`persisted read`]), ...sourceSteps],
+          readRows: noDemandRead ? [] : [[storedRow, storedOnly, gateRow]],
           status: `ready`,
-          publicRows: new Map(expectedRows.map((row) => [row.id, row])),
+          publicRows: new Map(expectedPublicRows.map((row) => [row.id, row])),
           durableRows: new Map(expectedRows.map((row) => [row.id, row])),
           publicMetadata: metadataKeys.map((key) => expectedMetadata.get(key)),
           durableMetadata: metadataKeys.map((key) => expectedMetadata.get(key)),
@@ -14556,7 +17834,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         releasePersistence.resolve()
         await cleanupPersistedOracle(
           [
-            ...(route === `subset`
+            ...(route === `subset` || route === `complete subset`
               ? [() => collection._sync.unloadSubset(options)]
               : []),
             () => Promise.allSettled(pendingOperations),
@@ -14750,7 +18028,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     const hydrationEntered = createEventGate()
     const hydration = createEventGate()
+    let holdReload = false
     adapter.loadSubset = async () => {
+      if (!holdReload) return []
       hydrationEntered.resolve()
       await hydration.promise
       return [
@@ -14765,7 +18045,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `full-reload-hydration-owned-metadata`,
     )
     coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -14791,6 +18074,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let receipt: Promise<void> | undefined
+    const demand = { limit: 1 }
     let hasPrimaryFailure = false
 
     try {
@@ -14798,6 +18082,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         collection.stateWhenReady(),
         `full-reload metadata collection ready`,
       )
+      await collection._sync.loadSubset(demand)
+      holdReload = true
       coordinator.emit({
         type: `tx:committed`,
         term: 1,
@@ -14856,6 +18142,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       throw error
     } finally {
       hydration.resolve()
+      collection._sync.unloadSubset(demand)
       await cleanupPersistedOracle(
         [() => receipt?.catch(() => undefined), () => collection.cleanup()],
         hasPrimaryFailure,
@@ -16239,7 +19526,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
       await flushAsyncWork()
       await flushAsyncWork()
-      expect(collection.size).toBe(0)
+      // Failed durable validation cannot retract the last public row. The
+      // failed run must still reject a later acquisition instead of treating
+      // that retained row as proof of hydrated coverage.
+      expect(stripVirtualProps(collection.get(`1`))).toEqual({
+        id: `1`,
+        title: `cached`,
+      })
 
       const readsBeforeReacquire = adapter.loadSubsetCalls.length
       const reacquired = collection._sync.loadSubset({ limit: 1 })
@@ -17739,12 +21032,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let hasPrimaryFailure = false
+    const demand = { limit: 1 }
 
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
         `terminal hydration collection initially ready`,
       )
+      await collection._sync.loadSubset(demand)
       adapter.loadSubset = () => Promise.reject(hydrationFailure)
       coordinator.emit({
         type: `tx:committed`,
@@ -17800,6 +21095,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       hasPrimaryFailure = true
       throw error
     } finally {
+      collection._sync.unloadSubset(demand)
       await cleanupPersistedOracle(
         [() => collection.cleanup()],
         hasPrimaryFailure,
@@ -17837,12 +21133,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let hasPrimaryFailure = false
+    const demand = { limit: 1 }
 
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
         `terminal source hydration collection initially ready`,
       )
+      await collection._sync.loadSubset(demand)
       adapter.loadSubset = () => Promise.reject(hydrationFailure)
       coordinator.emit({
         type: `tx:committed`,
@@ -17897,6 +21195,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       hasPrimaryFailure = true
       throw error
     } finally {
+      collection._sync.unloadSubset(demand)
       await cleanupPersistedOracle(
         [() => collection.cleanup()],
         hasPrimaryFailure,
@@ -18269,7 +21568,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (action === `unload`) collection._sync.unloadSubset(options)
         if (action === `abort`) controller.abort()
         finishHydration()
-        await pending
+        // An explicit abort of a retained demand now rejects promptly. The
+        // earlier law treated it as a fulfilled load, even though hydration
+        // must still suppress the remote acquisition. Release stays quiet.
+        if (action === `abort`) {
+          await expect(pending).rejects.toMatchObject({ name: `AbortError` })
+        } else {
+          await pending
+        }
 
         // The earlier history law cancelled only after remote acquisition had
         // begun. Holding the real adapter hydration seam exposes the distinct
@@ -18599,6 +21905,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (routing === `retry`) {
           await expect(load).rejects.toBe(offline)
           await retryFinished.promise
+        } else if (routing === `abort`) {
+          // Aborting a retained demand rejects rather than reporting a
+          // completed load; the transport-attempt prediction remains zero.
+          await expect(load).rejects.toMatchObject({ name: `AbortError` })
         } else {
           await load
         }
@@ -19645,8 +22955,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`targeted update avoids full loadSubset call`, async () => {
-    const adapter = createRecordingAdapter([{ id: `1`, title: `Original` }])
+  it(`checks durable row authority when a targeted public-key change could be a replacement`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Original`, detail: `removed by insert` },
+    ])
     const coordinator = createCoordinatorHarness()
 
     const collection = createCollection(
@@ -19669,7 +22981,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
     const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
 
-    // Update the row in the adapter backing store
+    // The envelope has no insert/update certificate. Durable insert may have
+    // replaced the entire row, including a field omitted from the notice.
     adapter.rows.set(`1`, { id: `1`, title: `Updated` })
 
     coordinator.emit({
@@ -19686,8 +22999,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
     await flushAsyncWork()
 
-    // Targeted path should NOT have called loadSubset again
-    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload + 1)
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
       title: `Updated`,
@@ -19699,6 +23011,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       { id: `1`, title: `Keep` },
       { id: `2`, title: `Keep` },
     ])
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    adapter.loadSubset = async (id, options, context) =>
+      (await loadSubset(id, options, context)).filter(
+        (row) => !options.where || row.value.title === `Keep`,
+      )
     const coordinator = createCoordinatorHarness()
 
     const whereExpr = new IR.Func(`eq`, [
@@ -19809,6 +23126,5482 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       id: `1`,
       title: `Updated`,
     })
+  })
+
+  // A scoped source snapshot establishes row 1. A coordinator notification
+  // cannot replace it from an uncertified cache; instead the active demand
+  // must request fresh source evidence. The five legal histories cross targeted,
+  // paginated, full-reload, sequence-gap, and reset notifications. The recording adapter is
+  // durable state, not the expected source result. The apply-mutex fence below
+  // places the public-row comparison after coordinator processing and checks
+  // a second source acquisition. This owner
+  // isolates the wrapper boundary; installed Electric delivery has a receiver.
+  it.each([
+    `targeted change`,
+    `paginated change`,
+    `full reload`,
+    `sequence gap`,
+    `durable reset`,
+  ] as const)(`keeps an active scoped source row after %s`, async (event) => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createLocalCoordinatorHarness()
+    let source!: TodoSyncParams
+    let sourceLoads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              loadSubset: async () => {
+                sourceLoads++
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+    const capability = source.metadata?.persistence
+    expect(capability?.startScopedRecovery).toBeTypeOf(`function`)
+    await capability!.startScopedRecovery!()
+
+    const sourceRow: Todo = { id: `1`, title: `Source row` }
+    source.begin()
+    source.write({ type: `insert`, value: sourceRow })
+    await whenSyncAccepted(source.commit())
+    await collection._sync.loadSubset(
+      event === `targeted change` ? {} : { limit: 10 },
+    )
+    expect(sourceLoads).toBe(1)
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(sourceRow)
+
+    const latest = adapter.applyCommittedTxCalls.at(-1)!.tx
+    if (event === `durable reset`) {
+      adapter.rows.clear()
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+    } else if (event === `sequence gap`) {
+      Object.assign(coordinator, {
+        pullSince: (): Promise<PullSinceResponse> =>
+          Promise.resolve({
+            type: `rpc:pullSince:res`,
+            rpcId: `scoped-gap`,
+            ok: true,
+            latestTerm: latest.term,
+            latestSeq: latest.seq + 2,
+            latestRowVersion: latest.rowVersion + 2,
+            requiresFullReload: true,
+          }),
+      })
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 2,
+        txId: `scoped-sequence-gap`,
+        latestRowVersion: latest.rowVersion + 2,
+        requiresFullReload: true,
+      })
+    } else if (event === `full reload`) {
+      // A transaction above the coordinator's targeted-invalidation limit can
+      // change many unrelated durable rows without changing source row 1.
+      for (let id = 2; id <= 130; id++) {
+        adapter.rows.set(String(id), { id: String(id), title: `Other ${id}` })
+      }
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 1,
+        txId: `large-scoped-change`,
+        latestRowVersion: latest.rowVersion + 1,
+        requiresFullReload: true,
+      })
+    } else {
+      const durableRow: Todo =
+        event === `targeted change`
+          ? { id: `1`, title: `Uncertified durable update` }
+          : { id: `2`, title: `Unrelated durable row` }
+      adapter.rows.set(durableRow.id, durableRow)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 1,
+        txId: `scoped-change`,
+        latestRowVersion: latest.rowVersion + 1,
+        requiresFullReload: false,
+        changedRows: [{ key: durableRow.id, value: durableRow }],
+        deletedKeys: [],
+      })
+    }
+
+    // scanPersistedRows enters the same apply mutex after event admission, so
+    // this observes the settled coordinator invalidation rather than a race.
+    await capability!.scanPersistedRows()
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(sourceRow)
+    expect(adapter.loadSubsetCalls).toEqual([])
+    await vi.waitFor(() => expect(sourceLoads).toBe(2))
+  })
+
+  // This deliberately wrong global-eviction message is a hostile control for
+  // the two-run Browser generation-routing oracle. A global full reload makes
+  // the warm run lose a valid source row, so it cannot implement cache
+  // retirement. This driver checks that the public-row comparison detects
+  // the fault; no production path emits this fabricated cacheEviction field.
+  it(`detects that global cache eviction removes a warm source row`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createLocalCoordinatorHarness()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(source).toBeDefined())
+      const sourceRow = { id: `warm`, title: `Valid source row` }
+      source.begin()
+      source.write({ type: `insert`, value: sourceRow })
+      await whenSyncAccepted(source.commit())
+      await collection._sync.loadSubset({ limit: 10 })
+      const readsBeforeEviction = adapter.loadSubsetCalls.length
+      const latest = adapter.applyCommittedTxCalls.at(-1)!.tx
+
+      adapter.rows.clear()
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 1,
+        txId: `peer-cache-eviction`,
+        latestRowVersion: latest.rowVersion + 1,
+        requiresFullReload: true,
+        cacheEviction: true,
+      } as unknown as TxCommitted)
+
+      await source.metadata!.persistence!.scanPersistedRows()
+      expect(stripVirtualProps(collection.get(`warm`))).toBeUndefined()
+      expect(adapter.loadSubsetCalls.length).toBeGreaterThan(
+        readsBeforeEviction,
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Scoped recovery removes durable rows' authority to enter the public
+  // Collection. This recording adapter has no generation catalog, so its old
+  // rows remain on disk in the model; the SQLite owner checks physical
+  // retirement separately. A later baseline capability call cannot revive
+  // the row. This driver checks public visibility and the adapter read boundary.
+  it(`does not hydrate durable baseline rows during scoped recovery`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Stale durable row` },
+    ])
+    const resetMarker = { kind: `reset`, updatedAt: 1 }
+    adapter.collectionMetadata.set(`electric:resume`, resetMarker)
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-baseline-quarantine`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+      const capability = source.metadata!.persistence!
+      await capability.startScopedRecovery!()
+      expect(collection.get(`1`)).toBeUndefined()
+      expect(adapter.rows.has(`1`)).toBe(true)
+      expect(adapter.collectionMetadata.get(`electric:resume`)).toEqual(
+        resetMarker,
+      )
+      await capability.hydrateBaseline()
+      expect(collection.get(`1`)).toBeUndefined()
+      expect(
+        adapter.loadResumeSnapshotCalls.filter(
+          (call) => call.includeRows === true,
+        ),
+      ).toEqual([])
+
+      // A later loss of authority in the same sync run must retire rows that
+      // arrived after the first clear, rather than growing the cache forever.
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `2`, title: `Later source row` },
+      })
+      await whenSyncAccepted(source.commit())
+      expect(adapter.rows.has(`2`)).toBe(true)
+      await capability.startScopedRecovery!()
+      expect(collection.get(`2`)).toBeUndefined()
+      expect(adapter.rows.has(`1`)).toBe(true)
+      expect(adapter.rows.has(`2`)).toBe(true)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // A local load can begin before scoped recovery claims the Collection.
+  // When that load fails, queued partial source work may ask for a durable
+  // baseline. The independent source model permits the partial source fields,
+  // but no old durable field has authority after the scoped clear. The gate
+  // fixes the order at the adapter boundary; the observations are the stale
+  // public field and full-row read count.
+  it(`keeps a failed local load from restoring scoped durable rows`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `shared`, title: `Stale durable`, detail: `stale detail` },
+    ])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const localFailure = new Error(`local load failed`)
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw localFailure
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-failed-local-load`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<unknown> | undefined
+    let receipt: Promise<unknown> | undefined
+    let scoped: Promise<void> | undefined
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `scoped failed local load startup`,
+      )
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        loadEntered.promise,
+        `scoped failed local load entered`,
+      )
+      source.begin()
+      source.write({
+        type: `update`,
+        value: { id: `shared`, title: `Partial source` } as Todo,
+      })
+      receipt = Promise.resolve(source.commit())
+      void receipt.catch(() => undefined)
+      scoped = source.metadata!.persistence!.startScopedRecovery!()
+      rejectLoad.resolve()
+      await expect(load).rejects.toBe(localFailure)
+      await atPersistedOracleCheckpoint(scoped, `scoped failed load clear`)
+      await Promise.allSettled([receipt])
+      expect(collection.get(`shared`)).toMatchObject({
+        id: `shared`,
+        title: `Partial source`,
+      })
+      expect(collection.get(`shared`)?.detail).toBeUndefined()
+      expect(
+        adapter.loadResumeSnapshotCalls.filter(
+          (call) => call.includeRows === true,
+        ),
+      ).toEqual([])
+    } finally {
+      rejectLoad.resolve()
+      await Promise.allSettled([load, receipt, scoped])
+      await collection.cleanup()
+    }
+  })
+
+  // Source work admitted while an old cache read is in flight belongs to the
+  // old persisted cache generation. Rotation may overtake that work at the
+  // apply mutex, but it cannot turn the old source result into a row in the
+  // new generation. The held local read fixes the ordering; the applied
+  // receipt and durable write destination are the comparison checkpoint.
+  // A sync adapter reports through its own sync params that served pages
+  // may have shifted. Under a managed cache generation the wrapper gives each
+  // source session its own params, so the report must reach the public
+  // Collection from the current session and be dropped from a retired one;
+  // otherwise a stale source could start repairs on the replacement.
+  it(`forwards a loaded-subset report only from the current source session`, async () => {
+    const adapter = createRecordingAdapter()
+    let currentStorageId = `report-old-storage`
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: currentStorageId,
+      claimId: `report-claim`,
+    })
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: (currentStorageId = `report-new-storage`),
+      claimId: `report-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const sessions: Array<TodoSyncParams> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `loaded-subset-report-sessions`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sessions.push(params)
+            params.markReady()
+            // Without its own restart hook, the source is retired and
+            // re-entered with fresh params after a scoped rotation.
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let reports = 0
+    const unsubscribe = collection.on(`loadedSubsets:invalidated`, () => {
+      reports++
+    })
+    // Reports are coalesced into a microtask; a macrotask lets them land.
+    const reportsAfter = async (report: () => void) => {
+      const before = reports
+      report()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return reports - before
+    }
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      const first = sessions[0]!
+      expect(await reportsAfter(() => first.invalidateLoadedSubsets())).toBe(1)
+
+      await atPersistedOracleCheckpoint(
+        first.metadata!.persistence!.startScopedRecovery!(),
+        `scoped rotation`,
+      )
+      expect(sessions).toHaveLength(2)
+      const replacement = sessions[1]!
+      expect({
+        retired: await reportsAfter(() => first.invalidateLoadedSubsets()),
+        replacement: await reportsAfter(() =>
+          replacement.invalidateLoadedSubsets(),
+        ),
+      }).toEqual({ retired: 0, replacement: 1 })
+    } finally {
+      unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`rejects a queued old-generation source commit after scoped rotation`, async () => {
+    const adapter = createRecordingAdapter()
+    const loadEntered = createEventGate()
+    const releaseLoad = createEventGate()
+    const claimId = `queued-old-claim`
+    let currentStorageId = `queued-old-storage`
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: currentStorageId,
+      claimId,
+    })
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: (currentStorageId = `queued-new-storage`),
+      claimId,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await releaseLoad.promise
+      return []
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `queued-generation-rotation`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            // The controlled source has no pending asynchronous callback.
+            // Its old commit is already queued inside the persisted wrapper.
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    let load: Promise<unknown> | undefined
+    let receipt: Promise<unknown> | undefined
+    let recovery: Promise<void> | undefined
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(loadEntered.promise, `old cache read`)
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `old-source`, title: `Old source result` },
+      })
+      receipt = Promise.resolve(source.commit())
+      void receipt.catch(() => undefined)
+      recovery = source.metadata!.persistence!.startScopedRecovery!()
+      releaseLoad.resolve()
+      await atPersistedOracleCheckpoint(recovery, `scoped rotation`)
+      await expect(receipt).rejects.toBeInstanceOf(SyncTransactionAbortedError)
+      expect(
+        adapter.applyCommittedTxCalls.filter(
+          (call) => call.collectionId === `queued-new-storage`,
+        ),
+      ).toEqual([])
+      expect(collection.get(`old-source`)).toBeUndefined()
+
+      // Cancellation belongs only to the old admission. Fresh work in the
+      // new generation still applies and persists through the same sync run.
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `new-source`, title: `New source result` },
+      })
+      await whenSyncAccepted(source.commit())
+      expect(collection.get(`new-source`)).toMatchObject({
+        id: `new-source`,
+        title: `New source result`,
+      })
+      expect(
+        adapter.applyCommittedTxCalls
+          .filter((call) => call.collectionId === `queued-new-storage`)
+          .flatMap((call) => call.tx.mutations.map((mutation) => mutation.key)),
+      ).toEqual([`new-source`])
+    } finally {
+      releaseLoad.resolve()
+      await Promise.allSettled([load, receipt, recovery])
+      await collection.cleanup()
+    }
+  })
+
+  // Cleanup can release the original claim while a rotation is paused before
+  // SQLite admission. If rotation then creates a private generation, that
+  // late claim still belongs to the cleaned-up sync run and must be released.
+  // The independent claim ledger observes ownership after both operations
+  // settle; checking only the public Collection would miss leaked storage.
+  it(`releases a cache claim created by rotation after cleanup`, async () => {
+    const adapter = createRecordingAdapter()
+    const liveClaims = new Set<string>()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    adapter.claimCacheGeneration = async () => {
+      liveClaims.add(`old-claim`)
+      return { storageCollectionId: `old-storage`, claimId: `old-claim` }
+    }
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      expect(liveClaims.has(`old-claim`)).toBe(false)
+      liveClaims.add(`private-claim`)
+      return {
+        storageCollectionId: `private-storage`,
+        claimId: `private-claim`,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async (claimId) => {
+      liveClaims.delete(claimId)
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cleanup-during-cache-rotation`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let recovery: Promise<void> | undefined
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      recovery = source.metadata!.persistence!.startScopedRecovery!()
+      void recovery.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `held cache rotation`,
+      )
+      await collection.cleanup()
+      expect(liveClaims.size).toBe(0)
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
+      expect([...liveClaims]).toEqual([])
+    } finally {
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
+      await collection.cleanup()
+    }
+  })
+
+  // A custom source is allowed to omit a provider-specific restart hook. Its
+  // Collection must still recover after claim expiry: the wrapper ends the old
+  // source session, rotates storage, and starts a fresh source session. A held
+  // callback from the retired session has no authority over new public rows or
+  // durable storage. The source-session and row ledgers are independent of the
+  // wrapper's recovery flags.
+  it.each([false, true])(
+    `restarts a custom on-demand source after its cache claim expires (prior demand=%s)`,
+    async (priorDemand) => {
+      const adapter = createRecordingAdapter([
+        { id: `stale`, title: `Old persisted row` },
+      ])
+      let rotations = 0
+      let sourceStarts = 0
+      let sourceCleanups = 0
+      const sourceSessions: Array<TodoSyncParams> = []
+      let revokeClaim = false
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: `old-storage`,
+        claimId: `old-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      })
+      adapter.renewCacheGenerationClaim = async (_storageId, claimId) =>
+        revokeClaim && claimId === `old-claim` ? undefined : Date.now() + 10_000
+      adapter.rotateCacheGeneration = async () => {
+        rotations++
+        return {
+          storageCollectionId: `new-storage`,
+          claimId: `new-claim`,
+        }
+      }
+      adapter.releaseCacheGenerationClaim = async () => {}
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `custom-cache-source`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              const session = ++sourceStarts
+              sourceSessions.push(params)
+              params.markReady()
+              return {
+                cleanup: () => {
+                  sourceCleanups++
+                },
+                loadSubset: async () => {
+                  params.begin()
+                  params.write({
+                    type: `update`,
+                    value: {
+                      id: `row-${session}`,
+                      title: `Session ${session}`,
+                    },
+                  })
+                  await params.commit()
+                },
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const releaseOldCallback = createEventGate()
+      let lateCallback: Promise<void> | undefined
+
+      try {
+        await collection.stateWhenReady()
+        expect(sourceStarts).toBe(1)
+        const oldSource = sourceSessions[0]!
+        lateCallback = (async () => {
+          await releaseOldCallback.promise
+          oldSource.begin()
+          oldSource.write({
+            type: `insert`,
+            value: { id: `late-old`, title: `Retired session` },
+          })
+          await oldSource.commit()
+        })()
+        if (priorDemand) {
+          await collection._sync.loadSubset({ limit: 2 })
+          expect(collection.get(`row-1`)).toBeDefined()
+        }
+        revokeClaim = true
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(sourceStarts).toBe(2)
+        expect(sourceCleanups).toBe(1)
+        expect(rotations).toBe(1)
+        expect(collection.get(`stale`)).toBeUndefined()
+        expect(collection.get(`row-1`)).toBeUndefined()
+        expect(collection.get(`row-2`)).toMatchObject({
+          id: `row-2`,
+          title: `Session 2`,
+        })
+        releaseOldCallback.resolve()
+        await lateCallback
+        expect(collection.get(`late-old`)).toBeUndefined()
+        expect(
+          adapter.applyCommittedTxCalls.some(({ tx }) =>
+            tx.mutations.some(({ key }) => key === `late-old`),
+          ),
+        ).toBe(false)
+      } finally {
+        releaseOldCallback.resolve()
+        await Promise.allSettled([lateCallback])
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // Cleanup can win after the old custom session retires but before SQLite
+  // returns its replacement claim. That history owns one source cleanup and
+  // must not start another source session after Collection disposal.
+  it(`does not restart a custom source after cleanup wins a held rotation`, async () => {
+    const adapter = createRecordingAdapter()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    let sourceStarts = 0
+    let sourceCleanups = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `old-storage`,
+      claimId: `old-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      return { storageCollectionId: `new-storage`, claimId: `new-claim` }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `custom-cleanup-during-rotation`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceStarts++
+            source = params
+            params.markReady()
+            return {
+              cleanup: () => {
+                sourceCleanups++
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let recovery: Promise<void> | undefined
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      recovery = source.metadata!.persistence!.startScopedRecovery!()
+      void recovery.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `held custom cache rotation`,
+      )
+      await collection.cleanup()
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
+      expect({ sourceStarts, sourceCleanups }).toEqual({
+        sourceStarts: 1,
+        sourceCleanups: 1,
+      })
+    } finally {
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
+      await collection.cleanup()
+    }
+  })
+
+  // A startup resume read may pass SQLite's first claim check, then fail its
+  // second check after the claim expires. The independent authority rule
+  // discards that old read and rotates privately before source entry. A read
+  // error while the claim remains live has no such explanation and stays
+  // terminal. The held read and clock distinguish these histories at source
+  // entry, Collection readiness, and physical storage choice.
+  it.each([
+    { outcome: `expired claim`, expires: true },
+    { outcome: `live I/O failure`, expires: false },
+  ])(
+    `classifies a rejected startup resume read: $outcome`,
+    async ({ expires }) => {
+      const adapter = createRecordingAdapter()
+      const readEntered = createEventGate()
+      const releaseRead = createEventGate()
+      const storageId = `startup-rejected-old`
+      let currentStorageId = storageId
+      let now = 1_000
+      let expiresAtMs = 2_000
+      let rotations = 0
+      let sourceStarts = 0
+      const ioFailure = new Error(`live startup read failed`)
+      const claimFailure = new InvalidPersistedCollectionConfigError(
+        `Persisted cache claim is no longer active for collection "${storageId}"`,
+      )
+      adapter.getCacheGenerationNow = () => now
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: currentStorageId,
+        claimId: `startup-rejected-claim`,
+        expiresAtMs,
+      })
+      adapter.renewCacheGenerationClaim = async () =>
+        now < expiresAtMs ? (expiresAtMs = now + 1_000) : undefined
+      adapter.rotateCacheGeneration = async () => {
+        rotations++
+        currentStorageId = `startup-rejected-new`
+        expiresAtMs = now + 1_000
+        return {
+          storageCollectionId: currentStorageId,
+          claimId: `startup-rejected-claim`,
+          expiresAtMs,
+        }
+      }
+      adapter.releaseCacheGenerationClaim = async () => {}
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      adapter.loadResumeSnapshot = async (id, options) => {
+        if (recordedStorageId(id) === storageId) {
+          readEntered.resolve()
+          await releaseRead.promise
+          throw expires ? claimFailure : ioFailure
+        }
+        return loadResumeSnapshot(id, options)
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `startup-rejected-resume-read-${expires}`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              sourceStarts++
+              markReady()
+              return { restartAfterScopedRecovery: () => {} }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        const ready = collection.stateWhenReady()
+        void ready.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          readEntered.promise,
+          `startup resume read entered`,
+        )
+        if (expires) now = 2_100
+        releaseRead.resolve()
+        if (expires) {
+          await atPersistedOracleCheckpoint(ready, `recovered source readiness`)
+          expect(collection.status).toBe(`ready`)
+          expect(sourceStarts).toBe(1)
+          expect(rotations).toBe(1)
+          expect(currentStorageId).toBe(`startup-rejected-new`)
+        } else {
+          await expect(ready).rejects.toBe(ioFailure)
+          expect(collection.status).toBe(`error`)
+          expect(sourceStarts).toBe(0)
+          expect(rotations).toBe(0)
+        }
+      } finally {
+        releaseRead.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // Each claim expiry is a loss of authority, not an exhausted retry budget.
+  // The independent clock pauses this run during two successive SQLite resume
+  // reads, then lets a third read finish with a live claim. The source must
+  // start exactly once under that final storage ID, with no old read admitted.
+  it(`recovers after successive startup resume claims expire`, async () => {
+    const adapter = createRecordingAdapter()
+    let now = 1_000
+    let expiresAtMs = 2_000
+    let storageId = `successive-startup-old`
+    let reads = 0
+    let rotations = 0
+    let sourceStarts = 0
+    adapter.getCacheGenerationNow = () => now
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `successive-startup-claim`,
+      expiresAtMs,
+    })
+    adapter.renewCacheGenerationClaim = async () =>
+      now < expiresAtMs ? (expiresAtMs = now + 1_000) : undefined
+    adapter.rotateCacheGeneration = async () => {
+      storageId = `successive-startup-new-${++rotations}`
+      expiresAtMs = now + 1_000
+      return {
+        storageCollectionId: storageId,
+        claimId: `successive-startup-claim`,
+        expiresAtMs,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (id, options) => {
+      if (++reads <= 2) {
+        now = expiresAtMs + 1
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache claim is no longer active for collection "${id}"`,
+        )
+      }
+      return loadResumeSnapshot(id, options)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `successive-startup-expiry`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            sourceStarts++
+            markReady()
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `source entry after successive claim expiry`,
+      )
+      expect(collection.status).toBe(`ready`)
+      expect(reads).toBe(3)
+      expect(rotations).toBe(2)
+      expect(storageId).toBe(`successive-startup-new-2`)
+      expect(sourceStarts).toBe(1)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // An expired cache claim may start a private rotation while startup is
+  // creating a persisted index. The source cannot enter until that rotation
+  // settles: before its sync callback returns there is no provider-session
+  // restart capability to retire callbacks bound to the old cache. This
+  // controlled adapter permits the index and rotation to overlap. The model
+  // starts the source once, under the rotated storage ID; the observations
+  // are source-entry timing and the durable destination of its first write.
+  it(`waits for a private startup rotation before entering the source`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstIndexEntered = createEventGate()
+    const releaseFirstIndex = createEventGate()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    const sourceStarted = createEventGate()
+    let expired = false
+    let storageId = `startup-old-storage`
+    let indexCalls = 0
+    const indexRoutes: Array<{ storageId: string; signature: string }> = []
+    let sourceStarts = 0
+    let restarts = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `startup-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () =>
+      expired ? undefined : Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      storageId = `startup-new-storage`
+      expired = false
+      return { storageCollectionId: storageId, claimId: `startup-claim` }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (id, signature) => {
+      indexRoutes.push({ storageId: recordedStorageId(id), signature })
+      if (++indexCalls === 1) {
+        firstIndexEntered.resolve()
+        await releaseFirstIndex.promise
+      }
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `startup-rotation-before-source`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            source = params
+            sourceStarts++
+            params.markReady()
+            sourceStarted.resolve()
+            return {
+              restartAfterScopedRecovery: () => {
+                restarts++
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.createIndex((row) => row.title, { name: `held-title` })
+    try {
+      collection.startSyncImmediate()
+      await atPersistedOracleCheckpoint(
+        firstIndexEntered.promise,
+        `first startup index`,
+      )
+      expired = true
+      const dynamicIndex = collection.createIndex((row) => row.id, {
+        name: `dynamic-id`,
+      })
+      const dynamicSignature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === dynamicIndex.id)?.signature
+      if (!dynamicSignature) throw new Error(`Missing dynamic index signature`)
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `private startup rotation`,
+      )
+      releaseFirstIndex.resolve()
+      await flushAsyncWork()
+      expect(sourceStarts).toBe(0)
+      releaseRotation.resolve()
+      await atPersistedOracleCheckpoint(sourceStarted.promise, `source entry`)
+      await collection.stateWhenReady()
+      expect(sourceStarts).toBe(1)
+      expect(restarts).toBe(0)
+      expect(indexRoutes).toContainEqual({
+        storageId: `startup-new-storage`,
+        signature: dynamicSignature,
+      })
+
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `fresh`, title: `New storage` },
+      })
+      await whenSyncAccepted(source.commit())
+      expect(collection.get(`fresh`)).toMatchObject({ id: `fresh` })
+      expect(
+        adapter.applyCommittedTxCalls
+          .filter((call) =>
+            call.tx.mutations.some((mutation) => mutation.key === `fresh`),
+          )
+          .map((call) => call.collectionId),
+      ).toEqual([`startup-new-storage`])
+    } finally {
+      releaseFirstIndex.resolve()
+      releaseRotation.resolve()
+      await collection.cleanup()
+    }
+  })
+
+  // An active scoped rotation changes the physical index destination. The
+  // independent registry is the Collection's current index metadata: every
+  // index still present after rotation, including one added after bootstrap
+  // captured its snapshot, must be routed to the new storage ID.
+  it(`rebuilds current persisted indexes after active cache rotation`, async () => {
+    const adapter = createRecordingAdapter()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    const bootstrapEntered = createEventGate()
+    const releaseBootstrap = createEventGate()
+    let storageId = `active-index-old`
+    let recovery!: () => Promise<void>
+    const indexRoutes: Array<{ storageId: string; signature: string }> = []
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `active-index-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      storageId = `active-index-new`
+      return { storageCollectionId: storageId, claimId: `active-index-claim` }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (id, signature) => {
+      indexRoutes.push({ storageId: recordedStorageId(id), signature })
+      if (
+        recordedStorageId(id) === `active-index-new` &&
+        signature === initialSignature
+      ) {
+        bootstrapEntered.resolve()
+        await releaseBootstrap.promise
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `active-index-rotation`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            recovery = params.metadata!.persistence!.startScopedRecovery!
+            params.markReady()
+            return { restartAfterScopedRecovery: (gate) => gate }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const initial = collection.createIndex((row) => row.title, {
+      name: `initial-title`,
+    })
+    const initialSignature = collection
+      .getIndexMetadata()
+      .find((metadata) => metadata.indexId === initial.id)?.signature
+    let activeRecovery: Promise<void> | undefined
+    try {
+      await collection.stateWhenReady()
+      activeRecovery = recovery()
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `active index rotation`,
+      )
+      const added = collection.createIndex((row) => row.id, {
+        name: `added-during-rotation`,
+      })
+      releaseRotation.resolve()
+      await atPersistedOracleCheckpoint(
+        bootstrapEntered.promise,
+        `new-storage index bootstrap`,
+      )
+      const addedDuringBootstrap = collection.createIndex((row) => row.detail, {
+        name: `added-during-bootstrap`,
+      })
+      const signatures = [initial.id, added.id, addedDuringBootstrap.id].map(
+        (id) =>
+          collection
+            .getIndexMetadata()
+            .find((metadata) => metadata.indexId === id)?.signature,
+      )
+      if (signatures.some((signature) => !signature)) {
+        throw new Error(`Missing current index signature`)
+      }
+      releaseBootstrap.resolve()
+      await atPersistedOracleCheckpoint(activeRecovery, `active index recovery`)
+      for (const signature of signatures) {
+        expect(indexRoutes).toContainEqual({
+          storageId: `active-index-new`,
+          signature,
+        })
+      }
+    } finally {
+      releaseRotation.resolve()
+      releaseBootstrap.resolve()
+      await Promise.allSettled([activeRecovery])
+      await collection.cleanup()
+    }
+  })
+
+  // Removing an index revokes its durable accelerator after all event work
+  // settles. The independent index registry follows the Collection's current
+  // declarations, even when an earlier add operation is held in the adapter.
+  // At the removal checkpoint the index is absent; the late add must not
+  // resurrect it at the final checkpoint.
+  it(`keeps a removed persisted index retired after its add completes late`, async () => {
+    const adapter = createRecordingAdapter()
+    const ensureEntered = createEventGate()
+    const releaseEnsure = createEventGate()
+    const ensureSettled = createEventGate()
+    const removeSettled = createEventGate()
+    const durableIndexes = new Map<string, boolean>()
+    const operations: Array<string> = []
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `index-remove-storage`,
+      claimId: `index-remove-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: `index-remove-new`,
+      claimId: `index-remove-claim`,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (_id, signature) => {
+      operations.push(`ensure-enter`)
+      ensureEntered.resolve()
+      await releaseEnsure.promise
+      durableIndexes.set(signature, true)
+      operations.push(`ensure-settled`)
+      ensureSettled.resolve()
+    }
+    adapter.markIndexRemoved = async (_id, signature) => {
+      durableIndexes.set(signature, false)
+      operations.push(`remove-settled`)
+      removeSettled.resolve()
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `late-index-add-after-removal`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      const index = collection.createIndex((row) => row.title, {
+        name: `transient-index`,
+      })
+      const signature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === index.id)?.signature
+      if (!signature) throw new Error(`Missing index signature`)
+      await atPersistedOracleCheckpoint(
+        ensureEntered.promise,
+        `index add entered`,
+      )
+      expect(collection.removeIndex(index)).toBe(true)
+      await atPersistedOracleCheckpoint(
+        removeSettled.promise,
+        `index removal settled`,
+      )
+      expect(durableIndexes.get(signature)).toBe(false)
+      releaseEnsure.resolve()
+      await atPersistedOracleCheckpoint(
+        ensureSettled.promise,
+        `late index add settled`,
+      )
+      await flushAsyncWork()
+      expect(collection.getIndexMetadata()).toEqual([])
+      expect(durableIndexes.get(signature)).toBe(false)
+      expect(operations.slice(0, 3)).toEqual([
+        `ensure-enter`,
+        `remove-settled`,
+        `ensure-settled`,
+      ])
+      expect(operations.at(-1)).toBe(`remove-settled`)
+    } finally {
+      releaseEnsure.resolve()
+      await collection.cleanup()
+    }
+  })
+
+  // Re-adding the same index signature reverses the expected final state.
+  // A held removal from the old declaration cannot deactivate the current
+  // declaration after its add has completed. Signature, rather than object
+  // identity, names the durable SQLite accelerator in this history.
+  it(`keeps a re-added persisted index active after its removal completes late`, async () => {
+    const adapter = createRecordingAdapter()
+    const removeEntered = createEventGate()
+    const releaseRemove = createEventGate()
+    const removeSettled = createEventGate()
+    const durableIndexes = new Map<string, boolean>()
+    let ensureCalls = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `index-readd-storage`,
+      claimId: `index-readd-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: `index-readd-new`,
+      claimId: `index-readd-claim`,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (_id, signature) => {
+      ensureCalls++
+      durableIndexes.set(signature, true)
+    }
+    adapter.markIndexRemoved = async (_id, signature) => {
+      removeEntered.resolve()
+      await releaseRemove.promise
+      durableIndexes.set(signature, false)
+      removeSettled.resolve()
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `late-index-removal-after-readd`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      const first = collection.createIndex((row) => row.title)
+      const signature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === first.id)?.signature
+      if (!signature) throw new Error(`Missing index signature`)
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(ensureCalls).toBe(1)),
+        `first index add`,
+      )
+      expect(collection.removeIndex(first)).toBe(true)
+      await atPersistedOracleCheckpoint(
+        removeEntered.promise,
+        `old index removal entered`,
+      )
+      const second = collection.createIndex((row) => row.title)
+      expect(
+        collection
+          .getIndexMetadata()
+          .find((metadata) => metadata.indexId === second.id)?.signature,
+      ).toBe(signature)
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(ensureCalls).toBe(2)),
+        `replacement index add`,
+      )
+      releaseRemove.resolve()
+      await atPersistedOracleCheckpoint(
+        removeSettled.promise,
+        `old removal settled`,
+      )
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(durableIndexes.get(signature)).toBe(true)),
+        `current index restored`,
+      )
+      expect(collection.getIndexMetadata()).toHaveLength(1)
+    } finally {
+      releaseRemove.resolve()
+      await collection.cleanup()
+    }
+  })
+
+  // Rotation rebuilds current index declarations on a new physical table.
+  // Removing one while its new-table bootstrap call is held must leave that
+  // table without the index once recovery and the removal event both settle.
+  // This is the neighboring bootstrap route for the add/remove race above.
+  it(`removes an index deleted during held cache-rotation bootstrap`, async () => {
+    const adapter = createRecordingAdapter()
+    const bootstrapEntered = createEventGate()
+    const releaseBootstrap = createEventGate()
+    const removalSettled = createEventGate()
+    const durableIndexes = new Map<string, boolean>()
+    let storageId = `bootstrap-removal-old`
+    let recovery!: () => Promise<void>
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `bootstrap-removal-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: (storageId = `bootstrap-removal-new`),
+      claimId: `bootstrap-removal-claim`,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (id, signature) => {
+      if (recordedStorageId(id) === `bootstrap-removal-new`) {
+        bootstrapEntered.resolve()
+        await releaseBootstrap.promise
+      }
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, true)
+    }
+    adapter.markIndexRemoved = async (id, signature) => {
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, false)
+      removalSettled.resolve()
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bootstrap-index-removal`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            recovery = params.metadata!.persistence!.startScopedRecovery!
+            params.markReady()
+            return { restartAfterScopedRecovery: (gate) => gate }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const index = collection.createIndex((row) => row.title)
+    const signature = collection
+      .getIndexMetadata()
+      .find((metadata) => metadata.indexId === index.id)?.signature
+    if (!signature) throw new Error(`Missing index signature`)
+    let activeRecovery: Promise<void> | undefined
+    try {
+      await collection.stateWhenReady()
+      activeRecovery = recovery()
+      await atPersistedOracleCheckpoint(
+        bootstrapEntered.promise,
+        `new-table index bootstrap`,
+      )
+      expect(collection.removeIndex(index)).toBe(true)
+      expect(collection.getIndexMetadata()).toEqual([])
+      // The removal finishes first; the old bootstrap call can still finish
+      // afterward and must not recreate the retired physical index.
+      await atPersistedOracleCheckpoint(
+        removalSettled.promise,
+        `index removal before late bootstrap ensure`,
+      )
+      expect(durableIndexes.get(`bootstrap-removal-new:${signature}`)).toBe(
+        false,
+      )
+      releaseBootstrap.resolve()
+      await atPersistedOracleCheckpoint(
+        activeRecovery,
+        `cache rotation after index removal`,
+      )
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() =>
+          expect(durableIndexes.get(`bootstrap-removal-new:${signature}`)).toBe(
+            false,
+          ),
+        ),
+        `new-table index removal`,
+      )
+    } finally {
+      releaseBootstrap.resolve()
+      await Promise.allSettled([activeRecovery])
+      await collection.cleanup()
+    }
+  })
+
+  // The same signature can be declared again while bootstrap repairs a late
+  // ensure. After that held removal finishes, the current Collection registry
+  // requires the physical index to be present. This is the reverse boundary
+  // of the preceding witness: the final declaration, not the order in which
+  // obsolete adapter calls finish, determines the durable accelerator.
+  it(`restores an index re-added during cache-rotation reconciliation`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstEnsureEntered = createEventGate()
+    const releaseFirstEnsure = createEventGate()
+    const firstRemovalSettled = createEventGate()
+    const secondRemovalEntered = createEventGate()
+    const releaseSecondRemoval = createEventGate()
+    const durableIndexes = new Map<string, boolean>()
+    let storageId = `bootstrap-readd-old`
+    let recovery!: () => Promise<void>
+    let newStorageEnsures = 0
+    let removals = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `bootstrap-readd-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: (storageId = `bootstrap-readd-new`),
+      claimId: `bootstrap-readd-claim`,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (id, signature) => {
+      if (
+        recordedStorageId(id) === `bootstrap-readd-new` &&
+        ++newStorageEnsures === 1
+      ) {
+        firstEnsureEntered.resolve()
+        await releaseFirstEnsure.promise
+      }
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, true)
+    }
+    adapter.markIndexRemoved = async (id, signature) => {
+      if (++removals === 2) {
+        secondRemovalEntered.resolve()
+        await releaseSecondRemoval.promise
+      }
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, false)
+      firstRemovalSettled.resolve()
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bootstrap-index-readd`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            recovery = params.metadata!.persistence!.startScopedRecovery!
+            params.markReady()
+            return { restartAfterScopedRecovery: (gate) => gate }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const initial = collection.createIndex((row) => row.title)
+    const signature = collection
+      .getIndexMetadata()
+      .find((metadata) => metadata.indexId === initial.id)?.signature
+    if (!signature) throw new Error(`Missing index signature`)
+    let activeRecovery: Promise<void> | undefined
+    try {
+      await collection.stateWhenReady()
+      activeRecovery = recovery()
+      await atPersistedOracleCheckpoint(
+        firstEnsureEntered.promise,
+        `first new-table ensure`,
+      )
+      expect(collection.removeIndex(initial)).toBe(true)
+      await atPersistedOracleCheckpoint(
+        firstRemovalSettled.promise,
+        `old declaration removed`,
+      )
+      releaseFirstEnsure.resolve()
+      await atPersistedOracleCheckpoint(
+        secondRemovalEntered.promise,
+        `bootstrap reconciliation removal`,
+      )
+      const current = collection.createIndex((row) => row.title)
+      expect(
+        collection
+          .getIndexMetadata()
+          .find((metadata) => metadata.indexId === current.id)?.signature,
+      ).toBe(signature)
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(newStorageEnsures).toBeGreaterThan(1)),
+        `re-added index ensure`,
+      )
+      releaseSecondRemoval.resolve()
+      await atPersistedOracleCheckpoint(
+        activeRecovery,
+        `reconciled cache rotation`,
+      )
+      expect(collection.getIndexMetadata()).toHaveLength(1)
+      expect(durableIndexes.get(`bootstrap-readd-new:${signature}`)).toBe(true)
+    } finally {
+      releaseFirstEnsure.resolve()
+      releaseSecondRemoval.resolve()
+      await Promise.allSettled([activeRecovery])
+      await collection.cleanup()
+    }
+  })
+
+  // A second recovery may be requested while the first is still rebuilding
+  // indexes. The first completion cannot reopen source commit admission while
+  // the second rotation is held. The two storage IDs and held index/rotation
+  // gates make that distinction visible before the final cache is accepted.
+  it(`keeps source commits quarantined through overlapping cache rotations`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstIndexEntered = createEventGate()
+    const releaseFirstIndex = createEventGate()
+    const secondRotationEntered = createEventGate()
+    const releaseSecondRotation = createEventGate()
+    let storageId = `overlap-old`
+    let rotations = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `overlap-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      if (++rotations === 2) {
+        secondRotationEntered.resolve()
+        await releaseSecondRotation.promise
+      }
+      storageId = `overlap-new-${rotations}`
+      return { storageCollectionId: storageId, claimId: `overlap-claim` }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async (id) => {
+      if (recordedStorageId(id) === `overlap-new-1`) {
+        firstIndexEntered.resolve()
+        await releaseFirstIndex.promise
+      }
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `overlap-cache-rotation`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { restartAfterScopedRecovery: (gate) => gate }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.createIndex((row) => row.title)
+    let first: Promise<void> | undefined
+    let second: Promise<void> | undefined
+    try {
+      await collection.stateWhenReady()
+      first = source.metadata!.persistence!.startScopedRecovery!()
+      await atPersistedOracleCheckpoint(
+        firstIndexEntered.promise,
+        `first rotation index bootstrap`,
+      )
+      second = source.metadata!.persistence!.startScopedRecovery!()
+      releaseFirstIndex.resolve()
+      await atPersistedOracleCheckpoint(
+        secondRotationEntered.promise,
+        `second cache rotation`,
+      )
+      await first
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `intermediate`, title: `Unaccepted` },
+      })
+      await expect(source.commit()).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      expect(collection.get(`intermediate`)).toBeUndefined()
+      releaseSecondRotation.resolve()
+      await second
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `final`, title: `Accepted` },
+      })
+      await whenSyncAccepted(source.commit())
+      expect(collection.get(`final`)).toMatchObject({ id: `final` })
+      expect(storageId).toBe(`overlap-new-2`)
+    } finally {
+      releaseFirstIndex.resolve()
+      releaseSecondRotation.resolve()
+      await Promise.allSettled([first, second])
+      await collection.cleanup()
+    }
+  })
+
+  // Indexes are optional accelerators. An index event whose claim check hits
+  // a temporary adapter error must settle its asynchronous listener without
+  // changing the Collection's ready state. The adapter is held until after
+  // the event so the checkpoint observes the listener's rejection path.
+  it(`keeps a failed runtime index check best-effort`, async () => {
+    const adapter = createRecordingAdapter()
+    const indexCheckEntered = createEventGate()
+    const releaseIndexCheck = createEventGate()
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let failIndexCheck = false
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `index-check-storage`,
+      claimId: `index-check-claim`,
+    })
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: `index-check-replacement`,
+      claimId: `index-check-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      if (failIndexCheck) {
+        indexCheckEntered.resolve()
+        await releaseIndexCheck.promise
+        throw new Error(`temporary index claim check failure`)
+      }
+      return Date.now() + 10_000
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `index-check-best-effort`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      failIndexCheck = true
+      collection.createIndex((row) => row.title, { name: `optional-index` })
+      await atPersistedOracleCheckpoint(
+        indexCheckEntered.promise,
+        `runtime index claim check`,
+      )
+      releaseIndexCheck.resolve()
+      await flushAsyncWork()
+      expect(collection.status).toBe(`ready`)
+      expect(warning).toHaveBeenCalledWith(
+        `Failed to ensure persisted index after index:added:`,
+        expect.any(Error),
+      )
+    } finally {
+      releaseIndexCheck.resolve()
+      warning.mockRestore()
+      await collection.cleanup()
+    }
+  })
+
+  // A demand waiting for startup has not reached the source or cache. Its
+  // caller may cancel while a private cache rotation is held. The canceled
+  // demand must reject promptly with AbortError; a sibling keeps waiting and
+  // obtains source rows after rotation. The model treats cancellation as one
+  // demand's settlement, not cancellation of the shared startup or rotation.
+  // The held rotation separates the abort checkpoint from source entry.
+  it(`settles an aborted startup demand while a sibling waits for cache rotation`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstIndexEntered = createEventGate()
+    const releaseFirstIndex = createEventGate()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    const sourceStarted = createEventGate()
+    let expired = false
+    let storageId = `abort-startup-old`
+    let indexCalls = 0
+    let sourceLoads = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `abort-startup-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () =>
+      expired ? undefined : Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      expired = false
+      storageId = `abort-startup-new`
+      return { storageCollectionId: storageId, claimId: `abort-startup-claim` }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.ensureIndex = async () => {
+      if (++indexCalls === 1) {
+        firstIndexEntered.resolve()
+        await releaseFirstIndex.promise
+      }
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `abort-startup-rotation`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            sourceStarted.resolve()
+            return {
+              restartAfterScopedRecovery: () => {},
+              loadSubset: async () => {
+                sourceLoads++
+                source.begin()
+                source.write({
+                  type: `insert`,
+                  value: { id: `fresh`, title: `New storage` },
+                })
+                await whenSyncAccepted(source.commit())
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.createIndex((row) => row.title, { name: `held-title` })
+    const controller = new AbortController()
+    try {
+      collection.startSyncImmediate()
+      await atPersistedOracleCheckpoint(
+        firstIndexEntered.promise,
+        `startup index`,
+      )
+      expired = true
+      collection.createIndex((row) => row.id, { name: `dynamic-id` })
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `startup rotation`,
+      )
+
+      const canceled = Promise.resolve(
+        collection._sync.loadSubset({ limit: 1, signal: controller.signal }),
+      )
+      void canceled.catch(() => undefined)
+      const sibling = Promise.resolve(collection._sync.loadSubset({ limit: 2 }))
+      let siblingSettled = false
+      void sibling.then(
+        () => {
+          siblingSettled = true
+        },
+        () => {
+          siblingSettled = true
+        },
+      )
+      controller.abort()
+      await expect(
+        atPersistedOracleCheckpoint(canceled, `aborted startup demand`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      expect(siblingSettled).toBe(false)
+      expect(sourceLoads).toBe(0)
+
+      releaseFirstIndex.resolve()
+      releaseRotation.resolve()
+      await atPersistedOracleCheckpoint(sourceStarted.promise, `source entry`)
+      await atPersistedOracleCheckpoint(sibling, `sibling startup demand`)
+      expect(sourceLoads).toBe(1)
+      expect(collection.get(`fresh`)).toMatchObject({ id: `fresh` })
+    } finally {
+      controller.abort()
+      releaseFirstIndex.resolve()
+      releaseRotation.resolve()
+      await collection.cleanup()
+    }
+  })
+
+  // Source entry may finish before a recovery rotation takes the apply mutex.
+  // A demand admitted behind that mutex still belongs to its own caller: an
+  // explicit abort must reject before rotation settles, while a sibling
+  // remains pending and succeeds afterward. This cut differs from a demand
+  // held before source entry, because the wrapper has already crossed its
+  // startup promises and is waiting inside the persisted runtime.
+  it(`settles an aborted demand behind a held recovery rotation`, async () => {
+    const adapter = createRecordingAdapter()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    let storageId = `abort-recovery-old`
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `abort-recovery-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      storageId = `abort-recovery-new`
+      return { storageCollectionId: storageId, claimId: `abort-recovery-claim` }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const controller = new AbortController()
+    let source!: TodoSyncParams
+    const sourceLimits: Array<number | undefined> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `abort-held-recovery`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              restartAfterScopedRecovery: () => {},
+              loadSubset: (options) => {
+                sourceLimits.push(options.limit)
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let recovery: Promise<void> | undefined
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      recovery = source.metadata!.persistence!.startScopedRecovery!()
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `held rotation`,
+      )
+
+      const canceled = Promise.resolve(
+        collection._sync.loadSubset({ limit: 1, signal: controller.signal }),
+      )
+      void canceled.catch(() => undefined)
+      const sibling = Promise.resolve(collection._sync.loadSubset({ limit: 2 }))
+      let siblingSettled = false
+      void sibling.then(
+        () => {
+          siblingSettled = true
+        },
+        () => {
+          siblingSettled = true
+        },
+      )
+      await flushAsyncWork()
+      expect(siblingSettled).toBe(false)
+      controller.abort()
+      await expect(
+        atPersistedOracleCheckpoint(canceled, `aborted recovery demand`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      expect(siblingSettled).toBe(false)
+
+      releaseRotation.resolve()
+      await atPersistedOracleCheckpoint(recovery, `rotation recovery`)
+      await atPersistedOracleCheckpoint(sibling, `sibling recovery demand`)
+      expect(sourceLimits).toContain(2)
+      expect(sourceLimits).not.toContain(1)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      controller.abort()
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
+      await collection.cleanup()
+    }
+  })
+
+  // A custom adapter may opt into managed cache generations. Claiming alone
+  // cannot enforce rotation, expiry, or release; accepting that partial bundle
+  // would make stale durable rows appear authoritative on a later run. The
+  // contract refuses the configuration before a claim or source load begins.
+  it.each([
+    `rotateCacheGeneration`,
+    `renewCacheGenerationClaim`,
+    `releaseCacheGenerationClaim`,
+  ] as const)(`refuses a managed cache adapter without %s`, async (missing) => {
+    const adapter = createRecordingAdapter()
+    adapter.claimCacheGeneration = vi.fn(async () => ({
+      storageCollectionId: `managed-storage`,
+      claimId: `managed-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    }))
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: `rotated-storage`,
+      claimId: `managed-claim`,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    delete adapter[missing]
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `partial-managed-adapter-${missing}`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: { sync: (params) => params.markReady() },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await expect(collection.stateWhenReady()).rejects.toThrow(
+        `managed cache generation adapter`,
+      )
+      expect(adapter.claimCacheGeneration).not.toHaveBeenCalled()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Losing a durable claim removes authority to hydrate its rows, not the
+  // public demand. The model keeps that demand, clears the old source base,
+  // and satisfies it from one new source snapshot. This driver lets renewal
+  // fail just before demand admission; stale durable rows remain in the fake
+  // adapter so the public row comparison rejects a missing recovery guard.
+  it(`reloads a demanded subset after its persisted cache claim expires`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `stale`, title: `Old persisted row` },
+    ])
+    let storageId = `expired-old-storage`
+    const claimId = `expiring-claim`
+    let renewals = 0
+    let revokeClaim = false
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      if (revokeClaim) {
+        revokeClaim = false
+        return undefined
+      }
+      return Date.now() + 10_000
+    }
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: (storageId = `expired-private-storage`),
+      claimId,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    let source!: TodoSyncParams
+    let sourceLoads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `expired-demand-reload`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              // Every source load is synchronous up to its tracked commit;
+              // there is no old provider callback to deliver after restart.
+              restartAfterScopedRecovery: () => {},
+              loadSubset: async () => {
+                sourceLoads++
+                source.begin()
+                source.write({
+                  type: `insert`,
+                  value: { id: `fresh`, title: `Fresh source row` },
+                })
+                await whenSyncAccepted(source.commit())
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      revokeClaim = true
+      await collection._sync.loadSubset({ limit: 1 })
+      expect(renewals).toBeGreaterThan(0)
+      expect(sourceLoads).toBe(1)
+      expect(collection.get(`stale`)).toBeUndefined()
+      expect(collection.get(`fresh`)).toMatchObject({
+        id: `fresh`,
+        title: `Fresh source row`,
+      })
+      expect(
+        adapter.applyCommittedTxCalls
+          .filter((call) =>
+            call.tx.mutations.some((mutation) => mutation.key === `fresh`),
+          )
+          .map((call) => call.collectionId),
+      ).toEqual([`expired-private-storage`])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  /**
+   * A physical cache generation starts a new row-version history. The model
+   * retains one active subset demand through rotation and requires a peer
+   * commit in the replacement generation to reacquire source evidence while
+   * scoped recovery quarantines durable rows. Its row version starts at one
+   * even when the retired generation had reached ten. The zero-version
+   * neighbor shows that the same notification reaches the refresh path when
+   * no retired version can accidentally classify it as already published.
+   * The coordinator records source reacquisition after each public cut; the
+   * old durable row must be absent after rotation.
+   */
+  it.each([
+    { retiredRowVersion: 0, oldRows: [] as Array<Todo> },
+    {
+      retiredRowVersion: 10,
+      oldRows: [{ id: `retired`, title: `Retired cache row` }],
+    },
+  ])(
+    `reacquires a scoped subset after a new-generation peer notice with retired row version $retiredRowVersion`,
+    async ({ retiredRowVersion, oldRows }) => {
+      const adapter = createRecordingAdapter(oldRows)
+      const coordinator = createCoordinatorHarness()
+      const oldStorageId = `peer-rotation-old-${retiredRowVersion}`
+      const newStorageId = `peer-rotation-new-${retiredRowVersion}`
+      let storageId = oldStorageId
+      const remoteEnsures: Array<string> = []
+      const originalLoadResumeSnapshot = adapter.loadResumeSnapshot
+      adapter.loadResumeSnapshot = async (id, context) => {
+        const snapshot = await originalLoadResumeSnapshot(id, context)
+        return {
+          ...snapshot,
+          latestTerm: recordedStorageId(id) === oldStorageId ? 1 : 0,
+          latestSeq:
+            recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
+          latestRowVersion:
+            recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
+        }
+      }
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: storageId,
+        claimId: `peer-rotation-claim-${retiredRowVersion}`,
+        expiresAtMs: Date.now() + 60_000,
+      })
+      adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+      adapter.rotateCacheGeneration = async () => ({
+        storageCollectionId: (storageId = newStorageId),
+        claimId: `peer-rotation-claim-${retiredRowVersion}`,
+        expiresAtMs: Date.now() + 60_000,
+      })
+      adapter.releaseCacheGenerationClaim = async () => {}
+      coordinator.requestEnsureRemoteSubset = async (id) => {
+        remoteEnsures.push(id)
+      }
+
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `peer-rotation-${retiredRowVersion}`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: async (cacheRotated) => {
+                  await cacheRotated
+                },
+                loadSubset: async () => {},
+                unloadSubset: async () => {},
+              }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        await source.metadata!.persistence!.hydrateBaseline()
+        expect(collection.get(`retired`)?.title).toBe(oldRows[0]?.title)
+
+        const persistence = source.metadata?.persistence
+        if (!persistence?.startScopedRecovery) {
+          throw new Error(`Expected scoped recovery capability`)
+        }
+        await persistence.startScopedRecovery()
+        await vi.waitFor(() => expect(remoteEnsures).toContain(newStorageId))
+        expect(collection.get(`retired`)).toBeUndefined()
+        const ensuresAfterRotation = remoteEnsures.length
+        expect(ensuresAfterRotation).toBe(1)
+
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `new-generation-peer-row`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [
+              {
+                key: `fresh`,
+                value: { id: `fresh`, title: `Fresh source row` },
+              },
+            ],
+            deletedKeys: [],
+          },
+          `peer`,
+          newStorageId,
+        )
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() =>
+            expect(remoteEnsures).toHaveLength(ensuresAfterRotation + 1),
+          ),
+          `source reacquisition after a new-generation peer notice`,
+        )
+        expect(remoteEnsures.at(-1)).toBe(newStorageId)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  /**
+   * A notification is scoped to the physical cache generation that received
+   * it. A peer may deliver an old-generation commit or reset while rotation holds the
+   * wrapper's apply mutex; processing begins only after the new generation
+   * binds. The model discards that old version at the generation boundary,
+   * then requires the next new-generation notice to request reacquisition of
+   * the active subset. The old generation may have a lower or higher row version than
+   * the new notice, so physical identity rather than version order decides
+   * authority. The history grammar varies an absent, commit, or reset old
+   * notice; row versions on both sides; and an absent or present new notice.
+   * No old notice and no new notice are work-count controls. This driver holds
+   * rotation, queues any old notice before the physical ID changes, and checks
+   * source requests after the old callback has crossed the apply mutex. A
+   * persisting optimistic mutation holds the new source snapshot's applied
+   * receipt. A constrained demand already pending at the coordinator must
+   * remain pending until that receipt publishes the source row. Until then,
+   * the refresh acquisition remains owned and the distinct notice-only row
+   * cannot become public during scoped recovery. The controlled coordinator
+   * supplies the receipt wait; the wrapper's settlement and publication are
+   * the observations at this boundary.
+   */
+  type GenerationNoticeHistory = {
+    retiredNotice: `none` | `commit` | `reset`
+    retiredRowVersion: 1 | 10
+    newRowVersion: 1 | 3
+    newNotice: boolean
+  }
+  const assertGenerationNoticeHistory = async ({
+    retiredNotice,
+    retiredRowVersion,
+    newRowVersion,
+    newNotice,
+  }: GenerationNoticeHistory): Promise<void> => {
+    const adapter = createRecordingAdapter([
+      { id: `retired`, title: `Retired cache row` },
+    ])
+    const coordinator = createCoordinatorHarness()
+    const logicalId = `queued-peer-rotation`
+    const oldStorageId = `queued-peer-old-storage`
+    const newStorageId = `queued-peer-new-storage`
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    const remoteEnsures: Array<string> = []
+    const remoteEnsureOptions: Array<{
+      id: string
+      options: LoadSubsetOptions
+    }> = []
+    const demandEnsureEntered = createEventGate()
+    const demandOptions: LoadSubsetOptions = {
+      limit: 2,
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(`fresh`)]),
+    }
+    const sourceCommitReturned = createEventGate()
+    const mutationEntered = createEventGate()
+    const releaseMutation = createEventGate()
+    let refreshReceipt: Promise<void> | undefined
+    let refreshApplied = false
+    const releaseCalls: Array<{
+      id: string
+      options: LoadSubsetOptions
+      appliedAtRelease: boolean
+    }> = []
+    let freshRequestOptions: LoadSubsetOptions | undefined
+    let newNoticeDelivered = false
+    let freshWorkStarted = false
+    let wrongGenerationReads = 0
+    const originalLoadResumeSnapshot = adapter.loadResumeSnapshot
+    adapter.loadResumeSnapshot = async (id, context) => {
+      if (recordedStorageId(id) === logicalId) {
+        wrongGenerationReads++
+        throw new Error(`Retired reset must not read the logical cache ID`)
+      }
+      const snapshot = await originalLoadResumeSnapshot(id, context)
+      return {
+        ...snapshot,
+        latestTerm: recordedStorageId(id) === oldStorageId ? 1 : 0,
+        latestSeq:
+          recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
+        latestRowVersion:
+          recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
+      }
+    }
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: oldStorageId,
+      claimId: `queued-peer-claim`,
+      expiresAtMs: Date.now() + 60_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      return {
+        storageCollectionId: newStorageId,
+        claimId: `queued-peer-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    coordinator.requestEnsureRemoteSubset = async (id, options) => {
+      remoteEnsures.push(id)
+      remoteEnsureOptions.push({ id, options })
+      if (options === demandOptions) {
+        demandEnsureEntered.resolve()
+        await sourceCommitReturned.promise
+        await refreshReceipt
+        return
+      }
+      if (
+        newNoticeDelivered &&
+        !freshWorkStarted &&
+        options.refetch === true &&
+        options.limit === demandOptions.limit
+      ) {
+        freshWorkStarted = true
+        freshRequestOptions = options
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `fresh`, title: `Fresh source row` },
+        })
+        const receipt = source.commit()
+        if (receipt === true) throw new Error(`Source receipt was untracked`)
+        refreshReceipt = receipt
+        sourceCommitReturned.resolve()
+        await receipt
+        refreshApplied = true
+      }
+    }
+    coordinator.requestReleaseRemoteSubset = async (id, options) => {
+      releaseCalls.push({ id, options, appliedAtRelease: refreshApplied })
+    }
+
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: logicalId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              restartAfterScopedRecovery: async (cacheRotated) => {
+                await cacheRotated
+              },
+              loadSubset: async () => {},
+              unloadSubset: async () => {},
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+        onInsert: async () => {
+          mutationEntered.resolve()
+          await releaseMutation.promise
+        },
+      }),
+    )
+    let mutation: ReturnType<typeof collection.insert> | undefined
+    let recovery: Promise<void> | undefined
+    let demand: Promise<void> | undefined
+    const publishedFreshTitles: Array<string | undefined> = []
+    const publication = collection.subscribeChanges(
+      (changes) => {
+        if (changes.some((change) => change.key === `fresh`)) {
+          publishedFreshTitles.push(collection.get(`fresh`)?.title)
+        }
+      },
+      { includeInitialState: false },
+    )
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await source.metadata!.persistence!.hydrateBaseline()
+      expect(collection.get(`retired`)?.title).toBe(`Retired cache row`)
+
+      const persistence = source.metadata?.persistence
+      if (!persistence?.startScopedRecovery) {
+        throw new Error(`Expected scoped recovery capability`)
+      }
+      recovery = persistence.startScopedRecovery()
+      void recovery.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `old physical cache rotation entered`,
+      )
+      // A queued old notice belongs to the still-subscribed old physical ID.
+      if (retiredNotice !== `none`) {
+        coordinator.emit(
+          retiredNotice === `commit`
+            ? {
+                type: `tx:committed`,
+                term: 1,
+                seq: retiredRowVersion + 1,
+                txId: `retired-generation-peer-row`,
+                latestRowVersion: retiredRowVersion + 1,
+                requiresFullReload: false,
+                changedRows: [
+                  {
+                    key: `retired`,
+                    value: { id: `retired`, title: `Old peer row` },
+                  },
+                ],
+                deletedKeys: [],
+              }
+            : { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+          `peer`,
+          oldStorageId,
+        )
+      }
+      releaseRotation.resolve()
+      await atPersistedOracleCheckpoint(recovery, `cache rotation settled`)
+      // This scan enters the same apply mutex behind the old notice. Its
+      // settlement is the checkpoint at which that notice can no longer
+      // change the new generation's row-version observation.
+      await persistence.scanPersistedRows()
+      expect(wrongGenerationReads).toBe(0)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.get(`retired`)).toBeUndefined()
+      // Rotation reacquires this active subset once. The queued old notice
+      // must not add another source request against the replacement cache.
+      expect(remoteEnsures).toEqual([newStorageId])
+
+      if (newNotice) {
+        const pendingDemand = Promise.resolve(
+          collection._sync.loadSubset(demandOptions),
+        ).then(() => undefined)
+        demand = pendingDemand
+        void pendingDemand.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          demandEnsureEntered.promise,
+          `constrained demand entered source coordinator`,
+        )
+        expect(
+          remoteEnsureOptions.filter(
+            ({ options }) => options === demandOptions,
+          ),
+        ).toEqual([{ id: newStorageId, options: demandOptions }])
+        const demandSettlement = observeSettlement(pendingDemand)
+        await flushAsyncWork()
+        expect(demandSettlement.read()).toEqual({ status: `pending` })
+        const ensuresBeforeNotice = remoteEnsures.length
+        mutation = collection.insert({ id: `local`, title: `Pending` })
+        await atPersistedOracleCheckpoint(
+          mutationEntered.promise,
+          `optimistic publication hold before new notice`,
+        )
+        newNoticeDelivered = true
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: newRowVersion,
+            txId: `new-generation-peer-row`,
+            latestRowVersion: newRowVersion,
+            requiresFullReload: false,
+            changedRows: [
+              {
+                key: `fresh`,
+                value: { id: `fresh`, title: `Notice-only row` },
+              },
+            ],
+            deletedKeys: [],
+          },
+          `peer`,
+          newStorageId,
+        )
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() =>
+            expect(remoteEnsures.length).toBeGreaterThan(ensuresBeforeNotice),
+          ),
+          `new-generation source reacquisition after an old notice`,
+        )
+        expect(remoteEnsures.at(-1)).toBe(newStorageId)
+        await atPersistedOracleCheckpoint(
+          sourceCommitReturned.promise,
+          `new-generation source receipt returned`,
+        )
+        expect(remoteEnsureOptions).toContainEqual({
+          id: newStorageId,
+          options: { ...demandOptions, refetch: true },
+        })
+        const applied = observeSettlement(refreshReceipt!)
+        await flushAsyncWork()
+        expect(freshRequestOptions).toBeDefined()
+        expect(applied.read()).toEqual({ status: `pending` })
+        expect(demandSettlement.read()).toEqual({ status: `pending` })
+        expect(refreshApplied).toBe(false)
+        expect(
+          releaseCalls.filter(({ options }) => options === freshRequestOptions),
+        ).toEqual([])
+        expect(collection.get(`retired`)).toBeUndefined()
+        expect(collection.get(`fresh`)).toBeUndefined()
+        expect(publishedFreshTitles).toEqual([])
+        releaseMutation.resolve()
+        await atPersistedOracleCheckpoint<unknown>(
+          mutation.isPersisted.promise,
+          `optimistic publication released`,
+        )
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() => expect(refreshApplied).toBe(true)),
+          `fresh source snapshot applied`,
+        )
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() =>
+            expect(
+              releaseCalls.filter(
+                ({ options }) => options === freshRequestOptions,
+              ),
+            ).toHaveLength(1),
+          ),
+          `refresh acquisition released after application`,
+        )
+        expect(
+          releaseCalls.filter(({ options }) => options === freshRequestOptions),
+        ).toEqual([
+          {
+            id: newStorageId,
+            options: freshRequestOptions,
+            appliedAtRelease: true,
+          },
+        ])
+        expect(collection.get(`fresh`)).toMatchObject({
+          id: `fresh`,
+          title: `Fresh source row`,
+        })
+        await atPersistedOracleCheckpoint(
+          pendingDemand,
+          `constrained demand settled`,
+        )
+        expect(demandSettlement.read()).toEqual({ status: `fulfilled` })
+        expect(publishedFreshTitles).toEqual([`Fresh source row`])
+      } else {
+        await persistence.scanPersistedRows()
+        expect(remoteEnsures).toEqual([newStorageId])
+      }
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseRotation.resolve()
+      releaseMutation.resolve()
+      publication.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => recovery,
+          () => mutation?.isPersisted.promise.catch(() => undefined),
+          () => demand?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  }
+
+  it.each([
+    { retiredNotice: `commit`, retiredRowVersion: 1, newRowVersion: 3 },
+    { retiredNotice: `reset`, retiredRowVersion: 1, newRowVersion: 3 },
+    { retiredNotice: `commit`, retiredRowVersion: 10, newRowVersion: 1 },
+    { retiredNotice: `reset`, retiredRowVersion: 10, newRowVersion: 1 },
+  ] as const)(
+    `does not let a queued retired-generation $retiredNotice at row version $retiredRowVersion affect a new-generation peer notice`,
+    ({ retiredNotice, retiredRowVersion, newRowVersion }) =>
+      assertGenerationNoticeHistory({
+        retiredNotice,
+        retiredRowVersion,
+        newRowVersion,
+        newNotice: true,
+      }),
+  )
+
+  const generationNoticeHistory = fc.record({
+    retiredNotice: fc.constantFrom<GenerationNoticeHistory[`retiredNotice`]>(
+      `none`,
+      `commit`,
+      `reset`,
+    ),
+    retiredRowVersion: fc.constantFrom<
+      GenerationNoticeHistory[`retiredRowVersion`]
+    >(1, 10),
+    newRowVersion: fc.constantFrom<GenerationNoticeHistory[`newRowVersion`]>(
+      1,
+      3,
+    ),
+    newNotice: fc.boolean(),
+  })
+  fcTest.prop([generationNoticeHistory], {
+    seed: 2069,
+    numRuns: oracleRuns(24),
+  })(
+    `checks generated cache-generation notice histories (fixed)`,
+    assertGenerationNoticeHistory,
+  )
+  fcTest.prop(
+    [generationNoticeHistory],
+    oraclePropertyOptions(24, `persistence.generation-notice`),
+  )(
+    `checks generated cache-generation notice histories (random or replayed)`,
+    assertGenerationNoticeHistory,
+  )
+
+  /**
+   * A follower has no local source. It routes demand to the elected owner,
+   * and the owner's commits reach it only as durable rows plus a commit
+   * notice. After a cache rotation the follower is in scoped recovery, where
+   * durable rows cannot replace source rows. Rotation gives the follower a
+   * fresh cache generation, and the follower asks the owner to reacquire
+   * every active demand into it. Once those reacquisitions settle, the new
+   * generation holds exactly the owner's rows for that demand, so durable
+   * rows are authoritative again. The law is therefore: while the
+   * reacquisitions are in flight, the follower holds the generation's commit
+   * notices; when they settle, scoped recovery ends for that generation and
+   * the held notices, and every later one, apply through the normal path.
+   * No sender is special: a peer's notice after recovery is an ordinary
+   * invalidation that rereads durable rows.
+   *
+   * The independent model is `expectedScopedSnapshot` with complete demand
+   * over the authored durable rows of the current generation. It knows
+   * nothing about notices or scoped recovery; the driver applies it only at
+   * checkpoints where the owner's evidence has arrived. The ensure log is a
+   * separate observation: one acquisition and one reacquisition after
+   * rotation, and no other ensure. A bounded leader that re-commits on every
+   * ensure makes the alternative design (answer every notice during scoped
+   * recovery with a refetch) loop, and the bound turns that loop into an
+   * assertion failure.
+   *
+   * The grammar crosses when the owner first commits the row (before or
+   * after the rotation) with a later broadcast for the same key: none, an
+   * owner update, or a peer notice that claims a different value. An owner
+   * update's durable read either succeeds or fails. Recovery has ended, so a
+   * failed read of it is a real failure: the follower becomes terminal and
+   * keeps the rows it showed, instead of silently ignoring the failure as if
+   * a new recovery had started during the read.
+   * The
+   * observations are the follower's rows when its first load settles, after
+   * the rotation's reacquisition, and after the later broadcast, plus the
+   * ensure log at quiescence. The coordinator is a controlled double of an
+   * elected owner; it does not prove the browser transport.
+   *
+   * Known gap (#2139): production does not end a rotated follower's scoped
+   * recovery, so this lane's cells are pinned as failing until it does.
+   */
+  type FollowerGenerationNoticeHistory = {
+    ownerCommit: `before-rotation` | `after-rotation`
+    later: `none` | `owner` | `peer`
+    // Applies only to a later owner update.
+    ownerRead: `ok` | `fails`
+    // Control: an owner notice's read is in flight when rotation starts, and
+    // then fails. Recovery owns that read, so its failure is ignored.
+    readFailsAsRotationStarts?: boolean
+    // How the owner's notices in the rotated generation reach the follower:
+    // in order, after a gap in the stream position (the follower's position
+    // restarts at zero when it rotates), or as an exact-ID reconciliation
+    // reload. Each must publish the same rows once recovery ends.
+    noticeShape?: `plain` | `gap` | `reconciliation`
+  }
+  const assertFollowerGenerationNoticeHistory = async ({
+    ownerCommit,
+    later,
+    ownerRead,
+    readFailsAsRotationStarts = false,
+    noticeShape = `plain`,
+  }: FollowerGenerationNoticeHistory): Promise<void> => {
+    const readFailure = new Error(`owner update read failed`)
+    let failNextRead = false
+    let holdNextRead:
+      { promise: Promise<void>; reject: (e: unknown) => void } | undefined
+    const oldStorageId = `follower-notice-old`
+    const newStorageId = `follower-notice-new`
+    const ownerId = `elected-owner`
+    const v1: Todo = { id: `remote`, title: `Owner row` }
+    const v2: Todo = { id: `remote`, title: `Owner update` }
+    const durable = new Map<string, Map<string, Todo>>([
+      [oldStorageId, new Map()],
+      [newStorageId, new Map()],
+    ])
+    let storageId = oldStorageId
+    // The owner's upstream row: present from the start, or only once the
+    // owner fetched it after the rotation began.
+    let upstream: Todo | undefined =
+      ownerCommit === `before-rotation` ? v1 : undefined
+    const ensures: Array<{ id: string; refetch: boolean }> = []
+    const subscribers = new Map<
+      string,
+      (message: ProtocolEnvelope<unknown>) => void
+    >()
+    const versions = new Map<string, number>()
+    // Enough commits for every legal history; a refetch loop exceeds it.
+    const commitBudget = 8
+    let commits = 0
+    const notify = (id: string, row: Todo, senderId: string) => {
+      // A gap skips one stream position in the rotated generation.
+      const skip =
+        noticeShape === `gap` && id === newStorageId && !versions.has(id)
+          ? 1
+          : 0
+      const version = (versions.get(id) ?? 0) + 1 + skip
+      versions.set(id, version)
+      const reconciliation =
+        noticeShape === `reconciliation` && id === newStorageId
+      subscribers.get(id)?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId: id,
+        senderId,
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: version,
+          txId: `${senderId}-${id}-${version}`,
+          latestRowVersion: version,
+          requiresFullReload: reconciliation,
+          ...(reconciliation ? { reconciliationReload: true } : {}),
+          changedRows: [{ key: row.id, value: { ...row } }],
+          deletedKeys: [],
+        } satisfies TxCommitted,
+      })
+    }
+    const ownerCommits = (id: string, row: Todo) => {
+      if (commits++ >= commitBudget) return
+      durable.get(id)!.set(row.id, structuredClone(row))
+      notify(id, row, ownerId)
+    }
+    const adapter: PersistenceAdapter = {
+      loadSubset: async (target) => {
+        const hold = holdNextRead
+        if (hold) {
+          holdNextRead = undefined
+          await hold.promise
+        }
+        if (failNextRead) {
+          failNextRead = false
+          throw readFailure
+        }
+        return Array.from(
+          durable.get(recordedStorageId(target))!.values(),
+          (value) => ({
+            key: value.id,
+            value: structuredClone(value),
+          }),
+        )
+      },
+      claimCacheGeneration: async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `follower-notice-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      }),
+      renewCacheGenerationClaim: async () => Date.now() + 60_000,
+      rotateCacheGeneration: async () => {
+        storageId = newStorageId
+        if (ownerCommit === `after-rotation`) upstream = v1
+        return {
+          storageCollectionId: newStorageId,
+          claimId: `follower-notice-claim`,
+          expiresAtMs: Date.now() + 60_000,
+        }
+      },
+      releaseCacheGenerationClaim: async () => {},
+      loadResumeSnapshot: async () => ({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    }
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `follower-node`,
+      subscribe: (id, onMessage) => {
+        subscribers.set(id, onMessage)
+        return () => {
+          if (subscribers.get(id) === onMessage) subscribers.delete(id)
+        }
+      },
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      // The elected owner loads its upstream and commits it into the
+      // requested generation before it replies, on every ensure.
+      requestEnsureRemoteSubset: async (id, options) => {
+        ensures.push({ id, refetch: options.refetch === true })
+        if (upstream) ownerCommits(id, upstream)
+      },
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_id, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      pullSince: () =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `follower-notice-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          requiresFullReload: false,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `follower-generation-notice`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              loadSubset: async () => {},
+              restartAfterScopedRecovery: async (cacheRotated) => {
+                await cacheRotated
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const demand: LoadSubsetOptions = { limit: 10 }
+    const publicRows = () =>
+      new Map(
+        Array.from(collection.state, ([key, row]) => [
+          String(key),
+          stripVirtualProps(row) as Todo,
+        ]),
+      )
+    // A checkpoint after the follower has processed every delivered notice:
+    // the scan crosses the same apply mutex the notices use.
+    const settled = async (label: string) => {
+      await flushAsyncWork()
+      await atPersistedOracleCheckpoint(
+        source.metadata!.persistence!.scanPersistedRows(),
+        label,
+      )
+      await flushAsyncWork()
+    }
+    const expectOwnerEvidence = (previous: ReadonlyMap<string, Todo>) => {
+      const expected = expectedScopedSnapshot(
+        previous,
+        durable.get(storageId)!,
+        new Map(),
+        true,
+      )
+      expectExactSnapshot(publicRows(), expected)
+      return expected
+    }
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset(demand)),
+        `follower demand settled`,
+      )
+      await settled(`first-ready notices processed`)
+      let visible = expectOwnerEvidence(new Map())
+
+      const persistence = source.metadata?.persistence
+      if (!persistence?.startScopedRecovery) {
+        throw new Error(`Expected scoped recovery capability`)
+      }
+      let rotation: Promise<void>
+      if (readFailsAsRotationStarts) {
+        let reject!: (error: unknown) => void
+        const promise = new Promise<void>((_resolve, rejectRead) => {
+          reject = rejectRead
+        })
+        void promise.catch(() => undefined)
+        holdNextRead = { promise, reject }
+        ownerCommits(oldStorageId, {
+          id: `remote`,
+          title: `Pre-rotation update`,
+        })
+        await flushAsyncWork()
+        rotation = persistence.startScopedRecovery()
+        reject(readFailure)
+      } else {
+        rotation = persistence.startScopedRecovery()
+      }
+      await atPersistedOracleCheckpoint(
+        rotation,
+        `follower cache rotation settled`,
+      )
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() =>
+          expect(ensures.map(({ id }) => id)).toContain(newStorageId),
+        ),
+        `reacquisition reached the owner`,
+      )
+      await settled(`reacquisition notices processed`)
+      // Answering the owner's notice with another refetch would make the
+      // owner commit again, and the follower would refetch forever.
+      expect.soft(ensures).toHaveLength(2)
+      visible = expectOwnerEvidence(visible)
+
+      if (later === `owner`) {
+        upstream = v2
+        failNextRead = ownerRead === `fails`
+        ownerCommits(newStorageId, v2)
+        if (ownerRead === `fails`) {
+          // Not settled(): a terminal runtime rejects the checkpoint scan.
+          await flushAsyncWork()
+          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          expectExactSnapshot(publicRows(), visible)
+        } else {
+          await settled(`owner update processed`)
+          expectOwnerEvidence(visible)
+        }
+      } else if (later === `peer`) {
+        // A peer's notice after recovery is an ordinary invalidation: the
+        // follower rereads durable rows, which the peer did not change, so
+        // its rows stay as they were and it sends no other ensure.
+        notify(newStorageId, { id: `remote`, title: `Peer claim` }, `peer-node`)
+        await settled(`peer notice processed`)
+        expectOwnerEvidence(visible)
+      }
+
+      expect(ensures).toEqual([
+        { id: oldStorageId, refetch: false },
+        { id: newStorageId, refetch: true },
+      ])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  }
+
+  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // the owner's rows in the new generation never become visible.
+  it.fails.each([
+    { ownerCommit: `before-rotation`, later: `none` },
+    { ownerCommit: `after-rotation`, later: `none` },
+    { ownerCommit: `after-rotation`, later: `owner` },
+    { ownerCommit: `before-rotation`, later: `peer` },
+  ] as const)(
+    `publishes an elected owner's rows to a follower after rotation: commit $ownerCommit, later $later`,
+    (history) =>
+      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
+  )
+
+  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // the owner's rows in the new generation never become visible.
+  it.fails.each(
+    ([`gap`, `reconciliation`] as const).flatMap((noticeShape) =>
+      ([`before-rotation`, `after-rotation`] as const).flatMap((ownerCommit) =>
+        ([`none`, `owner`] as const).map((later) => ({
+          ownerCommit,
+          later,
+          noticeShape,
+        })),
+      ),
+    ),
+  )(
+    `publishes an elected owner's rows after rotation when its notice is a $noticeShape: commit $ownerCommit, later $later`,
+    (history) =>
+      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
+  )
+
+  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // the owner's rows in the new generation never become visible.
+  it.fails.each([
+    { ownerCommit: `before-rotation`, later: `owner` },
+    { ownerCommit: `after-rotation`, later: `owner` },
+  ] as const)(
+    `fails a follower when its elected owner's update cannot be read after rotation: commit $ownerCommit`,
+    (history) =>
+      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `fails` }),
+  )
+
+  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // the owner's rows in the new generation never become visible.
+  it.fails(
+    `ignores a follower read failure when rotation starts while the read is in flight`,
+    () =>
+      assertFollowerGenerationNoticeHistory({
+        ownerCommit: `before-rotation`,
+        later: `none`,
+        ownerRead: `ok`,
+        readFailsAsRotationStarts: true,
+      }),
+  )
+
+  const followerGenerationNoticeHistory = fc.record({
+    ownerCommit: fc.constantFrom<
+      FollowerGenerationNoticeHistory[`ownerCommit`]
+    >(`before-rotation`, `after-rotation`),
+    later: fc.constantFrom<FollowerGenerationNoticeHistory[`later`]>(
+      `none`,
+      `owner`,
+      `peer`,
+    ),
+    ownerRead: fc.constantFrom<FollowerGenerationNoticeHistory[`ownerRead`]>(
+      `ok`,
+      `fails`,
+    ),
+  })
+  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // the owner's rows in the new generation never become visible. Some
+  // generated histories pass today, so a random draw cannot be pinned as
+  // failing; this fixed seed pins the gap. The fix for #2139 adds the random
+  // and replayed campaign back.
+  it.fails(
+    `checks generated follower generation-notice histories (fixed)`,
+    () =>
+      fc.assert(
+        fc.asyncProperty(
+          followerGenerationNoticeHistory,
+          assertFollowerGenerationNoticeHistory,
+        ),
+        { seed: 2128, numRuns: oracleRuns(12) },
+      ),
+  )
+  /**
+   * A follower routes demand it cannot serve to the elected owner. The owner
+   * loads the rows upstream, commits them durably, and broadcasts the commit
+   * before it answers the ensure request on the same channel. The follower
+   * applies that broadcast asynchronously, by reading durable rows under its
+   * apply mutex. Law 7 therefore owes: the follower's load settles only after
+   * the broadcasts that preceded the reply have applied here, and it rejects,
+   * with the runtime terminal, if applying them failed.
+   *
+   * The independent model knows only whether the owner's commit applies.
+   * While that apply is held, no consumer of the demand has settled. If it
+   * applies, the consumer settles successfully with the owner's row visible.
+   * If it fails, the consumer rejects without the row, and the source is in
+   * error. The model does not know how the follower queues commits.
+   *
+   * The grammar crosses where the owner's broadcast meets the follower with
+   * whether its apply succeeds. A direct broadcast applies at once. A queued
+   * broadcast arrives while another subset's hydration holds the apply mutex,
+   * so it waits in the queue. A rotated history loses the cache claim after
+   * the first hydration read, so the demand reacquires through the owner
+   * under a new generation. An expired history lets the follower's cache
+   * claim lapse while its ensure is in flight, so the owner's notice arrives
+   * while the claim is expired; renewal keeps the same generation. The read
+   * that applies the owner's row is the one
+   * whose durable snapshot contains it; the driver holds that read to observe
+   * the not-ready checkpoint, or fails it. The consumer is a live query
+   * over the demanded rows or the follower's load itself. Observations, while
+   * the apply is held and after it settles: whether the consumer settled, its
+   * outcome, the demanded rows it sees when it settles (the query's
+   * first-ready rows, or the source's rows at load settlement), and the
+   * query's and source's status. A load that rejects owes the release of the
+   * remote acquisition the owner granted it (LoadSubsetFn), so for the load
+   * consumer the model also counts the follower's release requests for the
+   * current cache generation when it settles. The coordinator
+   * is a controlled double of an elected owner that broadcasts before it
+   * replies, as the built-in coordinator does; the two-tab OPFS suite is the
+   * receiving witness for the browser transport.
+   *
+   * A separate cell lets the claim lapse after the owner's row applied, so
+   * the follower's renewal at the reply fails transiently. That is not claim
+   * loss: the load rejects as after a failed ensure, and the demand stays
+   * active and retries instead of releasing the owner's acquisition.
+   *
+   * Known gap (#2139): a rotated follower never ends scoped recovery, so the
+   * owner's row never becomes visible in the rotated placement. Its cells are
+   * pinned as failing, and the generated histories omit that placement. A
+   * rotation that starts while a load waits for the owner's commits is also
+   * outside this lane and tracked there.
+   */
+  type FollowerRemoteDemandHistory = {
+    placement: `direct` | `queued` | `rotated` | `expired`
+    apply: `ok` | `fails`
+    // A live query over the demand, or the follower's load itself.
+    consumer: `live-query` | `load`
+    // The owner's row applies, then the claim lapses before the reply and
+    // the follower's first renewal fails transiently.
+    renewal?: `fails-at-reply`
+  }
+  type FollowerRow = { id: string; group: string }
+
+  const expectedFollowerRemoteDemand = (
+    history: FollowerRemoteDemandHistory,
+  ) => {
+    const applied = history.apply === `ok`
+    return {
+      // While the owner's commit has not applied here, nothing has settled.
+      whileApplyHeld: { settled: false, rows: undefined },
+      settled:
+        history.consumer === `live-query`
+          ? applied
+            ? { outcome: `fulfilled`, rows: [`remote`], status: `ready` }
+            : { outcome: `rejected`, rows: undefined, status: `error` }
+          : applied
+            ? {
+                outcome: `fulfilled`,
+                rows: [`remote`],
+                status: undefined,
+                releases: 0,
+              }
+            : {
+                outcome: `rejected`,
+                rows: undefined,
+                status: `error`,
+                releases: 1,
+              },
+    }
+  }
+
+  function createFollowerTab(history: FollowerRemoteDemandHistory) {
+    const durable: Array<FollowerRow> = []
+    const applyRead = createDeferred()
+    const applyReadStarted = createDeferred()
+    const otherHydrationStarted = createDeferred()
+    const otherHydration = createDeferred()
+    let reads = 0
+    let storageId = `follower-demand-cache-1`
+    let loseClaim = false
+    const claim = () => ({
+      storageCollectionId: storageId,
+      claimId: `follower-demand-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    const rotated = history.placement === `rotated`
+    const expiring = history.placement === `expired`
+    const renewalFailsAtReply = history.renewal === `fails-at-reply`
+    let failRenewal = false
+    let now = 1_000_000
+    const adapter: PersistenceAdapter = {
+      loadSubset: async () => {
+        const read = ++reads
+        const snapshot = durable.slice()
+        if (snapshot.some((row) => row.id === `remote`)) {
+          applyReadStarted.resolve()
+          await applyRead.promise
+          if (history.apply === `fails`) throw new Error(`apply read failed`)
+        } else if (history.placement === `queued` && read === 2) {
+          otherHydrationStarted.resolve()
+          await otherHydration.promise
+        }
+        if (rotated && read === 1) loseClaim = true
+        return snapshot.map((value) => ({ key: value.id, value }))
+      },
+      ...(expiring
+        ? {
+            getCacheGenerationNow: () => now,
+            claimCacheGeneration: async () => ({
+              storageCollectionId: storageId,
+              claimId: `follower-demand-claim`,
+              expiresAtMs: now + 10_000,
+            }),
+            // The claim is still held, so renewal keeps this generation.
+            renewCacheGenerationClaim: async () => now + 10_000,
+            rotateCacheGeneration: async () => {
+              throw new Error(`an expired history must not rotate`)
+            },
+            releaseCacheGenerationClaim: async () => {},
+          }
+        : {}),
+      ...(renewalFailsAtReply
+        ? {
+            getCacheGenerationNow: () => now,
+            claimCacheGeneration: async () => ({
+              storageCollectionId: storageId,
+              claimId: `follower-demand-claim`,
+              expiresAtMs: now + 10_000,
+            }),
+            // A transient storage error, not a lost claim.
+            renewCacheGenerationClaim: async () => {
+              if (failRenewal) {
+                failRenewal = false
+                throw new Error(`transient renewal failure`)
+              }
+              return now + 10_000
+            },
+            rotateCacheGeneration: async () => {
+              throw new Error(`a transient renewal failure must not rotate`)
+            },
+            releaseCacheGenerationClaim: async () => {},
+          }
+        : {}),
+      ...(rotated
+        ? {
+            claimCacheGeneration: async () => claim(),
+            renewCacheGenerationClaim: async () =>
+              loseClaim ? undefined : Date.now() + 10_000,
+            rotateCacheGeneration: async () => {
+              loseClaim = false
+              storageId = `follower-demand-cache-2`
+              return claim()
+            },
+            releaseCacheGenerationClaim: async () => {},
+          }
+        : {}),
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    } as PersistenceAdapter
+    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+    let ensures = 0
+    let releases = 0
+    let resetPending = false
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `follower`,
+      subscribe: (_collectionId, onMessage) => {
+        subscriber = onMessage
+        return () => {
+          subscriber = undefined
+        }
+      },
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      // The owner commits once, broadcasts, then replies; later ensures find
+      // nothing new.
+      requestEnsureRemoteSubset: async (collectionId) => {
+        if (++ensures > 1 && !resetPending) return
+        resetPending = false
+        if (history.placement === `queued`) await otherHydrationStarted.promise
+        // The follower's claim lapses before the owner's notice reaches it.
+        if (expiring) now += 20_000
+        const value = { id: `remote`, group: `a` }
+        durable.push(value)
+        const payload: TxCommitted = {
+          type: `tx:committed`,
+          term: 1,
+          seq: ensures,
+          txId: `owner-tx-${ensures}`,
+          latestRowVersion: ensures,
+          requiresFullReload: false,
+          changedRows: [{ key: value.id, value }],
+          deletedKeys: [],
+        }
+        subscriber?.({
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `owner`,
+          ts: Date.now(),
+          payload,
+        })
+        if (renewalFailsAtReply) {
+          // Let the owner's row apply here before the claim lapses.
+          for (let i = 0; i < 5; i++)
+            await new Promise((resolve) => setTimeout(resolve, 0))
+          now += 20_000
+          failRenewal = true
+        }
+      },
+      // Rotation legitimately releases the previous generation's
+      // acquisition, so only the current generation's releases count.
+      requestReleaseRemoteSubset: async (collectionId) => {
+        if (!rotated || collectionId === storageId) releases++
+      },
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      pullSince: () =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `follower-demand-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          requiresFullReload: false,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    }
+    const source = createCollection(
+      persistedCollectionOptions<FollowerRow, string>({
+        id: `follower-demand-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        persistence: { adapter, coordinator },
+        syncMode: `on-demand`,
+        sync: {
+          sync: () => ({
+            loadSubset: () => Promise.resolve(),
+            restartAfterScopedRecovery: () => {},
+          }),
+        },
+      }),
+    )
+    source.startSyncImmediate()
+    return {
+      source,
+      applyReadStarted: applyReadStarted.promise,
+      otherHydrationStarted: otherHydrationStarted.promise,
+      releaseApply: () => applyRead.resolve(),
+      releaseOtherHydration: () => otherHydration.resolve(),
+      releases: () => releases,
+      ensures: () => ensures,
+      // The owner resets durable storage and announces it; it loads the
+      // demanded row again on the next ensure.
+      resetOwner: () => {
+        durable.length = 0
+        resetPending = true
+        subscriber?.({
+          v: 1,
+          dbName: `test-db`,
+          collectionId: source.id,
+          senderId: `owner`,
+          ts: Date.now(),
+          payload: {
+            type: `collection:reset`,
+            schemaVersion: 1,
+            resetEpoch: 1,
+          },
+        })
+      },
+    }
+  }
+
+  // Wait for a driver event, but turn a missing event into an observation
+  // rather than a timeout.
+  const within = (promise: Promise<unknown>, ms = 200) =>
+    Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+    ])
+
+  const assertFollowerRemoteDemandHistory = async (
+    history: FollowerRemoteDemandHistory,
+  ) => {
+    const expected = expectedFollowerRemoteDemand(history)
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const tab = createFollowerTab(history)
+    const groupQuery = (group: string) =>
+      createLiveQueryCollection((q) =>
+        q.from({ row: tab.source }).where(({ row }) => eq(row.group, group)),
+      )
+    const query = groupQuery(`a`)
+    const other = groupQuery(`b`)
+    try {
+      // The consumer's observation: its outcome, and the demanded rows it
+      // sees when it settles.
+      const seen: {
+        outcome: `pending` | `fulfilled` | `rejected`
+        rows?: Array<string>
+      } = { outcome: `pending` }
+      const demandedRows = () =>
+        Array.from(tab.source.values())
+          .filter((row) => row.group === `a`)
+          .map((row) => row.id)
+          .sort()
+      let settled: Promise<unknown>
+      if (history.consumer === `live-query`) {
+        query.onFirstReady(() => {
+          seen.rows = query.toArray.map((row) => (row as FollowerRow).id).sort()
+        })
+        settled = query.preload().then(
+          () => (seen.outcome = `fulfilled`),
+          () => (seen.outcome = `rejected`),
+        )
+      } else {
+        settled = Promise.resolve(
+          tab.source._sync.loadSubset({
+            where: new IR.Func(`eq`, [
+              new IR.PropRef([`group`]),
+              new IR.Value(`a`),
+            ]),
+          }),
+        ).then(
+          () => {
+            seen.outcome = `fulfilled`
+            seen.rows = demandedRows()
+          },
+          () => (seen.outcome = `rejected`),
+        )
+      }
+      if (history.placement === `queued`) void other.preload().catch(() => {})
+
+      if (history.placement === `queued`) {
+        // The owner's broadcast arrives while this hydration holds the apply
+        // mutex, so it waits in the queue until the hydration ends.
+        await within(tab.otherHydrationStarted)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        tab.releaseOtherHydration()
+      }
+      const applyStarted = await within(tab.applyReadStarted)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Checkpoint: the owner has replied, but its row has not applied here.
+      expect({
+        applyStarted,
+        settled: seen.outcome !== `pending`,
+        rows: seen.rows,
+      }).toEqual({ applyStarted: true, ...expected.whileApplyHeld })
+
+      tab.releaseApply()
+      await within(settled)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Checkpoint: the apply settled.
+      const releasesAtSettle = tab.releases()
+      expect({
+        outcome: seen.outcome,
+        rows: seen.rows,
+        ...(`releases` in expected.settled
+          ? { releases: releasesAtSettle }
+          : {}),
+        status:
+          expected.settled.status === undefined
+            ? undefined
+            : history.consumer === `live-query` &&
+                expected.settled.status === `ready`
+              ? query.status
+              : expected.settled.status === `error`
+                ? history.consumer === `live-query`
+                  ? `${query.status}/${tab.source.status}`
+                  : tab.source.status
+                : tab.source.status,
+      }).toEqual({
+        outcome: expected.settled.outcome,
+        rows: expected.settled.rows,
+        ...(`releases` in expected.settled
+          ? { releases: expected.settled.releases }
+          : {}),
+        status:
+          expected.settled.status === `error` &&
+          history.consumer === `live-query`
+            ? `error/error`
+            : expected.settled.status,
+      })
+    } finally {
+      await query.cleanup()
+      await other.cleanup()
+      await tab.source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  }
+
+  const followerRemoteDemandHistories: Array<FollowerRemoteDemandHistory> = (
+    [`direct`, `queued`, `rotated`, `expired`] as const
+  ).flatMap((placement) =>
+    ([`ok`, `fails`] as const).flatMap((apply) =>
+      ([`live-query`, `load`] as const).map((consumer) => ({
+        placement,
+        apply,
+        consumer,
+      })),
+    ),
+  )
+  it.each(
+    followerRemoteDemandHistories.filter(
+      ({ placement }) => placement !== `rotated`,
+    ),
+  )(
+    `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
+    assertFollowerRemoteDemandHistory,
+  )
+  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // the owner's rows in the new generation never become visible.
+  it.fails.each(
+    followerRemoteDemandHistories.filter(
+      ({ placement }) => placement === `rotated`,
+    ),
+  )(
+    `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
+    assertFollowerRemoteDemandHistory,
+  )
+  // A reset clears the owner's durable rows. Its rows return only when the
+  // follower requests its demand again, so the model predicts one more
+  // ensure, the owner's row visible again, and no further ensures: replacing
+  // rows in place must not drop the replay that a reset owes. Only a node
+  // that follows replaces rows in place. A node elected leader that still
+  // routes demand through the coordinator truncates and replays as the
+  // leader does; this follower-only cell does not exercise that path.
+  // A renewal that fails after the owner replied does not establish claim
+  // loss. The load cannot confirm its rows, so it rejects, as a failed ensure
+  // does; the demand stays active and retries, so the owner's acquisition
+  // is kept. The model predicts the rejected load, no release, one retried
+  // ensure, the owner's row still visible, and a healthy source.
+  it(`keeps a follower's demand when a renewal fails transiently at its reply`, async () => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const tab = createFollowerTab({
+      placement: `direct`,
+      apply: `ok`,
+      consumer: `load`,
+      renewal: `fails-at-reply`,
+    })
+    try {
+      tab.releaseApply()
+      let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+      const settled = Promise.resolve(
+        tab.source._sync.loadSubset({
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`group`]),
+            new IR.Value(`a`),
+          ]),
+        }),
+      ).then(
+        () => (outcome = `fulfilled`),
+        () => (outcome = `rejected`),
+      )
+      await within(settled, 1_000)
+      for (let i = 0; i < 5; i++)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      // Checkpoint: the load settled and any retry has run.
+      expect({
+        outcome,
+        releases: tab.releases(),
+        ensures: tab.ensures(),
+        rows: Array.from(tab.source.values()).map((row) => row.id),
+        status: tab.source.status === `error` ? `error` : `healthy`,
+      }).toEqual({
+        outcome: `rejected`,
+        releases: 0,
+        ensures: 2,
+        rows: [`remote`],
+        status: `healthy`,
+      })
+    } finally {
+      await tab.source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  })
+
+  it(`a follower requests its demand again after the owner resets, once`, async () => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const tab = createFollowerTab({
+      placement: `direct`,
+      apply: `ok`,
+      consumer: `live-query`,
+    })
+    const query = createLiveQueryCollection((q) =>
+      q.from({ row: tab.source }).where(({ row }) => eq(row.group, `a`)),
+    )
+    try {
+      void query.preload()
+      await within(tab.applyReadStarted)
+      tab.releaseApply()
+      await vi.waitFor(() => expect(query.size).toBe(1), { timeout: 1_000 })
+      expect(tab.ensures()).toBe(1)
+
+      tab.resetOwner()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect({
+        ensures: tab.ensures(),
+        rows: query.toArray.map((row) => (row as FollowerRow).id),
+        status: query.status,
+      }).toEqual({ ensures: 2, rows: [`remote`], status: `ready` })
+    } finally {
+      await query.cleanup()
+      await tab.source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  })
+
+  // Scoped recovery means durable rows cannot replace source rows. Owner
+  // evidence is an exception only in a rotated generation, which holds
+  // nothing but the owner's writes. Without a managed generation the old
+  // durable cache stays in place, so the model predicts that an owner notice
+  // during that recovery republishes none of the untrusted durable rows.
+  /**
+   * After a cache rotation, a follower reacquires every active demand into
+   * the new generation through the owner. The owner commits each demand's
+   * rows into that generation and broadcasts them before it replies, so the
+   * follower holds those notices. Scoped recovery may end only once every
+   * reacquisition has succeeded: before that, the new generation is still
+   * incomplete and its durable rows have no authority. Starting scoped
+   * recovery withdraws the old generation's rows.
+   *
+   * The independent model knows each demand's row version per generation:
+   * the owner wrote version 1 into the old generation and writes version 2
+   * into the new one when it reacquires the demand. Until every
+   * reacquisition has settled, neither demand shows a row. If all succeed,
+   * both show the new generation's rows, including an owner update that
+   * arrived while the reacquisitions were settling. If any fails, the
+   * follower stays in scoped recovery, shows no row from the incomplete
+   * generation, and the source reports the failure as soon as that
+   * reacquisition settles.
+   *
+   * A demand that the caller releases or aborts while it reacquires no longer
+   * needs the new generation's rows: its aborted ensure is neither a failure
+   * nor a reported error, and the other demands decide the outcome. Releasing
+   * it twice changes nothing. A load that fails on its own still counts as a
+   * failure even though the failed load gives up its demand.
+   *
+   * A new demand loaded while the reacquisitions are in flight settles only
+   * once they all have: with the rows of the new generation if recovery
+   * ended, or rejected if it did not. Its own ensure answering early does not
+   * make its held rows visible.
+   *
+   * Only a recovery that rotated can end this way. A recovery that keeps the
+   * old generation, or one in which this node is the leader, leaves scoped
+   * recovery in place, and a newer rotation supersedes an older one's
+   * reacquisition.
+   *
+   * Known gap (#2139): production does not yet end scoped recovery after a
+   * rotation, so the histories in which recovery should end, or in which a
+   * new demand waits for it, are pinned as failing.
+   *
+   * Limits. A failed reacquisition is not retried; the follower stays in
+   * scoped recovery until a later recovery rotates again.
+   *
+   * The grammar crosses the order in which two demands' reacquisitions
+   * settle, whether the owner updates demand a's row (version 3) between
+   * the first and last settlement, which reacquisitions fail or are released,
+   * and whether a new demand loads during reacquisition. Separate cells start
+   * rotation from two reads that find the claim lost, supersede reacquisition
+   * by a rotation as leader, and recover without rotating. The driver
+   * observes the rows, the new load's outcome, and the source status after
+   * every settlement, plus the ensure count, which a refetch loop would
+   * exceed.
+   */
+  type RotatedReacquisitionHistory = {
+    order: [`a`, `b`] | [`b`, `a`]
+    noticeBetween: boolean
+    // Which reacquisitions fail. `released` means demand b is released
+    // while it reacquires, so its ensure aborts; that is not a failure.
+    fails: `none` | `a` | `b` | `both` | `released`
+    // A new demand, c, loads while the reacquisitions are in flight.
+    newDemand?: boolean
+    // While reacquisition is in flight, the node is elected leader and a
+    // second rotation supersedes the first; it then follows again, and a new
+    // demand c loads. With nothing reacquiring, the node stays in scoped
+    // recovery: held notices must still be handled, not queued forever.
+    supersededAsLeader?: boolean
+    // How rotation starts: the source asks for scoped recovery after both
+    // demands loaded, or both demands' first reads are in flight when the
+    // cache claim is found lost.
+    trigger?: `source` | `claim-lost-during-reads`
+  }
+  type VersionedRow = { id: string; group: string; v: number }
+  type ReacquisitionObservation = {
+    rows: Record<`a` | `b` | `c`, number | undefined>
+    // The new demand's load, when the history has one.
+    newLoad?: `pending` | `fulfilled` | `rejected`
+    status: `error` | `healthy`
+  }
+  const expectedReacquisition = (
+    history: RotatedReacquisitionHistory,
+    settled: number,
+  ): ReacquisitionObservation => {
+    const fails = (group: `a` | `b`) =>
+      history.fails === group || history.fails === `both`
+    const allSettled = settled === 2
+    const ended = allSettled && !fails(`a`) && !fails(`b`)
+    // A failed reacquisition is reported when it settles.
+    const failed = history.order.slice(0, settled).some(fails)
+    return {
+      rows: ended
+        ? {
+            a: history.noticeBetween ? 3 : 2,
+            // A released demand's held notice still applies once recovery
+            // ends; the new generation's rows are trusted then.
+            b: 2,
+            c: history.newDemand ? 2 : undefined,
+          }
+        : { a: undefined, b: undefined, c: undefined },
+      ...(history.newDemand
+        ? {
+            newLoad: !allSettled
+              ? (`pending` as const)
+              : ended
+                ? (`fulfilled` as const)
+                : (`rejected` as const),
+          }
+        : {}),
+      status: failed ? `error` : `healthy`,
+    }
+  }
+
+  const assertRotatedReacquisition = async (
+    history: RotatedReacquisitionHistory,
+  ) => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const oldStorageId = `reacquire-old`
+    const newStorageId = `reacquire-new`
+    const durable = new Map<string, Map<string, VersionedRow>>([
+      [oldStorageId, new Map()],
+      [newStorageId, new Map()],
+    ])
+    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+    const seqs = new Map<string, number>()
+    const ownerCommits = (storageId: string, row: VersionedRow) => {
+      const seq = (seqs.get(storageId) ?? 0) + 1
+      seqs.set(storageId, seq)
+      durable.get(storageId)!.set(row.id, row)
+      const payload: TxCommitted = {
+        type: `tx:committed`,
+        term: 1,
+        seq,
+        txId: `owner-${storageId}-${seq}`,
+        latestRowVersion: seq,
+        requiresFullReload: false,
+        changedRows: [{ key: row.id, value: row }],
+        deletedKeys: [],
+      }
+      subscriber?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId: storageId,
+        senderId: `owner`,
+        ts: Date.now(),
+        payload,
+      })
+    }
+    type Reply = {
+      resolve: () => void
+      reject: (error: unknown) => void
+    }
+    const replies = new Map<string, Reply>()
+    let ensures = 0
+    let cEnsures = 0
+    const groupOf = (options: LoadSubsetOptions) => {
+      const where = options.where as IR.Func | undefined
+      const value = where?.args[1] as IR.Value | undefined
+      return value?.value as `a` | `b` | `c` | undefined
+    }
+    const duringReads = history.trigger === `claim-lost-during-reads`
+    const firstReads = createDeferred()
+    let reads = 0
+    let claimLost = false
+    const adapter = {
+      loadSubset: async (
+        target: PersistedStorageTarget,
+      ): Promise<Array<{ key: string; value: VersionedRow }>> => {
+        if (duringReads && ++reads <= 2) {
+          await firstReads.promise
+          claimLost = true
+        }
+        return Array.from(
+          durable.get(recordedStorageId(target))!.values(),
+          (value) => ({ key: value.id, value: { ...value } }),
+        )
+      },
+      claimCacheGeneration: async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `reacquire-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      }),
+      renewCacheGenerationClaim: async () =>
+        claimLost ? undefined : Date.now() + 60_000,
+      rotateCacheGeneration: async () => {
+        claimLost = false
+        return {
+          storageCollectionId: newStorageId,
+          claimId: `reacquire-claim-2`,
+          expiresAtMs: Date.now() + 60_000,
+        }
+      },
+      releaseCacheGenerationClaim: async () => {},
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    } as unknown as PersistenceAdapter
+    let leader = false
+    const coordinator = {
+      getNodeId: () => `follower`,
+      subscribe: (
+        _collectionId: string,
+        onMessage: (message: ProtocolEnvelope<unknown>) => void,
+      ) => {
+        subscriber = onMessage
+        return () => {
+          subscriber = undefined
+        }
+      },
+      publish: () => {},
+      isLeader: () => leader,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      // The owner commits the demand's row into the requesting generation
+      // and broadcasts it before it replies. In the new generation the
+      // driver releases the reply; a later refetch finds nothing new.
+      requestEnsureRemoteSubset: (
+        storageId: string,
+        options: LoadSubsetOptions,
+      ) => {
+        ensures++
+        const group = groupOf(options)
+        if (!group) return Promise.resolve()
+        if (storageId === oldStorageId) {
+          ownerCommits(oldStorageId, { id: `${group}-row`, group, v: 1 })
+          return Promise.resolve()
+        }
+        if (group === `c`) cEnsures++
+        if (replies.has(group) || (group === `c` && cEnsures > 1))
+          return Promise.resolve()
+        ownerCommits(newStorageId, { id: `${group}-row`, group, v: 2 })
+        // The new demand's ensure answers at once; the follower must still
+        // hold its rows until reacquisition ends.
+        if (group === `c`) return Promise.resolve()
+        return new Promise<void>((resolve, reject) => {
+          replies.set(group, { resolve, reject })
+        })
+      },
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId: string, tx: TxCommitted) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.seq,
+        }),
+      pullSince: (storageId: string) =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `reacquire-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: seqs.get(storageId) ?? 0,
+          latestRowVersion: seqs.get(storageId) ?? 0,
+          requiresFullReload: true,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    } as unknown as PersistedCollectionCoordinator
+    let sourceParams: SyncConfig<VersionedRow, string>[`sync`] extends (
+      params: infer P,
+    ) => unknown
+      ? P
+      : never
+    const source = createCollection(
+      persistedCollectionOptions<VersionedRow, string>({
+        id: `follower-reacquire-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        persistence: { adapter, coordinator },
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            return {
+              loadSubset: () => Promise.resolve(),
+              restartAfterScopedRecovery: () => {},
+            }
+          },
+        },
+      }),
+    )
+    source.startSyncImmediate()
+    let newLoad: `pending` | `fulfilled` | `rejected` = `pending`
+    const observe = (): ReacquisitionObservation => ({
+      rows: {
+        a: source.get(`a-row`)?.v,
+        b: source.get(`b-row`)?.v,
+        c: source.get(`c-row`)?.v,
+      },
+      ...(history.newDemand ? { newLoad } : {}),
+      status: source.status === `error` ? `error` : `healthy`,
+    })
+    const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
+    const settle = async () => {
+      for (let i = 0; i < 8; i++) await turn()
+    }
+    const demand = (group: `a` | `b` | `c`): LoadSubsetOptions => ({
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`group`]),
+        new IR.Value(group),
+      ]),
+    })
+    const demands = { a: demand(`a`), b: demand(`b`), c: demand(`c`) }
+    const load = (group: `a` | `b` | `c`) =>
+      source._sync.loadSubset(demands[group])
+    try {
+      if (duringReads) {
+        // Both first reads are in flight when the claim is found lost.
+        void Promise.resolve(load(`a`)).catch(() => undefined)
+        void Promise.resolve(load(`b`)).catch(() => undefined)
+        await settle()
+        firstReads.resolve()
+      } else {
+        for (const group of [`a`, `b`] as const) await load(group)
+        await settle()
+        expect(observe().rows).toEqual({ a: 1, b: 1 })
+        void sourceParams!.metadata!.persistence!.startScopedRecovery!()
+      }
+      await vi.waitFor(() => expect(replies.size).toBe(2), { timeout: 2_000 })
+      await settle()
+      if (history.newDemand) {
+        void Promise.resolve(load(`c`)).then(
+          () => (newLoad = `fulfilled`),
+          () => (newLoad = `rejected`),
+        )
+      }
+      if (history.fails === `released`) {
+        // Releasing the same demand twice must be idempotent.
+        source._sync.unloadSubset(demands.b)
+        source._sync.unloadSubset(demands.b)
+      }
+      await settle()
+      // Checkpoint: both reacquisitions are in flight.
+      expect(observe()).toEqual(expectedReacquisition(history, 0))
+      if (history.supersededAsLeader) {
+        leader = true
+        await sourceParams!.metadata!.persistence!.startScopedRecovery!()
+        await settle()
+        leader = false
+        let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+        void Promise.resolve(load(`c`)).then(
+          () => (outcome = `fulfilled`),
+          () => (outcome = `rejected`),
+        )
+        await settle()
+        // Checkpoint: the superseded reacquisition no longer holds notices.
+        // The node stays in scoped recovery with nothing reacquiring, so the
+        // owner's notice for c is handled by one refetch instead of waiting
+        // in the queue forever; the untrusted generation shows no row.
+        expect({ outcome, cEnsures, c: source.get(`c-row`)?.v }).toEqual({
+          outcome: `fulfilled`,
+          cEnsures: 2,
+          c: undefined,
+        })
+        for (const reply of replies.values()) reply.resolve()
+        return
+      }
+      for (const [index, group] of history.order.entries()) {
+        if (index === 1 && history.noticeBetween) {
+          ownerCommits(newStorageId, { id: `a-row`, group: `a`, v: 3 })
+          await settle()
+        }
+        if (history.fails === `released` && group === `b`) {
+          const aborted = new Error(`released`)
+          aborted.name = `AbortError`
+          replies.get(group)!.reject(aborted)
+        } else if (history.fails === group || history.fails === `both`)
+          replies.get(group)!.reject(new Error(`reacquire ${group} failed`))
+        else replies.get(group)!.resolve()
+        await settle()
+        // Checkpoint: after each settlement.
+        expect(observe()).toEqual(expectedReacquisition(history, index + 1))
+      }
+      // Two acquisitions and two reacquisitions, a new demand's ensure, plus
+      // one refresh per held notice when recovery stays; a refetch loop
+      // exceeds the bound.
+      expect(ensures).toBeLessThanOrEqual(16)
+    } finally {
+      await source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  }
+
+  const rotatedReacquisitionHistories: Array<RotatedReacquisitionHistory> = (
+    [
+      [`a`, `b`],
+      [`b`, `a`],
+    ] as const
+  ).flatMap((order) =>
+    [false, true].flatMap((noticeBetween) =>
+      ([`none`, `a`, `b`, `both`, `released`] as const).flatMap((fails) =>
+        [false, true].map((newDemand) => ({
+          order: [...order],
+          noticeBetween,
+          fails,
+          newDemand,
+        })),
+      ),
+    ),
+  )
+  // Known gap: see #2139. Recovery never ends today, so the histories in
+  // which it should end, or in which a new demand must wait for it, fail.
+  const reacquisitionGap = ({
+    fails,
+    newDemand,
+  }: RotatedReacquisitionHistory) =>
+    newDemand === true || fails === `none` || fails === `released`
+  it.each(
+    rotatedReacquisitionHistories.filter(
+      (history) => !reacquisitionGap(history),
+    ),
+  )(
+    `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
+    assertRotatedReacquisition,
+    10_000,
+  )
+  it.fails.each(rotatedReacquisitionHistories.filter(reacquisitionGap))(
+    `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
+    assertRotatedReacquisition,
+    10_000,
+  )
+  it(
+    `releases held notices when a second rotation supersedes reacquisition as leader`,
+    () =>
+      assertRotatedReacquisition({
+        order: [`a`, `b`],
+        noticeBetween: false,
+        fails: `none`,
+        supersededAsLeader: true,
+      }),
+    10_000,
+  )
+  // Two hydrations that both find the claim lost queue work while the
+  // follower reacquires. Their flushes must leave the held notices alone;
+  // otherwise each notice refreshes the scoped demand and the follower spins.
+  it(
+    `holds a rotated follower's notices when two reads find the claim lost: fails 'a'`,
+    () =>
+      assertRotatedReacquisition({
+        order: [`a`, `b`],
+        noticeBetween: false,
+        fails: `a`,
+        trigger: `claim-lost-during-reads`,
+      }),
+    10_000,
+  )
+  // Known gap: see #2139. Recovery never ends, so the rows stay hidden.
+  it.fails(
+    `holds a rotated follower's notices when two reads find the claim lost: fails 'none'`,
+    () =>
+      assertRotatedReacquisition({
+        order: [`a`, `b`],
+        noticeBetween: false,
+        fails: `none`,
+        trigger: `claim-lost-during-reads`,
+      }),
+    10_000,
+  )
+
+  // The same law holds when no demand is active as recovery starts: with
+  // nothing reacquired and no new generation, a later load must still not
+  // hydrate the untrusted rows.
+  it.each([`active demand`, `no active demand`] as const)(
+    `does not trust untrusted durable rows after a recovery without rotation: %s`,
+    async (activeAtRecovery) => {
+      const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const durable: Array<FollowerRow> = [{ id: `stale`, group: `a` }]
+      let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+      let seq = 0
+      const notice = (collectionId: string, value: FollowerRow) => {
+        seq++
+        if (!durable.some((row) => row.id === value.id)) durable.push(value)
+        const payload: TxCommitted = {
+          type: `tx:committed`,
+          term: 1,
+          seq,
+          txId: `owner-tx-${seq}`,
+          latestRowVersion: seq,
+          requiresFullReload: false,
+          changedRows: [{ key: value.id, value }],
+          deletedKeys: [],
+        }
+        subscriber?.({
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `owner`,
+          ts: Date.now(),
+          payload,
+        })
+      }
+      let ensures = 0
+      const adapter = {
+        loadSubset: async () =>
+          durable.map((value) => ({ key: value.id, value })),
+        loadResumeSnapshot: () =>
+          Promise.resolve({
+            rows: [],
+            keySet: { status: `consistent` },
+            collectionMetadata: [],
+            latestTerm: 0,
+            latestSeq: 0,
+            latestRowVersion: 0,
+            resetEpoch: 0,
+          }),
+        applyCommittedTx: async () => {},
+        ensureIndex: async () => {},
+      } as unknown as PersistenceAdapter
+      const coordinator = {
+        getNodeId: () => `follower`,
+        subscribe: (
+          _collectionId: string,
+          onMessage: (message: ProtocolEnvelope<unknown>) => void,
+        ) => {
+          subscriber = onMessage
+          return () => {
+            subscriber = undefined
+          }
+        },
+        publish: () => {},
+        isLeader: () => false,
+        ensureLeadership: async () => {},
+        requestEnsurePersistedIndex: async () => {},
+        requestEnsureRemoteSubset: async (collectionId: string) => {
+          if (++ensures === 1)
+            notice(collectionId, { id: `remote`, group: `a` })
+        },
+        requestReleaseRemoteSubset: async () => {},
+        registerRemoteSubsetOwner: () => () => {},
+        requestApplyCommittedTx: (_collectionId: string, tx: TxCommitted) =>
+          Promise.resolve({
+            type: `rpc:applyCommittedTx:res`,
+            rpcId: tx.txId,
+            ok: true,
+            term: tx.term,
+            seq: tx.seq,
+            latestRowVersion: seq,
+          }),
+        pullSince: () =>
+          Promise.resolve({
+            type: `rpc:pullSince:res`,
+            rpcId: `unrotated-pull`,
+            ok: true,
+            latestTerm: 1,
+            latestSeq: seq,
+            latestRowVersion: seq,
+            requiresFullReload: false,
+            changedKeys: [],
+            deletedKeys: [],
+          }),
+      } as unknown as PersistedCollectionCoordinator
+      let sourceParams: SyncConfig<FollowerRow, string>[`sync`] extends (
+        params: infer P,
+      ) => unknown
+        ? P
+        : never
+      const source = createCollection(
+        persistedCollectionOptions<FollowerRow, string>({
+          id: `follower-unrotated-${Math.random().toString(36).slice(2)}`,
+          getKey: (row) => row.id,
+          persistence: { adapter, coordinator },
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              return {
+                loadSubset: () => Promise.resolve(),
+                restartAfterScopedRecovery: () => {},
+              }
+            },
+          },
+        }),
+      )
+      source.startSyncImmediate()
+      const query = createLiveQueryCollection((q) =>
+        q.from({ row: source }).where(({ row }) => eq(row.group, `a`)),
+      )
+      try {
+        if (activeAtRecovery === `active demand`) {
+          await query.preload()
+          expect(Array.from(source.keys()).sort()).toEqual([`remote`, `stale`])
+        } else {
+          // Start the source without any demand.
+          void source.preload().catch(() => undefined)
+          await vi.waitFor(() => expect(sourceParams).toBeDefined())
+        }
+
+        // The source reports that the old durable rows are untrusted.
+        await sourceParams!.metadata!.persistence!.startScopedRecovery!()
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        if (activeAtRecovery === `no active demand`) {
+          void query.preload().catch(() => undefined)
+        }
+        notice(source.id, { id: `fresh`, group: `a` })
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        expect(Array.from(source.keys())).not.toContain(`stale`)
+      } finally {
+        await query.cleanup()
+        await source.cleanup()
+        errors.mockRestore()
+        warnings.mockRestore()
+      }
+    },
+  )
+
+  const followerRemoteDemandHistory = fc.record({
+    // Known gap: see #2139. The rotated placement is pinned above.
+    placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
+      `direct`,
+      `queued`,
+      `expired`,
+    ),
+    apply: fc.constantFrom<FollowerRemoteDemandHistory[`apply`]>(`ok`, `fails`),
+    consumer: fc.constantFrom<FollowerRemoteDemandHistory[`consumer`]>(
+      `live-query`,
+      `load`,
+    ),
+  })
+  fcTest.prop(
+    [followerRemoteDemandHistory],
+    oraclePropertyOptions(12, `persistence.follower-remote-demand`),
+  )(
+    `checks generated follower remote-demand histories (random or replayed)`,
+    assertFollowerRemoteDemandHistory,
+  )
+
+  // The model has one one-shot refresh lease. The grammar crosses cleanup
+  // before and after source settlement. Whichever event wins releases the
+  // lease once. The raw release log retains multiplicity at both checkpoints.
+  it.each([false, true])(
+    `releases a scoped refresh once when settlement precedes cleanup: %s`,
+    async (settleBeforeCleanup) => {
+      const adapter = createRecordingAdapter()
+      const coordinator = createCoordinatorHarness()
+      const logicalId = `scoped-refresh-cleanup`
+      const oldStorageId = `scoped-refresh-old`
+      const newStorageId = `scoped-refresh-new`
+      const refreshEntered = createEventGate()
+      const releaseRefresh = createEventGate()
+      const releaseCalls: Array<LoadSubsetOptions> = []
+      let watchRefresh = false
+      let refreshOptions: LoadSubsetOptions | undefined
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `scoped-refresh-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      })
+      adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+      adapter.rotateCacheGeneration = async () => ({
+        storageCollectionId: newStorageId,
+        claimId: `scoped-refresh-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      })
+      adapter.releaseCacheGenerationClaim = async () => {}
+      coordinator.requestEnsureRemoteSubset = async (_id, options) => {
+        if (watchRefresh && options.refetch === true) {
+          refreshOptions = options
+          refreshEntered.resolve()
+          await releaseRefresh.promise
+        }
+      }
+      coordinator.requestReleaseRemoteSubset = async (_id, options) => {
+        releaseCalls.push(options)
+      }
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: (cacheRotated) => cacheRotated,
+                loadSubset: async () => {},
+              }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() => expect(source).toBeDefined()),
+          `source sync entered`,
+        )
+        await collection._sync.loadSubset({ limit: 1 })
+        await source.metadata!.persistence!.startScopedRecovery!()
+        watchRefresh = true
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `scoped-refresh-notice`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [
+              { key: `fresh`, value: { id: `fresh`, title: `Fresh` } },
+            ],
+            deletedKeys: [],
+          },
+          `peer`,
+          newStorageId,
+        )
+        await atPersistedOracleCheckpoint(
+          refreshEntered.promise,
+          `scoped refresh acquisition entered`,
+        )
+        if (settleBeforeCleanup) {
+          releaseRefresh.resolve()
+          await atPersistedOracleCheckpoint(
+            vi.waitFor(() =>
+              expect(
+                releaseCalls.filter((options) => options === refreshOptions),
+              ).toHaveLength(1),
+            ),
+            `refresh settlement released its lease`,
+          )
+        }
+        const cleanup = collection.cleanup()
+        await atPersistedOracleCheckpoint(cleanup, `cleanup released refresh`)
+        expect(
+          releaseCalls.filter((options) => options === refreshOptions),
+        ).toHaveLength(1)
+        releaseRefresh.resolve()
+        await flushAsyncWork()
+        expect(
+          releaseCalls.filter((options) => options === refreshOptions),
+        ).toHaveLength(1)
+      } finally {
+        releaseRefresh.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A cached read may start under a live claim, then return after a paused
+  // tab's claim expires while its renewal timer is still queued. The read's
+  // old rows have no publication authority at that cut. The model discards
+  // them, rotates privately, and completes the retained demand from a new
+  // source snapshot. This gate holds the adapter result across the expiry;
+  // public rows, durable destination, and demand settlement distinguish a
+  // post-read fence from a check made only before the read.
+  it.each([
+    { outcome: `old rows returned`, expires: true },
+    { outcome: `claim check rejected`, expires: true },
+    { outcome: `live claim I/O failure`, expires: false },
+  ] as const)(
+    `handles a held subset read when $outcome`,
+    async ({ outcome, expires }) => {
+      const adapter = createRecordingAdapter()
+      const readEntered = createEventGate()
+      const releaseRead = createEventGate()
+      let now = 1_000
+      let storageId = `read-expiry-old`
+      let sourceLoads = 0
+      const ioFailure = new Error(`subset read I/O failure`)
+      adapter.getCacheGenerationNow = () => now
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: storageId,
+        claimId: `read-expiry-claim`,
+        expiresAtMs: 11_000,
+      })
+      adapter.renewCacheGenerationClaim = async (id) =>
+        id === `read-expiry-old` && now >= 11_000 ? undefined : now + 10_000
+      adapter.rotateCacheGeneration = async () => {
+        return {
+          storageCollectionId: (storageId = `read-expiry-new`),
+          claimId: `read-expiry-claim`,
+          expiresAtMs: now + 10_000,
+        }
+      }
+      adapter.releaseCacheGenerationClaim = async () => {}
+      adapter.loadSubset = async (id) => {
+        if (recordedStorageId(id) === `read-expiry-old`) {
+          readEntered.resolve()
+          await releaseRead.promise
+          if (outcome === `claim check rejected`) {
+            throw new InvalidPersistedCollectionConfigError(
+              `Persisted cache claim is no longer active for collection "${id}"`,
+            )
+          }
+          if (outcome === `live claim I/O failure`) throw ioFailure
+          return [
+            {
+              key: `stale`,
+              value: { id: `stale`, title: `Expired cached row` },
+            },
+          ]
+        }
+        return []
+      }
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `read-expiry-publication`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async () => {
+                  expect(collection.get(`stale`)).toBeUndefined()
+                  sourceLoads++
+                  source.begin()
+                  source.write({
+                    type: `insert`,
+                    value: { id: `fresh`, title: `New source row` },
+                  })
+                  await whenSyncAccepted(source.commit())
+                },
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      try {
+        await collection.stateWhenReady()
+        const demand = Promise.resolve(
+          collection._sync.loadSubset({ limit: 1 }),
+        )
+        void demand.catch(() => undefined)
+        await atPersistedOracleCheckpoint(readEntered.promise, `old cache read`)
+        if (expires) now = 11_001
+        releaseRead.resolve()
+        const [settlement] = await atPersistedOracleCheckpoint(
+          Promise.allSettled([demand]),
+          `held subset demand settlement`,
+        )
+        if (!expires) {
+          expect(settlement).toEqual({ status: `rejected`, reason: ioFailure })
+          expect(storageId).toBe(`read-expiry-old`)
+          expect(sourceLoads).toBe(0)
+          expect(collection.get(`stale`)).toBeUndefined()
+          return
+        }
+        expect(settlement.status).toBe(`fulfilled`)
+        expect(collection.get(`stale`)).toBeUndefined()
+        expect(collection.get(`fresh`)).toMatchObject({ id: `fresh` })
+        expect(storageId).toBe(`read-expiry-new`)
+        expect(sourceLoads).toBe(1)
+        expect(
+          adapter.applyCommittedTxCalls
+            .filter((call) =>
+              call.tx.mutations.some((mutation) => mutation.key === `fresh`),
+            )
+            .map((call) => call.collectionId),
+        ).toEqual([`read-expiry-new`])
+      } finally {
+        releaseRead.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // Resume certification is another consumer of a persisted snapshot. A read
+  // may pass SQLite's claim check while live, then return after expiry. The
+  // independent rule gives neither its old answer nor its claim-check failure
+  // authority to certify the old key set: the run moves to private storage.
+  // A still-live claim with an unrelated I/O failure is terminal instead.
+  // The history holds only certification, optionally expires the claim, then
+  // compares settlement, evidence, storage route, and public status. Startup,
+  // hydration, and replay have separate held-read witnesses; none exercises
+  // this resume-certification boundary.
+  it.each([
+    { readOutcome: `old snapshot returned`, failure: `none`, expires: true },
+    { readOutcome: `claim check rejected`, failure: `claim`, expires: true },
+    { readOutcome: `live claim I/O failure`, failure: `io`, expires: false },
+  ] as const)(
+    `handles held resume certification when $readOutcome`,
+    async ({ failure, expires }) => {
+      const adapter = createRecordingAdapter()
+      const readEntered = createEventGate()
+      const releaseRead = createEventGate()
+      const oldStorageId = `certification-expiry-old`
+      const newStorageId = `certification-expiry-new`
+      let storageId = oldStorageId
+      let now = 1_000
+      let rotations = 0
+      let holdCertification = false
+      const ioFailure = new Error(`certification read I/O failure`)
+      adapter.getCacheGenerationNow = () => now
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: storageId,
+        claimId: `certification-expiry-claim`,
+        expiresAtMs: 11_000,
+      })
+      adapter.renewCacheGenerationClaim = async (id) =>
+        id === oldStorageId && now >= 11_000 ? undefined : now + 10_000
+      adapter.rotateCacheGeneration = async () => {
+        rotations++
+        storageId = newStorageId
+        return {
+          storageCollectionId: newStorageId,
+          claimId: `certification-expiry-claim`,
+          expiresAtMs: now + 10_000,
+        }
+      }
+      adapter.releaseCacheGenerationClaim = async () => {}
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      adapter.loadResumeSnapshot = async (...args) => {
+        const snapshot = await loadResumeSnapshot(...args)
+        if (holdCertification && recordedStorageId(args[0]) === oldStorageId) {
+          readEntered.resolve()
+          await releaseRead.promise
+          if (failure === `claim`) {
+            throw new InvalidPersistedCollectionConfigError(
+              `Persisted cache claim is no longer active for collection "${oldStorageId}"`,
+            )
+          }
+          if (failure === `io`) throw ioFailure
+        }
+        return snapshot
+      }
+      let persistenceCapability:
+        SyncMetadataApi<string>[`persistence`] | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `certification-expiry-public`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              persistenceCapability = params.metadata?.persistence
+              params.markReady()
+              return { restartAfterScopedRecovery: () => {} }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let certification: Promise<void> | undefined
+      try {
+        await collection.stateWhenReady()
+        expect(
+          persistenceCapability?.resumeSnapshot.getKeySetEvidence(),
+        ).toEqual({ status: `consistent` })
+        holdCertification = true
+        certification = persistenceCapability?.resumeSnapshot.certify()
+        if (!certification) throw new Error(`Missing resume certification`)
+        void certification.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          readEntered.promise,
+          `held resume certification`,
+        )
+        if (expires) now = 11_001
+        releaseRead.resolve()
+        const outcome = await atPersistedOracleCheckpoint(
+          Promise.allSettled([certification]),
+          `held resume certification settlement`,
+        )
+        if (expires) {
+          expect(outcome[0].status).toBe(`fulfilled`)
+          expect(rotations).toBe(1)
+          expect(storageId).toBe(newStorageId)
+          expect(
+            persistenceCapability?.resumeSnapshot.getKeySetEvidence(),
+          ).toEqual({ status: `incompatible` })
+          expect(collection.status).not.toBe(`error`)
+        } else {
+          expect(outcome).toEqual([{ status: `rejected`, reason: ioFailure }])
+          expect(rotations).toBe(0)
+          expect(storageId).toBe(oldStorageId)
+          expect(collection.status).toBe(`error`)
+        }
+      } finally {
+        releaseRead.resolve()
+        await Promise.allSettled([certification])
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A peer notification may begin a full reload while the cache claim is
+  // valid, then hold its persisted read until that claim expires. The cached
+  // result loses publication authority at that cut. The independent rule is
+  // the same as for a direct subset read: discard the old result, rotate this
+  // run's cache, and reload its retained demand from the source. The adapter
+  // may return the old rows or reject at its second claim check. A still-live
+  // claim with an unrelated read failure is a control: it must remain terminal.
+  // A check only when the notification arrives misses both expiry histories.
+  // The held adapter read fixes the order; public rows and Collection status
+  // after release are the comparison cut.
+  it.each([
+    { readOutcome: `old rows returned`, failure: `none`, expires: true },
+    { readOutcome: `claim check rejected`, failure: `claim`, expires: true },
+    { readOutcome: `live claim I/O error`, failure: `io`, expires: false },
+  ])(
+    `handles a peer full reload when $readOutcome`,
+    async ({ failure, expires }) => {
+      const adapter = createRecordingAdapter()
+      const oldStorageId = `peer-reload-old`
+      const newStorageId = `peer-reload-new`
+      const coordinator = createFailStopCoordinatorHarness(oldStorageId)
+      const readEntered = createEventGate()
+      const releaseRead = createEventGate()
+      const readError = new Error(`Persisted peer reload I/O failed`)
+      let now = 1_000
+      let expiresAtMs = 11_000
+      let readCount = 0
+      let rotations = 0
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `peer-reload-claim`,
+        expiresAtMs,
+      })
+      adapter.getCacheGenerationNow = () => now
+      adapter.renewCacheGenerationClaim = async () => {
+        if (now >= expiresAtMs) return undefined
+        expiresAtMs = now + 10_000
+        return expiresAtMs
+      }
+      adapter.rotateCacheGeneration = async () => {
+        rotations++
+        return {
+          storageCollectionId: newStorageId,
+          claimId: `peer-reload-claim`,
+          expiresAtMs: now + 10_000,
+        }
+      }
+      adapter.releaseCacheGenerationClaim = async () => {}
+      adapter.loadSubset = async (storageId) => {
+        if (recordedStorageId(storageId) !== oldStorageId) return []
+        if (++readCount === 1) {
+          return [{ key: `old`, value: { id: `old`, title: `Initial row` } }]
+        }
+        readEntered.resolve()
+        await releaseRead.promise
+        if (failure === `claim`) {
+          throw new InvalidPersistedCollectionConfigError(
+            `Persisted cache claim is no longer active for collection "${oldStorageId}"`,
+          )
+        }
+        if (failure === `io`) throw readError
+        return [{ key: `old`, value: { id: `old`, title: `Expired peer row` } }]
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `peer-reload-expiry`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (source) => {
+              source.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: () => true,
+              }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(collection.get(`old`)?.title).toBe(`Initial row`)
+
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `peer-full-reload`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        })
+        await atPersistedOracleCheckpoint(
+          readEntered.promise,
+          `peer reload read`,
+        )
+        if (expires) now = expiresAtMs + 1
+        releaseRead.resolve()
+        await flushAsyncWork()
+
+        if (failure === `io`) {
+          expect(collection.status).toBe(`error`)
+          expect(collection.get(`old`)?.title).toBe(`Initial row`)
+          expect(rotations).toBe(0)
+          await expect(collection._sync.loadSubset({})).rejects.toBe(readError)
+          return
+        }
+        expect(collection.get(`old`)?.title).not.toBe(`Expired peer row`)
+        expect(collection.status).not.toBe(`error`)
+        await vi.waitFor(() => expect(rotations).toBe(1))
+        expect(collection.get(`old`)).toBeUndefined()
+      } finally {
+        releaseRead.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A persisted row scan is an exposed read, even though it does not publish
+  // rows to the Collection. Two sync runs initially claim the same cache
+  // generation. The model keeps the warm peer's claim and rows intact when the
+  // other claim expires. A held old scan must not return those rows to its
+  // caller; it retries against that run's private generation instead. The
+  // adapter gate fixes expiry after the old read but before its result reaches
+  // the caller. Both scan results and the peer's later read are observations.
+  it(`retries a held persisted row scan after only its claim expires`, async () => {
+    const adapter = createRecordingAdapter()
+    const scanEntered = createEventGate()
+    const releaseScan = createEventGate()
+    const oldRow = { key: `old`, value: { id: `old`, title: `Warm peer row` } }
+    const freshRow = {
+      key: `fresh`,
+      value: { id: `fresh`, title: `Private generation row` },
+    }
+    const scanRoutes: Array<{ storageId: string; claimId?: string }> = []
+    let claims = 0
+    let expired = false
+    let rotations = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `scan-old-storage`,
+      claimId: ++claims === 1 ? `scan-warm-claim` : `scan-expiring-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async (_storageId, claimId) =>
+      expired && claimId === `scan-expiring-claim`
+        ? undefined
+        : Date.now() + 10_000
+    adapter.rotateCacheGeneration = async (
+      _collectionId,
+      claimId,
+      _resetMetadata,
+      expectedStorageId,
+    ) => {
+      expect(claimId).toBe(`scan-expiring-claim`)
+      expect(expectedStorageId).toBe(`scan-old-storage`)
+      rotations++
+      return {
+        storageCollectionId: `scan-private-storage`,
+        claimId: `scan-private-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    adapter.scanRows = async (storageId, _options, context) => {
+      scanRoutes.push({
+        storageId: recordedStorageId(storageId),
+        claimId: context?.cacheGenerationClaimId,
+      })
+      if (
+        recordedStorageId(storageId) === `scan-old-storage` &&
+        context?.cacheGenerationClaimId === `scan-expiring-claim`
+      ) {
+        scanEntered.resolve()
+        await releaseScan.promise
+      }
+      return recordedStorageId(storageId) === `scan-private-storage`
+        ? [freshRow]
+        : [oldRow]
+    }
+
+    let warmSource!: TodoSyncParams
+    let expiringSource!: TodoSyncParams
+    const makePeer = (onStart: (source: TodoSyncParams) => void) =>
+      createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `held-scan-peers`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              onStart(params)
+              params.markReady()
+              return { restartAfterScopedRecovery: () => {} }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+    const warm = makePeer((source) => {
+      warmSource = source
+    })
+    const expiring = makePeer((source) => {
+      expiringSource = source
+    })
+    try {
+      warm.startSyncImmediate()
+      await warm.stateWhenReady()
+      expiring.startSyncImmediate()
+      await expiring.stateWhenReady()
+      expect(
+        await warmSource.metadata!.persistence!.scanPersistedRows(),
+      ).toEqual([oldRow])
+
+      const heldScan = expiringSource.metadata!.persistence!.scanPersistedRows()
+      await atPersistedOracleCheckpoint(scanEntered.promise, `old row scan`)
+      expired = true
+      releaseScan.resolve()
+      expect(
+        await atPersistedOracleCheckpoint(heldScan, `private row scan`),
+      ).toEqual([freshRow])
+      expect(rotations).toBe(1)
+      expect(scanRoutes).toContainEqual({
+        storageId: `scan-private-storage`,
+        claimId: `scan-private-claim`,
+      })
+      expect(
+        await warmSource.metadata!.persistence!.scanPersistedRows(),
+      ).toEqual([oldRow])
+      expect(warm.status).toBe(`ready`)
+    } finally {
+      releaseScan.resolve()
+      await expiring.cleanup()
+      await warm.cleanup()
+    }
+  })
+
+  // A coordinator replay may read a valid persisted cache generation, then
+  // return after this sync run's claim expires. Its deltas cannot publish
+  // under that expired claim. The independent model leaves the peer's head
+  // intact and rotates only this run's cache before any old row is visible.
+  // The held pull fixes the expiry cut; public rows and the private rotation
+  // are checked after the response rather than at request admission.
+  it(`discards a seq-gap replay returned after its cache claim expires`, async () => {
+    const adapter = createRecordingAdapter()
+    const id = `expired-seq-gap-replay`
+    const coordinator = createFailStopCoordinatorHarness(`replay-old-storage`)
+    const pullEntered = createEventGate()
+    const releasePull = createEventGate()
+    let expired = false
+    let storageId = `replay-old-storage`
+    let rotations = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `replay-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () =>
+      expired ? undefined : Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      return {
+        storageCollectionId: (storageId = `replay-private-storage`),
+        claimId: `replay-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    coordinator.pullSince = async () => {
+      pullEntered.resolve()
+      await releasePull.promise
+      return {
+        type: `rpc:pullSince:res`,
+        rpcId: `expired-pull`,
+        ok: true,
+        latestTerm: 1,
+        latestSeq: 2,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedKeys: [`old`],
+        deletedKeys: [],
+        deltas: [
+          {
+            txId: `old-delta`,
+            latestRowVersion: 2,
+            changedRows: [
+              {
+                key: `old`,
+                value: { id: `old`, title: `Expired replay row` },
+              },
+            ],
+            deletedKeys: [],
+            rowMetadataMutations: [],
+            collectionMetadataMutations: [],
+          },
+        ],
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              loadSubset: async () => {},
+              restartAfterScopedRecovery: () => {},
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset({})
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `gap-trigger`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(pullEntered.promise, `seq-gap pull`)
+      expired = true
+      releasePull.resolve()
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(collection.get(`old`)).toBeUndefined()
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(rotations).toBe(1)),
+        `private replay recovery`,
+      )
+      expect(storageId).toBe(`replay-private-storage`)
+    } finally {
+      releasePull.resolve()
+      await collection.cleanup()
+    }
+  })
+
+  // A source commit that arrives before a paused tab's renewal timer runs
+  // must not publish or persist under the expired claim. The independent
+  // history expires the claim immediately before commit admission, then lets
+  // recovery advance to private empty storage. The rejected receipt and
+  // exact destination of the following commit are the observations.
+  it(`rejects an old source commit after cache claim expiry and permits a new one`, async () => {
+    const adapter = createRecordingAdapter()
+    const claimId = `expired-write-claim`
+    let storageId = `expired-write-old`
+    let active = true
+    let renewals = 0
+    let rotations = 0
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      return active ? Date.now() + 10_000 : undefined
+    }
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      active = true
+      return {
+        storageCollectionId: (storageId = `expired-write-new`),
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    let source!: TodoSyncParams
+    const sourceRestarted = createEventGate()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `expired-source-write`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            // Both old commits have entered the wrapper before rotation.
+            return {
+              restartAfterScopedRecovery: (cacheRotated) =>
+                cacheRotated.then(() => sourceRestarted.resolve()),
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await source.metadata!.persistence!.hydrateBaseline()
+      // Baseline hydration is still authorized; expiry starts at commit admission.
+      active = false
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `old`, title: `Expired claim` },
+      })
+      const oldReceipt = source.commit()
+      if (oldReceipt === true) throw new Error(`source receipt was not tracked`)
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `second-old`, title: `Queued expired claim` },
+      })
+      const secondOldReceipt = source.commit()
+      if (secondOldReceipt === true)
+        throw new Error(`second source receipt was not tracked`)
+      await expect(oldReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await expect(secondOldReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(storageId).toBe(`expired-write-new`)),
+        `claim expiry recovery`,
+      )
+      await atPersistedOracleCheckpoint(
+        sourceRestarted.promise,
+        `replacement source restart`,
+      )
+      expect(rotations).toBe(1)
+      expect(renewals).toBeGreaterThan(0)
+      expect(collection.get(`old`)).toBeUndefined()
+      expect(collection.get(`second-old`)).toBeUndefined()
+      expect(
+        adapter.applyCommittedTxCalls.filter((call) =>
+          call.tx.mutations.some(
+            (mutation) =>
+              mutation.key === `old` || mutation.key === `second-old`,
+          ),
+        ),
+      ).toEqual([])
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `new`, title: `New private generation` },
+      })
+      await whenSyncAccepted(source.commit())
+      expect(collection.get(`new`)).toMatchObject({ id: `new` })
+      expect(
+        adapter.applyCommittedTxCalls
+          .filter((call) =>
+            call.tx.mutations.some((mutation) => mutation.key === `new`),
+          )
+          .map((call) => call.collectionId),
+      ).toEqual([`expired-write-new`])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Claim expiry revokes durable source authority, but it does not settle a
+  // local optimistic transaction. The model keeps that row visible until its
+  // mutation function settles, clears the old source base, then accepts a
+  // fresh source commit in the new generation. This checkpoint also detects
+  // a recovery that waits for visibility of its truncate behind the mutation.
+  it(`recovers an expired cache claim beneath a persisting optimistic mutation`, async () => {
+    const adapter = createRecordingAdapter()
+    let storageId = `optimistic-expiry-old`
+    let expired = false
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `optimistic-expiry-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () =>
+      expired ? undefined : Date.now() + 10_000
+    adapter.rotateCacheGeneration = async () => {
+      expired = false
+      return {
+        storageCollectionId: (storageId = `optimistic-expiry-new`),
+        claimId: `optimistic-expiry-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const entered = createDeferred()
+    const release = createDeferred()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `optimistic-expiry`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            // This controlled source delivers only explicit test writes.
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          entered.resolve()
+          await release.promise
+        },
+      }),
+    )
+    let mutation: ReturnType<typeof collection.insert> | undefined
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      mutation = collection.insert({ id: `local`, title: `Pending` })
+      await entered.promise
+      expect(collection.get(`local`)).toMatchObject({ id: `local` })
+      expired = true
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `old`, title: `Expired source` },
+      })
+      const staleReceipt = source.commit()
+      if (staleReceipt === true)
+        throw new Error(`source receipt was not tracked`)
+      await expect(staleReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(storageId).toBe(`optimistic-expiry-new`)),
+        `expired optimistic recovery`,
+      )
+      expect(collection.get(`local`)).toMatchObject({ id: `local` })
+      expect(collection.get(`old`)).toBeUndefined()
+      release.resolve()
+      await mutation.isPersisted.promise
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `fresh`, title: `New source` },
+      })
+      await whenSyncAccepted(source.commit())
+      expect(collection.get(`fresh`)).toMatchObject({ id: `fresh` })
+      expect(
+        adapter.applyCommittedTxCalls
+          .filter((call) =>
+            call.tx.mutations.some((entry) => entry.key === `fresh`),
+          )
+          .map((call) => call.collectionId),
+      ).toEqual([`optimistic-expiry-new`])
+    } finally {
+      release.resolve()
+      await mutation?.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  // A warm run with an active demand renews its claim while timers run. If a
+  // long pause lets the claim expire, that timer must start scoped recovery
+  // and reacquire the active subset from the source. The held wall-clock
+  // interval is bounded; the source call log distinguishes a wakeup from a
+  // run that silently stays on the old cache.
+  it(`reloads an active subset when its renewal timer finds an expired claim`, async () => {
+    const adapter = createRecordingAdapter()
+    let storageId = `timer-old-storage`
+    let renewals = 0
+    let rotations = 0
+    let expired = false
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: storageId,
+      claimId: `timer-claim`,
+      expiresAtMs: Date.now() + 80,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      return expired ? undefined : Date.now() + 80
+    }
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      return {
+        storageCollectionId: (storageId = `timer-new-storage`),
+        claimId: `timer-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const sourceLoads: Array<{ refetch?: boolean }> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `timer-claim-reload`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              // The first load has settled before the claim-expiry timer.
+              restartAfterScopedRecovery: () => {},
+              loadSubset: (options) => {
+                sourceLoads.push({ refetch: options.refetch })
+                return Promise.resolve()
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset({ limit: 1 })
+      expect(sourceLoads).toEqual([{ refetch: undefined }])
+      expired = true
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(rotations).toBe(1)),
+        `expired timer recovery`,
+      )
+      expect(renewals).toBeGreaterThan(0)
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() => expect(sourceLoads).toHaveLength(2)),
+        `active subset reload`,
+      )
+      expect(sourceLoads[1]).toEqual({ refetch: true })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // A live claim with more than one timer interval remaining needs no durable
+  // renewal write for each source commit or subset read. The adapter checks
+  // claim authority at its storage boundary, while the timer maintains an
+  // otherwise idle run. The independent clock and call ledger require zero
+  // foreground renewals far from expiry and one when less than a minute
+  // remains. The row receipts and subset loads still complete at both cuts.
+  it(`renews a live cache claim only near expiry during foreground work`, async () => {
+    const adapter = createRecordingAdapter()
+    let now = 1_000
+    let expiresAtMs = 301_000
+    let renewals = 0
+    let rotations = 0
+    adapter.getCacheGenerationNow = () => now
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `foreground-renewal-storage`,
+      claimId: `foreground-renewal-claim`,
+      expiresAtMs,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      if (now >= expiresAtMs) return undefined
+      return (expiresAtMs = now + 300_000)
+    }
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      return {
+        storageCollectionId: `foreground-renewal-new`,
+        claimId: `foreground-renewal-claim`,
+        expiresAtMs: (expiresAtMs = now + 300_000),
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `foreground-claim-renewal`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const commit = async (id: string) => {
+      source.begin()
+      source.write({ type: `insert`, value: { id, title: id } })
+      await whenSyncAccepted(source.commit())
+    }
+    try {
+      await collection.stateWhenReady()
+      const startupRenewals = renewals
+      for (let index = 0; index < 6; index++) {
+        await commit(`far-${index}`)
+        await collection._sync.loadSubset({ limit: index + 1 })
+      }
+      expect(renewals).toBe(startupRenewals)
+      expect(collection.get(`far-5`)).toMatchObject({ id: `far-5` })
+      expect(rotations).toBe(0)
+
+      now = 251_000
+      await commit(`near`)
+      expect(renewals).toBe(startupRenewals + 1)
+      expect(collection.get(`near`)).toMatchObject({ id: `near` })
+      await collection._sync.loadSubset({ limit: 7 })
+      expect(renewals).toBe(startupRenewals + 1)
+      expect(rotations).toBe(0)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Skipping a far-from-expiry timer check must arm its successor. This
+  // virtual-clock history observes no durable renewal at the first minute,
+  // then one renewal when the same idle claim enters the one-minute window.
+  // It distinguishes a cheap timer wake from accidentally consuming the only
+  // renewal opportunity.
+  it(`reschedules a skipped cache-claim timer until renewal is due`, async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const adapter = createRecordingAdapter()
+    let expiresAtMs = Date.now() + 180_000
+    let renewals = 0
+    let rotations = 0
+    adapter.getCacheGenerationNow = () => Date.now()
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `idle-renewal-storage`,
+      claimId: `idle-renewal-claim`,
+      expiresAtMs,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      if (Date.now() >= expiresAtMs) return undefined
+      return (expiresAtMs = Date.now() + 180_000)
+    }
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      return {
+        storageCollectionId: `idle-renewal-new`,
+        claimId: `idle-renewal-claim`,
+        expiresAtMs: (expiresAtMs = Date.now() + 180_000),
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `idle-claim-renewal`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      const startupRenewals = renewals
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(renewals).toBe(startupRenewals)
+      expect(collection.status).toBe(`ready`)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(renewals).toBe(startupRenewals + 1)
+      expect(rotations).toBe(0)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      await collection.cleanup()
+      vi.useRealTimers()
+    }
+  })
+
+  // A timer's transient renewal failure does not prove that the claim has
+  // expired. The independent clock model keeps the old claim through the
+  // failed attempt, retries before expiry, and never publishes an error or
+  // rotates storage. The scheduled retry, status and storage route are checked
+  // after each virtual-clock cut; treating every rejection as terminal fails
+  // at the first cut.
+  it(`retries a transient cache-claim renewal error while the claim is live`, async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const adapter = createRecordingAdapter()
+    let renewals = 0
+    let rotations = 0
+    let failNextRenewal = false
+    adapter.getCacheGenerationNow = () => Date.now()
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `timer-transient-old`,
+      claimId: `timer-transient-claim`,
+      expiresAtMs: Date.now() + 1_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      if (failNextRenewal) {
+        failNextRenewal = false
+        throw new Error(`transient SQLITE_BUSY`)
+      }
+      return Date.now() + 1_000
+    }
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      return {
+        storageCollectionId: `timer-transient-new`,
+        claimId: `timer-transient-claim`,
+        expiresAtMs: Date.now() + 1_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `timer-transient-renewal`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return { restartAfterScopedRecovery: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      failNextRenewal = true
+      await vi.advanceTimersByTimeAsync(500)
+      expect(collection.status).toBe(`ready`)
+      expect(rotations).toBe(0)
+      const countAfterFailure = renewals
+      await vi.advanceTimersByTimeAsync(250)
+      expect(renewals).toBeGreaterThan(countAfterFailure)
+      expect(collection.status).toBe(`ready`)
+      expect(rotations).toBe(0)
+    } finally {
+      await collection.cleanup()
+      vi.useRealTimers()
+    }
+  })
+
+  // Recovery can accept a new storage generation while its source restart is
+  // still held. A renewal timer consumed during that hold cannot renew: its
+  // own claim check joins the in-flight recovery. The independent clock model
+  // therefore starts the new timer after source restart, then renews before
+  // the replacement claim expires. No further demand drives this checkpoint.
+  it(`renews a replacement cache claim after a held source restart`, async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const adapter = createRecordingAdapter()
+    const sourceHeld = createEventGate()
+    const releaseSource = createEventGate()
+    const sourceFinished = createEventGate()
+    let renewals = 0
+    let rotations = 0
+    adapter.getCacheGenerationNow = () => Date.now()
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `held-source-old`,
+      claimId: `held-source-claim`,
+      expiresAtMs: 2_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      renewals++
+      return rotations === 0 && Date.now() >= 2_000
+        ? undefined
+        : Date.now() + 1_000
+    }
+    adapter.rotateCacheGeneration = async () => {
+      rotations++
+      return {
+        storageCollectionId: `held-source-new`,
+        claimId: `held-source-claim`,
+        expiresAtMs: Date.now() + 1_000,
+      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `held-source-renewal`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              restartAfterScopedRecovery: (cacheRotated) =>
+                cacheRotated.then(async () => {
+                  sourceHeld.resolve()
+                  await releaseSource.promise
+                  sourceFinished.resolve()
+                }),
+              loadSubset: () => Promise.resolve(),
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      vi.setSystemTime(2_100)
+      await vi.advanceTimersByTimeAsync(500)
+      await sourceHeld.promise
+      expect(rotations).toBe(1)
+      await vi.advanceTimersByTimeAsync(500)
+      releaseSource.resolve()
+      await sourceFinished.promise
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+      const afterRecovery = renewals
+      await vi.advanceTimersByTimeAsync(260)
+      expect(renewals).toBeGreaterThan(afterRecovery)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      releaseSource.resolve()
+      await collection.cleanup()
+      vi.useRealTimers()
+    }
+  })
+
+  // A local cache clear supplies no source-readiness evidence. The model starts
+  // loading, accepts the scoped truncate, and remains loading until the source
+  // explicitly marks ready. This wrapper-path check observes status after the
+  // truncate commit, where the core default could otherwise publish readiness.
+  it(`keeps initial Collection loading through a scoped cache clear`, async () => {
+    const adapter = createRecordingAdapter()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-clear-readiness`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+      expect(collection.status).toBe(`loading`)
+      await source.metadata!.persistence!.startScopedRecovery!()
+      expect(collection.status).toBe(`loading`)
+      source.markReady()
+      await flushAsyncWork()
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Core applies an accepted truncate even while a local optimistic handler
+  // persists. The source may continue after this accepted clear; a later subset
+  // still waits for its own applied rows. This held-handler cut tests the
+  // review's proposed acceptance/application cycle on the actual wrapper path.
+  it(`accepts a scoped cache clear while an optimistic handler is held`, async () => {
+    const adapter = createRecordingAdapter()
+    const entered = createDeferred()
+    const release = createDeferred()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-clear-held-handler`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          entered.resolve()
+          await release.promise
+        },
+      }),
+    )
+    let mutation: ReturnType<typeof collection.insert> | undefined
+
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      mutation = collection.insert({ id: `local`, title: `Pending` })
+      await entered.promise
+      const recovery = observeSettlement(
+        source.metadata!.persistence!.startScopedRecovery!(),
+      )
+      await flushAsyncWork()
+      expect(recovery.read()).toEqual({ status: `fulfilled` })
+      expect(collection.get(`local`)).toBeDefined()
+      release.resolve()
+      await mutation.isPersisted.promise
+    } finally {
+      release.resolve()
+      await mutation?.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
   })
 
   it(`fail-stops queued and later work when reset reload fails after truncation`, async () => {
@@ -19963,7 +28756,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const publishCallsBefore = coordinator.publishCalls.length
     adapter.loadSubset = (collectionId, options, context) => {
       adapter.loadSubsetCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         options,
         requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
       })
@@ -20546,6 +29339,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const replacementReceipt = replacement.commit()
       if (replacementReceipt !== true) await replacementReceipt
 
+      // A retained capability from the cleaned-up run must not truncate the
+      // new Collection, even when invoked after the replacement row applies.
+      await retired.metadata!.persistence!.startScopedRecovery!()
+
       expect({
         retiredPublic: collection.get(`retired`),
         retiredDurable: adapter.rows.get(`retired`),
@@ -20576,6 +29373,70 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // hydration scope. The adapter makes an interleaved v2 write possible only
   // outside that scope, so the public v1 metadata and row are the independent
   // coherence checkpoint. This fixed history does not model arbitrary resets.
+  it(`rebases a managed reset from its claimed physical storage`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const physicalId = `managed-reset-physical`
+    const claimId = `managed-reset-claim`
+    const reads: Array<PersistedStorageTarget> = []
+    const load = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = (target, context) => {
+      reads.push(target)
+      return load(target, context)
+    }
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: physicalId,
+      claimId,
+      expiresAtMs: Date.now() + 60_000,
+    })
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: physicalId,
+      claimId,
+      expiresAtMs: Date.now() + 60_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `managed-reset-logical`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              restartAfterScopedRecovery: () => {},
+              loadSubset: async () => {},
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      const before = reads.length
+      coordinator.emit(
+        { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+        `peer`,
+        physicalId,
+      )
+      await vi.waitFor(() => expect(reads.length).toBeGreaterThan(before))
+      expect(reads.slice(before)).toContainEqual({
+        kind: `managed`,
+        storageCollectionId: physicalId,
+        claimId,
+      })
+      expect(reads.slice(before)).not.toContainEqual({
+        kind: `eager`,
+        collectionId: `managed-reset-logical`,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`keeps a collection-reset reload inside one hydration scope`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
     adapter.collectionMetadata.set(`snapshot`, `initial`)
@@ -21318,7 +30179,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
 
     adapter.ensureIndex = async (collectionId, signature) => {
-      adapter.ensureIndexCalls.push({ collectionId, signature })
+      adapter.ensureIndexCalls.push({
+        collectionId: recordedStorageId(collectionId),
+        signature,
+      })
       throw localFailure
     }
     coordinator.requestEnsurePersistedIndex = async (
@@ -21396,7 +30260,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       coordinatorEntered.resolve()
       // Deliberately ignore the optional scoped adapter, as existing public
       // coordinator implementations are allowed to do.
-      await adapter.ensureIndex(collectionId, signature, spec)
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        spec,
+      )
     }
 
     const collection = createCollection(
@@ -21481,12 +30349,22 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       collectionId,
       signature,
       spec,
-    ) => tab2.adapter.ensureIndex(collectionId, signature, spec)
+    ) =>
+      tab2.adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        spec,
+      )
     coordinator2.requestEnsurePersistedIndex = (
       collectionId,
       signature,
       spec,
-    ) => tab1.adapter.ensureIndex(collectionId, signature, spec)
+    ) =>
+      tab1.adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        spec,
+      )
 
     const createFollowerCollection = (
       id: string,
@@ -21593,7 +30471,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               spec,
             ) =>
               tabs[remoteIndex]!.adapter.ensureIndex(
-                collectionId,
+                { kind: `eager`, collectionId: collectionId },
                 signature,
                 spec,
               )
@@ -22284,7 +31162,7 @@ function installHydrationRoutingProbe(adapter: PersistenceAdapter) {
       route: `public`,
       scope: [...active].at(-1),
       live: active.size === 0,
-      collectionId,
+      collectionId: recordedStorageId(collectionId),
     })
     return direct(collectionId, tx)
   }
@@ -22298,7 +31176,7 @@ function installHydrationRoutingProbe(adapter: PersistenceAdapter) {
           route: `scoped`,
           scope,
           live: active.has(scope),
-          collectionId,
+          collectionId: recordedStorageId(collectionId),
         })
         return direct(collectionId, tx)
       },
@@ -22346,7 +31224,7 @@ describeUnlessAnyOracleReplay(`hydration routing probe calibration`, () => {
         mutations: [],
       }
       const apply = (target: PersistenceAdapter) =>
-        target.applyCommittedTx(`probe`, tx)
+        target.applyCommittedTx({ kind: `eager`, collectionId: `probe` }, tx)
       try {
         await apply(loans[0]!)
         await apply(loans[1]!)

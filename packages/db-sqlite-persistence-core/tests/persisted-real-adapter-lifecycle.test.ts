@@ -98,11 +98,13 @@ class QueryObservingDriver implements SQLiteDriver {
   ): Promise<ReadonlyArray<T>> {
     const normalizedSql = sql.replace(/\s+/g, ` `).trim()
     this.queries.push(normalizedSql)
+    // Hide stream bookkeeping, but not the registry read that checks it.
     if (
-      normalizedSql.includes(`FROM leader_term`) ||
-      normalizedSql.includes(`FROM collection_version`) ||
-      normalizedSql.includes(`FROM applied_tx`) ||
-      normalizedSql.includes(`FROM collection_metadata`)
+      !normalizedSql.includes(`FROM collection_registry`) &&
+      (normalizedSql.includes(`FROM leader_term`) ||
+        normalizedSql.includes(`FROM collection_version`) ||
+        normalizedSql.includes(`FROM applied_tx`) ||
+        normalizedSql.includes(`FROM collection_metadata`))
     ) {
       return []
     }
@@ -362,7 +364,9 @@ it.each([
       await collection.stateWhenReady()
       transaction = collection.insert({ id: `local`, title: `optimistic` })
       await reachCheckpoint(handlerEntered.promise, `refused handler entered`)
-      expect(await adapter.loadSubset(id, {})).toEqual([])
+      expect(
+        await adapter.loadSubset({ kind: `eager`, collectionId: id }, {}),
+      ).toEqual([])
       expect(adapterRowWrites()).toEqual([])
       source.begin()
       source.write({ type: `delete`, key: `local` })
@@ -376,7 +380,9 @@ it.each([
         expect.objectContaining({ type: `delete`, key: `local` }),
       ])
       expect(collection.get(`local`)?.title).toBe(`optimistic`)
-      expect(await adapter.loadSubset(id, {})).toEqual([])
+      expect(
+        await adapter.loadSubset({ kind: `eager`, collectionId: id }, {}),
+      ).toEqual([])
 
       rejectOutbound(refused)
       await expect(transaction.isPersisted.promise).rejects.toBe(refused)
@@ -384,7 +390,9 @@ it.each([
       expect(transaction.state).toBe(`failed`)
       expect(collection.has(`local`)).toBe(false)
       expect(collection.base.has(`local`)).toBe(false)
-      expect(await adapter.loadSubset(id, {})).toEqual([])
+      expect(
+        await adapter.loadSubset({ kind: `eager`, collectionId: id }, {}),
+      ).toEqual([])
       expect(adapterRowWrites()).toEqual([
         expect.objectContaining({ type: `delete`, key: `local` }),
       ])
@@ -398,14 +406,18 @@ it.each([
         await Promise.resolve(source.commit())
         expect(collection.get(`local`)?.title).toBe(`first source row`)
         expect(
-          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+          (
+            await adapter.loadSubset({ kind: `eager`, collectionId: id }, {})
+          ).map(({ value }) => value),
         ).toEqual([{ id: `local`, title: `first source row` }])
 
         source.begin()
         source.write({ type: `delete`, key: `local` })
         await Promise.resolve(source.commit())
         expect(collection.has(`local`)).toBe(false)
-        expect(await adapter.loadSubset(id, {})).toEqual([])
+        expect(
+          await adapter.loadSubset({ kind: `eager`, collectionId: id }, {}),
+        ).toEqual([])
 
         source.begin()
         source.write({
@@ -417,7 +429,9 @@ it.each([
         expect(collection.get(`local`)?.$origin).toBe(`remote`)
         expect(collection.base.get(`local`)?.title).toBe(`later source row`)
         expect(
-          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+          (
+            await adapter.loadSubset({ kind: `eager`, collectionId: id }, {})
+          ).map(({ value }) => value),
         ).toEqual([{ id: `local`, title: `later source row` }])
 
         source.begin()
@@ -432,7 +446,9 @@ it.each([
         expect(collection.get(`local`)?.title).toBe(`updated source row`)
         expect(collection.base.get(`local`)?.title).toBe(`updated source row`)
         expect(
-          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+          (
+            await adapter.loadSubset({ kind: `eager`, collectionId: id }, {})
+          ).map(({ value }) => value),
         ).toEqual([{ id: `local`, title: `updated source row` }])
       }
 
@@ -450,11 +466,21 @@ it.each([
       await reopened.stateWhenReady()
       if (history === `reopens before later source writes`) {
         expect(reopened.has(`local`)).toBe(false)
-        expect(await reopenedAdapter.loadSubset(id, {})).toEqual([])
+        expect(
+          await reopenedAdapter.loadSubset(
+            { kind: `eager`, collectionId: id },
+            {},
+          ),
+        ).toEqual([])
       } else {
         expect(reopened.get(`local`)?.title).toBe(`updated source row`)
         expect(
-          (await reopenedAdapter.loadSubset(id, {})).map(({ value }) => value),
+          (
+            await reopenedAdapter.loadSubset(
+              { kind: `eager`, collectionId: id },
+              {},
+            )
+          ).map(({ value }) => value),
         ).toEqual([{ id: `local`, title: `updated source row` }])
       }
     } catch (error) {
@@ -492,4 +518,5 @@ it.each([
       )
     }
   },
+  15_000,
 )

@@ -3946,7 +3946,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(() => {
         activeUsers.utils.setWindow({ offset: 1, limit: 1 })
       }).toThrow(
-        /setWindow\(\) can only be called on collections with an ORDER BY clause/,
+        /setWindow\(\) can only move a window on a query with an ORDER BY clause/,
       )
     })
 

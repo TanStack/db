@@ -1,5 +1,35 @@
 # @tanstack/vue-db
 
+## 0.3.12
+
+### Patch Changes
+
+- Updated dependencies [[`5a1b286`](https://github.com/TanStack/db/commit/5a1b286910bdf56917a76732ba160c99d7b1ad66), [`9aecbab`](https://github.com/TanStack/db/commit/9aecbab4cacb3f1123b1716e6f063abb5affc74f)]:
+  - @tanstack/db@0.15.2
+
+## 0.3.11
+
+### Patch Changes
+
+- Retire adapter-created live-query collections after their final subscriber leaves. Treat an undefined `gcTime` as omitted, preserve explicit values and caller-supplied collections, and retain Solid projections while their Suspense boundary is pending. ([#2172](https://github.com/TanStack/db/pull/2172))
+
+- Updated dependencies [[`468db85`](https://github.com/TanStack/db/commit/468db85fb5deeb286d08c8d9ca73c74613766d8c), [`3c481f6`](https://github.com/TanStack/db/commit/3c481f6c0455fbfe82ea94d9cf457cf00b20d3e7), [`a09ba67`](https://github.com/TanStack/db/commit/a09ba670b0e4e51821c20b958e5257d3d7a83c9d), [`92b11b0`](https://github.com/TanStack/db/commit/92b11b006edc46cea23ae4423046bf9eb29fc50e), [`fcd539a`](https://github.com/TanStack/db/commit/fcd539a515f43ab1a2bd06163548e839d7a576f3), [`2c83fdc`](https://github.com/TanStack/db/commit/2c83fdc53bd762fa8b8d5e5a8b82e092710618be)]:
+  - @tanstack/db@0.15.1
+
+## 0.3.10
+
+### Patch Changes
+
+- Updated dependencies [[`8660cc0`](https://github.com/TanStack/db/commit/8660cc0eb4914b8b0d3b2ba159416185f6d956c9), [`3a98e00`](https://github.com/TanStack/db/commit/3a98e0062fda2084596d218c14609f30dbef365a)]:
+  - @tanstack/db@0.15.0
+
+## 0.3.9
+
+### Patch Changes
+
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`2f928e6`](https://github.com/TanStack/db/commit/2f928e6f240adb8874a6537905000009a2e9b53f), [`dfec42e`](https://github.com/TanStack/db/commit/dfec42e4a78ef609f9aa2f2c0f863a1e4f1ae1e3), [`1a65c2c`](https://github.com/TanStack/db/commit/1a65c2c63db9ad14c08d35b09d0081ecc121fbfc), [`1b4ee8d`](https://github.com/TanStack/db/commit/1b4ee8d57168978847687e75dbc1c33ddb935ed3), [`bbbf017`](https://github.com/TanStack/db/commit/bbbf017ef5b3884515295a4225faacdfd814499e), [`bc6f30e`](https://github.com/TanStack/db/commit/bc6f30e716aeb26c13b6a0e9ba00a27edc72a4d7), [`fade2e2`](https://github.com/TanStack/db/commit/fade2e24cfb9922b9b172f96194f7b6246731f50), [`bbe9327`](https://github.com/TanStack/db/commit/bbe9327ce90ab587ee6ef24e0030f79291f3057d), [`b34a579`](https://github.com/TanStack/db/commit/b34a579762b36dd49a89e11eacd7788f1df89453), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`f84387c`](https://github.com/TanStack/db/commit/f84387cd8220e8603dc24a99fe4881fa4cd5ddcd), [`be4a3d6`](https://github.com/TanStack/db/commit/be4a3d642c6d292150f7ff4e041442338e5a2de2), [`0dc696a`](https://github.com/TanStack/db/commit/0dc696a64901973d8025cb1a40af34c68c856855), [`fd13e3c`](https://github.com/TanStack/db/commit/fd13e3cc9d3302e7598a78ac8f49d06dbbde7e08)]:
+  - @tanstack/db@0.14.0
+
 ## 0.3.8
 
 ### Patch Changes

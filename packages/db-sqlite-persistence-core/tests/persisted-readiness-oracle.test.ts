@@ -7,6 +7,7 @@ import {
   createLiveQueryObserver,
   eq,
   getPersistedReadinessSource,
+  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'
@@ -240,6 +241,7 @@ describe(`persisted-readiness oracle`, () => {
                       ? { status: `error`, error: leftError }
                       : { status: leftOutcome },
                   subscribe: () => () => {},
+                  waitForInitialRender: waitForPersistedInitialRender,
                 },
               })
             }
@@ -253,6 +255,7 @@ describe(`persisted-readiness oracle`, () => {
                       ? { status: `error`, error: rightError }
                       : { status: rightOutcome },
                   subscribe: () => () => {},
+                  waitForInitialRender: waitForPersistedInitialRender,
                 },
               })
             }
@@ -623,6 +626,83 @@ describe(`persisted-readiness oracle`, () => {
     ])
   })
 
+  // The finite conjunction above has no transitions. This legal history gives
+  // source A two sync runs while source B completes once. A's old restore cannot
+  // satisfy the current-run conjunct after cleanup. The model needs only each
+  // source's current restore outcome; it does not copy the wrapper's generations.
+  // A fresh live query is created after restart because cleanup terminates the
+  // old query. Its public snapshot and initial-render wait are the checkpoints.
+  it(`waits for a restarted source after the other joined source restores`, async () => {
+    const left = recordingAdapter([{ id: `one`, value: `left` }])
+    const right = recordingAdapter([{ id: `one`, value: `right` }])
+    left.load.resolve()
+    const secondLeftRead = deferred<void>()
+    const loadResumeSnapshot = left.adapter.loadResumeSnapshot
+    let leftReads = 0
+    left.adapter.loadResumeSnapshot = async (id, options) => {
+      if (options?.includeRows !== false && ++leftReads === 2) {
+        await secondLeftRead.promise
+      }
+      return loadResumeSnapshot(id, options)
+    }
+    const sourceA = source(`joined-restart-left`, left.adapter, true)
+    const sourceB = source(`joined-restart-right`, right.adapter, true)
+    let query: ReturnType<typeof createLiveQueryCollection> | undefined
+    let observer: ReturnType<typeof createLiveQueryObserver> | undefined
+    let unsubscribe: (() => void) | undefined
+    await checkWithCleanup(async () => {
+      sourceA.startSyncImmediate()
+      sourceB.startSyncImmediate()
+      await vi.waitFor(() => expect(leftReads).toBe(1))
+      await vi.waitFor(() => expect(sourceA.has(`one`)).toBe(true))
+
+      await sourceA.cleanup()
+      sourceA.startSyncImmediate()
+      await vi.waitFor(() => expect(leftReads).toBe(2))
+      right.load.resolve()
+      await vi.waitFor(() => expect(sourceB.has(`one`)).toBe(true))
+
+      query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ a: sourceA })
+            .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
+      })
+      observer = createLiveQueryObserver(query)
+      unsubscribe = observer.subscribe(() => {})
+      const model = [
+        { optedIn: true, outcome: `loading` as ModelOutcome, error: undefined },
+        { optedIn: true, outcome: `ready` as ModelOutcome, error: undefined },
+      ]
+      expect(observer.getSnapshot().persistedStatus).toBe(
+        expectedPersistedSnapshot(model).status,
+      )
+      let initialRenderSettled = false
+      const initialRenderWait = observer.preloadForInitialRender().then(() => {
+        initialRenderSettled = true
+      })
+      await Promise.resolve()
+      expect(initialRenderSettled).toBe(false)
+
+      secondLeftRead.resolve()
+      model[0]!.outcome = `ready`
+      await initialRenderWait
+      expect(observer.getSnapshot()).toMatchObject({
+        persistedStatus: expectedPersistedSnapshot(model).status,
+        data: [
+          { a: { id: `one`, value: `left` }, b: { id: `one`, value: `right` } },
+        ],
+      })
+    }, [
+      () => secondLeftRead.resolve(),
+      () => unsubscribe?.(),
+      () => observer?.dispose(),
+      () => query?.cleanup(),
+      () => sourceA.cleanup(),
+      () => sourceB.cleanup(),
+    ])
+  })
+
   it(`offers an initial-render fallback without changing preload's Collection readiness boundary`, async () => {
     const fixture = recordingAdapter([{ id: `one`, value: `local` }])
     const persisted = source(`local-suspense`, fixture.adapter, true)
@@ -981,6 +1061,7 @@ describe(`persisted-readiness oracle`, () => {
         getOrStartNetworkDeadline: () => Date.now() + 60_000,
         getSnapshot: () => ({ status: `ready` }),
         subscribe: () => () => {},
+        waitForInitialRender: waitForPersistedInitialRender,
       },
     })
     const failure = new Error(`query failed independently of its source`)
@@ -1020,6 +1101,7 @@ describe(`persisted-readiness oracle`, () => {
         getOrStartNetworkDeadline: () => Date.now() + 60_000,
         getSnapshot: () => ({ status: `ready` }),
         subscribe: () => () => {},
+        waitForInitialRender: waitForPersistedInitialRender,
       },
     })
     const query = createLiveQueryCollection({
