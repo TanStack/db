@@ -107,3 +107,49 @@ Delete only that baseline entry. The complete check then retains the other
 No documentation example or oracle expectation is weakened. The final source
 binding is `sizeCiFollowup.sha256`; earlier bindings retain their historical
 commit meanings.
+
+
+## Main integration at 1640de834
+
+A normal merge integrates main `1640de834bca0588f91432ea80a0f4569157e9dc`
+with published head `bb188e6eff58d850091766e930aa2bb2e4978772`.
+The only textual conflicts are the private-member cache and replay selectors.
+The replay registry retains both branches' entries. The official mangle
+writer starts from main's assignments, drops removed private helpers and
+assigns `gcGraceUntil` the free name `aP`. Main's lifecycle change resets the
+cleanup promise only when a replacement run actually enters `loading`.
+The GC retention refactors remain intact. No model, history, comparison,
+expected result or run budget changes in this resolution.
+
+The fresh production comparison against this main revision reports:
+
+| Production output | gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| DB bundle | -170 B | -39 B |
+| Typical app | -182 B | -72 B |
+| App with Effect | -159 B | -200 B |
+| App with groupBy | -129 B | -130 B |
+| App with includes | -169 B | -297 B |
+| App with join | -160 B | -124 B |
+| App with LocalStorage | -182 B | -198 B |
+| App with optimistic action | -169 B | -183 B |
+| App with paced mutations | -172 B | -176 B |
+
+This measurement uses `pnpm size:compare --packages db --files --exact-base`
+before the merge commit, so its baseline is the fetched main revision rather
+than the older HEAD merge-base. The temporary baseline uses the same local
+`baseline-browser-mapping@2.11.30` override as the candidate. The override and
+lockfile remain uncommitted.
+
+Native Chromium passes 3/3 histories and Electric/Postgres passes 12/12 paths
+on the merged production sources. DB source and test TypeScript, changed-file
+lint, mangle validation, conflict-file formatting and whitespace checks pass.
+The replay manifest's three registry checks pass. The first expanded test run
+finishes its 21 core files, but its additional guarded replay subprocess
+campaign stalls and is interrupted. That run is not credited as a clean GREEN.
+A separate core run supplies the final suite result below. Logs use the
+`main164-` prefix under `/private/tmp/pr-2258-size`.
+
+The separate core run passes **1,033 tests across 21 files**, with no type
+errors. It includes the updated cleanup/restart and subscription-lifecycle
+owners from main. The source binding is `main164Integration.sha256`.

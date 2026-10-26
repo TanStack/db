@@ -1025,6 +1025,7 @@ function useLiveQueryImpl(
         client: dbClient,
         queryHash: instance.queryHash,
         onPreload: resumeDeferredCollections,
+        suspendUntilReady: forSuspense,
       })
     }
     const observer = instance.observer!
@@ -1054,7 +1055,7 @@ function useLiveQueryImpl(
     const returned = useSyncExternalStore(
       instance.subscribe,
       () => observer.getSnapshot(),
-      () => observer.getServerSnapshot(),
+      () => observer.getServerSnapshot(forSuspense),
     )
     // Only useLiveSuspenseQuery reads this, and it costs a define per render.
     if (forSuspense) {

@@ -90,6 +90,117 @@ that test identifiers must copy production's private data structures.
 
 ### Guide-audit boundary handoffs
 
+The cleanup/restart owner checks ordinary subscription admission and deferred
+acquisition resumption during held adapter cleanup. Its eighteen cases cross
+loading/ready/error status, eager/on-demand sources, and direct, snapshot, or resumed
+admission. The three-cut model requires rejection before subscriber ownership
+or acquisition, followed by successful explicit admission after cleanup settles.
+Twelve Effect receiving cases cross both source modes, all three prior statuses, and
+cleanup on the first or second joined source. A late Effect returns disposed,
+reports the cleanup once, and retains no subscription or cleanup observer. A
+new Effect after settlement is admitted. The original implementation fails all
+eighteen admission cases; a guard limited to fresh subscribers misses six
+resumption cases. A guard without earlier Effect cleanup observation fails the
+twelve receiving cases during construction. The owner covers these controlled
+adapter cuts, with cleanup rejection and terminal-listener restart covered by
+its existing histories. It does not establish arbitrary concurrent framework
+schedules or actual provider shutdown. The [migration feedback review](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
+records the rejection policy and exact calibration.
+
+The eight-item follow-up at reviewed head `16824f677` extends the same owners.
+The cleanup/restart owner adds six plain/live-query logical-demand cases at
+idle, ready, and cleaned-up cleanup start, plus six admission outcomes that
+distinguish a pending cleanup promise from an actual replacement sync run.
+The deferred-acquisition owner adds render-deferred eager/on-demand sources and
+explicit deferred subscription/resumption histories across both query shapes
+and one/two live-query levels. The React descriptor driver receives resumption
+after a real abandoned suspended render through the existing startup judgment.
+The observer-history owner adds eight failed-setup histories, with both modes,
+one/two failures, cleanup rejection or real sync-start failure. Client, status,
+and layout leases are checked immediately, then retry, publication and release.
+Two late-listener seed failures retain a healthy peer and exclude the failed
+listener from later publications. Eight stream-preload histories cross pending
+or successful streams, both source modes and a render deferral. The real React
+streaming test receives the on-demand premise while retaining server rows until
+browser acquisition completes.
+The pooled release owner adds twelve new/retained/released partition histories
+through held loading/ready cleanup and two startup-cleanup reentry histories.
+The subscription boundary owner adds 28 resumption/retirement histories crossing
+loading, ready and acquiring notifications, cleanup, source mode and render gate.
+The shared token-count model forbids restoring a retired owner. Deferred-demand
+cancellation fixtures now create logical demand before explicit resumption;
+render-owned queued loads remain covered by the DbClient fixture. These finite
+extensions do not establish arbitrary async/provider schedules or new framework
+error policy. The [follow-up audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
+records original RED, hostile controls, and the unchanged rejection decision.
+
+A subsequent current-head summary exposed cleanup during ownership transfer.
+The deferred-acquisition owner adds 192 surviving-owner histories crossing both
+source modes, shapes, depths, ordinary/resumed/deferred readers, render gates,
+source loading/ready cleanup, and explicit restart later or from terminal
+publication. They check the complete post-cleanup status trace, ownership,
+replacement acquisition, readiness and rows. The previous implementation fails
+44 assertions; retaining ownership without fencing first-demand cleanup fails
+16. The controlled grammar does not claim arbitrary recursive cleanup or async
+provider work before acquisition. This owner retains those wider witnesses.
+
+The ten-finding high review adds generated error-provenance and partial-setup
+histories to the existing owners. The deferred-acquisition owner crosses ready,
+returned-error and thrown starts, before/during handoff, with defined/absent
+causes. Its independent start-handoff judgment also feeds real React ordinary
+and infinite hook drivers. Each hook now has independent fixed/random campaigns
+and reach minima for returned/thrown source failures before/during commit,
+including absent causes. They compare readable error/boundary behavior after
+commit, one source start, and ownership immediately after unmount, before GC.
+Independent startup owns a pre-commit throw; the later hook reads error status.
+The restored broad-rethrow defect fails both observations for each hook.
+Explicit DbClient preload continues to
+report source startup failures. Pooled lifecycle histories add released
+partitions whose synchronous late cleanup callback returns or throws, including
+1–3 healthy status peers. The same pooled release owner now generates
+bootstrap callback return/throw, Error/undefined, zero through three healthy
+observers, callback position before/after those peers, and `gcTime` 1–3 through
+both ordinary compiled and pooled core observer paths. Failed granular
+bootstrap retains no unreturned ownership after the grace period; surviving
+peers retain their source until release. Held source cleanup gives every
+admitted wholesale observer one terminal error snapshot and callback despite
+a sibling throw, then preserves the exact reported failure at settlement.
+First-return, surviving-peer, cleanup-start, settlement and final-release/GC
+cuts distinguish ownership rollback from all-peer status delivery. Original
+production and repairs that implement only one of those obligations fail the
+respective public comparisons. These are controlled core receiving paths, not
+framework scheduling or remote-provider shutdown evidence.
+Observer histories add early capability or sync
+failure, one/two failed attempts, both modes and reentrant surviving peers,
+then explicit retry/publication/release. First-party persisted readiness does
+not throw at registration; that premise is a controlled core-capability claim.
+The lifecycle owner adds held/immediate cleanup and actual post-transfer
+notification throws across 1–3 demands, checked after replacement readiness.
+Original and narrow-mutant assertions calibrate these cuts. All six new
+properties have declared reach, paired fixed/random campaigns and guarded
+seed/path replay. The [high-review audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md#high-review-of-ten-findings--2026-10-23)
+records counts and finite limits.
+
+Two historical high-review claims, H04 and H08, remain `confirmed-open`
+evidence gaps, with no reproduced contract counterexample or closure credit.
+They are not accepted exclusions or refuted by the neighboring controls. For
+H04, the pooled lifecycle owner needs a legal eager-source `subscribeChanges`
+throw that reaches the partition's terminating catch and whose contract
+promises same-partition, same-run recovery; current eager
+`markError`/`markReady` histories recover both shared views. On-demand sources
+are ineligible for pooling, so their throwing probes do not reach this path.
+For H08, the lifecycle/deferred-acquisition owners need a synchronous
+post-transfer notification throw that keeps retained demand detached past
+supported replacement readiness; generated real throws currently acquire
+afterward through the status listener. Resumption can skip its immediate
+restart when that notification throws. An implicit retry without another
+readiness signal is not established by the current contract. A broader
+recovery promise needs an explicit decision; a legal failing trace under the
+existing promise needs enforcement in these owners.
+Arbitrary provider outages, callback programs and other frameworks' error
+policies remain outside these new witnesses. The approved cleanup admission
+rejection policy remains unchanged.
+
 The Collection lifecycle history owner includes a 26-cell cleanup-restart
 matrix. It crosses explicit and default eager sources with absent or present
 loaders, empty or nonempty replacements, and no interruption, truncate during
@@ -330,6 +441,28 @@ retired-route publication; and
 checks before, during, and after-commit abort boundaries with applied receipts.
 These fixtures do not establish real-provider cancellation or framework timing.
 
+The ordered replay owner distinguishes replay renewal from an ordinary lazy
+demand created during another subscription's replay. Its adapter records the
+leases held at truncate, then matches subscription identity and independently
+evaluated key predicates once per renewed lease. New owners and different keys
+remain ordinary demand. Terminal-error assertions run after each history action
+and at convergence. Named neighbors require a new include demand's failure to
+be terminal and a settled joined demand's failed replay to remain nonterminal.
+The CI seed `-1751969525`, path `67:11:10:12:1:8:7:7`, reaches the former.
+The normal broad campaigns did not each reach both critical failure origins
+in the declared-reach audit. A second property in the same owner,
+`replay.subscription-demand-origin`, generates zero to three prior replays,
+marked-row rank moves and ordinary/renewal failure schedules. Its 75-history
+fixed and random campaigns must each reach new demand failing during marker
+replay and a settled demand's failed renewal. The adapter witnesses non-aborted
+failure independently of expected terminal status. A positive terminality check
+rejects ignored ordinary failures. Source-wide, subscription-blind and
+always-terminal controls also fail. Broad reach counts each of its existing
+seventeen required dimensions once per history. The [declared-reach audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md#audit-against-the-declared-reach-rules-from-pr-2233)
+records counts, exact replay coordinates, calibration and chronology limits.
+This projection covers the grammar's five numeric keys and one-level includes;
+it does not establish arbitrary predicates or provider-driven replay schedules.
+
 The ordered-work owner has a 96-cell optimistic-departure matrix over source,
 joined, and anti-joined filters; update and delete; Collection and Effect;
 acknowledgement and rollback; one- and two-row windows; and indexed and
@@ -544,9 +677,203 @@ appears in `DbClient.dehydrate()` after the first enter event. A separate
 same-hash transition from a concrete query to an unbound descriptor query
 checks that the hook reports the missing client before reusing prior rows.
 The same React owner checks that a descriptor render suspended before commit
-starts no source work, while a later direct `Collection.preload()` starts that
-source once and reaches ready. This is one abandoned-render/direct-reader cut,
-not a general concurrent-render schedule.
+starts no source work. Its finite 24-cell grammar crosses later reader intent,
+startSync true/false and eager/on-demand sources. Ordinary subscription admission
+also crosses no cleanup, loading callback cleanup, ready callback cleanup, and
+held ready cleanup. Preload and deferring readers retain no-cleanup controls.
+The shared independent judgment in
+`collection-subscription-lifecycle-grammar-oracle.ts` predicts adapter entries
+and the complete public status trace at admission return and cleanup settlement.
+A second ordinary subscriber reuses a live run or restarts a retired source.
+Public rows without cleanup distinguish on-demand source preload, which does
+not acquire rows, from ordinary subscriptions. The core lifecycle owner adds
+24 cases crossing the four cleanup histories, no/unrequested/requested start
+gates and eager/on-demand modes. The erroneous release-before-request repair
+fails four core and four React cells at admission return. The final expanded
+React grammar also rejects the original no-release implementation. Historical
+calibration of a previously-requested-start mutant predates the final call
+reorder and is not evidence against that mutant on the current path.
+This does not establish arbitrary concurrent-render schedules, failed-provider
+histories, or Electric txid delivery. The [migration feedback review](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
+records the SSR admission repair. The maintainer chose a programming-error
+rejection when an ordinary server hook reads incidental rows or readiness that
+its first browser render cannot reproduce. Cold/loading SSR remains legal.
+`packages/db/tests/ssr-snapshot-admission-oracle.ts` owns the independent
+preparation judgment and history grammar. The descriptor owner drives React's
+ordinary and infinite hooks independently. The Svelte server driver is
+`packages/svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`.
+Each compares rejection, projected rows and status before browser commit across
+no preparation, completed or pending query preload, and normalized source
+transport, including ready-empty and partial-loading sources. Render-time query
+captures carry their own readiness; normalized source rows alone remain
+provisional. React also runs real `hydrateRoot`, observes recoverable errors, and
+checks the committed browser result. Svelte's actual server-to-browser driver is
+`packages/svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`: it loads a
+server-compiled fixture and calls browser-compiled native `hydrate` or `mount`.
+Its first hook rows/status before effects and later authoritative browser view
+are compared with the shared judgment. Histories cross zero through three
+rows, same/different browser rows, zero through two earlier authoritative
+readers, first/late hydration, fresh mount and a child created after provider
+mount. Each independently hydrated root supplies `DbProvider hydrating`;
+nested same-client providers inherit that host fact unless explicitly
+overridden. An inherited marker must preserve the late reader's server view,
+while a fresh mount or later child must read live rows. Always using the server
+getter, keeping the marker after mount, and ignoring it each fail a receiving
+comparison. Both React and Svelte cross writes after server render and before
+browser hydration, including a completed same-query browser preload. The older
+Svelte server-only owner proves server reconstruction only; its second render
+is not browser evidence. `hydration.svelte.test.ts` separately receives
+normalized transport and normal warm-browser initialization through its native
+scheduler.
+
+The shared admission owner also defines runtime ready/error outcomes, browser
+explicit preparation and defined/undefined causes. Its receiving drivers are
+`packages/react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx` and
+`packages/svelte-db/tests/ssr-runtime-error-oracle.svelte.test.ts`. React drives
+ordinary and infinite hooks independently through `renderToString`, JSON and
+`hydrateRoot`; Svelte uses the server/browser compilation and native host above.
+Each checks every public lifecycle flag at the actual first hook view and the
+committed browser view: the transported initial error/ready view is reproduced,
+then browser error/ready becomes authoritative. The React driver also checks
+that an error snapshot cannot fulfill a later explicit data preload. Runtime
+`markError` remains a returned error result; the explicit failed preload must
+reject. These empty-source histories do not establish arbitrary error-detail
+serialization, error identity or post-error row retention.
+
+Real React streaming checks
+cold and warm Suspense discovery, opaque keyed/unkeyed logic, and prepared
+non-streaming Suspense. Under the shared React identity law, unkeyed opaque
+queries reject with `UnhashableQueryIRError` during preparation, before stream
+admission. Both cold and warm receiving cases check that class; keyed controls
+still render and transport their rows. Infinite identity checks callback-returned Collections
+and explicit keys with matching and unbounded windows across builder, direct
+Collection and callback-returned Collection inputs. The latter callback path is
+JavaScript runtime coverage; it has no TypeScript overload. The React
+mixed-reader streaming owner crosses zero through three rows and microtask
+source publications before preload settlement. Histories place an ordinary
+hook before or after a Suspense sibling, or omit it, with source readiness
+synchronous or held until the ordinary server read. Held histories distinguish
+Suspense registration before the ordinary loading capture from ordinary-first
+discovery. An empty-source failure outcome makes that later stream reject after
+the ordinary loading view was rendered; rejected Suspense supplies a fallback,
+not a successful hook view.
+Real React hydration receives JSON-copied snapshots and streamed promises from
+the real Router adapter under its controlled SSR callback. It compares each
+hook's first browser view with its own server view, even when local browser rows
+differ. `packages/db/tests/ssr-stream-view-oracle.ts` owns this shared metamorphic
+comparison over independently recorded ordered row names and status; a missing
+browser observation fails. Mandatory reach distinguishes both reader orders,
+Suspense alone, same/different browser rows, synchronous/held readiness and held
+source failure. It crosses async hydration with a synchronous
+React act cut that permits ordinary commit before Suspense hydration, while
+transported promises can still be pending. Both schedules must preserve each
+reader's first projected rows and readiness, including an ordinary loading view
+whose sibling stream later failed. Emitting an update without a newer transport
+revision and prioritizing that later error over the ordinary initial snapshot
+fail the respective first-view comparisons. The Router's focused receiving
+test separately checks replacement delivery after an initial loading record.
+
+`examples/react/start-ssr-e2e/e2e/router-stream-view.spec.ts` receives the same
+law through the real Router serializer and HTML transform
+(`attachRouterServerSsrUtils`/`renderRouterToStream`), manifest-driven `Scripts`,
+`RouterClient`/`hydrateRoot` and Chromium. Its mini HTTP host holds the first DB
+record and every later byte until a browser hook attempts hydration, preserving
+byte order after the async entry and completed shell. Thirteen finite cases
+cross initial-shell/later-boundary discovery, ordinary reader order, zero/one
+row, same/different browser rows, and delayed first-record arrival. A completed
+same-query browser preload with a newer local timestamp cannot replace the
+older server view owed to hydration. Missing-record normal close and transport
+failure report the exact Error Boundary cause without a successful browser
+substitution or new adapter work after termination. A known pending result
+remains pending across DB record-stream close and explicit local Collection
+preload until the held server provider is released. Original no-wait and
+close-known-pending designs fail these host comparisons. Waiting forbids a
+successful substituted view before the server record; it does not prohibit
+valid Suspense prefetch.
+
+The core receiving driver
+`packages/db/tests/ssr-stream-record-wait-oracle.test.ts` adds paired generated
+histories for missing, pending and explicitly preloaded local records, arrival,
+normal close, transport error or cleanup, unrelated peer records, first attempts
+after termination, and defined/undefined causes. The shared stream-view owner
+supplies its independent lifetime judgment. Promise settlement/identity and
+public observer retry cuts check that only the requested server record settles
+a wait, known pending results survive normal record-stream close, and terminal
+missing records cannot become local success or start new adapter work. This
+later dimension coverage follows the original host RED gate. Histories also
+cross public client cleanup, rematerialization and a new stream for the same
+hash. Old wait promises remain settled, a new stream obtains a fresh wait, and
+enabling the same open stream preserves its current pending demand. The sticky
+failure implementation and an unconditional reset each fail the corresponding
+checkpoint. Pending-result
+disposal during client cleanup and timestamp policy after record consumption
+are excluded from this grammar. The
+[SSR review audit](oracle-reviews/2026-10-23-ssr-review.md) records RED on unchanged
+production, GREEN, narrow mutants, and exact receiving replays.
+The consumer bundle owner `scripts/ssr-bundle-oracle.mjs` checks the maintainer's
+2026-10-26 SSR isolation decision at the current DbClient import boundary. It
+enumerates ordinary, Suspense, and infinite React hook exports, with and without
+DbClient. Final production bundles must exclude the entire observer transport
+module and its admission/capture operations without DbClient; positive controls
+must retain them. `pnpm test:ssr-bundle` runs after built artifacts in the
+minified-DB CI lane. The original shared observer fails the absence assertion;
+`--calibrate` forces transport into a plain bundle and fails that same assertion.
+The package aliases and pre-bundle artifact freshness checks share one list:
+DB, DB IVM and React DB, including TypeScript and TSX source inputs. Stale React
+and IVM controls passed the former standalone command, then fail its named
+freshness guard after correction; current output still passes all six consumer
+programs. The inputs are built ESM; esbuild minifies the final consumer bundle.
+Freshness compares source/config timestamps with the package entry, not
+content-addressed provenance or manually falsified timestamps.
+This finite build oracle does not establish every bundler, framework entry,
+byte budget, or runtime hydration schedule. A client-only application that uses
+DbClient still ships its transport methods: isolating that case needs an
+explicit SSR API boundary and remains outside this import-level guarantee.
+The [isolation record](oracle-reviews/2026-10-26-ssr-bundle-isolation.md) records
+the size comparison, runtime checks, and calibration.
+The separate `live-query-observer-snapshot-oracle.property.test.ts` owner checks
+unchanged getter identity with and without a completed DbClient query. It runs
+ordered/single-result and attached/detached histories through ordinary and server
+getters. It does not model provisional hydration replacement or host scheduling.
+Focused snapshot checks protect lazy state, one admission walk for an unchanged
+revision, explicit preload after a loading capture, JSON-compatible non-streaming
+transport, and pending-stream ownership. The observer history
+owner generates throwing releases followed by explicit retries, in both modes
+and with thrown undefined. This last premise is a controlled synchronous channel
+release; first-party event listeners report their failures asynchronously.
+Its hydration error-timing grammar also crosses error before attachment versus
+after subscribe returns, granular/wholesale mode, all three portable seed
+statuses, and defined/undefined causes. The first pre-attachment hydration read
+must retain its server view; an owned provider error after subscription must
+publish error and notify synchronously. Always deferring error handoff fails
+the latter cut; original local-error precedence fails the former. This
+distinguishes initial hydration from ordinary owned runtime publication.
+
+Limits: admission/runtime sources are synchronous and eager with zero through
+three rows; the mixed-reader driver additionally holds readiness/failure.
+Infinite receiving coverage uses a one-row initial page and its peek-ahead row.
+Arbitrary asynchronous providers, later page-shape changes during a pending
+hydration stream, persistence readiness, arbitrary concurrent-root hydration
+schedules and custom dehydration filters remain open for these receiving
+owners. The Router/Chromium witness covers its finite serializer/HTML/script
+path, not a deployed Start application, Electric delivery, every React renderer
+or every host schedule. The React mixed-reader owner still needs a partial
+nonempty loading snapshot followed by failure; its failed-source histories are
+empty. The Svelte owners do not cover a pending streamed boundary, deferred
+source throws, arbitrary asynchronous providers, error-detail identity or
+post-error row retention. Manual multiple hydration epochs remain unspecified:
+Core-SC04 asks whether an older record arriving after active-record consumption
+may replace a newer retained server record. The shared stream-view and DbClient
+owners need an explicit ordering contract before adding consumed/unconsumed
+and older/equal/newer record histories. Neither local-versus-transported version
+coverage nor normal Router byte order resolves that question. Transport
+deliberately discarding required state and rendering local Collection object
+identity are outside the portable snapshot law.
+The Date descriptor typing report remains an evidence gap. The reliable strict
+compiler probe accepts the reported Date forms. The receiving owners are
+`packages/db/tests/db-client.test-d.ts` and
+`packages/electric-db-collection/tests/electric.test-d.ts`; extending them needs
+the failing application assignment and its resolved dependency versions.
 Its no-client diagnostic also covers explicit `queryKey` and legacy dependency
 identity for both `useLiveQuery` and `useLiveSuspenseQuery` at first consumption.
 A local hook-first SSR stream over a concrete
@@ -710,8 +1037,8 @@ generic visitor behavior outside the named collectors.
 | WHERE predicate publication                  | [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts), [`in` evaluator](https://github.com/TanStack/db/blob/main/packages/db/tests/query/compiler/in-evaluator-oracle.property.test.ts) ([review](oracle-reviews/perf-in-constant-set.md)) | An independent Kleene evaluator judges `eq`/`not`/`and`/`or` predicates over strings, a normalization-prefixed string, booleans, numbers, `NaN`, a valid Date, `null`, a missing field, and virtual fields. Snapshot histories with pending optimistic inserts compare a live query, direct subscribers with and without initial state, and `currentStateAsChanges`; change histories apply multi-key sync transactions, including reinsertion of a key deleted earlier, and compare every consumer's key set after each commit, on scan and `BasicIndex` paths. Peer subscribers share one field with different literals, plus one on a virtual field, so every published change must reach exactly the subscribers whose predicate it can satisfy; routing mutants that ignored the previous value, ignored the field, delivered a change twice, or routed while stale published rows awaited reconciliation fail here. Fixed witnesses cover a layout-only publication reaching a filtered subscriber as one empty batch, a filtered subscriber's empty Collection-readiness batch, retraction of a vanished row after eager cleanup and restart, and the new row plus exact subscriber update payload when a same-key row stays TRUE. A stale-live-value mutant survives the generated membership checks but fails the payload witness. A focused [property-visibility test](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-prefilter-property-visibility.test.ts) compares the public unindexed snapshot with the enriched-row contract for inherited, non-enumerable, enumerable-own, and nested getter paths; the pre-fix stored-row shortcut failed three of its four controls. Other property-descriptor and stateful-getter histories remain outside those fixed controls. Hostile mutants for FALSE-for-UNKNOWN `eq`, `or` or number-literal subscription prefilters, a prefilter that ignores the previous value, a skipped readiness batch, a skip while stale published rows await reconciliation, and an unindexed snapshot scan that reads only synced rows while an optimistic insert or delete changes visibility passed the prior `@tanstack/db` suite and fail here. Change routing withholds a dropped row from an `eq` subscription before its sent key could be recorded, so a mutant that records dropped rows as sent is equivalent for routed predicates in this oracle. A focused `collection-subscription.test.ts` witness checks that a dropped insert or update, alone or beside a matching change, cannot advance a limited subscription's page offset under a routed `eq` and an unrouted `or` predicate; the unrouted cases beside a matching change kill that mutant, and the unrouted `alone` case does not. A loose-equality prefilter is an equivalent mutant: it only skips less. Skipping during truncate replay also survives; the replay's baseline diff re-derives the same retraction, so the guard keeps the prior dataflow without its own witness. Generated cleanup and restart histories for filtered subscribers remain open for the lifecycle publication owner. No-op updates, other comparison operators, Temporal and binary operands, joins, ordering, optimistic updates, and truncate are outside this owner. It runs in `@tanstack/db`'s `test:oracles` campaign. The [2026-09-30 review](https://github.com/TanStack/db/blob/main/docs/contributing/oracle-reviews/2026-09-30-where-predicate-and-join-keys.md) records each ORC outcome. Change routing was later removed in favor of pooled live queries; the routing mutants above are historical, and the same peer laws now check plain subscription dispatch. The unindexed snapshot prefilter was restored for compiled queries as one stored-row `eq` test on a string or boolean literal. Its property-visibility test also covers the reverse direction: a stored row with an inherited or non-enumerable field must still match `isUndefined` on that field, which a scan that evaluated the full predicate on stored rows fails. The `in` evaluator owner checks `in` against an independent linear reference over Dates, `NaN`, `-0`, BigInt, bytes, Temporal values, objects and nullish items, for constant and row-supplied lists. |
 | Joined result keys                           | [Joined result key oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/join-result-key-oracle.property.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | A nested-loop model recomputes the pair set of an inner, left, or full join over source keys drawn from plain, comma-bearing, bracket-bearing, and quoted strings, numbers beside the strings that print the same, both infinities, and `NaN`. After preload and each synced group change, the published rows must equal the model's pairs and the result key count must equal the row count. The comma-joined key encoding fails its two pinned histories and both campaigns; plain `JSON.stringify`, which prints infinities as the missing-side `null`, fails the pinned infinity history and both campaigns. A pinned history in which a `NaN`-keyed pair leaves and re-forms fails when the join index compares source-key prefixes with `===`. Joins over subqueries, more than two sources, custom `getKey`, and optimistic mutations are outside this owner. It runs in `@tanstack/db`'s `test:oracles` campaign. The [2026-09-30 review](https://github.com/TanStack/db/blob/main/docs/contributing/oracle-reviews/2026-09-30-where-predicate-and-join-keys.md) records each ORC outcome.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | D2 Index storage                             | [Index refinement oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/index-refinement-oracle.property.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | A plain-`Map` model sums multiplicities under a type-and-value identity in which `NaN` equals `NaN` and `-0` equals `0`. Histories of up to twelve additions to two keys mix prefixed arrays with `NaN`, `0`, `-0`, `1`, `'1'`, `1n`, and `'a'` prefixes and unprefixed values, with cancellation and reappearance. After each addition, `get` and `has` must equal the model. Each step also checks that `get` returns what `getIterator` yields, in its order, since the two walk the storage separately. Comparing prefixes with `===`, which disagrees with the `Map` that holds them, fails three pinned histories and both campaigns; the `-0` control passes under both. Every history also runs with `prefixIdentity`, where values under one key with the same prefix are one value; mutants that merge unprefixed values or ignore the option in a prefix map fail. The [structural identity oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/structural-identity-oracle.property.test.ts) checks that `structuralIdentity` agrees with D2 value identity for equal representations (array subclasses, class instances, null prototypes, key order, non-enumerable symbols) and independent values, including separator-bearing strings and keys, enumerable symbol keys, Dates, RegExps with numeric `lastIndex`, Maps and Sets with zero to two entries (the second Set member is a fresh tagged array, so primitive deduplication and unwrapped reordering are outside this lane), arrays with an optional enumerable `note` field, binary values, holes, deep nesting, and a cyclic value; an independent normal-form model decides equality and is checked against `equalHashValues`. The model expands `deep` shorthand into nested arrays. A pinned equal `deep`/array pair and adjacent-depth control guard the model boundary exposed by seed 1158727847/path 255. The equal-pair grammar crosses same-spec values with explicit-array/`deep` equivalent specs; the independent-pair grammar uses two specs. Both run fixed and fresh campaigns with guarded one-case seed/path replay. Pinned same-description symbols and equal-body Map/Set/object pairs expose collisions that random independent pairs rarely reach. Mutants that stringify symbols, collapse those three object-kind tags, drop a string's or key's length or an array's length, or omit Date and RegExp headers fail it. A first-entry-only Map/Set mutant and an array-identity mutant that ignores enumerable non-index fields fail the pinned comparisons; lowering the depth cap is equivalent, because the cap only bounds work. Open: reference-valued RegExp `lastIndex` can give D2-unequal values one defined identity and merge `groupBy` contributions ([#2192](https://github.com/TanStack/db/issues/2192)); the structural-identity and incrementalization owners need a production repair and receiving witness. Temporal values, other opaque reference values, large binary values, getters/proxies, and mutation between observations are outside this generated grammar. groupBy's use of it is owned by the incrementalization law: its string-extrema lane fails a string identity without a length prefix, and a focused groupBy witness fails when the group key is left out of the identity. Compaction, presence tracking, and structural payloads are outside this owner; a focused test checks that an index built without presence (as reduce builds its indexes) throws when presence is read; the [reduce fast-path oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/reduce-fast-path-oracle.property.test.ts) compares the fast path's emitted entries one by one with the general path's, over keys that move between the paths, hash-merged outputs, -0, and zero and negative multiplicities, while an unchanged `NaN` output is owned by a focused reduce test; the join operator tests and incrementalization law own operator behavior.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Pooled live queries | [pooled live query oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pooled-live-query-oracle.property.test.ts) | An independent `eq` model (nullish UNKNOWN, Date as timestamp, `NaN` equal to `NaN`, `-0` equal to `0`) gives membership; a live-query Collection compiled for the same query gives order, values, and status. Histories mix sync transactions, optimistic writes confirmed or rolled back, peer mounts and unmounts, and source cleanup and restart, including cleanup while a write is pending and a mount between cleanup and restart. Wholesale observers must match after every step, granular changes must match a reference observer by type, key, value, and previous value and replay to the model's rows, the layout revision must advance when keys reorder, and observing must never build the live-query Collection. Peers may add a residual `not(eq(...))` conjunct, which the model evaluates itself; a view that ignores it, reports an unfiltered `entries()`, or delivers a row entering or leaving it as an update fails it. Other residual operators use the same compiler evaluator but are not generated. Peers may also order their rows by `id` or by a `g` that can be null, with explicit `nulls`; order comes from the reference. A comparator that ignores direction or `nulls`, an order left out of the partition key, and key order instead of the query's order each fail the pinned reorder history and both campaigns. A partition that ignores a row's previous group, orders by arrival, skips normalization, skips the initial snapshot, follows the source's status after cleanup, or never terminates fails it. Two shared conformance scenarios (`eq-filter-rows`, `eq-filter-peers`) run the pooled path under React, Vue, Solid, Svelte, and Angular; a partition that ignores a row's previous group fails both under every adapter, and `eq-filter-peers` checks through `subscriberCount` that each adapter shares one source subscription per partition while mounted and releases every source subscription after the final framework unmount. A focused [release-timing test](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pooled-live-query-gc-oracle.test.ts) compares when a pooled query and a live-query Collection release their sources across `gcTime` 1, 100, 0, and `Infinity`, with and without a subscriber, and with no `gcTime`, where both use the live-query Collection default, checks that a partition waits for its views' longest `gcTime`, checks that a view resubscribed after its partition released follows later source writes as its live-query Collection does, including a view with a residual conjunct, and checks that a partition that subscribes again still serves new mounts from one source subscription. Further focused witnesses check that a partition keeps groups only for values that have rows or watchers, that a detached reader never sees a dropped group's revision reused, keep a pooled query's public Collection live while the view is observed, accept it as a query source, and check that a pooled query turns terminal when source cleanup starts while the adapter's cleanup is still pending, as a live-query Collection does. A pinned oracle witness checks that an `eq` path whose getter throws excludes the row on both paths; a pooled path that rethrows fails it. The pooled oracle's grammar never releases a partition, so release and resubscribe histories rely on these fixed witnesses; a fixed delay, a missing unsubscribed floor, a last-`gcTime`-wins rule, and releasing at `gcTime` 0 each fail it. Removing the partition's final-listener release survives the mounted row checks but fails the shared framework unmount checkpoint and core release-timing owner. The shared adapter conformance suite checks the opt-in boundary in every framework: queries without `pool` keep a source subscription each in the function, config, and parameterized forms, and a pooled parameterized query follows its parameter between pool groups beside an unchanged peer. Pooling every query by default, a pooled identity that ignores literal values (React then reuses the old query), and an Angular `params` form that drops `pool` each fail it. `pooled-param-change` also reads each driver's publication log: every value published after a switch holds only the new group's rows. Each driver also logs its keyed `state` map at the same points, and the law applies to it. A pooled view that serves the previous view's rows until a later task replaces them passes every final-state check and fails only the log, in all six drivers. A view that sends the previous rows as its first change set fails the `state` log in Vue; Solid rebuilds its map from a snapshot within the same turn, and Angular builds its map from `entries()`, so that mutant cannot reach them. The `invalid-pool` scenario requires `InvalidPoolOptionError` for `true` and for `false` (the value adapters pass to say a hook cannot pool), alone, beside `gcTime`, beside `queryKey`, on a parameterized query, and on a disabled config or parameterized query, in all six drivers; a check in only one of the three readers of `pool` fails it in four of them, and Angular's `params` form failed the `false` and disabled cases until it checked its pool first. The shared `grouping-operator-switch` scenario re-renders a grouped query without `groupKeys()`, and `compile-error-after-rerender` re-renders to a select that mixes a source field with an aggregate; both require the error and no rows after it. A binding that keeps its last compiled query when compilation throws fails both in Solid, Svelte, and Angular; one that throws once and then serves that query fails the no-rows check in Solid and Svelte, and cannot occur in Angular, whose `computed` rethrows a cached error until an input changes. In `grouping-operator-switch`, React and Preact kept the grouped query before query identity held operator code, and Vue served the previous rows before its compile error stopped reaching readers through a throwing computed (also on `main` at `5649a07d4`). The [2026-10-01 review](oracle-reviews/2026-10-01-pooled-live-queries.md) records each ORC outcome. |
-| Live-query deferred acquisition | [deferred acquisition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-deferred-acquisition-oracle.test.ts), [React Suspense warm-cache witness](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-warm-cache.test.tsx) | An independent model of the law that a live-query Collection starts no provider work before a subscriber or a preload in its current sync run crosses five source states (eager or on-demand, idle or already started, and an on-demand source that already holds the rows), an unordered query and an ordered window, one or two live-query levels, and seven histories: start and read, subscribe or preload after a start, subscribe or preload without one, cleanup before a subscriber, and restart after a run that had one. After every command it checks source sync-run starts, acquisition attempts, readiness when the call returns (the synchronous observation cut), settled readiness, and rows. A pooled block checks that building a pooled view starts no idle eager source until a view subscribes or preloads, and a DbClient block checks that a preload answered by a pending or settled stream still resumes acquisition. Mutants that never defer, keep the subscriber-or-preload fact across cleanup, ignore preload, never resume a builder's subscriptions, let a deferring subscriber start a base source, build a pooled partition without deferral, never resume it, mark a preload one microtask late, or drop the stream's preload mark each fail it. The React witness checks that `useLiveSuspenseQuery` over a source that already holds the rows renders without the fallback, for eager and on-demand sources and both shapes; creating the Suspense collection started, or not preloading it in render, fails it. A later review added `peer` and `truncate` commands: a peer that starts an idle on-demand source, or a truncate on a running one, made the live query acquire before any subscriber, and both guards are killed separately. Pinned blocks check that a subscriber surviving cleanup is served after a restart while a surviving deferring subscriber is not, and that `toArrayWhenReady()` and `stateWhenReady()` count as a preload. A pinned block checks that a deferring live query is not counted in its source's `subscriberCount` or `subscribers:change` until its first subscriber, while still keeping the source from garbage collection; a Query Collection test checks that it causes no refetch. Another pinned block checks that a preload or subscriber requested by an inner live query's status handler, while the outer query creates its subscription to it, still resumes acquisition. Solid's Suspense receiving witnesses check that a resource whose preload settles first retains its live-query Collection while its sibling remains pending past the unsubscribed floor, then releases that temporary owner on both commit and abandonment, and that a preload settling after its owner unmounts cannot publish an error through the abandoned result. Open: source failure and asynchronous loads before resumption, which the subscription lifecycle oracle owns once acquisition resumes; a resume that throws, which leaves later sources unstarted only for a live query that is already in error; asynchronous sources; and Suspense with a `DbClient`, where render already defers source starts. |
+| Pooled live queries | [pooled live query oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pooled-live-query-oracle.property.test.ts) | An independent `eq` model (nullish UNKNOWN, Date as timestamp, `NaN` equal to `NaN`, `-0` equal to `0`) gives membership; a live-query Collection compiled for the same query gives order, values, and status. Histories mix sync transactions, optimistic writes confirmed or rolled back, peer mounts and unmounts, and source cleanup and restart, including cleanup while a write is pending and a mount between cleanup and restart. Wholesale observers must match after every step, granular changes must match a reference observer by type, key, value, and previous value and replay to the model's rows, the layout revision must advance when keys reorder, and observing must never build the live-query Collection. Peers may add a residual `not(eq(...))` conjunct, which the model evaluates itself; a view that ignores it, reports an unfiltered `entries()`, or delivers a row entering or leaving it as an update fails it. Other residual operators use the same compiler evaluator but are not generated. Peers may also order their rows by `id` or by a `g` that can be null, with explicit `nulls`; order comes from the reference. A comparator that ignores direction or `nulls`, an order left out of the partition key, and key order instead of the query's order each fail the pinned reorder history and both campaigns. A partition that ignores a row's previous group, orders by arrival, skips normalization, skips the initial snapshot, follows the source's status after cleanup, or never terminates fails it. Two shared conformance scenarios (`eq-filter-rows`, `eq-filter-peers`) run the pooled path under React, Vue, Solid, Svelte, and Angular; a partition that ignores a row's previous group fails both under every adapter, and `eq-filter-peers` checks through `subscriberCount` that each adapter shares one source subscription per partition while mounted and releases every source subscription after the final framework unmount. The [resource-lifetime oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pooled-live-query-gc-oracle.test.ts) compares when a pooled query and a live-query Collection release their sources across `gcTime` 1, 100, 0, and `Infinity`, with and without a subscriber, and with no `gcTime`, where both use the live-query Collection default, checks that a partition waits for its views' longest `gcTime`, checks that a view resubscribed after its partition released follows later source writes as its live-query Collection does, including a view with a residual conjunct, and checks that a partition that subscribes again still serves new mounts from one source subscription. Further focused witnesses check that a partition keeps groups only for values that have rows or watchers, that a detached reader never sees a dropped group's revision reused, keep a pooled query's public Collection live while the view is observed, accept it as a query source, and check that a pooled query turns terminal when source cleanup starts while the adapter's cleanup is still pending, as a live-query Collection does. Generated callback-boundary histories also compare ordinary compiled and pooled core observers across return/throw, Error/undefined, zero through three healthy peers, callback position before/after peers, and `gcTime` 1–3. Failed granular bootstrap retains no unreturned ownership after grace; held source cleanup gives every admitted wholesale observer one terminal error snapshot/callback despite a sibling throw, and preserves the exact failure at settlement. Original production and independent rollback-only or all-peer-only repairs fail the respective ownership or cleanup-start comparisons. These controlled core receiving paths do not establish framework schedules, arbitrary callback programs or provider shutdown. A pinned oracle witness checks that an `eq` path whose getter throws excludes the row on both paths; a pooled path that rethrows fails it. The pooled oracle's grammar never releases a partition, so release and resubscribe histories rely on these fixed witnesses; a fixed delay, a missing unsubscribed floor, a last-`gcTime`-wins rule, and releasing at `gcTime` 0 each fail it. Removing the partition's final-listener release survives the mounted row checks but fails the shared framework unmount checkpoint and core release-timing owner. The [2026-10-01 review](oracle-reviews/2026-10-01-pooled-live-queries.md) records each ORC outcome. The shared adapter conformance suite checks the opt-in boundary in every framework: queries without `pool` keep a source subscription each in the function, config, and parameterized forms, and a pooled parameterized query follows its parameter between pool groups beside an unchanged peer. Pooling every query by default, a pooled identity that ignores literal values (React then reuses the old query), and an Angular `params` form that drops `pool` each fail it. `pooled-param-change` also reads each driver's publication log: every value published after a switch holds only the new group's rows. Each driver also logs its keyed `state` map at the same points, and the law applies to it. A pooled view that serves the previous view's rows until a later task replaces them passes every final-state check and fails only the log, in all six drivers. A view that sends the previous rows as its first change set fails the `state` log in Vue; Solid rebuilds its map from a snapshot within the same turn, and Angular builds its map from `entries()`, so that mutant cannot reach them. The `invalid-pool` scenario requires `InvalidPoolOptionError` for `true` and for `false` (the value adapters pass to say a hook cannot pool), alone, beside `gcTime`, beside `queryKey`, on a parameterized query, and on a disabled config or parameterized query, in all six drivers; a check in only one of the three readers of `pool` fails it in four of them, and Angular's `params` form failed the `false` and disabled cases until it checked its pool first. The shared `grouping-operator-switch` scenario re-renders a grouped query without `groupKeys()`, and `compile-error-after-rerender` re-renders to a select that mixes a source field with an aggregate; both require the error and no rows after it. A binding that keeps its last compiled query when compilation throws fails both in Solid, Svelte, and Angular; one that throws once and then serves that query fails the no-rows check in Solid and Svelte, and cannot occur in Angular, whose `computed` rethrows a cached error until an input changes. In `grouping-operator-switch`, React and Preact kept the grouped query before query identity held operator code, and Vue served the previous rows before its compile error stopped reaching readers through a throwing computed (also on `main` at `5649a07d4`). |
+| Live-query deferred acquisition | [deferred acquisition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-deferred-acquisition-oracle.test.ts), [React Suspense warm-cache witness](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-warm-cache.test.tsx) | An independent model of the law that a live-query Collection starts no provider work before a subscriber or a preload in its current sync run crosses seven source states (eager or on-demand, idle, already started or render-deferred, and an on-demand source that already holds the rows), an unordered query and an ordered window, one or two live-query levels, and eleven histories: start and read, subscribe or preload after a start, subscribe or preload without one, deferred subscription and resumption with or without a start, cleanup before a subscriber, peer start, source truncate, and restart after a run that had one. After every command it checks source sync-run starts, acquisition attempts, readiness when the call returns (the synchronous observation cut), settled readiness, and rows. A pooled block checks that building a pooled view starts no idle eager source until a view subscribes or preloads, and eight DbClient histories check that a preload answered by a pending or settled stream still resumes acquisition across eager/on-demand idle and render-deferred sources. The React streaming witness receives the on-demand render-deferral premise, starts local acquisition before the stream settles, and retains server rows until browser acquisition completes. Mutants that never defer, keep the subscriber-or-preload fact across cleanup, ignore preload, never resume a builder's subscriptions, let a deferring subscriber start a base source, build a pooled partition without deferral, never resume it, mark a preload one microtask late, or drop the stream's preload mark each fail it. The React witness checks that `useLiveSuspenseQuery` over a source that already holds the rows renders without the fallback, for eager and on-demand sources and both shapes; creating the Suspense collection started, or not preloading it in render, fails it. A later review added `peer` and `truncate` commands: a peer that starts an idle on-demand source, or a truncate on a running one, made the live query acquire before any subscriber, and both guards are killed separately. Pinned blocks check that a subscriber surviving cleanup is served after a restart while a surviving deferring subscriber is not, and that `toArrayWhenReady()` and `stateWhenReady()` count as a preload. A pinned block checks that a deferring live query is not counted in its source's `subscriberCount` or `subscribers:change` until its first subscriber, while still keeping the source from garbage collection; a Query Collection test checks that it causes no refetch. Another pinned block checks that a preload or subscriber requested by an inner live query's status handler, while the outer query creates its subscription to it, still resumes acquisition. Solid's Suspense receiving witnesses check that a resource whose preload settles first retains its live-query Collection while its sibling remains pending past the unsubscribed floor, then releases that temporary owner on both commit and abandonment, and that a preload settling after its owner unmounts cannot publish an error through the abandoned result. Open: source failure and asynchronous loads before resumption, which the subscription lifecycle oracle owns once acquisition resumes; a resume that throws, which leaves later sources unstarted only for a live query that is already in error; asynchronous sources; and arbitrary Suspense schedules with a `DbClient` beyond the bounded abandoned-render and streaming handoffs recorded above. |
 | Live-query notification algebra | [real-query and checker calibration](https://github.com/TanStack/db/blob/main/packages/db/tests/notification-laws-oracle.test.ts), [independent Map checker](https://github.com/TanStack/db/blob/main/packages/db-collection-e2e/src/utils/notification-laws-oracle.ts) | One-key synchronous source histories check exact live-query callback reconstruction and unsubscribe silence. Synthetic multi-key histories calibrate the checker; direct source Collection events remain with the change-event history owner. |
 | Flat-row change tracking | [flat change tracking oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/flat-change-tracking-oracle.property.test.ts) | Generated callbacks over flat rows, frozen or not and with or without a non-enumerable field (assignments of `0`, `-0`, `NaN`, `undefined`, functions, and fresh objects; reverts; deletions; added fields; data and accessor `defineProperty`; stored drafts; throws), run through the flat tracker, the draft proxy, and an independent model, which must report the same change sets with `0` and `-0` equal, or throw the same error and leave the rows unchanged. Defining a field acts as assigning it, and a non-enumerable field is row data only once written; the proxy broke three of those laws on `main` and the flat tracker one. Diffs using `!==`, `Object.is` alone, or no deletions fail it. It found that the proxy dropped a field added as `undefined` when another field reverted; the pinned history and both campaigns fail without that fix. Non-flat rows must fall back. The [2026-10-01 review](oracle-reviews/2026-10-01-pooled-live-queries.md) records each ORC outcome. |
 | Virtual props cache | [cache laws](https://github.com/TanStack/db/blob/main/packages/db/tests/virtual-props-cache.test.ts) | Focused laws for the per-key cache of rows read with virtual props: a change's published value is the row later `get` and `toArray` reads return, for every subscriber, after sync and local writes, and a key that is deleted or rolled back leaves the cache. Enriching the value before the previous value fails the first two; skipping the drop on delete events fails the third. Rows read with virtual props through other paths, such as joins, are outside these laws. |
@@ -3897,6 +4224,12 @@ The campaign can fail CI intermittently until the defect is fixed. Owner: the or
 Needed witness: whether this unindexed window may use full-source recovery,
 which this map allows for unindexed underfilled continuations; if so the
 check is too strict for it, and if not production is wrong.
+
+The same comparison fails on main `6c1ca8f8f` and PR #2229 at `7fff3a7e0`
+with seed `1902868771`, path `19:2:2:4:4:4:5:9:18:15`. This joined-filter
+history changes eligibility through `link`, then touches another row. Both
+exact replays report two full-source requests where the check expects zero;
+neither reports type errors. The existing contract question remains open.
 
 Open observation without a trace: in one CI run of this change, the random
 campaign of `packages/query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`

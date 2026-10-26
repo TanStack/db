@@ -51,13 +51,14 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
     dbClient._setSsrServerCleanupEnabled(true)
     const dbStream = createPushableStream<DehydratedDbState>()
     const bufferedQueryHashes = new Set<string>()
-    const streamedQueryHashes = new Set<string>()
+    const streamedQueryVersions = new Map<string, number>()
     let criticalStateCaptured = false
     let renderFinishRegistered = false
 
     const streamLiveQuery = (queryHash: string) => {
-      if (streamedQueryHashes.has(queryHash)) return
-      streamedQueryHashes.add(queryHash)
+      const version = dbClient._getLiveQuery(queryHash)!.dehydratedAt
+      if (streamedQueryVersions.get(queryHash) === version) return
+      streamedQueryVersions.set(queryHash, version)
 
       const enqueued = dbStream.enqueue(
         dbClient.dehydrate({
@@ -73,7 +74,7 @@ export function routerWithDbClient<TRouter extends AnyRouter>(
     }
 
     const unsubscribe = dbClient.subscribe((event) => {
-      if (event.type !== `liveQueryAdded`) return
+      if (event.type === `liveQueryStreamError`) return
 
       if (!criticalStateCaptured) {
         bufferedQueryHashes.add(event.query.queryHash)
