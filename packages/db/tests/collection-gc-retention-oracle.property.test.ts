@@ -71,6 +71,9 @@ type BoundaryHistory = {
   ready: boolean
   direct?: boolean
   asyncCleanup?: boolean
+  cleanupRejects?: boolean
+  automaticCleanup?: boolean
+  interaction?: boolean
   actions: Array<GcAction>
 }
 const boundaryPropertyName = `collection-lifecycle.gc-retention-boundaries`
@@ -100,6 +103,14 @@ const boundaryStates = [
   `pending-subscription-held`,
   `pending-last-unsubscribe`,
   `concurrent-preload`,
+  `interaction-subscriber-multiplicity`,
+  `interaction-delayed-commit`,
+  `interaction-three-persisting`,
+  `interaction-preload-between-settlements`,
+  `interaction-nonfifo-settlement`,
+  `automatic-cleanup-held`,
+  `automatic-cleanup-pending-rollback`,
+  `automatic-cleanup-rejected`,
 ] as const
 let boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
 
@@ -122,9 +133,13 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
   let markError = (_error: Error) => {}
   const preloadFailure = new Error(`preload failed`)
   const cleanupGate = createDeferred<void>()
+  const cleanupFailure = new Error(`adapter cleanup rejected`)
   let cleanupPromise: Promise<void> | undefined
   let cleanupStatus: string | undefined
   let cleanupSettled = false
+  let cleanupError: unknown
+  let adapterCleanupCalls = 0
+  let transactionSettlements = 0
   const preloads: Array<{
     promise: Promise<void>
     expected: `pending` | `fulfilled` | `rejected`
@@ -132,6 +147,17 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
     reason?: unknown
   }> = []
   let warmPreloads = 0
+  const observeCleanup = () => {
+    cleanupPromise = collection.cleanup().then(
+      () => {
+        cleanupSettled = true
+      },
+      (error: unknown) => {
+        cleanupSettled = true
+        cleanupError = error
+      },
+    )
+  }
   const collection = createCollection<{ id: number }, number>({
     getKey: (row) => row.id,
     gcTime: history.gcTime,
@@ -142,7 +168,12 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         markReady = params.markReady
         markError = params.markError
         if (history.ready) markReady()
-        return history.asyncCleanup ? () => cleanupGate.promise : undefined
+        return history.asyncCleanup
+          ? () => {
+              adapterCleanupCalls++
+              return cleanupGate.promise
+            }
+          : undefined
       },
     },
   })
@@ -187,15 +218,53 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
       )
       expect(cleanupSettled, `${label}: cleanup settlement is held`).toBe(false)
     }
+    if (model.retired && cleanupPromise) {
+      expect(cleanupSettled, `${label}: cleanup settled`).toBe(true)
+      if (history.cleanupRejects) {
+        // Sync cleanup exposes its public wrapper and retains the exact cause.
+        expect(cleanupError, `${label}: public cleanup failure`).toMatchObject({
+          name: `SyncCleanupError`,
+        })
+        expect(
+          (cleanupError as Error).cause,
+          `${label}: exact adapter cause`,
+        ).toBe(cleanupFailure)
+      } else
+        expect(
+          cleanupError,
+          `${label}: successful adapter cleanup`,
+        ).toBeUndefined()
+    }
   }
   await withOracleCleanup(async () => {
     await flush()
     check(`start`)
     for (const [index, action] of history.actions.entries()) {
+      if (history.interaction)
+        expect(
+          gcActionLegal(model, action),
+          `constructive interaction action ${index}`,
+        ).toBe(true)
       if (!gcActionLegal(model, action)) continue
       const deadlineBefore = gcDeadline(model)
       const phaseBefore =
         `slot` in action ? model.transactions[action.slot] : undefined
+      if (
+        history.interaction &&
+        action.kind === `commit` &&
+        model.transactions.filter(
+          (phase) => phase === `pending` || phase === `persisting`,
+        ).length >= 3
+      )
+        boundaryReach.reach(`interaction-delayed-commit`)
+      if (
+        history.interaction &&
+        action.kind === `settle` &&
+        model.transactions.some(
+          (phase, slot) => slot < action.slot && phase === `persisting`,
+        )
+      )
+        boundaryReach.reach(`interaction-nonfifo-settlement`)
       if (action.kind === `insert`) {
         if (idleHost.callbacks.size) boundaryReach.reach(`queued-idle-renewal`)
         const handler = createDeferred<void>()
@@ -233,6 +302,12 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         if (model.subscribers === 1 && model.gcTime < 50 && model.gcTime > 0)
           boundaryReach.reach(`last-unsubscribe-short`)
       } else if (action.kind === `preload`) {
+        if (
+          history.interaction &&
+          transactionSettlements > 0 &&
+          model.transactions.includes(`persisting`)
+        )
+          boundaryReach.reach(`interaction-preload-between-settlements`)
         if (model.ready) {
           warmPreloads++
           if (model.transactions.includes(`persisting`))
@@ -281,12 +356,24 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
       } else if (action.kind === `advance`) {
         await vi.advanceTimersByTimeAsync(action.elapsedMs)
       } else if (action.kind === `idle`) {
+        const startsHeldCleanup =
+          action.cleanupPending &&
+          (action.hasTime || action.didTimeout) &&
+          model.now >= deadlineBefore
+        if (startsHeldCleanup) cleanupStatus = collection.status
         for (const [id, callback] of [...idleHost.callbacks]) {
           idleHost.callbacks.delete(id)
           callback({
             didTimeout: action.didTimeout,
             timeRemaining: () => (action.hasTime ? 50 : 0),
           })
+        }
+        if (startsHeldCleanup) {
+          // Join the operation that the idle callback started. The callback,
+          // not this observer, must have invoked adapter cleanup first.
+          expect(adapterCleanupCalls, `GC started adapter cleanup`).toBe(1)
+          observeCleanup()
+          boundaryReach.reach(`automatic-cleanup-held`)
         }
         if (
           model.transactions.includes(`pending`) &&
@@ -302,15 +389,35 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
           boundaryReach.reach(`pending-subscription-held`)
       } else if (action.kind === `cleanup-start`) {
         cleanupStatus = collection.status
-        cleanupPromise = collection.cleanup().then(() => {
-          cleanupSettled = true
-        })
+        observeCleanup()
       } else if (action.kind === `cleanup-settle`) {
-        cleanupGate.resolve()
+        if (history.cleanupRejects) cleanupGate.reject(cleanupFailure)
+        else cleanupGate.resolve()
         await cleanupPromise
+        if (history.cleanupRejects)
+          boundaryReach.reach(`automatic-cleanup-rejected`)
       } else await collection.cleanup()
       stepGcModel(model, action)
-      if (action.kind === `cleanup-start`)
+      if (action.kind === `settle` || action.kind === `rollback`)
+        transactionSettlements++
+      if (history.interaction && model.subscribers >= 2)
+        boundaryReach.reach(`interaction-subscriber-multiplicity`)
+      if (
+        history.interaction &&
+        model.transactions.filter((phase) => phase === `persisting`).length >= 3
+      )
+        boundaryReach.reach(`interaction-three-persisting`)
+      if (
+        history.asyncCleanup &&
+        action.kind === `rollback` &&
+        model.cleaningUp &&
+        history.automaticCleanup
+      )
+        boundaryReach.reach(`automatic-cleanup-pending-rollback`)
+      if (
+        action.kind === `cleanup-start` ||
+        (action.kind === `idle` && model.cleaningUp)
+      )
         check(`step ${index} cleanup-start synchronous row discard`)
       if (
         (action.kind === `settle` || action.kind === `rollback`) &&
@@ -389,7 +496,7 @@ const boundaryParameters = fc.record({
   ),
   siblingPending: fc.boolean(),
 })
-const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
+const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
   ...[
     `startup`,
     `unsubscribe`,
@@ -553,6 +660,195 @@ const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
       }
     }),
   ),
+)
+
+// These histories choose each next command from the reference's legal actions.
+// The prefix establishes subscriber multiplicity, three persisting siblings,
+// a delayed commit, non-FIFO settlement and a warm preload between releases.
+// Generated suffixes then recombine those owners instead of only varying a
+// predefined lane's parameters. A maximum of seven transaction slots and three
+// subscribers keeps shrinking and exact-key observations small. Every emitted
+// action is legal; the production driver rejects a skipped interaction action.
+// Removing this arbitrary loses those crossings. Removing its suffix preserves
+// the prefix witnesses but loses repeated ownership/release cycles in one run.
+const interactionHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc
+  .record({
+    gcTime: fc.constantFrom(1, 10, 49, 50, 51, 100),
+    age: fc.integer({ min: 0, max: 80 }),
+    firstSettlement: fc.constantFrom(1, 2),
+    reverseDrain: fc.boolean(),
+    commands: fc.array(
+      fc.record({
+        choice: fc.integer({ min: 0, max: 255 }),
+        elapsedMs: fc.integer({ min: 0, max: 120 }),
+        hasTime: fc.boolean(),
+        didTimeout: fc.boolean(),
+        outcome: fc.constantFrom(`complete` as const, `fail` as const),
+      }),
+      { minLength: 6, maxLength: 14 },
+    ),
+  })
+  .map(({ gcTime, age, firstSettlement, reverseDrain, commands }) => {
+    const model = createGcModel(gcTime)
+    const actions: Array<GcAction> = []
+    const emit = (action: GcAction) => {
+      // This check belongs to construction, before the production driver can
+      // silently skip an illegal command or turn a shrink into another path.
+      if (!gcActionLegal(model, action))
+        throw new Error(`Interaction grammar emitted ${JSON.stringify(action)}`)
+      actions.push(action)
+      stepGcModel(model, action)
+    }
+    emit({ kind: `subscribe` })
+    emit({ kind: `subscribe` })
+    emit({ kind: `unsubscribe` })
+    emit({ kind: `advance`, elapsedMs: Math.max(gcTime, 50) + 1 })
+    emit({ kind: `idle`, hasTime: true, didTimeout: false })
+    emit({ kind: `subscribe` })
+    emit({ kind: `insert`, commit: true })
+    emit({ kind: `insert`, commit: true })
+    emit({ kind: `insert`, commit: false })
+    emit({ kind: `advance`, elapsedMs: age })
+    emit({ kind: `commit`, slot: 2 })
+    emit({ kind: `unsubscribe` })
+    emit({ kind: `advance`, elapsedMs: Math.max(gcTime, 50) + 1 })
+    emit({ kind: `idle`, hasTime: true, didTimeout: false })
+    emit({ kind: `unsubscribe` })
+    emit({
+      kind: `settle`,
+      slot: firstSettlement,
+      outcome: commands[0]!.outcome,
+    })
+    emit({ kind: `preload` })
+    for (const command of commands) {
+      const candidates: Array<GcAction> = [
+        { kind: `advance`, elapsedMs: command.elapsedMs },
+        {
+          kind: `idle`,
+          hasTime: command.hasTime,
+          didTimeout: command.didTimeout,
+        },
+      ]
+      if (!model.retired) {
+        if (model.subscribers < 3) candidates.push({ kind: `subscribe` })
+        if (model.subscribers > 0) candidates.push({ kind: `unsubscribe` })
+        if (model.transactions.length < 7)
+          candidates.push(
+            { kind: `insert`, commit: false },
+            { kind: `insert`, commit: true },
+          )
+        candidates.push({ kind: `preload` })
+      }
+      for (const [slot, state] of model.transactions.entries()) {
+        if (state === `pending`) {
+          if (!model.retired) candidates.push({ kind: `commit`, slot })
+          candidates.push({ kind: `rollback`, slot })
+        } else if (state === `persisting`)
+          candidates.push(
+            { kind: `settle`, slot, outcome: command.outcome },
+            { kind: `rollback`, slot },
+          )
+      }
+      emit(candidates[command.choice % candidates.length]!)
+    }
+    const slots = model.transactions.map((_, slot) => slot)
+    if (reverseDrain) slots.reverse()
+    for (const slot of slots) {
+      if (model.transactions[slot] === `pending`)
+        emit({ kind: `rollback`, slot })
+      else if (model.transactions[slot] === `persisting`)
+        emit({ kind: `settle`, slot, outcome: commands.at(-1)!.outcome })
+    }
+    while (model.subscribers > 0) {
+      emit({ kind: `unsubscribe` })
+      if (model.subscribers > 0) {
+        emit({ kind: `advance`, elapsedMs: gcTime + 1 })
+        emit({ kind: `idle`, hasTime: true, didTimeout: false })
+      }
+    }
+    if (!model.retired) {
+      const remaining = Math.max(0, gcDeadline(model) - model.now)
+      emit({ kind: `advance`, elapsedMs: Math.max(0, remaining - 1) })
+      emit({ kind: `idle`, hasTime: true, didTimeout: false })
+      emit({ kind: `advance`, elapsedMs: 1 })
+      emit({ kind: `idle`, hasTime: true, didTimeout: false })
+    }
+    emit({ kind: `cleanup` })
+    return { gcTime, ready: true, interaction: true, actions }
+  })
+
+// GC may discard pending drafts, but adapter cleanup still has two cuts.
+// Keep two drafts so rollback during automatic cleanup can reveal a stale
+// sibling overlay. Rejection finalizes the same run and preserves its error.
+const automaticCleanupHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc
+  .record({
+    gcTime: fc.constantFrom(1, 10, 49, 50, 51, 100),
+    age: fc.integer({ min: 0, max: 80 }),
+    gap: fc.integer({ min: 0, max: 60 }),
+    cleanupRejects: fc.boolean(),
+    subscribed: fc.boolean(),
+    outcome: fc.constantFrom(`complete` as const, `fail` as const),
+  })
+  .map(({ gcTime, age, gap, cleanupRejects, subscribed, outcome }) => {
+    const model = createGcModel(gcTime)
+    const actions: Array<GcAction> = []
+    const emit = (action: GcAction) => {
+      stepGcModel(model, action)
+      actions.push(action)
+    }
+    if (subscribed) emit({ kind: `subscribe` })
+    emit({ kind: `insert`, commit: true })
+    emit({ kind: `insert`, commit: false })
+    emit({ kind: `insert`, commit: false })
+    emit({ kind: `advance`, elapsedMs: age })
+    emit({ kind: `settle`, slot: 0, outcome })
+    if (subscribed) emit({ kind: `unsubscribe` })
+    const remaining = gcDeadline(model) - model.now
+    emit({ kind: `advance`, elapsedMs: remaining - 1 })
+    emit({
+      kind: `idle`,
+      hasTime: true,
+      didTimeout: false,
+      cleanupPending: true,
+    })
+    emit({ kind: `advance`, elapsedMs: 1 })
+    emit({
+      kind: `idle`,
+      hasTime: false,
+      didTimeout: false,
+      cleanupPending: true,
+    })
+    emit({
+      kind: `idle`,
+      hasTime: true,
+      didTimeout: false,
+      cleanupPending: true,
+    })
+    emit({ kind: `rollback`, slot: 1 })
+    emit({ kind: `advance`, elapsedMs: gap })
+    emit({
+      kind: `idle`,
+      hasTime: true,
+      didTimeout: false,
+      cleanupPending: true,
+    })
+    emit({ kind: `cleanup-settle` })
+    emit({ kind: `rollback`, slot: 2 })
+    return {
+      gcTime,
+      ready: true,
+      asyncCleanup: true,
+      automaticCleanup: true,
+      cleanupRejects,
+      interaction: true,
+      actions,
+    }
+  })
+
+const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
+  { arbitrary: boundaryLaneHistoryArbitrary, weight: 5 },
+  { arbitrary: interactionHistoryArbitrary, weight: 1 },
+  { arbitrary: automaticCleanupHistoryArbitrary, weight: 1 },
 )
 
 it.each(

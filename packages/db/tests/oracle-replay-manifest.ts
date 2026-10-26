@@ -90,6 +90,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `gc-persisting-transaction`,
   ],
   [
+    `db/tests/collection-gc-mutation-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-mutation-shapes`,
+  ],
+  [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
     `retention optimistic-history optimistic-history-partial accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
@@ -277,6 +282,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `collection-lifecycle.gc-mutation-shapes`,
+    `retains every touched Collection across mutation shapes.*seed undefined`,
+  ],
   [
     `collection-lifecycle.gc-persisting-transaction`,
     `retires a Collection only after gcTime.*seed undefined`,

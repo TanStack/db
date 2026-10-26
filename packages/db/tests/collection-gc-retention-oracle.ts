@@ -16,8 +16,8 @@
  * additionally checks the current appointment-driven delivery at its nominated
  * usable idle cuts. The reducer's exact retirement cut describes that fixture,
  * not a new general host-liveness promise.
- * Explicit cleanup clears rows at cleanup start, including while a transaction
- * persists. Its public status retires only after the adapter cleanup settles,
+ * Cleanup clears rows at cleanup start. Explicit cleanup also clears them while
+ * a transaction persists. Public status retires only after adapter cleanup settles,
  * as specified by Collection.cleanup() and the glossary's cleanup boundary.
  *
  * The reference keeps only logical holds, their last release, and the absolute
@@ -30,6 +30,11 @@
  * the glossary's cleanup-start and cleanup-settlement boundaries. `cleanup`
  * keeps the same operation atomic for drivers whose adapter stops at once.
  * `cleaningUp` is the model's projection of that held adapter interval.
+ * An idle action with cleanupPending starts that interval instead of publishing
+ * retirement. Adapter success or rejection ends it through cleanup-settle.
+ * The mutation receiving driver uses `mutate` to admit an optimistic transaction
+ * with its own independently computed row projection; `insert` is the original
+ * fresh-key admission shorthand. Both have the same lifetime rule.
  * A pending manual transaction has no GC hold. Its caller can retain the
  * Collection with a subscription. This owner checks that retained path and the
  * ordinary delay after unsubscribe; it excludes restart and owes no optimistic
@@ -44,6 +49,7 @@ export type GcAction =
   | { kind: `subscribe` }
   | { kind: `unsubscribe` }
   | { kind: `insert`; commit: boolean }
+  | { kind: `mutate`; commit: boolean }
   | { kind: `commit`; slot: number }
   | { kind: `settle`; slot: number; outcome: `complete` | `fail` }
   | { kind: `rollback`; slot: number }
@@ -51,7 +57,12 @@ export type GcAction =
   | { kind: `ready` }
   | { kind: `preload-failure` }
   | { kind: `advance`; elapsedMs: number }
-  | { kind: `idle`; hasTime: boolean; didTimeout: boolean }
+  | {
+      kind: `idle`
+      hasTime: boolean
+      didTimeout: boolean
+      cleanupPending?: boolean
+    }
   | { kind: `cleanup` }
   | { kind: `cleanup-start` }
   | { kind: `cleanup-settle` }
@@ -148,6 +159,7 @@ export function stepGcModel(model: GcModel, action: GcAction): void {
       if (model.subscribers === 0) model.handoffUntil = 0
       break
     case `insert`:
+    case `mutate`:
       model.transactions.push(action.commit ? `persisting` : `pending`)
       break
     case `commit`:
@@ -186,8 +198,10 @@ export function stepGcModel(model: GcModel, action: GcAction): void {
       if (
         (action.hasTime || action.didTimeout) &&
         model.now >= gcDeadline(model)
-      )
-        model.retired = true
+      ) {
+        if (action.cleanupPending) model.cleaningUp = true
+        else model.retired = true
+      }
       break
     case `cleanup`:
       model.retired = true
@@ -220,6 +234,9 @@ export function checkGcObservation(
   actual: GcObservation,
   checkpoint: string,
   sourceKeys: ReadonlyArray<number> = [],
+  // A receiving driver may independently project update/delete/merged intent.
+  // This input must never come from the observed Collection or production merger.
+  expectedKeys?: ReadonlyArray<number>,
 ): void {
   const fail = (message: string): never => {
     throw new Error(`${checkpoint} at ${model.now}ms: ${message}`)
@@ -233,15 +250,15 @@ export function checkGcObservation(
       fail(`cleanup left visible rows: ${actual.visibleKeys.join()}`)
     return
   }
-  const expectedKeys = new Set(sourceKeys)
-  for (const [slot, state] of model.transactions.entries())
-    if (state === `pending` || state === `persisting`)
-      expectedKeys.add(slot + 1)
+  const expected = new Set(expectedKeys ?? sourceKeys)
+  if (expectedKeys === undefined)
+    for (const [slot, state] of model.transactions.entries())
+      if (state === `pending` || state === `persisting`) expected.add(slot + 1)
   if (
-    actual.visibleKeys.length !== expectedKeys.size ||
-    [...expectedKeys].some((key) => !actual.visibleKeys.includes(key))
+    actual.visibleKeys.length !== expected.size ||
+    [...expected].some((key) => !actual.visibleKeys.includes(key))
   )
     fail(
-      `visible keys expected [${[...expectedKeys].join()}], got [${actual.visibleKeys.join()}]`,
+      `visible keys expected [${[...expected].join()}], got [${actual.visibleKeys.join()}]`,
     )
 }
