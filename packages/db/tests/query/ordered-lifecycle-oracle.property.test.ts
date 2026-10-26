@@ -1,9 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { createCollection } from '../../src/collection/index.js'
-import { createDeferred } from '../../src/deferred.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -11,6 +8,9 @@ import {
   not,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {

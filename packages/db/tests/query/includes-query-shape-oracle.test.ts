@@ -1,11 +1,11 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
   eq,
   materialize,
 } from '../../src/query/index.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'

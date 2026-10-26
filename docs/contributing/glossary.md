@@ -212,6 +212,8 @@ Use nouns for state and verbs for transitions:
 - A sync transaction **applies** when its writes and events become visible.
 - A replay or repair **publishes** one coherent public snapshot.
 - Cleanup start **invalidates** a sync run and **closes** restart admission.
+  Ordinary subscription admission and deferred acquisition resumption **throw**
+  during active cleanup without changing subscriber ownership.
   Cleanup **settles** after adapter cleanup settles and the Collection publishes
   `cleaned-up`. Restart then **starts** a new sync run.
 - Truncate replay **replaces** source state inside the current sync run and

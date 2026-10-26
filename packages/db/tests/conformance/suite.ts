@@ -34,7 +34,8 @@
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
  * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
- * inputs, error status, and order-only moves.
+ * inputs, opt-in pooling in each input form, error status, and order-only
+ * moves.
  *
  * The query-identity scenarios (see `contract.ts`) run each history through
  * both identity policies. A comparing binding rejects an unhashable query
@@ -53,7 +54,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  include,
   permitsPersistedInitialRender,
+  pooledLiveQueries,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { createOracleReach } from '../oracle-reach'
@@ -67,6 +70,7 @@ import {
   expectUnorderedRows,
   selectedRow,
 } from './result-laws'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   DeferredSourceHandle,
   LiveQueryDriver,
@@ -99,6 +103,9 @@ async function expectRetired(collection: ConformanceCollection): Promise<void> {
 async function expectRejection(
   name: string,
   run: () => Promise<unknown> | unknown,
+  // Many coded errors share their base class's name; the development
+  // build's message tells them apart.
+  message?: RegExp,
 ): Promise<void> {
   let rejection: unknown
   try {
@@ -106,14 +113,15 @@ async function expectRejection(
   } catch (error) {
     rejection = error
   }
-  expect(rejection, `expected ${name}`).toMatchObject({ name })
+  expect(rejection, `expected ${name}`).toMatchObject(
+    message ? { name, message: expect.stringMatching(message) } : { name },
+  )
 }
 
 /**
  * After a rejection, every read throws or holds no rows. Two reads catch a
- * memo that throws once and then serves its previous value. No current driver
- * can fail this check (see `contract.ts`); it guards a driver whose binding
- * stays mounted after a rejection.
+ * memo that throws once and then serves its previous value, as a Vue
+ * computed does (see `contract.ts`).
  */
 function expectNoRowsAfterRejection(h: LiveQueryHandle): void {
   for (let read = 0; read < 2; read++) {
@@ -196,8 +204,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       sources!.track(rawDriver.makePrecreated(build, options)),
     makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
     mount: (build) => track(rawDriver.mount(build)),
-    mountControllable: (build, initial) =>
-      track(rawDriver.mountControllable(build, initial)),
+    mountControllable: (build, initial, options) =>
+      track(rawDriver.mountControllable(build, initial, options)),
     mountCollection: (collection) =>
       track(rawDriver.mountCollection(collection)),
     mountConfig: (build, options) =>
@@ -426,10 +434,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           q
             .from({ items: source.collection })
             .where(({ items }: any) => ops.eq(items.team, team))
-        const teamA = driver.mount(query(`a`))
-        const teamB = driver.mount(query(`b`))
-        const olderA = driver.mount((q) =>
-          query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
+        // The config opts into pooling; without it each query compiles.
+        const pool = { pool: pooledLiveQueries }
+        const teamA = driver.mountConfig(query(`a`), pool)
+        const teamB = driver.mountConfig(query(`b`), pool)
+        const olderA = driver.mountConfig(
+          (q) => query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
+          pool,
         )
         for (const h of [teamA, teamB, olderA]) await h.flush()
         // Pooling shares one subscription between the two team queries.
@@ -458,6 +469,219 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             timeout: 500,
           })
           .toBe(0)
+      },
+    )
+
+    // Pooling is opt-in per query. Queries that do not pass `pool` each
+    // subscribe to the source themselves, whatever input form they use.
+    scenario(
+      `pool-opt-in`,
+      `queries without pool keep a source subscription each`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const query = (team: string) => (q: any) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const handles = [
+          driver.mount(query(`a`)),
+          driver.mount(query(`b`)),
+          driver.mountConfig(query(`a`)),
+          driver.mountControllable((q, team: string) => query(team)(q), `b`),
+        ]
+        for (const h of handles) await h.flush()
+        expect(source.collection.subscriberCount).toBe(handles.length)
+        expect(
+          handles.map((h) =>
+            (h.current().data as Array<{ id: string }>).map((row) => row.id),
+          ),
+        ).toEqual([[`1`, `3`], [`2`], [`1`, `3`], [`2`]])
+        for (const h of handles) h.unmount()
+      },
+    )
+
+    // A pooled query whose parameter changes leaves its old pool group and
+    // joins the new one: its rows follow the parameter, and a peer that keeps
+    // its parameter is not disturbed.
+    scenario(
+      `pooled-param-change`,
+      `a pooled query follows its parameter between pool groups`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const pool = { pool: pooledLiveQueries }
+        const query = (q: any, team: string) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const moving = driver.mountControllable<string>(query, `a`, pool)
+        const peer = driver.mountConfig((q) => query(q, `a`), pool)
+        for (const h of [moving, peer]) await h.flush()
+        const ids = (h: LiveQueryHandle) =>
+          (h.current().data as Array<{ id: string }>).map((row) => row.id)
+        expect([ids(moving), ids(peer)]).toEqual([
+          [`1`, `3`],
+          [`1`, `3`],
+        ])
+        const shared = driver.features?.pooledEqFilters ? 1 : 2
+        expect(source.collection.subscriberCount).toBe(shared)
+
+        // Every value the binding publishes after a switch holds only rows of
+        // the new group, or none while it loads; the old group's rows never
+        // show again. The driver logs the first paint, so the law cannot
+        // pass on an empty log.
+        const switchTo = async (
+          team: string,
+          rows: ReadonlyArray<{ id: string }>,
+        ) => {
+          const before = moving.publications().length
+          await moving.setParam(team)
+          const published = moving.publications().slice(before)
+          // The keyed state map follows the same law as `data`.
+          const states = moving.statePublications().slice(before)
+          expect(published.length).toBeGreaterThan(0)
+          for (const value of [...published, ...states])
+            expectOnlyRowsOf(value, rows)
+        }
+
+        await switchTo(`b`, [SEED[1]!])
+        await peer.flush()
+        expect([ids(moving), ids(peer)]).toEqual([[`2`], [`1`, `3`]])
+        expectKeyedRows(moving.current().state, [SEED[1]!])
+        expect(source.collection.subscriberCount).toBe(shared)
+
+        source.insert({ id: `4`, name: `Dave`, age: 40, team: `b` })
+        for (const h of [moving, peer]) await h.flush()
+        expect([ids(moving), ids(peer)]).toEqual([
+          [`2`, `4`],
+          [`1`, `3`],
+        ])
+
+        await switchTo(`a`, [SEED[0]!, SEED[2]!])
+        await peer.flush()
+        expect([ids(moving), ids(peer)]).toEqual([
+          [`1`, `3`],
+          [`1`, `3`],
+        ])
+        for (const h of [moving, peer]) h.unmount()
+        await expect
+          .poll(() => source.collection.subscriberCount, {
+            interval: 5,
+            timeout: 500,
+          })
+          .toBe(0)
+      },
+    )
+
+    // `pool` takes `pooledLiveQueries`. Any other value, such as the removed
+    // boolean form, contradicts the hook contract, so the hook rejects it the
+    // same way whatever its other options: beside `gcTime`, which keeps the
+    // pooled path, beside `queryKey`, which compiles its own Collection, and
+    // on a parameterized query. Authority: AGENTS.md, which requires a
+    // contract contradiction to fail at the boundary, not to fall back.
+    scenario(
+      `invalid-pool`,
+      `a hook rejects a pool option that is not pooledLiveQueries`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const query = (q: any, team: string) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        // `false` is a value an adapter passes to say a hook cannot pool; a
+        // config that passes it still breaks the contract. A disabled query
+        // has no query to pool, but its config holds the same option.
+        for (const invalid of [
+          true,
+          false,
+        ] as Array<unknown> as Array<PooledLiveQueries>)
+          for (const mount of [
+            () => driver.mountConfig((q) => query(q, `a`), { pool: invalid }),
+            () => driver.mountConfig(() => null as any, { pool: invalid }),
+            () => driver.mountControllable(() => null, `a`, { pool: invalid }),
+            () =>
+              driver.mountConfig((q) => query(q, `a`), {
+                pool: invalid,
+                gcTime: 5,
+              }),
+            () =>
+              driver.mountConfig((q) => query(q, `a`), {
+                pool: invalid,
+                queryKey: [`teams`, `a`],
+              }),
+            () => driver.mountControllable(query, `a`, { pool: invalid }),
+          ])
+            await expectRejection(`InvalidPoolOptionError`, async () => {
+              const h = mount()
+              await h.flush()
+              return h.current()
+            })
+      },
+    )
+
+    // Operator code is part of query identity. A re-render whose groupBy
+    // drops `groupKeys()` has no grouping compiler, so it rejects; a binding
+    // that compares identity must not keep the grouped query it compiled.
+    scenario(
+      `grouping-operator-switch`,
+      `a re-render that drops groupKeys() rejects instead of keeping the grouped query`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const team = ({ items }: any) => items.team
+        const h = driver.mountControllable<boolean>(
+          (q, keys) =>
+            q
+              .from({ items: source.collection })
+              .groupBy(keys ? ops.groupKeys(team) : team)
+              .select(({ items }: any) => ({ id: items.team })),
+          true,
+        )
+        await h.flush()
+        expectUnorderedRows(h.current().data, [{ id: `a` }, { id: `b` }])
+        await expectRejection(
+          `QueryCompilationError`,
+          async () => {
+            await h.setParam(false)
+            return h.current()
+          },
+          /^groupBy\(\) without an aggregate needs groupKeys\(\)/,
+        )
+        expectNoRowsAfterRejection(h)
+      },
+    )
+
+    // Any compile error after mount follows the rejection law, not only a
+    // missing operator: a select that mixes a source field with an
+    // aggregate has no value for one implicit group.
+    scenario(
+      `compile-error-after-rerender`,
+      `a re-render whose query fails to compile rejects and shows no rows`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountControllable<boolean>(
+          (q, valid) =>
+            q
+              .from({ items: source.collection })
+              .select(({ items }: any) =>
+                valid
+                  ? { id: items.id }
+                  : { id: items.id, n: ops.count(items.id) },
+              ),
+          true,
+        )
+        await h.flush()
+        expectUnorderedRows(
+          h.current().data,
+          SEED.map(({ id }) => ({ id })),
+        )
+        await expectRejection(
+          `GroupByError`,
+          async () => {
+            await h.setParam(false)
+            return h.current()
+          },
+          /^Non-aggregate expression 'id' must also appear in GROUP BY clause/,
+        )
+        expectNoRowsAfterRejection(h)
       },
     )
 
@@ -815,10 +1039,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           q.from({ persons: people.collection }).select(({ persons }: any) => ({
             id: persons.id,
             name: persons.name,
-            issues: q
-              .from({ issues: issues.collection })
-              .where(({ issues: i }: any) => ops.eq(i.userId, persons.id))
-              .select(({ issues: i }: any) => ({ id: i.id, title: i.title })),
+            issues: include(
+              q
+                .from({ issues: issues.collection })
+                .where(({ issues: i }: any) => ops.eq(i.userId, persons.id))
+                .select(({ issues: i }: any) => ({ id: i.id, title: i.title })),
+            ),
           })),
         )
         await h.flush()
@@ -1780,7 +2006,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(41)
+      expect(registry.size).toBe(46)
     })
   })
 }

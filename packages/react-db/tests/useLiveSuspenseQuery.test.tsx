@@ -683,7 +683,9 @@ describe(`useLiveSuspenseQuery`, () => {
       { wrapper: browserWrapper },
     )
 
-    expect(browserLoad).not.toHaveBeenCalled()
+    // Suspense preload is local demand even while the server stream is pending.
+    // Its rows remain authoritative until the browser acquisition completes.
+    expect(browserLoad).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       resolveServerLoad()

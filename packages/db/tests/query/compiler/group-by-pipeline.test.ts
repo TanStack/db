@@ -1,5 +1,6 @@
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { describe, expect, test } from 'vitest'
+import { grouping } from '../../../src/query/compiler/grouping.js'
 import { NonAggregateExpressionNotInGroupByError } from '../../../src/errors.js'
 import { coalesce } from '../../../src/query/builder/functions.js'
 import { processGroupBy } from '../../../src/query/compiler/group-by.js'
@@ -133,7 +134,11 @@ describe(`group-by production pipeline`, () => {
       const graph = new D2()
       const input = graph.newInput<KeyedNamespacedRow>()
       const groupRef = new PropRef([`row`, `group`])
-      const total = new Aggregate(`sum`, [new PropRef([`row`, `amount`])])
+      const total = new Aggregate(
+        `sum`,
+        [new PropRef([`row`, `amount`])],
+        grouping,
+      )
       // Exercise generated-field collision avoidance as well as wrapped refs.
       const totalAlias = `__tanstack_group_synced`
       const select: Select | undefined =
