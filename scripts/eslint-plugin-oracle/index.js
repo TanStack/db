@@ -1,4 +1,5 @@
 import noDisabled from './rules/no-disabled.js'
+import noUnitTest from './rules/no-unit-test.js'
 
 /**
  * Lint rules for oracle files.
@@ -18,6 +19,7 @@ const plugin = {
   meta: { name: `eslint-plugin-oracle` },
   rules: {
     'no-disabled': noDisabled,
+    'no-unit-test': noUnitTest,
   },
 }
 
@@ -28,6 +30,7 @@ plugin.configs = {
     plugins: { oracle: plugin },
     rules: {
       'oracle/no-disabled': `error`,
+      'oracle/no-unit-test': `error`,
     },
   },
 }
