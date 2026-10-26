@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+  materialize,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  materialize,
-  toArray,
-} from '../../src/query/index.js'
 import { flushPromises } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
@@ -262,9 +263,11 @@ describe(`functional projection output compatibility`, () => {
               .from({ parent: parents.collection })
               .select(({ parent }) => ({
                 id: parent.id,
-                children: q
-                  .from({ child: children })
-                  .where(({ child }) => eq(child.groupId, parent.groupId)),
+                children: include(
+                  q
+                    .from({ child: children })
+                    .where(({ child }) => eq(child.groupId, parent.groupId)),
+                ),
               })),
           })
           return projection === `expression`
@@ -449,9 +452,11 @@ describe(`functional projection output compatibility`, () => {
         return q.from({ row: projected }).select(({ row }) => ({
           id: row.id,
           groupId: row.groupId,
-          children: q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.groupId, row.groupId)),
+          children: include(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.groupId, row.groupId)),
+          ),
         }))
       })
       if (subscribeAt === `publication`) {
@@ -592,9 +597,11 @@ describe(`functional projection output compatibility`, () => {
               return {
                 id: parent.id,
                 groupId: parent.groupId,
-                children: ordered
-                  ? childQuery.orderBy(({ child }) => child.id, `desc`)
-                  : childQuery,
+                children: include(
+                  ordered
+                    ? childQuery.orderBy(({ child }) => child.id, `desc`)
+                    : childQuery,
+                ),
               }
             }),
           })
@@ -762,9 +769,11 @@ describe(`functional projection output compatibility`, () => {
           row: q.from({ parent: parents.collection }).select(({ parent }) => ({
             id: parent.id,
             label: parent.label,
-            children: q
-              .from({ child: childSource.collection })
-              .where(({ child }) => eq(child.groupId, parent.groupId)),
+            children: include(
+              q
+                .from({ child: childSource.collection })
+                .where(({ child }) => eq(child.groupId, parent.groupId)),
+            ),
           })),
         })
         return source.select(({ row }) => ({
@@ -861,9 +870,11 @@ describe(`functional projection output compatibility`, () => {
           })
         return q.from({ row: projected }).select(({ row }) => ({
           id: row.id,
-          children: q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.groupId, row.groupId)),
+          children: include(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.groupId, row.groupId)),
+          ),
         }))
       })
       let primaryFailure: unknown = noPrimaryFailure
@@ -921,9 +932,11 @@ describe(`functional projection output compatibility`, () => {
       const source = createLiveQueryCollection((q) =>
         q.from({ parent: parents.collection }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentId, parent.id)),
+          children: include(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentId, parent.id)),
+          ),
         })),
       )
       const projected = createLiveQueryCollection((q) =>
@@ -1016,7 +1029,7 @@ describe(`functional projection output compatibility`, () => {
                   base: parent.base,
                   children:
                     form === `collection`
-                      ? childRows
+                      ? include(childRows)
                       : form === `array`
                         ? toArray(childRows)
                         : materialize(childRows),
@@ -1176,7 +1189,7 @@ describe(`functional projection output compatibility`, () => {
                   ? {
                       children:
                         form === `collection`
-                          ? childRows
+                          ? include(childRows)
                           : form === `array`
                             ? toArray(childRows)
                             : materialize(childRows),
@@ -1305,7 +1318,7 @@ describe(`functional projection output compatibility`, () => {
                 id: parent.id,
                 children:
                   form === `collection`
-                    ? primary
+                    ? include(primary)
                     : form === `array`
                       ? toArray(primary)
                       : materialize(primary),
@@ -1313,7 +1326,7 @@ describe(`functional projection output compatibility`, () => {
                   ? {
                       sibling:
                         form === `collection`
-                          ? sibling
+                          ? include(sibling)
                           : form === `array`
                             ? toArray(sibling)
                             : materialize(sibling),
@@ -1632,7 +1645,7 @@ describe(`functional include projection boundary grammar`, () => {
                 total: 0,
                 children:
                   form === `collection`
-                    ? childRows
+                    ? include(childRows)
                     : form === `array`
                       ? toArray(childRows)
                       : materialize(childRows),

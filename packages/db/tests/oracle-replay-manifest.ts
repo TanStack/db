@@ -9,6 +9,51 @@ import { registeredOracleProperties } from './oracle-config.js'
  */
 const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
+    `db/tests/ssr-stream-record-wait-oracle.test.ts`,
+    `ssr`,
+    `stream-record-lifetime`,
+  ],
+  [
+    `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
+    `live-query`,
+    `start-handoff`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
+    `pooled-live-query`,
+    `late-cleanup bootstrap-ownership cleanup-peers`,
+  ],
+  [
+    `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
+    `react`,
+    `descriptor-error-surface descriptor-ownership ssr-ordinary ssr-infinite ssr-stream-cut`,
+  ],
+  [
+    `react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx`,
+    `react`,
+    `ssr-runtime-ordinary ssr-runtime-infinite`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-snapshot`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-handoff ssr-receiving-reader`,
+  ],
+  [
+    `svelte-db/tests/ssr-runtime-error-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-runtime-errors`,
+  ],
+  [
+    `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
+    `live-query-observer`,
+    `retained-snapshot`,
+  ],
+  [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
     `cleanup-queue`,
     `history`,
@@ -85,6 +130,16 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `reentrant-drain`,
   ],
   [
+    `db/tests/collection-gc-transaction-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-persisting-transaction`,
+  ],
+  [
+    `db/tests/collection-gc-mutation-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-mutation-shapes`,
+  ],
+  [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
     `retention optimistic-history optimistic-history-partial accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
@@ -112,7 +167,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
     `subscription-lifecycle`,
-    `async-statistics async-restart`,
+    `async-statistics async-restart notification-error`,
   ],
   [
     `db/tests/collection-subscription-replay-oracle.property.test.ts`,
@@ -132,7 +187,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/live-query-observer-history-oracle.property.test.ts`,
     `live-query-observer`,
-    `granular-history wholesale-history`,
+    `granular-history wholesale-history partial-attach release-failure hydration-error-timing`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
@@ -238,6 +293,11 @@ for (const law of [
   }
 }
 
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
+
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
     owners.set(
@@ -267,6 +327,81 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `collection-lifecycle.gc-mutation-shapes`,
+    `retains every touched Collection across mutation shapes.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-persisting-transaction`,
+    `retires a Collection only after gcTime.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
+  [
+    `ssr.stream-record-lifetime`,
+    `settles each record demand at its transport checkpoint.*random`,
+  ],
+  [
+    `live-query-observer.hydration-error-timing`,
+    `publishes errors at their ownership checkpoint.*random`,
+  ],
+  [
+    `live-query-observer.retained-snapshot`,
+    `first reads match the capture-time rows.*random`,
+  ],
+  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
+  [
+    `pooled-live-query.late-cleanup`,
+    `releases late cleanup registration channels.*random`,
+  ],
+  [
+    `pooled-live-query.bootstrap-ownership`,
+    `bootstrap ownership after callback failure.*random`,
+  ],
+  [
+    `pooled-live-query.cleanup-peers`,
+    `cleanup status reaches every observer.*random`,
+  ],
+  [
+    `live-query-observer.partial-attach`,
+    `releases every acquired channel before retry.*random`,
+  ],
+  [
+    `subscription-lifecycle.notification-error`,
+    `acquires retained demand after replacement readiness.*random`,
+  ],
+  [
+    `react.descriptor-error-surface`,
+    `error-surface after descriptor failure.*random`,
+  ],
+  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
+  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
+  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
+  [`react.ssr-stream-cut`, `transports the rendered view.*random`],
+  [
+    `react.ssr-runtime-ordinary`,
+    `ordinary preserves runtime error hydration views.*random`,
+  ],
+  [
+    `react.ssr-runtime-infinite`,
+    `infinite preserves runtime error hydration views.*random`,
+  ],
+  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
+  [`svelte.ssr-handoff`, `matches the actual browser initialization.*random`],
+  [
+    `svelte.ssr-receiving-reader`,
+    `preserves each receiving reader view.*random`,
+  ],
+  [
+    `svelte.ssr-runtime-errors`,
+    `keeps runtime failures on their ordinary error surface.*random`,
+  ],
+  [
+    `live-query-observer.release-failure`,
+    `reattaches after reporting a release failure.*random`,
+  ],
   [
     `structural-identity.equal-representations`,
     `agrees with D2 value identity for equal representations`,

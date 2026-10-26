@@ -1,5 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
@@ -12,11 +10,14 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  include,
   localOnlyCollectionOptions,
   lte,
   sum,
   toArray,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { useLiveQuery, useLiveQueryForSuspense } from '../src/useLiveQuery'
 import { getLiveQueryResultInfo } from '../src/live-query-internals'
@@ -2762,13 +2763,15 @@ describe(`Query Collections`, () => {
           q.from({ p: projectsCollection }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: q
-              .from({ i: issuesCollection })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
+            issues: include(
+              q
+                .from({ i: issuesCollection })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
           })),
         )
       })

@@ -3,7 +3,7 @@ id: SyncTransactionAbortedError
 title: SyncTransactionAbortedError
 ---
 
-Defined in: [packages/db/src/errors.ts:1056](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1056)
+Defined in: [packages/db/src/errors.ts:1076](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1076)
 
 A sync transaction was canceled before its writes became visible.
 
@@ -19,7 +19,7 @@ A sync transaction was canceled before its writes became visible.
 new SyncTransactionAbortedError(): SyncTransactionAbortedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1057](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1057)
+Defined in: [packages/db/src/errors.ts:1077](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1077)
 
 #### Returns
 

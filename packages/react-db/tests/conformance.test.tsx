@@ -16,6 +16,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -31,6 +32,7 @@ import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { rejectReadsAfterRenderError } from './rejected-binding'
 import type { RenderHookResult } from '@testing-library/react'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -142,7 +144,10 @@ function mountCollection(collection: any) {
   return makeHandle(hook)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const hook = renderHook(() => useLiveQuery({ query: build as any, ...opts }))
   return makeHandle(hook)
 }
@@ -156,7 +161,7 @@ function mountWithDependencyList(build: QueryBuild) {
 
 function mountConfigWithDependencyList(
   build: QueryBuild,
-  opts?: { gcTime?: number },
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
 ) {
   const hook = renderHook(() =>
     useLiveQuery({ query: build as any, ...opts } as any, []),
@@ -180,18 +185,25 @@ const mountControllableWith = (path: IdentityPath) =>
   function mountControllable<P>(
     build: (q: any, param: P) => any,
     initial: P,
+    opts?: { pool?: PooledLiveQueries },
   ): ControllableHandle<P> {
     const published = createPublicationLog()
     const hook = renderHook(
       ({ param }: { param: P }) => {
+        const query = (q: any) => build(q, param)
+        // A pooled query uses the config form, on either identity path.
         const result =
-          path === `derived`
-            ? // The callback captures param, so its IR identity changes with it.
-              useLiveQuery((q: any) => build(q, param))
-            : useLiveQuery((q: any) => build(q, param), [param])
+          opts?.pool !== undefined
+            ? path === `derived`
+              ? useLiveQuery({ query, pool: opts.pool })
+              : useLiveQuery({ query, pool: opts.pool }, [param])
+            : path === `derived`
+              ? // The callback captures param, so its IR identity changes with it.
+                useLiveQuery(query)
+              : useLiveQuery(query, [param])
         // A layout effect records each committed value.
         useLayoutEffect(() => {
-          published.record(result.data)
+          published.record(result.data, result.state)
         })
         return result
       },
@@ -202,6 +214,7 @@ const mountControllableWith = (path: IdentityPath) =>
     return {
       ...handle,
       publications: published.values,
+      statePublications: published.stateValues,
       async setParam(param: P) {
         await guard(() =>
           act(async () => {
@@ -269,7 +282,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
             ? useLiveQuery(config)
             : useLiveQuery(config, [param])
         useLayoutEffect(() => {
-          published.record(result.data)
+          published.record(result.data, result.state)
         })
         return result
       },
@@ -280,6 +293,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
     return {
       ...handle,
       publications: published.values,
+      statePublications: published.stateValues,
       async setParam(param: P) {
         await guard(() =>
           act(async () => {
@@ -296,7 +310,7 @@ const reactDriver: LiveQueryDriver = {
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

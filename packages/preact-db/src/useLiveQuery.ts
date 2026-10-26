@@ -22,6 +22,7 @@ import type {
   LiveQueryPersistedStatus,
   LiveQuerySourceIdClaims,
   NonSingleResult,
+  PooledLiveQueries,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
@@ -47,6 +48,11 @@ type UseLiveQueryConfigOptions<TContext extends Context> = Omit<
    * with functional variants. Structured queries should omit it.
    */
   queryKey?: LiveQueryKey
+  /**
+   * Pass `pooledLiveQueries` to share one partition among equality-filtered
+   * queries of one shape.
+   */
+  pool?: PooledLiveQueries
 }
 
 export type UseLiveQueryConfig<TContext extends Context> =

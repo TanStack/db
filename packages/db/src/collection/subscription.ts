@@ -85,8 +85,8 @@ type CollectionSubscriptionOptions = {
    * subscriber or a preload in its current sync run.
    */
   deferAcquisition?: boolean
-  /** Called once when deferred acquisition resumes. */
-  onResumeAcquisition?: () => void
+  /** Start sync, then return the ownership notification for a live resumption. */
+  onResumeAcquisition?: () => () => void
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -295,8 +295,12 @@ export class CollectionSubscription
     if (!this.defersAcquisition || this.unsubscribed) return
     // Start the source first: if its start throws, this subscription still
     // defers rather than claiming acquisition it never began.
-    this.options.onResumeAcquisition?.()
+    const notifyResumed = this.options.onResumeAcquisition?.()
+    // Startup can synchronously retire this subscription. It then owns no
+    // acquisition, including when a status callback unsubscribes during startup.
+    if (this.unsubscribed as boolean) return
     this.defersAcquisition = false
+    notifyResumed?.()
     if (this.collection.status !== `idle`) {
       this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
     }

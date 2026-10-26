@@ -3,18 +3,18 @@ import { D2, MultiSet, output, serializeValue } from '@tanstack/db-ivm'
 import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import { getQueryIR } from '../../src/query/builder/query-ir.js'
-import { createCollection } from '../../src/collection/index.js'
-import { count as countRows } from '../../src/query/builder/functions.js'
-import { compileExpression } from '../../src/query/compiler/evaluators.js'
-import { compileQuery } from '../../src/query/compiler/index.js'
-import { getEqualityValueIdentity } from '../../src/query/equality-value-identity.js'
 import {
   Query,
   and,
   createLiveQueryCollection,
   eq,
 } from '../../src/query/index.js'
+import { getQueryIR } from '../../src/query/builder/query-ir.js'
+import { createCollection } from '../../src/collection/index.js'
+import { count as countRows } from '../../src/query/builder/functions.js'
+import { compileExpression } from '../../src/query/compiler/evaluators.js'
+import { compileQuery } from '../../src/query/compiler/index.js'
+import { getEqualityValueIdentity } from '../../src/query/equality-value-identity.js'
 import { queriesMatchForCaching } from '../../src/query/compiler/query-equivalence.js'
 import {
   getLoadSubsetDemandKey,
