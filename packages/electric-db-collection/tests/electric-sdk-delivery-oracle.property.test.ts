@@ -50,6 +50,25 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { Message } from '@electric-sql/client'
 
+// Observe the real constructor boundary without changing the installed SDK's
+// options, prototype, methods, or HTTP behavior. Only the rotation lane enables
+// the callback; every construction still executes the original ShapeStream.
+const sdkConstruction = vi.hoisted(() => ({
+  observe: undefined as (() => void) | undefined,
+}))
+vi.mock(`@electric-sql/client`, async (importOriginal) => {
+  const original = await importOriginal<typeof import('@electric-sql/client')>()
+  return {
+    ...original,
+    ShapeStream: new Proxy(original.ShapeStream, {
+      construct(target, args, newTarget) {
+        sdkConstruction.observe?.()
+        return Reflect.construct(target, args, newTarget)
+      },
+    }),
+  }
+})
+
 /**
  * # Does the installed Electric SDK deliver the adapter's assumed protocol?
  *
@@ -1012,213 +1031,361 @@ fixedCase(`does not certify an aborted SDK subset snapshot`, async () => {
  * the installed ShapeStream and HTTP path. A Map-backed adapter supplies the
  * generation boundary; real SQLite and native hosts have separate owners.
  * It also receives the stream-listener release law below for the retired
- * session: after the rotation only the replacement stream's listener stays
- * registered, and none stays after cleanup.
+ * session. The Electric guide requires releasing its owned resources before
+ * constructing the replacement ShapeStream. The independent rule is zero
+ * old listeners at that constructor boundary, one replacement listener after
+ * delivery, and zero after cleanup. Cache rotation may finish before disposal;
+ * no zero-listener promise applies while the rotation result is held.
+ *
+ * Generated histories rotate one to three times in the same sync run. Each
+ * retired HTTP snapshot arrives while rotation is held, just before replacement
+ * snapshots, or after replacement settlement. A forwarding constructor observer
+ * records listener ownership before invoking the real SDK. It does not release
+ * resources or replace SDK behavior. This lane
+ * covers sequential rotations in an on-demand run with the installed browser
+ * SDK; overlapping rotations, other SDK versions, and native hosts remain separate.
+ * Both retained demands must remain pending until replacement source responses
+ * arrive. Promise outcomes are observed while rotation is held and again before
+ * the first replacement response; final rows alone cannot establish settlement.
  */
-fixedCase(
-  `discards an old SDK snapshot after managed cache rotation`,
-  async () => {
-    const listeners = recordVisibilityListeners()
-    const http = controlledHttp()
-    const rows = new Map<string, Map<number, Item>>([
-      [`old-generation`, new Map()],
-    ])
-    const metadata = new Map<string, Map<string, unknown>>([
-      [`old-generation`, new Map()],
-    ])
-    let storageId = `old-generation`
-    let claimExpired = false
-    let rotations = 0
-    const claimId = `managed-sdk-claim`
-    const adapter: PersistenceAdapter = {
-      claimCacheGeneration: () =>
-        Promise.resolve({
-          storageCollectionId: storageId,
-          claimId,
-          expiresAtMs: Date.now() + 10_000,
-        }),
-      renewCacheGenerationClaim: () =>
-        Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
-      rotateCacheGeneration: (
-        _collectionId,
-        _claimId,
-        resetMetadata,
-        expectedStorageId,
-      ) => {
-        expect(expectedStorageId).toBe(storageId)
-        rotations++
-        storageId = `new-generation`
-        rows.set(storageId, new Map())
-        metadata.set(
-          storageId,
-          new Map(
-            resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
-          ),
-        )
-        claimExpired = false
-        return Promise.resolve({
-          storageCollectionId: storageId,
-          claimId,
-          expiresAtMs: Date.now() + 10_000,
-        })
-      },
-      releaseCacheGenerationClaim: async () => {},
-      loadSubset: (id) =>
-        Promise.resolve(
-          Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
-            key,
-            value,
-          })),
-        ),
-      loadResumeSnapshot: (id) =>
-        Promise.resolve({
-          rows: Array.from(
-            rows.get(storageTargetId(id)) ?? [],
-            ([key, value]) => ({
-              key,
-              value,
-            }),
-          ),
-          keySet: {
-            status:
-              storageTargetId(id) === `old-generation`
-                ? `consistent`
-                : `incompatible`,
-          },
-          collectionMetadata: Array.from(
-            metadata.get(storageTargetId(id)) ?? [],
-            ([key, value]) => ({ key, value }),
-          ),
-          latestTerm: 0,
-          latestSeq: 0,
-          latestRowVersion: 0,
-          resetEpoch: 0,
-        }),
-      applyCommittedTx: (id, tx) => {
-        expect(tx.cacheGenerationClaimId).toBe(claimId)
-        const generationRows = rows.get(storageTargetId(id))!
-        if (tx.truncate) generationRows.clear()
-        for (const mutation of tx.mutations) {
-          if (mutation.type === `delete`) {
-            generationRows.delete(Number(mutation.key))
-          } else {
-            generationRows.set(Number(mutation.key), mutation.value as Item)
-          }
-        }
-        const generationMetadata = metadata.get(storageTargetId(id))!
-        for (const mutation of tx.collectionMetadataMutations ?? []) {
-          if (mutation.type === `delete`)
-            generationMetadata.delete(mutation.key)
-          else generationMetadata.set(mutation.key, mutation.value)
-        }
-        return Promise.resolve()
-      },
-      ensureIndex: async () => {},
-    }
-    const electric = electricCollectionOptions<Item>({
-      id: `sdk-managed-restart-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/managed-restart-${sequence}`,
-        params: { table: `rows` },
-        // A provider can finish an HTTP request after stream retirement.
-        fetchClient: (input, init) =>
-          http.fetchClient(input, { ...init, signal: undefined }),
-      },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        Item,
-        string | number,
-        never,
-        ElectricCollectionUtils<Item>
-      >({
-        ...electric,
-        persistence: { adapter },
+type RetiredSnapshotCut =
+  `during-rotation` | `before-snapshots` | `after-snapshots`
+const createRotationReach = () =>
+  createOracleReach<
+    | RetiredSnapshotCut
+    | `first-session`
+    | `replacement-session`
+    | `demands-await-replacement`
+  >(`electric.sdk-rotation-release`, [
+    `during-rotation`,
+    `before-snapshots`,
+    `after-snapshots`,
+    `first-session`,
+    `replacement-session`,
+    `demands-await-replacement`,
+  ])
+let rotationReach: ReturnType<typeof createRotationReach> | undefined
+
+async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
+  rotationReach?.beginHistory()
+  const listeners = recordVisibilityListeners()
+  const http = controlledHttp()
+  const rows = new Map<string, Map<number, Item>>([
+    [`old-generation`, new Map()],
+  ])
+  const metadata = new Map<string, Map<string, unknown>>([
+    [`old-generation`, new Map()],
+  ])
+  let storageId = `old-generation`
+  let claimExpired = false
+  let rotations = 0
+  let allowRotation = deferred<void>()
+  let rotationRequested = deferred<void>()
+  let replacementConstructed = deferred<void>()
+  const beforeConstruction: Array<number> = []
+  sdkConstruction.observe = () => {
+    beforeConstruction.push(listeners.live())
+    replacementConstructed.resolve()
+  }
+  const claimId = `managed-sdk-claim`
+  const adapter: PersistenceAdapter = {
+    claimCacheGeneration: () =>
+      Promise.resolve({
+        storageCollectionId: storageId,
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
       }),
-    )
-    const demand = (id: number) => ({
-      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
-    })
-    const respond = (request: Request, row: Item | undefined, offset: number) =>
-      request.respond(
-        new Response(
-          JSON.stringify({
-            metadata: {
-              xmin: `10`,
-              xmax: `20`,
-              xip_list: [],
-              database_lsn: `10`,
-              snapshot_mark: offset,
-            },
-            data: row
-              ? [
-                  {
-                    key: String(row.id),
-                    value: { ...row, id: String(row.id) },
-                    headers: { operation: `insert` },
-                  },
-                ]
-              : [],
-          }),
-          { headers: headers(offset) },
+    renewCacheGenerationClaim: () =>
+      Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
+    rotateCacheGeneration: (
+      _collectionId,
+      _claimId,
+      resetMetadata,
+      expectedStorageId,
+    ) => {
+      expect(expectedStorageId).toBe(storageId)
+      rotations++
+      rotationRequested.resolve()
+      storageId = `generation-${rotations}`
+      rows.set(storageId, new Map())
+      metadata.set(
+        storageId,
+        new Map(
+          resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
         ),
       )
+      claimExpired = false
+      return allowRotation.promise.then(() => ({
+        storageCollectionId: storageId,
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
+      }))
+    },
+    releaseCacheGenerationClaim: async () => {},
+    loadSubset: (id) =>
+      Promise.resolve(
+        Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
+          key,
+          value,
+        })),
+      ),
+    loadResumeSnapshot: (id) =>
+      Promise.resolve({
+        rows: Array.from(
+          rows.get(storageTargetId(id)) ?? [],
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        ),
+        keySet: {
+          status:
+            storageTargetId(id) === `old-generation`
+              ? `consistent`
+              : `incompatible`,
+        },
+        collectionMetadata: Array.from(
+          metadata.get(storageTargetId(id)) ?? [],
+          ([key, value]) => ({ key, value }),
+        ),
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+    applyCommittedTx: (id, tx) => {
+      expect(tx.cacheGenerationClaimId).toBe(claimId)
+      const generationRows = rows.get(storageTargetId(id))!
+      if (tx.truncate) generationRows.clear()
+      for (const mutation of tx.mutations) {
+        if (mutation.type === `delete`) {
+          generationRows.delete(Number(mutation.key))
+        } else {
+          generationRows.set(Number(mutation.key), mutation.value as Item)
+        }
+      }
+      const generationMetadata = metadata.get(storageTargetId(id))!
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`) generationMetadata.delete(mutation.key)
+        else generationMetadata.set(mutation.key, mutation.value)
+      }
+      return Promise.resolve()
+    },
+    ensureIndex: async () => {},
+  }
+  const electric = electricCollectionOptions<Item>({
+    id: `sdk-managed-restart-${++sequence}`,
+    shapeOptions: {
+      url: `http://test-url/managed-restart-${sequence}`,
+      params: { table: `rows` },
+      // A provider can finish an HTTP request after stream retirement.
+      fetchClient: (input, init) =>
+        http.fetchClient(input, { ...init, signal: undefined }),
+    },
+    syncMode: `on-demand`,
+    startSync: true,
+    getKey: (row) => row.id,
+  })
+  const collection = await withElectricSetup(
+    () =>
+      createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          ElectricCollectionUtils<Item>
+        >({
+          ...electric,
+          persistence: { adapter },
+        }),
+      ),
+    [
+      () => allowRotation.resolve(),
+      () => http.close(),
+      () => listeners.restore(),
+      () => {
+        sdkConstruction.observe = undefined
+      },
+    ],
+  )
+  const demand = (id: number) => ({
+    where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+  })
+  const respond = (request: Request, row: Item | undefined, offset: number) =>
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: offset,
+          },
+          data: row
+            ? [
+                {
+                  key: String(row.id),
+                  value: { ...row, id: String(row.id) },
+                  headers: { operation: `insert` },
+                },
+              ]
+            : [],
+        }),
+        { headers: headers(offset) },
+      ),
+    )
 
-    await withElectricCleanup(async () => {
+  await withElectricCleanup(async () => {
+    for (const [round, retiredSnapshotCut] of cuts.entries()) {
+      allowRotation = deferred<void>()
+      rotationRequested = deferred<void>()
+      const oldId = round * 2 + 1
+      const newId = oldId + 1
+      const oldOptions = demand(oldId)
+      const newOptions = demand(newId)
+      const settlements: Array<`pending` | `fulfilled` | `rejected`> = []
+      const loadDemand = (options: ReturnType<typeof demand>) => {
+        const slot = settlements.push(`pending`) - 1
+        const result = Promise.resolve(collection._sync.loadSubset(options))
+        void result.then(
+          () => {
+            settlements[slot] = `fulfilled`
+          },
+          () => {
+            settlements[slot] = `rejected`
+          },
+        )
+        return result
+      }
+      const assertDemandsPending = async (checkpoint: string) => {
+        // Requests are still held. Yield one task so nested promise reactions
+        // report an early settlement before comparing their public outcomes.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect([...settlements], checkpoint).toEqual([`pending`, `pending`])
+      }
       await atCheckpoint(http.take(), `old managed stream`)
-      const oldDemand = Promise.resolve(collection._sync.loadSubset(demand(1)))
-      void oldDemand.catch(() => undefined)
+      const oldDemand = loadDemand(oldOptions)
       const oldSnapshot = await atCheckpoint(
         http.take(true),
         `old managed subset snapshot`,
       )
 
+      replacementConstructed = deferred<void>()
       claimExpired = true
-      const newDemand = Promise.resolve(collection._sync.loadSubset(demand(2)))
-      void newDemand.catch(() => undefined)
-      await vi.waitFor(() => expect(rotations).toBe(1))
-      expect(storageId).toBe(`new-generation`)
+      const newDemand = loadDemand(newOptions)
+      await atCheckpoint(rotationRequested.promise, `managed rotation entry`)
+      expect(rotations).toBe(round + 1)
+      expect(storageId).toBe(`generation-${round + 1}`)
+      expect([...beforeConstruction]).toHaveLength(round + 1)
+      expect(listeners.registered()).toBe(round + 1)
+
+      const deliverRetiredSnapshot = async () => {
+        respond(oldSnapshot, { id: oldId, name: `late-old` }, round * 4 + 1)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(collection.get(oldId)).toBeUndefined()
+      }
+      if (retiredSnapshotCut === `during-rotation`)
+        await deliverRetiredSnapshot()
+      await assertDemandsPending(`demands while cache rotation is held`)
+      allowRotation.resolve()
+      await atCheckpoint(
+        replacementConstructed.promise,
+        `replacement construction`,
+      )
+      expect([...beforeConstruction]).toHaveLength(round + 2)
+      expect(
+        beforeConstruction[round + 1],
+        `retired listeners before replacement construction`,
+      ).toBe(0)
+      rotationReach?.reach(retiredSnapshotCut)
+      rotationReach?.reach(
+        round === 0 ? `first-session` : `replacement-session`,
+      )
+      if (retiredSnapshotCut === `before-snapshots`)
+        await deliverRetiredSnapshot()
+      await assertDemandsPending(`demands before replacement source responses`)
+      rotationReach?.reach(`demands-await-replacement`)
 
       // The replacement SDK first reacquires the old demand, then the new one.
-      // Empty source snapshots for id 1 distinguish source authority from the
-      // old request's late row; the id 2 snapshot establishes the new row.
+      // Empty snapshots for oldId distinguish source authority from the old
+      // request's late row; the newId snapshot establishes the fresh row.
       respond(
         await atCheckpoint(http.take(true), `first replacement snapshot`),
         undefined,
-        2,
+        round * 4 + 2,
       )
       respond(
         await atCheckpoint(http.take(true), `replayed old demand`),
         undefined,
-        3,
+        round * 4 + 3,
       )
       respond(
         await atCheckpoint(http.take(true), `new demand snapshot`),
-        { id: 2, name: `fresh` },
-        4,
+        { id: newId, name: `fresh` },
+        round * 4 + 4,
       )
       await atCheckpoint(
         Promise.all([oldDemand, newDemand]),
         `replacement demand settlement`,
       )
-      expect(collection.get(2)?.name).toBe(`fresh`)
+      expect([...settlements]).toEqual([`fulfilled`, `fulfilled`])
+      expect(collection.get(newId)?.name).toBe(`fresh`)
 
-      respond(oldSnapshot, { id: 1, name: `late-old` }, 1)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(collection.get(1)).toBeUndefined()
-      expect(collection.get(2)?.name).toBe(`fresh`)
-      expect([...rows.get(`new-generation`)!.keys()]).toEqual([2])
-      expect(listeners.registered()).toBe(2)
+      if (retiredSnapshotCut === `after-snapshots`)
+        await deliverRetiredSnapshot()
+      expect(collection.get(oldId)).toBeUndefined()
+      expect(collection.get(newId)?.name).toBe(`fresh`)
+      expect([...rows.get(storageId)!.keys()]).toEqual([newId])
+      expect(listeners.registered()).toBe(round + 2)
       expect(listeners.live(), `live listeners after rotation`).toBe(1)
-    }, [
-      () => collection.cleanup(),
-      () => http.close(),
-      () => expect(listeners.live(), `live listeners after cleanup`).toBe(0),
-      () => listeners.restore(),
-    ])
+      // End these demands before the next round; its fresh IDs ensure an old
+      // source snapshot is really in flight when the next claim expires.
+      collection._sync.unloadSubset(oldOptions)
+      collection._sync.unloadSubset(newOptions)
+    }
+  }, [
+    () => allowRotation.resolve(),
+    () => collection.cleanup(),
+    () => http.close(),
+    () => expect(listeners.live(), `live listeners after cleanup`).toBe(0),
+    () => listeners.restore(),
+    () => {
+      sdkConstruction.observe = undefined
+    },
+  ])
+}
+
+fixedCase(`discards an old SDK snapshot after managed cache rotation`, () =>
+  checkManagedRotation([`after-snapshots`]),
+)
+const rotationViolation = sameViolation()
+sdkCampaigns(
+  `electric.sdk-rotation-release`,
+  `releases retired SDK resources before constructing a replacement`,
+  20261026,
+  rotationViolation,
+  async (seed) => {
+    rotationReach = createRotationReach()
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.constantFrom<RetiredSnapshotCut>(
+            `during-rotation`,
+            `before-snapshots`,
+            `after-snapshots`,
+          ),
+          { minLength: 1, maxLength: 3 },
+        ),
+        (cuts) =>
+          rotationViolation.check(cuts, () => checkManagedRotation(cuts)),
+      ),
+      {
+        ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
+        ...(seed === undefined ? {} : { seed }),
+      },
+    )
+    rotationReach.assertReached()
   },
 )
 
