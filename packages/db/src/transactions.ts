@@ -256,11 +256,11 @@ function mergePendingMutations<T extends object>(
   }
 
   // Reject combinations that mutation admission does not allow.
-  const combination = `${existing.type}-${incoming.type}`
+  const _exhaustive = `${existing.type}-${incoming.type}`
   throw new Error(
     devBuild() && process.env.NODE_ENV !== `production`
-      ? `Unhandled mutation combination: ${combination}`
-      : codedMessage(165, { combination }),
+      ? `Unhandled mutation combination: ${_exhaustive}`
+      : codedMessage(165, { combination: _exhaustive }),
   )
 }
 

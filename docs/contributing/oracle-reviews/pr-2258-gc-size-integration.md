@@ -90,3 +90,20 @@ The local-only install workaround remains uncommitted:
 `baseline-browser-mapping@2.11.32` returns HTTP 403, `2.11.31` is unavailable,
 and `2.11.30` installs. Both comparison trees use that override. Existing
 overrides remain intact; neither workspace nor lockfile changes enter the PR.
+
+## CI follow-up
+
+CI on `a8b047cb5` passes every completed runtime shard except the frozen
+error-site source-template check. That check records the interpolation
+identifier as well as the message literals. Restore its original `_exhaustive`
+identifier without changing the runtime message, error code or diagnostic
+parameter key. All **19 production-error oracle tests pass** without changing
+an expectation. A fresh size comparison retains every byte delta above.
+
+The documentation snippet check also identifies one obsolete suppression:
+`packages/db/skills/db-core/persistence/SKILL.md#81435553635b5b53` now compiles.
+Delete only that baseline entry. The complete check then retains the other
+279 known failures across 757 examples, with no new failure or stale entry.
+No documentation example or oracle expectation is weakened. The final source
+binding is `sizeCiFollowup.sha256`; earlier bindings retain their historical
+commit meanings.
