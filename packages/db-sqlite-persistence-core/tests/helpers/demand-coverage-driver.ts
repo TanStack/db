@@ -1,0 +1,246 @@
+import { vi } from 'vitest'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import { persistedCollectionOptions } from '../../src/index.js'
+import type { Collection, LoadSubsetOptions } from '@tanstack/db'
+import type {
+  SQLiteCorePersistenceAdapter,
+  SQLiteDriver,
+} from '../../src/index.js'
+
+/**
+ * The production driver shared by the persisted demand coverage oracle
+ * (`tests/persisted-demand-coverage-oracle.test.ts`) and its generated
+ * campaign (`tests/persisted-demand-coverage-campaign-oracle.test.ts`). It
+ * drives the real persisted wrapper over a generic on-demand source; it holds
+ * no model and no expected result.
+ */
+
+export type Row = { id: string; group: string; rank: number; value: string }
+
+// Session 2 reads through this wrapper, which answers each read on a later
+// macrotask, as a worker-backed or OPFS driver does. A driver that answers
+// within one microtask turn hides any work that happens between the
+// wrapper's own awaits, such as an upstream failure during a coverage read.
+// `setImmediate` stays real under the fake clock, so the drains below yield
+// to it.
+export function withMacrotaskReads(driver: SQLiteDriver): SQLiteDriver {
+  return {
+    ...driver,
+    query: (sql, params) =>
+      new Promise<void>((resolve) => setImmediate(resolve)).then(() =>
+        driver.query(sql, params),
+      ),
+  }
+}
+
+export const realMacrotask = () =>
+  new Promise<void>((resolve) => setImmediate(resolve))
+
+// ORC-010: run a check, then every cleanup. A cleanup failure never replaces
+// the primary failure; both survive in one AggregateError.
+export async function withCleanup<T>(
+  check: () => Promise<T>,
+  cleanups: ReadonlyArray<() => unknown>,
+): Promise<T> {
+  let result: T | undefined
+  let primary: { error: unknown } | undefined
+  try {
+    result = await check()
+  } catch (error) {
+    primary = { error }
+  }
+  const cleanupFailures: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (primary) {
+    if (cleanupFailures.length === 0) throw primary.error
+    throw new AggregateError(
+      [primary.error, ...cleanupFailures],
+      `Demand-coverage check and cleanup both failed`,
+      { cause: primary.error },
+    )
+  }
+  if (cleanupFailures.length === 1) throw cleanupFailures[0]
+  if (cleanupFailures.length > 1) {
+    throw new AggregateError(cleanupFailures, `Demand-coverage cleanup failed`)
+  }
+  return result as T
+}
+
+export function useFakeClock(): void {
+  vi.useFakeTimers({
+    toFake: [
+      `setTimeout`,
+      `clearTimeout`,
+      `setInterval`,
+      `clearInterval`,
+      `Date`,
+    ],
+  })
+}
+
+export async function drain(): Promise<void> {
+  for (let i = 0; i < 25; i++) {
+    await vi.advanceTimersByTimeAsync(0)
+    await realMacrotask()
+  }
+}
+
+export type Upstream = {
+  calls: Array<LoadSubsetOptions>
+  // The row IDs the Collection showed when each load was forwarded.
+  visibleAtCall: Array<Array<string>>
+  pendingCount: () => number
+  answer: (rows: ReadonlyArray<Row>) => Promise<void>
+  fail: (error: unknown) => void
+  truncate: () => Promise<void>
+  // When set, each later load rejects as soon as it is called.
+  rejectAtOnce: boolean
+  // Writes rows without settling any load.
+  write: (rows: ReadonlyArray<Row>) => Promise<void>
+  // Settles only the oldest pending load, without writing rows.
+  settleOldest: () => void
+  startScopedRecovery: () => Promise<void>
+  // Deletes rows in one sync transaction.
+  remove: (rows: ReadonlyArray<Row>) => Promise<void>
+  // Updates rows in one sync transaction.
+  update: (rows: ReadonlyArray<Row>) => Promise<void>
+}
+
+// A generic on-demand source. Each load waits until the test answers or
+// fails it. An answer writes the rows in one sync transaction and settles
+// every pending load after its applied receipt.
+export function onDemandSource(
+  adapter: SQLiteCorePersistenceAdapter,
+  waitMs: number,
+  extra: { onInsert?: () => Promise<void> } = {},
+): { collection: Collection<Row, string, any>; upstream: Upstream } {
+  const pending: Array<{
+    resolve: () => void
+    reject: (error: unknown) => void
+  }> = []
+  let write: ((rows: ReadonlyArray<Row>) => unknown) | undefined
+  let truncate: (() => unknown) | undefined
+  let startScopedRecovery: (() => Promise<void>) | undefined
+  let remove: ((rows: ReadonlyArray<Row>) => unknown) | undefined
+  let update: ((rows: ReadonlyArray<Row>) => unknown) | undefined
+  const upstream: Upstream = {
+    calls: [],
+    visibleAtCall: [],
+    rejectAtOnce: false,
+    pendingCount: () => pending.length,
+    answer: async (rows) => {
+      await write?.(rows)
+      for (const load of pending.splice(0)) load.resolve()
+    },
+    fail: (error) => {
+      for (const load of pending.splice(0)) load.reject(error)
+    },
+    truncate: async () => {
+      await truncate?.()
+    },
+    write: async (rows) => {
+      await write?.(rows)
+    },
+    settleOldest: () => pending.shift()?.resolve(),
+    startScopedRecovery: () => startScopedRecovery?.() ?? Promise.resolve(),
+    remove: async (rows) => {
+      await remove?.(rows)
+    },
+    update: async (rows) => {
+      await update?.(rows)
+    },
+  }
+  const collection = createCollection(
+    persistedCollectionOptions<Row, string>({
+      id: `demand-coverage-source`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      initialRender: { strategy: `network-first`, networkTimeoutMs: waitMs },
+      persistence: { adapter },
+      ...(extra.onInsert ? { onInsert: extra.onInsert } : {}),
+      sync: {
+        sync: (params) => {
+          write = (rows) => {
+            params.begin()
+            for (const value of rows) params.write({ type: `insert`, value })
+            return params.commit()
+          }
+          truncate = () => {
+            params.begin()
+            params.truncate()
+            return params.commit()
+          }
+          startScopedRecovery = () =>
+            params.metadata?.persistence?.startScopedRecovery?.() ??
+            Promise.resolve()
+          remove = (rows) => {
+            params.begin()
+            for (const value of rows) params.write({ type: `delete`, value })
+            return params.commit()
+          }
+          update = (rows) => {
+            params.begin()
+            for (const value of rows) params.write({ type: `update`, value })
+            return params.commit()
+          }
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              upstream.calls.push(options)
+              upstream.visibleAtCall.push(
+                collection.toArray.map((row) => row.id).sort(),
+              )
+              if (upstream.rejectAtOnce) {
+                return Promise.reject(new Error(`offline at once`))
+              }
+              return new Promise<void>((resolve, reject) => {
+                pending.push({ resolve, reject })
+              })
+            },
+          }
+        },
+      },
+    }),
+  )
+  return { collection, upstream }
+}
+
+export function filterQuery(
+  source: Collection<Row, string, any>,
+  group: string,
+) {
+  return createLiveQueryCollection((q) =>
+    q.from({ row: source }).where(({ row }) => eq(row.group, group)),
+  )
+}
+
+export function trackPreload(query: Collection<any, any, any>) {
+  const state = { value: `pending` as `pending` | `resolved` | `rejected` }
+  void query.preload().then(
+    () => (state.value = `resolved`),
+    () => (state.value = `rejected`),
+  )
+  return () => state.value
+}
+
+export async function untilUpstreamCalled(upstream: Upstream, count = 1) {
+  for (let i = 0; i < 200 && upstream.calls.length < count; i++) {
+    await vi.advanceTimersByTimeAsync(0)
+    await realMacrotask()
+  }
+  if (upstream.calls.length < count) {
+    throw new Error(
+      `checkpoint not reached: upstream load ${count} never started`,
+    )
+  }
+}
+
+export function quietConsole(): void {
+  vi.spyOn(console, `warn`).mockImplementation(() => {})
+  vi.spyOn(console, `error`).mockImplementation(() => {})
+}
