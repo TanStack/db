@@ -6,7 +6,7 @@ import {
   getLiveQueryStatusFlags,
   isCollection,
   isSingleResultCollection,
-} from './live-query-adapter.js'
+} from './live-query-primitives.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { deepEquals } from './utils.js'

@@ -215,7 +215,6 @@ const describeUnlessOracleReplay =
   requestedOracleReplayProperty === undefined ||
   requestedOracleReplayProperty === `persistence.retained-demand` ||
   requestedOracleReplayProperty === `persistence.generation-notice` ||
-  requestedOracleReplayProperty === `persistence.follower-generation-notice` ||
   requestedOracleReplayProperty === `persistence.follower-remote-demand`
     ? describe
     : describe.skip
@@ -26043,7 +26042,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ),
   })
   // Known gap: see #2139. A rotated follower stays in scoped recovery, so
-  // the owner's rows in the new generation never become visible.
+  // the owner's rows in the new generation never become visible. Some
+  // generated histories pass today, so a random draw cannot be pinned as
+  // failing; this fixed seed pins the gap. The fix for #2139 adds the random
+  // and replayed campaign back.
   it.fails(
     `checks generated follower generation-notice histories (fixed)`,
     () =>
@@ -26055,17 +26057,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         { seed: 2128, numRuns: oracleRuns(12) },
       ),
   )
-  // Known gap: see #2139. Some generated histories pass today, so a random
-  // draw cannot be pinned as failing; the fixed seed above pins the gap.
-  it.skip(`checks generated follower generation-notice histories (random or replayed)`, () =>
-    fc.assert(
-      fc.asyncProperty(
-        followerGenerationNoticeHistory,
-        assertFollowerGenerationNoticeHistory,
-      ),
-      oraclePropertyOptions(12, `persistence.follower-generation-notice`),
-    ))
-
   /**
    * A follower routes demand it cannot serve to the elected owner. The owner
    * loads the rows upstream, commits them durably, and broadcasts the commit

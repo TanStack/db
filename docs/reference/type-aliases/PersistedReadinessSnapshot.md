@@ -19,6 +19,6 @@ type PersistedReadinessSnapshot =
 };
 ```
 
-Defined in: [packages/db/src/persisted-readiness.ts:2](https://github.com/TanStack/db/blob/main/packages/db/src/persisted-readiness.ts#L2)
+Defined in: [packages/db/src/persisted-readiness.ts:4](https://github.com/TanStack/db/blob/main/packages/db/src/persisted-readiness.ts#L4)
 
 The local-restore boundary of one opted-in persisted Collection.

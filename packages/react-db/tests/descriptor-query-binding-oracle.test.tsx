@@ -96,6 +96,7 @@ import {
   BTreeIndex,
   DbClient,
   Query,
+  UnhashableQueryIRError,
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
@@ -2441,7 +2442,10 @@ describe(`SSR Suspense receiving matrix`, () => {
               errors,
               `warm rows do not waive transport identity`,
             ).toHaveLength(1)
-            expect(String(errors[0])).toMatch(/explicit serializable queryKey/)
+            // The shared conformance identity law rejects an unkeyed opaque
+            // React query during preparation, before SSR stream admission.
+            // Warming the source does not change that programming error.
+            expect(errors[0]).toBeInstanceOf(UnhashableQueryIRError)
           }
         } finally {
           vi.stubGlobal(`window`, browserWindow)

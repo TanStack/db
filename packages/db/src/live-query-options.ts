@@ -1,6 +1,10 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
-import { isCollection } from './live-query-adapter.js'
+import { isCollection } from './live-query-primitives.js'
+import {
+  DEFAULT_GC_TIME_MS,
+  UNSUBSCRIBED_GC_FLOOR_MS,
+} from './collection/lifecycle.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
@@ -32,6 +36,66 @@ export type LiveQueryOptions = LiveQueryCollectionConfig<any> & {
 export type DeferredLiveQueryCollections = Set<
   CollectionImpl<any, string | number, any, any, any>
 >
+
+/**
+ * Release the sync starts a rejected query input deferred, then rethrow its
+ * rejection. A framework hook calls this around its own render work, so a
+ * query the hook rejects leaves no source deferred and a later reader can
+ * start it. A render that throws after the hook returns, such as in a sibling
+ * hook, is not a rejection of this input: like any render that never commits,
+ * it releases its deferral through `releaseDeferredOnReclaim` when garbage
+ * collection reclaims its live query. As for a
+ * `DbClient` preload, the rejection wins over a source whose resumed start
+ * fails; that source records its own failure.
+ */
+export function rejectLiveQueryInput(
+  collections: DeferredLiveQueryCollections | undefined,
+  rejection: unknown,
+): never {
+  try {
+    if (collections) resumeDeferredLiveQueryCollections(collections)
+  } catch {
+    // Report the rejection, not a later start failure.
+  }
+  throw rejection
+}
+
+/**
+ * Release a render's deferred sync starts when the live query it built is
+ * reclaimed. A render that commits releases them first, when it subscribes.
+ * A render that never commits, because a sibling threw or it suspended, leaves
+ * its live query unsubscribed until garbage collection cleans it up; that
+ * cleanup releases the starts, so a direct reader's demand, made before or
+ * after, then starts the sources. A live query that garbage collection never
+ * reclaims, because its config disables GC or does not start its sync,
+ * releases after the unsubscribed GC floor instead. Releases only the starts
+ * deferred so far, not ones a later render of the same hook defers. Pass only
+ * a live query the render built, and call the returned function when the
+ * render commits, so a committed hook keeps no listener, timer, or copied
+ * sources.
+ */
+export function releaseDeferredOnReclaim(
+  liveQuery: Pick<Collection<any, any, any>, `once` | `config` | `status`>,
+  deferredCollections: DeferredLiveQueryCollections,
+): (() => void) | undefined {
+  if (deferredCollections.size === 0) return undefined
+  const pending: DeferredLiveQueryCollections = new Set(deferredCollections)
+  const release = () => {
+    try {
+      resumeDeferredLiveQueryCollections(pending)
+    } catch {
+      // A source whose resumed start fails records its own failure.
+    }
+  }
+  // The lifecycle's own rule: GC reclaims only a started collection with a
+  // finite, positive gcTime.
+  const gcTime = liveQuery.config.gcTime ?? DEFAULT_GC_TIME_MS
+  if (gcTime > 0 && Number.isFinite(gcTime) && liveQuery.status !== `idle`) {
+    return liveQuery.once(`status:cleaned-up`, release)
+  }
+  const timer = setTimeout(release, UNSUBSCRIBED_GC_FLOOR_MS)
+  return () => clearTimeout(timer)
+}
 
 /** Release every deferred source, then report the first startup failure. */
 export function resumeDeferredLiveQueryCollections(
@@ -228,12 +292,6 @@ export function getLiveQueryHash(
   return getStableValueHash(identity, `queryKey`)
 }
 
-/**
- * Resolve an adapter's query value to what its observer watches: `null` for a
- * disabled query, an existing Collection with sync started, or a live query.
- * A query builder whose shape a shared partition can serve gets a pooled view
- * instead of its own live-query Collection.
- */
 // A config that names only its query and lifetime describes the same live
 // query as its builder. Any other option shapes its Collection, so compiles.
 function poolConfig(
@@ -251,6 +309,12 @@ function poolConfig(
   })
 }
 
+/**
+ * Resolve an adapter's query value to what its observer watches: `null` for a
+ * disabled query, an existing Collection with sync started, or a live query.
+ * A query builder whose shape a shared partition can serve gets a pooled view
+ * instead of its own live-query Collection.
+ */
 export function resolveLiveQueryValue(
   value: unknown,
   {

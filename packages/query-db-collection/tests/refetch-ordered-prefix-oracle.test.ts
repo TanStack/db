@@ -13,6 +13,7 @@ import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -1967,7 +1968,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
 
   // The premise-directed campaign for the skip under a hold. Its reach
   // witness requires refetches that report while a hold is running.
-  it.runIf(replay.replayPath === undefined)(
+  it.skipIf(oracleReplayRequested())(
     `generated refetch histories under a hold (fixed campaign)`,
     async () => {
       let reachedReport = 0
@@ -1996,10 +1997,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         }),
         campaign === `fixed`
           ? { seed: 20261013, numRuns: oracleRuns(80) }
-          : {
-              ...oraclePropertyOptions(80, property),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(80, property),
       )
       // Positive reach witness: generated histories serve continuation pages
       // before a refetch, which is the premise of the gap.

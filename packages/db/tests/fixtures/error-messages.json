@@ -137,7 +137,7 @@
   ],
   "QueryMustHaveFromClauseError": ["Query must have a from clause"],
   "InvalidWhereExpressionError": [
-    "Invalid where() expression: Expected a query expression, but received a boolean. This usually happens when using JavaScript's comparison operators (===, !==, <, >, etc.) directly. Instead, use the query builder functions:\n\n  ❌ .where(({ user }) => user.id === 'abc')\n  ✅ .where(({ user }) => eq(user.id, 'abc'))\n\nAvailable comparison functions: eq, gt, gte, lt, lte, and, or, not, like, ilike, isNull, isUndefined"
+    "Invalid where() expression: Expected a query expression, but received a boolean. This usually happens when using JavaScript's comparison operators (===, !==, <, >, etc.) directly. Instead, use the query builder functions:\n\n  \u274c .where(({ user }) => user.id === 'abc')\n  \u2705 .where(({ user }) => eq(user.id, 'abc'))\n\nAvailable comparison functions: eq, gt, gte, lt, lte, and, or, not, like, ilike, isNull, isUndefined"
   ],
   "QueryCompilationError": ["Compilation error"],
   "UnsafeAliasPathError": [
@@ -260,5 +260,8 @@
   ],
   "SetWindowFindOneLimitError": [
     "setWindow() cannot change the limit of a findOne() query."
+  ],
+  "SourceCollectionIdReuseError": [
+    "[useLiveQuery] Collection ID \"todos\" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID."
   ]
 }
