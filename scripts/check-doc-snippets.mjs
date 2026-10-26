@@ -27,6 +27,8 @@ import prettier from 'prettier'
 import ts from 'typescript'
 import {
   componentScript,
+  externalImports,
+  externalName,
   fingerprint,
   frameworkOf,
   misspelling,
@@ -158,7 +160,7 @@ const ambient = join(root, `.snippet-check`, `ambient.d.ts`)
 const missingModules = new Set()
 const ambientSource = () =>
   [...missingModules]
-    .map((name) => `declare module ${JSON.stringify(name)}\n`)
+    .map((name) => `declare module ${JSON.stringify(externalName(name))}\n`)
     .join(``) || `export {}\n`
 
 function check(sources) {
@@ -224,7 +226,7 @@ function sourceOf(snippet, declared, autoImported) {
           `declare const ${name}: ${/collection$/i.test(name) ? `SnippetCollection<Record<string, any>, string | number>` : `any`}\ntype ${name} = any\n`,
       )
       .join(``) +
-    snippet.code +
+    externalImports(snippet.code, missingModules) +
     `\nexport {}\n`
   )
 }

@@ -160,7 +160,6 @@
     "fefabaccf3eabdf4"
   ],
   "docs/guides/offline-transactions.md": [
-    "1147ca316b1bbc4f",
     "66ebb56ae8a44f0a",
     "e5ce654a151d436f"
   ],
@@ -306,7 +305,6 @@
   "packages/db/skills/meta-framework/SKILL.md": [
     "230d26818828a8b0",
     "a529c96af815a04e",
-    "d1243ee3f23b2c9b",
     "e08f750ae875cf11"
   ],
   "packages/offline-transactions/skills/offline/SKILL.md": [
@@ -321,7 +319,6 @@
     "95f54055d2f8f35c",
     "985618b925e3379e",
     "c3c382de80c45bb9",
-    "d1c8f0182841f3e2",
     "d2dce4009d5fa25e",
     "d5e14ff028e79b54",
     "e8cea9396752d82a"

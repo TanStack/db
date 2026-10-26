@@ -170,7 +170,53 @@ export function frameworkOf(file) {
   return name.find((candidate) => frameworks.has(candidate)) ?? `react`
 }
 
+// Relative ambient module declarations are invalid TypeScript. Only rewrite
+// unresolved app import specifiers, leaving source strings and real modules alone.
+export const externalName = (name) =>
+  name.startsWith(`.`) ? `snippet-app:${name}` : name
+
+export function externalImports(code, missingModules) {
+  const source = parse(code, true)
+  const replacements = []
+  for (const statement of source.statements) {
+    if (
+      !ts.isImportDeclaration(statement) &&
+      !ts.isExportDeclaration(statement)
+    )
+      continue
+    const specifier = statement.moduleSpecifier
+    if (!specifier || !ts.isStringLiteral(specifier)) continue
+    if (!missingModules.has(specifier.text)) continue
+    replacements.push({
+      start: specifier.getStart(source) + 1,
+      end: specifier.getEnd() - 1,
+      text: externalName(specifier.text),
+    })
+  }
+  for (const replacement of replacements.reverse()) {
+    code =
+      code.slice(0, replacement.start) +
+      replacement.text +
+      code.slice(replacement.end)
+  }
+  return code
+}
+
 export function selfTest() {
+  const appImport = `import { api } from './convex/_generated/api'`
+  const literal = `const text = "from './convex/_generated/api'"`
+  const rewritten = externalImports(
+    `${appImport}\n${literal}`,
+    new Set([`./convex/_generated/api`]),
+  )
+  if (
+    rewritten !==
+    `import { api } from 'snippet-app:./convex/_generated/api'\n${literal}`
+  )
+    throw new Error(`App import rewriting changed source outside an import`)
+  if (externalImports(appImport, new Set()) !== appImport)
+    throw new Error(`App import rewriting changed a resolved module`)
+
   const imports = [
     `include`,
     `toArray`,

@@ -19,8 +19,11 @@ import { createCollection } from '@tanstack/db'
 import { convexCollectionOptions } from '@tanstack/convex-db-collection'
 import { ConvexClient } from 'convex/browser'
 import { api } from './convex/_generated/api'
+import type { FunctionReturnType } from 'convex/server'
 
-const client = new ConvexClient(import.meta.env.VITE_CONVEX_URL)
+type Task = FunctionReturnType<typeof api.tasks.list>[number]
+
+const client = new ConvexClient('https://your-deployment.convex.cloud')
 
 export const tasks = createCollection(
   convexCollectionOptions({
@@ -28,7 +31,7 @@ export const tasks = createCollection(
     client,
     query: api.tasks.list,
     queryArgs: { projectId },
-    getKey: (task) => task._id,
+    getKey: (task: Task) => task._id,
   }),
 )
 
@@ -48,13 +51,16 @@ The adapter uses eager sync. DB filters, ordering, and limits apply locally to t
 Supply handlers for the operations your application supports. Await mutations on the same client used for the subscription.
 
 ```ts
+import { createCollection } from '@tanstack/db'
+import { convexCollectionOptions } from '@tanstack/convex-db-collection'
+
 const tasks = createCollection(
   convexCollectionOptions({
     id: 'tasks',
     client,
     query: api.tasks.list,
     queryArgs: { projectId },
-    getKey: (task) => task._id,
+    getKey: (task: Task) => task._id,
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map(({ original, changes }) =>
@@ -92,23 +98,28 @@ A DB transaction does not make several Convex calls atomic. For atomic batches, 
 Convex assigns `_id` on the server. DB needs a stable key before an optimistic insert. For optimistic inserts, add an application key such as `clientId` to your schema and documents. Use that key in `getKey` and send it through your insert mutation. Use `select` to omit server-only fields from the local row type.
 
 ```ts
-select: (tasks) => tasks.map((task) => ({
-  clientId: task.clientId,
-  projectId: task.projectId,
-  title: task.title,
-})),
-getKey: (task) => task.clientId,
-onInsert: async ({ transaction }) => {
-  await Promise.all(
-    transaction.mutations.map(({ modified }) =>
-      client.mutation(api.tasks.create, {
-        clientId: modified.clientId,
-        projectId: modified.projectId,
-        title: modified.title,
-      }),
-    ),
-  )
-},
+convexCollectionOptions({
+  client,
+  query: api.tasks.list,
+  queryArgs: { projectId },
+  select: (tasks) => tasks.map((task) => ({
+    clientId: task.clientId,
+    projectId: task.projectId,
+    title: task.title,
+  })),
+  getKey: (task: { clientId: string; projectId: string; title: string }) => task.clientId,
+  onInsert: async ({ transaction }) => {
+    await Promise.all(
+      transaction.mutations.map(({ modified }) =>
+        client.mutation(api.tasks.create, {
+          clientId: modified.clientId,
+          projectId: modified.projectId,
+          title: modified.title,
+        }),
+      ),
+    )
+  },
+})
 ```
 
 Insert a local row with `tasks.insert({ clientId: crypto.randomUUID(), projectId, title })`. The server query must return the same `clientId`.
@@ -125,7 +136,7 @@ convexCollectionOptions({
   query: api.tasks.listWithMetadata,
   queryArgs: { projectId },
   select: (result) => result.tasks,
-  getKey: (task) => task._id,
+  getKey: (task: Task) => task._id,
 })
 
 convexCollectionOptions({
@@ -133,7 +144,7 @@ convexCollectionOptions({
   query: api.tasks.get,
   queryArgs: { id: taskId },
   select: (task) => (task === null ? [] : [task]),
-  getKey: (task) => task._id,
+  getKey: (task: Task) => task._id,
 })
 ```
 
@@ -144,6 +155,7 @@ Keep projections synchronous and treat query results as immutable. A projection 
 Use `convexPaginatedCollectionOptions` for a complete eager mirror of a finite query that returns Convex's `PaginationResult`. The adapter supplies `paginationOpts`, loads every page automatically, and keeps the full result and its page subscriptions in memory. `preload()` waits for the whole result. Set a server-side scope such as a project or workspace before using it with a large table.
 
 ```ts
+import { createCollection } from '@tanstack/db'
 import { convexPaginatedCollectionOptions } from '@tanstack/convex-db-collection'
 
 const tasks = createCollection(
@@ -154,7 +166,7 @@ const tasks = createCollection(
     queryArgs: { projectId },
     pageSize: 100,
     maxRows: 5_000,
-    getKey: (task) => task._id,
+    getKey: (task: Task) => task._id,
   }),
 )
 
@@ -256,7 +268,7 @@ convexCollectionOptions({
   client,
   query: api.tasks.list,
   queryArgs: { projectId },
-  getKey: (task) => task._id,
+  getKey: (task: Task) => task._id,
   onError: (error) => reportError(error),
 })
 ```
