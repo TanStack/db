@@ -6,6 +6,7 @@ import { SyncTransactionAbortedError } from '../src/errors.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
@@ -790,6 +791,8 @@ const runCancellationHistory = ({
     canceledFirst,
     initialMetadata,
   )
+
+declareOracle({ check: [applyRound, expectMetadataCancellationOwnership] })
 
 describe(`generated metadata publication histories`, () => {
   if (!oracleReplayRequested()) {
