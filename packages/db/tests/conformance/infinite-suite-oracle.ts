@@ -16,6 +16,7 @@
  * history instead of test-runner housekeeping.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { createOracleReach } from '../oracle-reach'
 import { expectPageRows } from './page-laws-oracle'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
@@ -24,6 +25,7 @@ import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
 } from './infinite-contract'
+import type { QueryBuild } from './contract'
 
 interface InfiniteRow {
   id: string
@@ -146,6 +148,36 @@ async function captureError(fn: () => InfiniteQueryHandle): Promise<unknown> {
   }
 }
 
+/** A rejected input throws at mount, reconfiguration, flush, or read. */
+async function captureRejection(
+  run: () => Promise<unknown> | unknown,
+): Promise<unknown> {
+  try {
+    await run()
+    return undefined
+  } catch (error) {
+    return error
+  }
+}
+
+/**
+ * After a rejection, every read throws or holds no rows. Two reads catch a
+ * memo that throws once and then serves its previous value. No current driver
+ * can fail this check (see `contract.ts`); it guards a driver whose binding
+ * stays mounted after a rejection.
+ */
+function expectNoPagesAfterRejection(handle: InfiniteQueryHandle): void {
+  for (let read = 0; read < 2; read++) {
+    let data: unknown
+    try {
+      data = handle.current().data
+    } catch {
+      continue
+    }
+    expect(data).toEqual([])
+  }
+}
+
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt++) {
     if (check()) return
@@ -179,7 +211,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
   }
   const driver: InfiniteQueryDriver = {
     ...rawDriver,
-    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
+    makeSource: (data, collectionId) =>
+      sources!.track(rawDriver.makeSource(data, collectionId)),
     makeOnDemandSource: (data, delay) =>
       sources!.track(rawDriver.makeOnDemandSource(data, delay)),
     makeLaggingOnDemandSource: (data) =>
@@ -202,6 +235,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     key: string,
     name: string,
     fn: () => Promise<void> | void,
+    // A generated grammar runs many histories, each through the driver's cut.
+    timeoutMs?: number,
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
@@ -223,7 +258,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         sources = null
       }
     }
-    it(label, run)
+    it(label, run, timeoutMs)
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
@@ -1655,8 +1690,359 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       },
     )
 
+    // ---- query identity (1.0 law; see contract.ts) ----------------------
+    //
+    // Each history branches only on the driver's public identity policy, and
+    // both branches check pages: a comparing binding rejects, and a reactive
+    // binding pages the current input.
+
+    // `fn.where` runs a JavaScript predicate, so its IR has no stable hash.
+    const functionalRanks = (source: { collection: any }) => (q: any) =>
+      q
+        .from({ items: source.collection })
+        .fn.where(({ items }: any) => items.rank > 4)
+        .orderBy(({ items }: any) => items.rank, `desc`)
+
+    scenario(
+      `unhashable-query`,
+      `pages a query without a stable IR identity, needing queryKey only where the binding compares identity`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        if (driver.comparesQueryIdentity) {
+          // An empty key is absent, as it is for a DbClient preload.
+          for (const config of [
+            { pageSize: 3 },
+            { pageSize: 3, queryKey: [] },
+          ]) {
+            const error = await captureError(() =>
+              driver.mount(functionalRanks(source), config),
+            )
+            expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          }
+        }
+        const handle = driver.mount(
+          functionalRanks(source),
+          driver.comparesQueryIdentity
+            ? { pageSize: 3, queryKey: [`ranks-above`, 4] }
+            : { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 4), 3)
+        expect(handle.current().hasNextPage).toBe(false)
+      },
+    )
+
+    scenario(
+      `source-id-reuse`,
+      `rejects or pages a different source under a Collection ID the binding read`,
+      async () => {
+        // Claim memory grammar, as in the live suite without a disabled step:
+        // a history mounts on A(x) or C(y), then takes two steps over A(x),
+        // B(x) (another object under A's ID), and C(y). The pairwise model
+        // judges each step from the history alone. A comparing binding rejects
+        // a step when an earlier step read another object under its ID, which
+        // ends the history; a reactive binding pages the selected source.
+        type Pick = `A` | `B` | `C`
+        const first = driver.makeSource(rows(4))
+        const sourceOf: Record<Pick, { collection: any }> = {
+          A: first,
+          B: driver.makeSource(rows(3, `r`), first.collection.id),
+          C: driver.makeSource(rows(2, `o`)),
+        }
+        const pagesOf: Record<Pick, Array<InfiniteRow>> = {
+          A: rows(4).slice(0, 3),
+          B: rows(3, `r`),
+          C: rows(2, `o`),
+        }
+        const collides = (history: ReadonlyArray<Pick>, next: Pick) =>
+          history.some(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+        type ReachState =
+          | `swap after an intervening query`
+          | `revisit after an intervening query`
+        // A state names what lies between the step that made a claim and the
+        // step that tests it.
+        const reachedState = (
+          history: ReadonlyArray<Pick>,
+          next: Pick,
+        ): ReachState | undefined => {
+          const lastIndex = (match: (pick: Pick) => boolean) => {
+            for (let index = history.length - 1; index >= 0; index--) {
+              if (match(history[index]!)) return index
+            }
+            return -1
+          }
+          const conflict = lastIndex(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+          if (conflict >= 0) {
+            return history.length - conflict > 1
+              ? `swap after an intervening query`
+              : undefined
+          }
+          const revisit = lastIndex((prior) => prior === next)
+          return revisit >= 0 && history.length - revisit > 1
+            ? `revisit after an intervening query`
+            : undefined
+        }
+        // Declared reach: the states where a claim must outlive the query
+        // that made it.
+        const reach = createOracleReach<ReachState>(
+          `infinite source-id claim memory`,
+          [
+            `swap after an intervening query`,
+            `revisit after an intervening query`,
+          ],
+        )
+        const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`]
+        for (const start of [`A`, `C`] as const) {
+          for (const second of picks) {
+            for (const third of picks) {
+              reach.beginHistory()
+              const history: Array<Pick> = [start]
+              const handle = driver.mountControllable(
+                (q, pick: Pick) =>
+                  q
+                    .from({ items: sourceOf[pick].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                start as Pick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[start], 3)
+              for (const next of [second, third]) {
+                const state = reachedState(history, next)
+                if (state) reach.reach(state)
+                if (driver.comparesQueryIdentity && collides(history, next)) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                const observed = handle.observations().length
+                handle.setParamSync(next)
+                if (collides(history, next)) {
+                  // A reactive binding read the swap as a new source. At the
+                  // first paint, after the framework's microtask flush and
+                  // before any later task, it shows only the new source's
+                  // rows or none; so does every value it publishes after.
+                  await Promise.resolve()
+                  await Promise.resolve()
+                  const allowed = new Set(pagesOf[next].map((row) => row.id))
+                  const firstPaint = handle
+                    .current()
+                    .data.map((row: { id: string }) => row.id)
+                  expect(
+                    firstPaint.filter((id: string) => !allowed.has(id)),
+                    `first paint ${JSON.stringify(firstPaint)}`,
+                  ).toEqual([])
+                  await handle.flush()
+                  for (const observation of handle
+                    .observations()
+                    .slice(observed)) {
+                    expect(
+                      observation.ids.filter((id) => !allowed.has(id)),
+                      `published ${JSON.stringify(observation.ids)}`,
+                    ).toEqual([])
+                  }
+                } else {
+                  await handle.flush()
+                }
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[next], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        reach.assertReached()
+
+        if (!driver.comparesQueryIdentity) return
+        // Keyed dimension (comparing bindings only), as in the live suite:
+        // AK reads A(x) and BK reads B(x) under their own keys. A keyed step
+        // records no claim and checks none, so a claim made before it still
+        // binds a later derived step.
+        type KeyedPick = Pick | `AK` | `BK`
+        const base = (pick: KeyedPick): Pick =>
+          pick === `AK` ? `A` : pick === `BK` ? `B` : pick
+        const isKeyed = (pick: KeyedPick) => pick !== base(pick)
+        const conflicts = (prior: KeyedPick, next: KeyedPick) =>
+          !isKeyed(prior) &&
+          !isKeyed(next) &&
+          base(prior) !== base(next) &&
+          sourceOf[base(prior)].collection.id ===
+            sourceOf[base(next)].collection.id
+        type KeyedReachState =
+          `claim crosses a keyed step` | `keyed step after a claim`
+        const keyedReach = createOracleReach<KeyedReachState>(
+          `infinite source-id claim memory with keys`,
+          [`claim crosses a keyed step`, `keyed step after a claim`],
+        )
+        const mountKeyed = driver.mountKeyedControllable
+        // Every comparing driver supplies the keyed form.
+        expect(mountKeyed).toBeDefined()
+        const keyedPicks: ReadonlyArray<KeyedPick> = [`A`, `B`, `C`, `AK`, `BK`]
+        for (const start of [`A`, `C`, `AK`] as const) {
+          for (const second of keyedPicks) {
+            for (const third of keyedPicks) {
+              keyedReach.beginHistory()
+              const history: Array<KeyedPick> = [start]
+              const handle = mountKeyed!(
+                (q, pick: KeyedPick) =>
+                  q
+                    .from({ items: sourceOf[base(pick)].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                (pick) => (isKeyed(pick) ? [`keyed`, pick] : undefined),
+                start as KeyedPick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[base(start)], 3)
+              for (const next of [second, third]) {
+                let claimIndex = -1
+                for (let index = history.length - 1; index >= 0; index--) {
+                  if (conflicts(history[index]!, next)) {
+                    claimIndex = index
+                    break
+                  }
+                }
+                if (
+                  claimIndex >= 0 &&
+                  history.slice(claimIndex + 1).some(isKeyed)
+                ) {
+                  keyedReach.reach(`claim crosses a keyed step`)
+                }
+                if (
+                  isKeyed(next) &&
+                  history.some(
+                    (prior) =>
+                      !isKeyed(prior) &&
+                      base(prior) !== base(next) &&
+                      sourceOf[base(prior)].collection.id ===
+                        sourceOf[base(next)].collection.id,
+                  )
+                ) {
+                  keyedReach.reach(`keyed step after a claim`)
+                }
+                if (claimIndex >= 0) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                handle.setParamSync(next)
+                await handle.flush()
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[base(next)], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        keyedReach.assertReached()
+      },
+      // 18 histories of three steps each, and 75 keyed histories for a
+      // comparing binding.
+      60_000,
+    )
+
+    scenario(
+      `unhashable-recompile`,
+      `recompiling to a query without a stable IR identity follows the binding's identity policy`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        // `null` selects the structured query; a number, the functional one
+        // that keeps ranks at or below it.
+        const handle = driver.mountControllable(
+          (q, atMost: number | null) => {
+            const query = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return atMost === null
+              ? query
+              : query.fn.where(({ items }: any) => items.rank <= atMost)
+          },
+          null as number | null,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        if (driver.comparesQueryIdentity) {
+          const error = await captureRejection(async () => {
+            handle.setParamSync(4)
+            await handle.flush()
+            return handle.current()
+          })
+          expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          expectNoPagesAfterRejection(handle)
+          return
+        }
+        // A changed captured value recompiles, though no identity names it.
+        handle.setParamSync(4)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(4, 7), 3)
+        handle.setParamSync(2)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(6, 8), 3)
+      },
+    )
+
+    scenario(
+      `source-id-reuse-in-one-query`,
+      `rejects or pages one query that reads two sources under one Collection ID`,
+      async () => {
+        // Overlapping but different rows: ids 1-4 and 3-6.
+        const first = driver.makeSource(rows(4))
+        const reused = driver.makeSource(rows(6).slice(2), first.collection.id)
+        const build: QueryBuild = (q) =>
+          q
+            .from({ items: first.collection })
+            .join(
+              { other: reused.collection },
+              ({ items, other }: any) => driver.eq(items.id, other.id),
+              `inner`,
+            )
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .select(({ items }: any) => ({ ...items }))
+        if (driver.comparesQueryIdentity) {
+          const error = await captureError(() =>
+            driver.mount(build, { pageSize: 3 }),
+          )
+          expect(error).toMatchObject({ name: `SourceCollectionIdReuseError` })
+          return
+        }
+        // The inner join matches only ids both objects hold: 3 and 4.
+        // Reading the first object for both sides pages 1-3; the second, 3-5.
+        const handle = driver.mount(build, { pageSize: 3 })
+        await handle.flush()
+        expect(handle.current().data.map((row: any) => row.id)).toEqual([
+          `3`,
+          `4`,
+        ])
+      },
+    )
+
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(39)
+      expect(registry.size).toBe(43)
     })
   })
 }

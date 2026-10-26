@@ -31,6 +31,9 @@ import type { CollectionStateManager } from './state'
  */
 export const UNSUBSCRIBED_GC_FLOOR_MS = 50
 
+/** A Collection's gcTime when its config names none (5 minutes). */
+export const DEFAULT_GC_TIME_MS = 300000
+
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -303,7 +306,7 @@ export class CollectionLifecycleManager<
   public startGCTimer(minDelay = 0): void {
     if (!this.canGarbageCollect()) return
 
-    const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
+    const gcTime = this.config.gcTime ?? DEFAULT_GC_TIME_MS
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
     // Note: setTimeout with Infinity coerces to 0 via ToInt32, causing immediate GC,

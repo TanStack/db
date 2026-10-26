@@ -140,9 +140,12 @@ When the derived identity changes:
 3. The component re-renders with the new data
 4. The utility shows loading state again
 
-Use `queryKey` for opaque functional variants such as `.fn.where`, because DB
-cannot inspect their closed-over values. Pass reactive key values through a
-getter:
+Without a `DbClient`, Svelte compiles again whenever a reactive read changes,
+so an opaque functional variant such as `.fn.where` works without a key. A
+`DbClient` matches preloaded and hydrated queries by identity hash, so a query
+it backs needs one: an opaque query without `queryKey` throws
+`UnhashableQueryIRError`, and an empty `queryKey` counts as none. Pass reactive
+key values through a getter:
 
 ```svelte
 <script>
@@ -158,6 +161,12 @@ getter:
   })
 </script>
 ```
+
+While a `DbClient`-backed query is mounted, each source Collection ID it
+reads must keep naming one Collection object, because its identity names
+sources by ID. A different object under an ID the hook already read throws
+`SourceCollectionIdReuseError`, and every result property then throws instead
+of returning the previous query's state.
 
 The legacy dependency array remains supported. Prefer derived identity for
 structured queries and `queryKey` for opaque ones.

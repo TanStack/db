@@ -71,6 +71,13 @@ await generateReferenceDocs({
       exclude: [`packages/db/**/*`],
     },
     {
+      name: `preact-db`,
+      entryPoints: [resolve(__dirname, `../packages/preact-db/src/index.ts`)],
+      tsconfig: resolve(__dirname, `../packages/preact-db/tsconfig.docs.json`),
+      outputDir: resolve(__dirname, `../docs/framework/preact/reference`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
       name: `solid-db`,
       entryPoints: [resolve(__dirname, `../packages/solid-db/src/index.ts`)],
       tsconfig: resolve(__dirname, `../packages/solid-db/tsconfig.docs.json`),
