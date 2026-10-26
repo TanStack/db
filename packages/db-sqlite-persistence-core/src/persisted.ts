@@ -5712,10 +5712,9 @@ function createWrappedSyncConfig<
         until?: { transaction: OpenSyncTransaction<T, TKey>; index: number },
       ): { present: boolean; value?: T } | undefined => {
         let row: { present: boolean; value?: T } | undefined
-        for (const transaction of [
-          ...pendingPublicationTransactions,
-          ...transactionStack,
-        ]) {
+        for (const transaction of pendingPublicationTransactions.concat(
+          transactionStack,
+        )) {
           if (transaction.truncate) row = { present: false }
           // Each write keeps the transaction's row, so a read without `until`
           // folds one entry per transaction instead of its operations.
