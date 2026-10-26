@@ -9,6 +9,7 @@ import {
   compileSingleRowExpression,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
+  permitsPersistedInitialRender,
   safeRandomUUID,
   toBooleanPredicate,
   waitForPersistedInitialRender,
@@ -809,6 +810,7 @@ class PersistedReadinessTracker implements PersistedReadinessSource {
   ) {}
 
   waitForInitialRender = waitForPersistedInitialRender
+  permitsInitialRender = permitsPersistedInitialRender
 
   getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
 

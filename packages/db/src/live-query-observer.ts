@@ -71,34 +71,6 @@ function collectPersistedReadinessSources(
   return visit(root) && sources.length > 0 ? sources : undefined
 }
 
-// An eager source permits local rendering once its wait has passed; an
-// on-demand source waits inside each load, so it permits it once the query's
-// demands on it have settled.
-function permitsLocalRender(source: PersistedSourceEntry): boolean {
-  const owner = source.demandOwner
-  if (!owner) return Date.now() >= source.readiness.getOrStartNetworkDeadline()
-  const builder = getBuilderFromConfig(owner.config)
-  return builder ? builder.initialDemandsSettled() : !owner.isLoadingSubset
-}
-
-// An on-demand source's demands settle without a persisted readiness change,
-// so the wait also rechecks when the owning live query's demands settle.
-function subscribeDemandSettlement(
-  sources: ReadonlyArray<PersistedSourceEntry>,
-  listener: () => void,
-): () => void {
-  const unsubscribers = sources.flatMap(({ demandOwner }) => {
-    if (!demandOwner) return []
-    const builder = getBuilderFromConfig(demandOwner.config)
-    return [
-      builder
-        ? builder.subscribeInitialDemandsSettled(listener)
-        : demandOwner.on(`loadingSubset:change`, listener),
-    ]
-  })
-  return () => unsubscribers.forEach((unsubscribe) => unsubscribe())
-}
-
 /**
  * The canonical, adapter-agnostic view of a live query at a point in time.
  *
@@ -1079,7 +1051,7 @@ class LiveQueryObserverImpl<
         ? this.client._getLiveQuery(this.queryHash)
         : undefined
     if (clientQuery?.status === `error`) return true
-    return sources.every(permitsLocalRender)
+    return sources[0]!.readiness.permitsInitialRender(sources)
   }
 
   preloadForInitialRender(): Promise<void> {
@@ -1107,9 +1079,6 @@ class LiveQueryObserverImpl<
         currentClientQuery,
         collectionStatus: () => this.collection?.status,
         readPersisted: () => this.readPersistedReadiness(),
-        localRenderPermitted: () => sources.every(permitsLocalRender),
-        subscribeDemandSettlement: (listener) =>
-          subscribeDemandSettlement(sources, listener),
         onReady: () => {
           this.initialRenderReady = true
         },

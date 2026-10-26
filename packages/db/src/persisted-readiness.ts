@@ -1,4 +1,6 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
+import { getBuilderFromConfig } from './query/live/collection-registry.js'
+import type { Collection } from './collection/index.js'
 
 /** The local-restore boundary of one opted-in persisted Collection. */
 export type PersistedReadinessSnapshot =
@@ -25,6 +27,54 @@ export interface PersistedReadinessSource {
    * its readiness, so an app with no persisted Collection does not ship it.
    */
   waitForInitialRender: typeof waitForPersistedInitialRender
+  /** Normally `permitsPersistedInitialRender`, supplied the same way. */
+  permitsInitialRender: typeof permitsPersistedInitialRender
+}
+
+/** @internal One persisted source as the initial-render gate reads it. */
+export interface PersistedInitialRenderSource {
+  collection: { status: string }
+  readiness: PersistedReadinessSource
+  /**
+   * The live query whose demands an on-demand source serves. A source read
+   * by several live queries has one entry per owner.
+   */
+  demandOwner: Collection<any, any, any> | undefined
+}
+
+// An eager source permits local rendering once its wait has passed; an
+// on-demand source waits inside each load, so it permits it once the query's
+// demands on it have settled.
+function permitsLocalRender(source: PersistedInitialRenderSource): boolean {
+  const owner = source.demandOwner
+  if (!owner) return Date.now() >= source.readiness.getOrStartNetworkDeadline()
+  const builder = getBuilderFromConfig(owner.config)
+  return builder ? builder.initialDemandsSettled() : !owner.isLoadingSubset
+}
+
+/** Whether every source permits rendering from local data now. */
+export function permitsPersistedInitialRender(
+  sources: ReadonlyArray<PersistedInitialRenderSource>,
+): boolean {
+  return sources.every(permitsLocalRender)
+}
+
+// An on-demand source's demands settle without a persisted readiness change,
+// so the wait also rechecks when the owning live query's demands settle.
+function subscribeDemandSettlement(
+  sources: ReadonlyArray<PersistedInitialRenderSource>,
+  listener: () => void,
+): () => void {
+  const unsubscribers = sources.flatMap(({ demandOwner }) => {
+    if (!demandOwner) return []
+    const builder = getBuilderFromConfig(demandOwner.config)
+    return [
+      builder
+        ? builder.subscribeInitialDemandsSettled(listener)
+        : demandOwner.on(`loadingSubset:change`, listener),
+    ]
+  })
+  return () => unsubscribers.forEach((unsubscribe) => unsubscribe())
 }
 
 /** A client query stream, as the initial-render wait reads it. */
@@ -36,10 +86,7 @@ interface InitialRenderClientQuery {
 
 /** @internal What a live query observer passes to the initial-render wait. */
 export interface PersistedInitialRenderInput {
-  sources: ReadonlyArray<{
-    collection: { status: string }
-    readiness: PersistedReadinessSource
-  }>
+  sources: ReadonlyArray<PersistedInitialRenderSource>
   /** The network preload that this render prefers. */
   network: Promise<void>
   /** The client query stream at the start of the wait, if any. */
@@ -49,13 +96,6 @@ export interface PersistedInitialRenderInput {
   /** The live query Collection's status now. */
   collectionStatus: () => string | undefined
   readPersisted: () => { status: string; error: unknown }
-  /**
-   * Whether every source permits local rendering: an eager source after its
-   * deadline, an on-demand source once the query's demands on it settle.
-   */
-  localRenderPermitted: () => boolean
-  /** Recheck when an on-demand source's demands settle. */
-  subscribeDemandSettlement: (listener: () => void) => () => void
   /** Runs once the render may proceed, before the promise resolves. */
   onReady: () => void
 }
@@ -72,8 +112,6 @@ export function waitForPersistedInitialRender({
   currentClientQuery,
   collectionStatus,
   readPersisted,
-  localRenderPermitted,
-  subscribeDemandSettlement,
   onReady,
 }: PersistedInitialRenderInput): {
   promise: Promise<void>
@@ -125,7 +163,7 @@ export function waitForPersistedInitialRender({
       const remainingNetworkMs = Math.max(0, networkDeadlineAt - Date.now())
       // A pending on-demand demand rechecks when its demands settle.
       const localRenderAllowed =
-        remainingNetworkMs === 0 && localRenderPermitted()
+        remainingNetworkMs === 0 && permitsPersistedInitialRender(sources)
       const sourceFailed = sources.some(
         (source) => source.collection.status === `error`,
       )
@@ -152,7 +190,7 @@ export function waitForPersistedInitialRender({
     for (const source of sources) {
       unsubscribers.push(source.readiness.subscribe(check))
     }
-    unsubscribers.push(subscribeDemandSettlement(check))
+    unsubscribers.push(subscribeDemandSettlement(sources, check))
     void network.then(
       () => {
         networkReady = true

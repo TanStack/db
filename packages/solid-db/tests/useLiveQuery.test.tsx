@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  permitsPersistedInitialRender,
   toArray,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
@@ -2320,6 +2321,7 @@ describe(`Query Collections`, () => {
               networkTimeoutMs,
               onDemand: false,
               waitForInitialRender: waitForPersistedInitialRender,
+              permitsInitialRender: permitsPersistedInitialRender,
               getOrStartNetworkDeadline: () =>
                 (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
               getSnapshot: () => ({ status: persistedStatus }),
@@ -2388,6 +2390,7 @@ describe(`Query Collections`, () => {
         networkTimeoutMs: 0,
         onDemand,
         waitForInitialRender: waitForPersistedInitialRender,
+        permitsInitialRender: permitsPersistedInitialRender,
         getOrStartNetworkDeadline: () => Date.now(),
         getSnapshot: () => ({ status: `ready` }),
         subscribe: () => () => {},

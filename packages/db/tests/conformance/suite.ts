@@ -52,7 +52,10 @@
  * query follow the same split: rejected, or each read.
  */
 import { describe, expect, it } from 'vitest'
-import { waitForPersistedInitialRender } from '@tanstack/db'
+import {
+  permitsPersistedInitialRender,
+  waitForPersistedInitialRender,
+} from '@tanstack/db'
 import { createOracleReach } from '../oracle-reach'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
@@ -222,6 +225,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           networkTimeoutMs: 0,
           onDemand: false,
           waitForInitialRender: waitForPersistedInitialRender,
+          permitsInitialRender: permitsPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now(),
           getSnapshot: () => snapshot,
           subscribe: (listener: () => void) => {

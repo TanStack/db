@@ -7,6 +7,7 @@ import {
   createLiveQueryObserver,
   eq,
   getPersistedReadinessSource,
+  permitsPersistedInitialRender,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src/index.js'
@@ -242,6 +243,7 @@ describe(`persisted-readiness oracle`, () => {
                       : { status: leftOutcome },
                   subscribe: () => () => {},
                   waitForInitialRender: waitForPersistedInitialRender,
+                  permitsInitialRender: permitsPersistedInitialRender,
                 },
               })
             }
@@ -256,6 +258,7 @@ describe(`persisted-readiness oracle`, () => {
                       : { status: rightOutcome },
                   subscribe: () => () => {},
                   waitForInitialRender: waitForPersistedInitialRender,
+                  permitsInitialRender: permitsPersistedInitialRender,
                 },
               })
             }
@@ -1066,6 +1069,7 @@ describe(`persisted-readiness oracle`, () => {
         getSnapshot: () => ({ status: `ready` }),
         subscribe: () => () => {},
         waitForInitialRender: waitForPersistedInitialRender,
+        permitsInitialRender: permitsPersistedInitialRender,
       },
     })
     const failure = new Error(`query failed independently of its source`)
@@ -1106,6 +1110,7 @@ describe(`persisted-readiness oracle`, () => {
         getSnapshot: () => ({ status: `ready` }),
         subscribe: () => () => {},
         waitForInitialRender: waitForPersistedInitialRender,
+        permitsInitialRender: permitsPersistedInitialRender,
       },
     })
     const query = createLiveQueryCollection({

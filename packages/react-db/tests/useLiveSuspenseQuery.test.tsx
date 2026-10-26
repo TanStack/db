@@ -14,6 +14,7 @@ import {
   eq,
   getStableValueHash,
   gt,
+  permitsPersistedInitialRender,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { Component, StrictMode, Suspense } from 'react'
@@ -98,6 +99,7 @@ describe(`useLiveSuspenseQuery`, () => {
           networkTimeoutMs: 60_000,
           onDemand: false,
           waitForInitialRender: waitForPersistedInitialRender,
+          permitsInitialRender: permitsPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -165,6 +167,7 @@ describe(`useLiveSuspenseQuery`, () => {
             networkTimeoutMs: 60_000,
             onDemand: false,
             waitForInitialRender: waitForPersistedInitialRender,
+            permitsInitialRender: permitsPersistedInitialRender,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: `ready` }),
             subscribe: () => () => {},
@@ -319,6 +322,7 @@ describe(`useLiveSuspenseQuery`, () => {
           networkTimeoutMs: 60_000,
           onDemand: false,
           waitForInitialRender: waitForPersistedInitialRender,
+          permitsInitialRender: permitsPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -429,6 +433,7 @@ describe(`useLiveSuspenseQuery`, () => {
             networkTimeoutMs,
             onDemand: false,
             waitForInitialRender: waitForPersistedInitialRender,
+            permitsInitialRender: permitsPersistedInitialRender,
             getOrStartNetworkDeadline: () =>
               (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
             getSnapshot: () => ({ status: persistedStatus }),
@@ -499,6 +504,7 @@ describe(`useLiveSuspenseQuery`, () => {
       networkTimeoutMs: 0,
       onDemand,
       waitForInitialRender: waitForPersistedInitialRender,
+      permitsInitialRender: permitsPersistedInitialRender,
       getOrStartNetworkDeadline: () => Date.now(),
       getSnapshot: () => ({ status: `ready` }),
       subscribe: () => () => {},
