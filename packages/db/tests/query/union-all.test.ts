@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   caseWhen,
   coalesce,
@@ -9,8 +7,11 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -1588,14 +1589,16 @@ describe(`unionAll`, () => {
           id: user.id,
           profile: caseWhen(user.id, {
             id: user.id,
-            items: q
-              .from({ item: events })
-              .where(({ item }) => eq(item.userId, user.id))
-              .orderBy(({ item }) => item.timestamp)
-              .select(({ item }) => ({
-                label: item.label,
-                timestamp: item.timestamp,
-              })),
+            items: include(
+              q
+                .from({ item: events })
+                .where(({ item }) => eq(item.userId, user.id))
+                .orderBy(({ item }) => item.timestamp)
+                .select(({ item }) => ({
+                  label: item.label,
+                  timestamp: item.timestamp,
+                })),
+            ),
           }),
         }))
         .orderBy(({ user }) => user.id)
@@ -1697,23 +1700,25 @@ describe(`unionAll`, () => {
           key: run.key,
           order: run.order,
           status: run.status,
-          items: q
-            .from({ item: runItemsSource })
-            .where(({ item }) => eq(item.runId, run.key))
-            .orderBy(({ item }) => item.order)
-            .select(({ item }) => ({
-              text: caseWhen(item.text.key, {
-                key: item.text.key,
-                runId: item.text.runId,
-                order: item.text.order,
-                status: item.text.status,
-                content: item.textContent,
-              }),
-              inactiveText: caseWhen(item.toolCall.key, {
-                content: item.textContent,
-              }),
-              toolCall: item.toolCall,
-            })),
+          items: include(
+            q
+              .from({ item: runItemsSource })
+              .where(({ item }) => eq(item.runId, run.key))
+              .orderBy(({ item }) => item.order)
+              .select(({ item }) => ({
+                text: caseWhen(item.text.key, {
+                  key: item.text.key,
+                  runId: item.text.runId,
+                  order: item.text.order,
+                  status: item.text.status,
+                  content: item.textContent,
+                }),
+                inactiveText: caseWhen(item.toolCall.key, {
+                  content: item.textContent,
+                }),
+                toolCall: item.toolCall,
+              })),
+          ),
         }),
       }))
     })

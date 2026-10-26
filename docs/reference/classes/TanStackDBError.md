@@ -28,6 +28,7 @@ Defined in: [packages/db/src/errors.ts:4](https://github.com/TanStack/db/blob/ma
 - [`QueryOptimizerError`](QueryOptimizerError.md)
 - [`SetWindowReentrancyError`](SetWindowReentrancyError.md)
 - [`SourceCollectionIdReuseError`](SourceCollectionIdReuseError.md)
+- [`InvalidPoolOptionError`](InvalidPoolOptionError.md)
 
 ## Constructors
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import {
   IR,
   Query,
@@ -119,6 +120,7 @@ describe(`CollectionRef public shape`, () => {
               new IR.PropRef([`root`, `id`]),
               new IR.PropRef([`child`, `id`]),
               `children`,
+              includesRuntime,
             ),
           },
         },

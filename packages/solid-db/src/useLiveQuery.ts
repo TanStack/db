@@ -25,7 +25,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
   NonSingleResult,
@@ -197,7 +197,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryCollectionConfig<TContext>>,
+  config: Accessor<LiveQueryHookConfig<TContext>>,
 ): Accessor<InferResultType<TContext>> & {
   /**
    * @deprecated use function result instead
