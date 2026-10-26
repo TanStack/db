@@ -200,6 +200,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
   ],
   [
+    `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
+    `replay`,
+    `ordered-window-faults keyed-request-failures`,
+  ],
+  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
@@ -294,6 +299,10 @@ const replayTestNames = new Map([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property === `replay.ordered-window-faults`)
+    return `keeps the ordered window under load and release faults \\(replay campaign\\)`
+  if (property === `replay.keyed-request-failures`)
+    return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
   if (property === `cold-join.compound`)
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)

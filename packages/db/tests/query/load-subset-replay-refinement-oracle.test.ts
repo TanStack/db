@@ -1,6 +1,7 @@
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { CollectionSubscription } from '../../src/collection/subscription.js'
 import { createDeferred } from '../../src/deferred.js'
 import {
   createLiveQueryCollection,
@@ -13,6 +14,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
+import { createOracleReach } from '../oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -1095,12 +1097,15 @@ describe(`loadSubset replay refinement`, () => {
  *   convergence does not apply. Either side can be the lazy one: the planner
  *   loads an inner join's root by key when the marker source is eager. A
  *   demand load asks for keys (a `where` with no `orderBy`). A failed load
- *   that a truncate's replay issued is not fatal: it keeps the last
- *   publication until the next replay. A load that fails before the query
- *   first becomes ready is fatal too (an initial load failure), except on
+ *   that reacquires an established request after truncate is not fatal: it
+ *   keeps the last publication until the next replay. A load that fails before
+ *   the query first becomes ready is fatal too (an initial load failure), except on
  *   a lazy join source, which owns its demand. So a query may end in
- *   `error` only after a demand load issued outside a replay failed, or a
- *   load failed while the query was still loading.
+ *   `error` only after a newly issued keyed snapshot request failed, or a
+ *   load failed while the query was still loading. A truncate may change the
+ *   private window and issue a new include request while it commits; that
+ *   request still starts fresh lazy demand. Reacquisition of a previously
+ *   settled request is an ordinary replay, even when it starts later.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
@@ -1124,8 +1129,14 @@ describe(`loadSubset replay refinement`, () => {
  *
  * Limits: one ordered source; no full joins (the ordered-work oracle owns
  * them); includes one level deep; and a provider that reads its rows at the time it
- * answers.
+ * answers. The status check relates an observed initiating request rejection
+ * to dependent query status; it does not independently establish correct
+ * settlement of that request receipt. Peer scenarios share one history-level
+ * failure allowance, so they do not establish receiver-specific fault ownership.
  */
+type OrderedFailureState =
+  `initiating-keyed-request-failed` | `keyed-reacquisition-failed`
+
 type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
   | { type: `move`; id: number; rank: number }
@@ -1260,6 +1271,7 @@ const ordinaryOrderedScenario: OrderedScenario = {
 async function checkOrderedReplay(
   history: Array<OrderedCommand>,
   scenario: OrderedScenario = ordinaryOrderedScenario,
+  recordFailureReach?: (state: OrderedFailureState) => void,
 ): Promise<OrderedReach> {
   const sign = scenario.direction === `asc` ? 1 : -1
   let window = { offset: scenario.offset, limit: scenario.limit }
@@ -1341,12 +1353,10 @@ async function checkOrderedReplay(
   let throwNextUnload = false
   // Window moves whose settlement waits on held loads.
   const pendingMoves: Array<Promise<void>> = []
-  // The truncate starts its replay while it commits.
+  // Release-fault reach still distinguishes a throw while truncate commits.
   let truncating = false
   let anyLoadFailed = false
   let earlyThrowSinceTruncate = false
-  // A marker truncate's commit starts its replay loads synchronously.
-  let markerReplaying = false
   let demandFailed = false
   // A failed initial load is fatal too (error 229). The queries are created
   // below; a load can only fail after they start.
@@ -1354,9 +1364,38 @@ async function checkOrderedReplay(
   let failedWhileLoading = false
   // Adapter callbacks set these flags, so read them through a call.
   const fatalLoadFailed = () => demandFailed || failedWhileLoading
-  // Lazy join demand asks for keys; ordered and full-source loads do not.
-  const isDemand = (options: LoadSubsetOptions) =>
-    options.where !== undefined && options.orderBy === undefined
+  // Observe the initiating snapshot request's result. A new lazy keyed
+  // request may start while truncate commits, whereas reacquisition of an
+  // established request does not issue another snapshot request. The receipt
+  // connects an injected adapter failure to its initiating request without
+  // using replay state, callback timing, or predicate identity.
+  const injectedLoadFaults = new WeakSet<Error>()
+  // Exact acquisition receipts are used only to measure the two failure
+  // premises. This requires no referential stability of predicate expressions.
+  const snapshotAcquisitions = new WeakSet<LoadSubsetOptions>()
+  const requestSnapshot = CollectionSubscription.prototype.requestSnapshot
+  const snapshotRequests = vi
+    .spyOn(CollectionSubscription.prototype, `requestSnapshot`)
+    .mockImplementation(function (this: CollectionSubscription, options) {
+      if (options?.where === undefined || options.orderBy !== undefined) {
+        return requestSnapshot.call(this, options)
+      }
+      return requestSnapshot.call(this, {
+        ...options,
+        onLoadSubsetResult: (result, acquisition, release) => {
+          snapshotAcquisitions.add(acquisition)
+          if (result instanceof Promise) {
+            void result.catch((error: unknown) => {
+              if (error instanceof Error && injectedLoadFaults.has(error)) {
+                demandFailed = true
+                recordFailureReach?.(`initiating-keyed-request-failed`)
+              }
+            })
+          }
+          options.onLoadSubsetResult?.(result, acquisition, release)
+        },
+      })
+    })
   let violation: string | undefined
   // The faults this history injects. They may surface as rejected loads, as
   // thrown releases, or as errors the subscription rethrows from a microtask,
@@ -1369,6 +1408,17 @@ async function checkOrderedReplay(
   const inject = (error: Error) => {
     injected.add(error)
     return error
+  }
+  const injectLoad = (error: Error, options: LoadSubsetOptions) => {
+    injectedLoadFaults.add(error)
+    if (
+      options.where !== undefined &&
+      options.orderBy === undefined &&
+      !snapshotAcquisitions.has(options)
+    ) {
+      recordFailureReach?.(`keyed-reacquisition-failed`)
+    }
+    return inject(error)
   }
   let escaped: unknown
   const escapedError = () => escaped
@@ -1430,7 +1480,6 @@ async function checkOrderedReplay(
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
             reach.markerLoads++
-            const demand = !markerReplaying && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
@@ -1438,12 +1487,11 @@ async function checkOrderedReplay(
               if (!ok) {
                 load.outcome = `failed`
                 anyLoadFailed = true
-                if (demand) demandFailed = true
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
                 }
                 reach.failedLoads++
-                throw inject(new Error(`marker load failed`))
+                throw injectLoad(new Error(`marker load failed`), options)
               }
             } else await Promise.resolve()
             if (options.signal?.aborted) {
@@ -1494,7 +1542,6 @@ async function checkOrderedReplay(
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
-            const demand = !truncating && isDemand(options)
             if (holding) {
               const ok = await new Promise<boolean>((resolve) =>
                 held.push(resolve),
@@ -1502,12 +1549,11 @@ async function checkOrderedReplay(
               if (!ok) {
                 load.outcome = `failed`
                 anyLoadFailed = true
-                if (demand) demandFailed = true
                 if (queries.some(({ status }) => status === `loading`)) {
                   failedWhileLoading = true
                 }
                 reach.failedLoads++
-                throw inject(new Error(`load failed`))
+                throw injectLoad(new Error(`load failed`), options)
               }
             } else await Promise.resolve()
             if (options.signal?.aborted) {
@@ -1688,13 +1734,7 @@ async function checkOrderedReplay(
         installedMarkers.add(id)
       }
     }
-    markerReplaying = true
-    let receipt: true | Promise<void>
-    try {
-      receipt = markerSync.commit()
-    } finally {
-      markerReplaying = false
-    }
+    const receipt = markerSync.commit()
     if (receipt !== true) await receipt
   }
   try {
@@ -1886,6 +1926,7 @@ async function checkOrderedReplay(
     await flushPromises()
     process.off(`unhandledRejection`, swallow)
     microtasks.mockRestore()
+    snapshotRequests.mockRestore()
   }
   return reach
 }
@@ -1896,6 +1937,14 @@ const orderedReplayCampaigns =
   orderedReplayConfig.replayPath === undefined
     ? ([`fixed`, `random`] as const)
     : orderedReplayConfig.replayProperty === orderedReplayProperty
+      ? ([`replay`] as const)
+      : ([] as const)
+
+const orderedFailureProperty = `replay.keyed-request-failures`
+const orderedFailureCampaigns =
+  orderedReplayConfig.replayPath === undefined
+    ? ([`fixed`, `random`] as const)
+    : orderedReplayConfig.replayProperty === orderedFailureProperty
       ? ([`replay`] as const)
       : ([] as const)
 
@@ -2081,6 +2130,77 @@ describe(`Ordered windows across truncate replays`, () => {
         markerMode: `on-demand`,
       },
     },
+    {
+      name: `a fresh include request that fails during marker truncate`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: false },
+        { type: `move`, id: 1, rank: 1 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `terminalErrors`,
+    },
+    {
+      name: `an established include replay that fails`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: false },
+        { type: `move`, id: 1, rank: 1 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+    },
+    {
+      name: `an established marker replay after a fresh include succeeds`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true },
+        { type: `settle`, ok: false },
+        { type: `move`, id: 1, rank: 1 },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+    },
+    {
+      name: `a pending include whose initiating load succeeds before replay fails`,
+      history: [
+        { type: `hold` },
+        { type: `mark`, id: 1, on: false },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true },
+        { type: `settle`, ok: true },
+        { type: `settle`, ok: true },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedLoads`,
+    },
   ] satisfies Array<{
     name: string
     history: Array<OrderedCommand>
@@ -2148,6 +2268,72 @@ describe(`Ordered windows across truncate replays`, () => {
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The broad grammar may miss the low-frequency interaction between a
+  // truncate's private window change and fresh child demand. These generated
+  // histories vary the marked head's rank and two other markers before
+  // placing failure on either side of that boundary. Reacquisition failures
+  // additionally explore later rank, marker, window, replay, release, and
+  // settlement actions before recovery; terminal histories need no suffix.
+  // A new include fails in the first prefix. In the second it succeeds, and
+  // failure instead reaches the already established marker reacquisition.
+  it.each(orderedFailureCampaigns)(
+    `distinguishes keyed request failure from reacquisition (%s campaign)`,
+    async (campaign) => {
+      const failureReach = createOracleReach<OrderedFailureState>(
+        orderedFailureProperty,
+        [`initiating-keyed-request-failed`, `keyed-reacquisition-failed`],
+      )
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(orderedCommand, { minLength: 0, maxLength: 6 }),
+          fc.constantFrom(`asc` as const, `desc` as const),
+          fc.integer({ min: 1, max: 9 }),
+          fc.boolean(),
+          fc.boolean(),
+          async (suffix, direction, rank, markThird, markFourth) => {
+            for (const fresh of [true, false]) {
+              failureReach.beginHistory()
+              const history: Array<OrderedCommand> = [
+                {
+                  type: `move`,
+                  id: direction === `asc` ? 1 : 5,
+                  rank: direction === `asc` ? -rank : 100 + rank,
+                },
+                { type: `mark`, id: 3, on: markThird },
+                { type: `mark`, id: 4, on: markFourth },
+                { type: `hold` },
+                { type: `truncateMarkers` },
+                ...(fresh ? [] : [{ type: `settle` as const, ok: true }]),
+                { type: `settle`, ok: false },
+                ...(fresh ? [] : suffix),
+              ]
+              const reach = await checkOrderedReplay(
+                history,
+                {
+                  ...ordinaryOrderedScenario,
+                  direction,
+                  limit: 1,
+                  joined: `none`,
+                  markerMode: `on-demand`,
+                  includes: true,
+                },
+                failureReach.reach,
+              )
+              if (fresh) {
+                expect(reach.terminalErrors, `fresh request failure`).toBe(1)
+              }
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { seed: 20261026, numRuns: oracleRuns(40) }
+          : oraclePropertyOptions(40, orderedFailureProperty),
+      )
+      failureReach.assertReached()
     },
     120_000,
   )
