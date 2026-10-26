@@ -66,10 +66,10 @@ import type { SQLiteDriver } from '../src/index.js'
  * a schema reset, a refetch, and cache-claim expiry; Electric's must-refetch
  * is in its witness. There is no coordinator other than the default
  * single-process one (multi-tab is out of scope, maintainer decision
- * 2026-10-26), no window with duplicate ranks, no unindexed offset page, and
- * no native host. A failure before the persisted subset restore publishes is
- * not a legal history (Part 1). Every block is a bounded enumeration or fixed history, not a
- * generated campaign, so ORC-007 and ORC-015 do not apply.
+ * 2026-10-26), and no native host. A failure before the persisted subset
+ * restore publishes is not a legal history (Part 1). Every block is a
+ * bounded enumeration or fixed history, not a generated campaign, so ORC-007
+ * and ORC-015 do not apply here.
  */
 
 type Row = { id: string; group: string; rank: number; value: string }
@@ -2041,11 +2041,12 @@ async function runJoined(
 // reject "a window counts only rows" by the row count alone.
 //
 // Two more histories move the window to its next page offline. Page 2 is
-// covered only when session 1 loaded it too. These histories index `rank`, so
-// core continues the window with a cursor from the restored boundary instead
-// of reloading a longer prefix. The wrong design "a demand key ignores offset
-// and cursor" would then settle a page that session 1 never loaded. A
-// positive witness checks that the move sent a cursor.
+// covered only when session 1 loaded it too. Each runs with and without an
+// index on `rank`. With one, core continues the window with a cursor from the
+// restored boundary; without one, it reloads the longer prefix `limit 4`. The
+// wrong designs "a demand key ignores offset and cursor" and "a demand key
+// ignores its limit" would then settle a page that session 1 never loaded. A
+// positive witness checks which load the move sent.
 // ===========================================================================
 
 type WindowHistory =
@@ -2190,8 +2191,126 @@ async function runWindow(
   ])
 }
 
+// Ties at the boundary. Session 1 loads W over `a1` (rank 1), `a2` and `a2b`
+// (both rank 2), and `a3` (rank 3), so W holds `a1` and `a2`, and its
+// tie-boundary load is the demand "group a, rank 2", which held `a2` and
+// `a2b`. Model: W is a limited demand and a tie-boundary demand, and it
+// settles only when both are covered. The window must hold the same rows
+// (the window law); the tie-boundary demand is unordered, so it must hold at
+// least the rows it held (the row-count rule). The model orders ties by key.
+//
+// - `tie-unchanged`: nothing; W settles on `a1`, `a2`.
+// - `tie-row-outside-deleted`: the source deletes `a2b`. W keeps its rows,
+//   but its tie-boundary demand lost one, so W waits. This rejects "a window
+//   ignores its tie-boundary load".
+// - `tie-row-added`: the source adds `a2c` at rank 2. W keeps its rows, and
+//   its tie-boundary demand gained one, so W settles. This rejects "every
+//   demand must hold the keys it held".
+// - `tie-row-inside-deleted`: the source deletes `a2`, so W holds `a1` and
+//   `a2b`, a different window, and waits.
+type TieHistory =
+  | `tie-unchanged`
+  | `tie-row-outside-deleted`
+  | `tie-row-added`
+  | `tie-row-inside-deleted`
+const TIE_HISTORIES: ReadonlyArray<TieHistory> = [
+  `tie-unchanged`,
+  `tie-row-outside-deleted`,
+  `tie-row-added`,
+  `tie-row-inside-deleted`,
+]
+const A2B: Row = { id: `a2b`, group: `a`, rank: 2, value: `v1` }
+
+function expectedTieWindow(history: TieHistory): {
+  ready: boolean
+  rows?: ReadonlyArray<string>
+} {
+  const held = [`a1`, `a2`]
+  const tieRowsHeld = 2
+  const rows = [
+    [`a1`, 1],
+    [`a2`, 2],
+    [`a2b`, 2],
+    [`a3`, 3],
+    ...(history === `tie-row-added` ? [[`a2c`, 2] as const] : []),
+  ].filter(
+    ([id]) =>
+      !(history === `tie-row-outside-deleted` && id === `a2b`) &&
+      !(history === `tie-row-inside-deleted` && id === `a2`),
+  ) as Array<readonly [string, number]>
+  rows.sort(([a, x], [b, y]) => x - y || (a < b ? -1 : 1))
+  const window = rows.slice(0, 2).map(([id]) => id)
+  const boundary = rows[1]![1]
+  const tieRows = rows.filter(([, rank]) => rank === boundary).length
+  const sameRows = held.every((id) => window.includes(id))
+  return sameRows && tieRows >= tieRowsHeld
+    ? { ready: true, rows: window }
+    : { ready: false }
+}
+
+async function runTieWindow(history: TieHistory): Promise<{
+  held: ReadonlyArray<string>
+  tieLoads: number
+  ready: boolean
+  rows?: ReadonlyArray<string>
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  let held: ReadonlyArray<string> = []
+  let tieLoads = 0
+  {
+    const { collection, upstream } = onDemandSource(
+      new SQLiteCorePersistenceAdapter({ driver }),
+      0,
+    )
+    const query = windowQuery(collection)
+    await withCleanup(async () => {
+      await answerUntil(upstream, [A1, A2, A2B, A3], query.preload())
+      held = query.toArray.map((row) => row.id)
+      tieLoads = upstream.calls.filter(
+        (call) => call.limit === undefined,
+      ).length
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const tieRows = [A2, A2B]
+      const inside = tieRows.find((row) => held.includes(row.id))!
+      const outside = tieRows.find((row) => !held.includes(row.id))!
+      if (history === `tie-row-outside-deleted`)
+        await upstream.remove([outside])
+      if (history === `tie-row-inside-deleted`) await upstream.remove([inside])
+      if (history === `tie-row-added`) {
+        await upstream.write([{ id: `a2c`, group: `a`, rank: 2, value: `v1` }])
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  useFakeClock()
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const query = windowQuery(collection)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, 1)
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    return {
+      held,
+      tieLoads,
+      ...(query.status === `ready`
+        ? { ready: true, rows: query.toArray.map((row) => row.id) }
+        : { ready: false }),
+    }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
 async function runNextPage(
   session1LoadsPageTwo: boolean,
+  indexed = true,
 ): Promise<{ pageTwoSettled: boolean; rows?: ReadonlyArray<string> }> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   const A4: Row = { id: `a4`, group: `a`, rank: 4, value: `v1` }
@@ -2201,7 +2320,9 @@ async function runNextPage(
       new SQLiteCorePersistenceAdapter({ driver }),
       0,
     )
-    collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    if (indexed) {
+      collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    }
     const query = windowQuery(collection)
     await withCleanup(async () => {
       await answerUntil(upstream, all, query.preload())
@@ -2222,7 +2343,9 @@ async function runNextPage(
     new SQLiteCorePersistenceAdapter({ driver }),
     0,
   )
-  collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
+  if (indexed) {
+    collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
+  }
   const query = windowQuery(collection)
   return withCleanup(async () => {
     void query.preload().catch(() => undefined)
@@ -2239,11 +2362,16 @@ async function runNextPage(
       () => (moved.settled = true),
     )
     await drain()
-    // Positive witness: the move asked the source for page 2 with a cursor.
+    // Positive witness: with an index, the move asked the source for page 2
+    // with a cursor; without one, for the longer prefix `limit 4`.
     expect(
       upstream.calls
         .slice(callsBefore)
-        .some((call) => call.cursor !== undefined),
+        .some((call) =>
+          indexed
+            ? call.cursor !== undefined
+            : call.cursor === undefined && call.limit === 4,
+        ),
     ).toBe(true)
     await vi.advanceTimersByTimeAsync(1)
     await drain()
@@ -2677,6 +2805,18 @@ describe(`persisted demand coverage oracle`, () => {
     },
   )
 
+  it.each(TIE_HISTORIES)(
+    `settles a window with a tie at its boundary only while both of its demands are covered: %s`,
+    async (history) => {
+      quietConsole()
+      const { held, tieLoads, ...observed } = await runTieWindow(history)
+      // Positive witness: W held a1 and a2 and sent a tie-boundary load.
+      expect(held).toEqual([`a1`, `a2`])
+      expect(tieLoads).toBeGreaterThan(0)
+      expect(observed).toEqual(expectedTieWindow(history))
+    },
+  )
+
   it.each([
     [true, { pageTwoSettled: true, rows: [`a3`, `a4`] }],
     [false, { pageTwoSettled: false }],
@@ -2685,6 +2825,7 @@ describe(`persisted demand coverage oracle`, () => {
     async (session1LoadsPageTwo, expected) => {
       quietConsole()
       expect(await runNextPage(session1LoadsPageTwo)).toEqual(expected)
+      expect(await runNextPage(session1LoadsPageTwo, false)).toEqual(expected)
     },
   )
 })
