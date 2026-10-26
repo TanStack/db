@@ -416,5 +416,6 @@
   "ssrStreamFailure": "bB",
   "ssrQueryWaiters": "bL",
   "includesRuntimeCache": "ch",
-  "failSsrQueryWaiters": "cA"
+  "failSsrQueryWaiters": "cA",
+  "snapshotMetadata": "cE"
 }

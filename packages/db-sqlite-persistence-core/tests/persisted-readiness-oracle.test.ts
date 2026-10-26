@@ -1,4 +1,5 @@
 import {
+  BTreeIndex,
   DbClient,
   PERSISTED_READINESS,
   createCollection,
@@ -6,11 +7,13 @@ import {
   createLiveQueryObserver,
   eq,
   getPersistedReadinessSource,
+  liveQueryCollectionOptions,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { persistedCollectionOptions } from '../src/index.js'
-import type { PersistenceAdapter } from '../src/index.js'
+import type { SyncConfig } from '@tanstack/db'
+import type { PersistedTx, PersistenceAdapter } from '../src/index.js'
 
 type Row = { id: string; value: string }
 type ModelOutcome = `loading` | `ready` | `error`
@@ -1297,4 +1300,430 @@ describe(`persisted-readiness oracle`, () => {
       () => persisted.cleanup(),
     ])
   })
+})
+
+/**
+ * A persisted live-query Collection certifies its own completed result. Its
+ * source Collections can have pending on-demand work without invalidating that
+ * restored result. Authority: the completed query snapshot proposal in
+ * query/live/ARCHITECTURE.md. This is a new opt-in law, not default publication.
+ *
+ * The independent model selects the previous completed result until every
+ * current source and acquisition completes; only then does a full relational
+ * recomputation replace it. A source error never makes partial rows complete.
+ * The finite grammar crosses empty/nonempty restored and refreshed results,
+ * a new unconfirmed database, both source-completion orders, and failure.
+ * Removing any axis loses respectively the empty-result, cold-cache, last
+ * participant, or error-retention boundary. Provider writes precede acquisition
+ * fulfillment. Fulfilling a request before its applied rows is not legal.
+ *
+ * The unordered driver compares rows in key order and preserves every publication
+ * boundary. A later-demand grammar also checks convergence after initial readiness.
+ * This driver uses the real persisted wrapper, live-query engine and observer
+ * with a controlled adapter. It does not claim native SQLite, browser scheduling,
+ * arbitrary query rewrites, or persistent identity of Collection-valued includes.
+ */
+type SnapshotRow = Row & { joined?: string }
+type SnapshotHistory = {
+  restored: Array<SnapshotRow>
+  confirmed: boolean
+  final: Array<Row>
+  removeParent: boolean
+  cacheWindow: number
+  parentFirst: boolean
+  fail: boolean | `query`
+  receiver?: `derived` | `peer`
+  optimistic?: boolean
+  later?: boolean
+}
+
+// Before successful coverage, the stored result wins as a whole. After it,
+// compute the selected LEFT join directly from the two source arrays.
+function expectedCompletedSnapshot(
+  history: SnapshotHistory,
+  completed: boolean,
+  optimistic = history.optimistic ?? false,
+  laterCompleted = false,
+) {
+  const rows = completed
+    ? history.removeParent
+      ? []
+      : [
+          {
+            id: `parent`,
+            value: `fresh`,
+            joined: optimistic
+              ? `optimistic`
+              : history.final.find((row) => row.id === `parent`)?.value,
+          },
+        ]
+    : history.restored
+  return laterCompleted
+    ? [...rows, { id: `later`, value: `new parent`, joined: `new child` }]
+    : rows
+}
+
+async function observeCompletedSnapshot(history: SnapshotHistory) {
+  type Controls = Parameters<SyncConfig<Row>[`sync`]>[0]
+  let parentSync: Controls | undefined
+  let childSync: Controls | undefined
+  const acquisition = deferred<void>()
+  let currentAcquisition = acquisition
+  const mutation = deferred<void>()
+  let rollback: (() => void) | undefined
+  let acquired = 0
+  const parents = createCollection<Row>({
+    id: `snapshot-parents`,
+    getKey: (row) => row.id,
+    sync: {
+      sync(params) {
+        parentSync = params
+      },
+    },
+  })
+  const children = createCollection<Row>({
+    id: `snapshot-children`,
+    onUpdate: () => mutation.promise,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync(params) {
+        childSync = params
+        params.markReady()
+        return {
+          loadSubset() {
+            acquired++
+            return currentAcquisition.promise
+          },
+        }
+      },
+    },
+  })
+  children.createIndex((row) => row.id, { indexType: BTreeIndex })
+  const committed: Array<PersistedTx> = []
+  const restored = recordingAdapter(history.restored)
+  restored.adapter.applyCommittedTx = (_id, tx) => {
+    committed.push(tx)
+    return Promise.resolve()
+  }
+  const originalResume = restored.adapter.loadResumeSnapshot
+  restored.adapter.loadResumeSnapshot = async (...args) => ({
+    ...(await originalResume(...args)),
+    collectionMetadata: history.confirmed
+      ? [
+          {
+            key: `live-query:confirmed`,
+            value: { version: 1, offset: history.cacheWindow, limit: null },
+          },
+        ]
+      : [],
+  })
+  const options = liveQueryCollectionOptions({
+    id: `completed-snapshot`,
+    snapshotPublication: `complete`,
+    getKey: (row: SnapshotRow) => row.id,
+    query: (q) =>
+      q
+        .from({ parent: parents })
+        .leftJoin({ child: children }, ({ parent, child }) =>
+          eq(parent.id, child.id),
+        )
+        .select(({ parent, child }) => ({
+          id: parent.id,
+          value: parent.value,
+          joined: child.value,
+        })),
+  })
+  const result = createCollection(
+    persistedCollectionOptions({
+      ...options,
+      syncMode: `eager`,
+      persistence: { adapter: restored.adapter },
+      initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
+    }),
+  )
+  const derived = history.receiver
+    ? createLiveQueryCollection({
+        query: (q) =>
+          history.receiver === `peer`
+            ? q
+                .from({ saved: result })
+                .leftJoin({ peer: parents }, ({ saved, peer }) =>
+                  eq(saved.id, peer.id),
+                )
+                .select(({ saved }) => saved)
+            : q.from({ saved: result }).select(({ saved }) => saved),
+      })
+    : undefined
+  const received = derived ?? result
+  const observer = derived
+    ? createLiveQueryObserver(derived)
+    : createLiveQueryObserver(result)
+  const read = () =>
+    [...received.values()]
+      .map(({ id, value, joined }) => ({
+        id,
+        value,
+        joined,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+  const publications: Array<Array<SnapshotRow>> = []
+  const unsubscribe = observer.subscribe((changes) => {
+    if (changes?.length) publications.push(read())
+  })
+  const expected = (
+    complete: boolean,
+    optimistic = history.optimistic ?? false,
+    laterCompleted = false,
+  ) =>
+    expectedCompletedSnapshot(
+      history,
+      complete,
+      optimistic,
+      laterCompleted,
+    ).map(({ id, value, joined }) => ({ id, value, joined }))
+  await checkWithCleanup(async () => {
+    restored.load.resolve()
+    await vi.waitFor(() => expect(parentSync).toBeDefined())
+    await vi.waitFor(() => expect(read()).toEqual(expected(false)))
+    await vi.waitFor(() =>
+      expect(
+        getPersistedReadinessSource(result.config)!.getSnapshot().status,
+      ).toBe(`ready`),
+    )
+    expect(observer.getSnapshot().isPersistedReady).toBe(
+      history.receiver !== `peer` &&
+        history.confirmed &&
+        history.cacheWindow === 0,
+    )
+    expect(result.isReady()).toBe(false)
+    parentSync!.begin()
+    parentSync!.write({
+      type: `insert`,
+      value: { id: `parent`, value: `fresh` },
+    })
+    parentSync!.commit()
+    await vi.waitFor(() => expect(acquired).toBeGreaterThan(0))
+    childSync!.begin()
+    childSync!.write({
+      type: `insert`,
+      value: { id: `parent`, value: `partial` },
+    })
+    childSync!.commit()
+    expect(read()).toEqual(expected(false))
+    const checkpoint = publications.length
+    if (history.fail) {
+      const failure = new Error(`source failed`)
+      if (history.fail === `query`) acquisition.reject(failure)
+      else parentSync!.markError(failure)
+      await vi.waitFor(() => expect(result.status).toBe(`error`))
+      expect(read()).toEqual(expected(false))
+      let outcome: unknown = `pending`
+      void observer.preloadForInitialRender().then(
+        () => {
+          outcome = `resolved`
+        },
+        () => {
+          outcome = `rejected`
+        },
+      )
+      const canFallback =
+        history.fail !== `query` &&
+        history.receiver !== `peer` &&
+        history.confirmed &&
+        history.cacheWindow === 0
+      await vi.waitFor(() =>
+        expect(outcome).toBe(canFallback ? `resolved` : `rejected`),
+      )
+      return
+    }
+    if (history.optimistic) {
+      const transaction = children.update(`parent`, (draft) => {
+        draft.value = `optimistic`
+      })
+      void transaction.isPersisted.promise.catch(() => {})
+      rollback = () => transaction.rollback()
+      expect(read()).toEqual(expected(false))
+    }
+    if (history.removeParent) {
+      parentSync!.begin()
+      parentSync!.truncate({ markReady: false })
+      parentSync!.commit()
+    }
+    if (history.parentFirst) parentSync!.markReady()
+    childSync!.begin()
+    childSync!.truncate({ markReady: false })
+    for (const value of history.final)
+      childSync!.write({ type: `insert`, value })
+    childSync!.commit()
+    expect(read()).toEqual(
+      expected(history.removeParent && history.parentFirst),
+    )
+    acquisition.resolve()
+    await Promise.resolve()
+    if (!history.parentFirst) {
+      expect(read()).toEqual(expected(false))
+      parentSync!.markReady()
+    }
+    await result.preload()
+    expect(read()).toEqual(expected(true))
+    const replacement = committed.find((tx) => tx.truncate)
+    if (!replacement)
+      throw new Error(`No atomic replacement reached persistence`)
+    expect(
+      replacement.mutations
+        .map((change) => change.value)
+        .map(({ id, value, joined }) => ({ id, value, joined })),
+    ).toEqual(expected(true))
+    expect(replacement.collectionMetadataMutations).toContainEqual({
+      type: `set`,
+      key: `live-query:confirmed`,
+      value: { version: 1, offset: 0, limit: null },
+    })
+    // Every observed changed result is the complete replacement, never a mixture.
+    for (const rows of publications.slice(checkpoint))
+      expect(rows).toEqual(expected(true))
+    expect(observer.getSnapshot().isPersistedReady).toBe(
+      history.receiver !== `peer`,
+    )
+    if (rollback) {
+      rollback()
+      await vi.waitFor(() => expect(read()).toEqual(expected(true, false)))
+    }
+    if (history.later) {
+      currentAcquisition = deferred<void>()
+      const previous = expected(true, false)
+      const laterCheckpoint = publications.length
+      const before = acquired
+      parentSync!.begin()
+      parentSync!.write({
+        type: `insert`,
+        value: { id: `later`, value: `new parent` },
+      })
+      parentSync!.commit()
+      await vi.waitFor(() => expect(acquired).toBeGreaterThan(before))
+      expect(read()).toEqual(previous)
+      childSync!.begin()
+      childSync!.write({
+        type: `insert`,
+        value: { id: `later`, value: `new child` },
+      })
+      await childSync!.commit()
+      expect(children.get(`later`)!.value).toBe(`new child`)
+      // This task boundary drains the controlled adapter's resolved local work;
+      // the provider acquisition remains explicitly held throughout it.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(read()).toEqual(previous)
+      currentAcquisition.resolve()
+      const completed = expected(true, false, true).sort((a, b) =>
+        a.id.localeCompare(b.id),
+      )
+      await vi.waitFor(() => expect(read()).toEqual(completed))
+      for (const rows of publications.slice(laterCheckpoint))
+        expect(rows).toEqual(completed)
+    }
+  }, [
+    () => {
+      acquisition.resolve()
+      currentAcquisition.resolve()
+      mutation.resolve()
+      unsubscribe()
+      observer.dispose()
+    },
+    () => derived?.cleanup(),
+    () => result.cleanup(),
+    () => parents.cleanup(),
+    () => children.cleanup(),
+  ])
+}
+
+describe(`persisted completed initial snapshots`, () => {
+  for (const restored of [
+    [],
+    [{ id: `old`, value: `cached`, joined: `saved` }],
+  ]) {
+    for (const confirmed of [false, true]) {
+      for (const final of [[], [{ id: `parent`, value: `validated` }]]) {
+        for (const parentFirst of [false, true]) {
+          for (const fail of [false, true]) {
+            for (const removeParent of [false, true]) {
+              for (const cacheWindow of [0, 1]) {
+                const history = {
+                  restored,
+                  confirmed,
+                  final,
+                  parentFirst,
+                  fail,
+                  removeParent,
+                  cacheWindow,
+                }
+                it(`retains one completed result: ${JSON.stringify(history)}`, async () => {
+                  await observeCompletedSnapshot(history)
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})
+
+// A second bounded grammar reaches the same law through a derived observer,
+// through a direct peer sharing a source, and through an optimistic source edit.
+// The peer must still satisfy its independent restore obligation. Rollback after
+// completion follows ordinary live updates rather than re-entering the hold.
+describe(`completed snapshot receiving paths`, () => {
+  for (const receiver of [undefined, `derived`, `peer`] as const) {
+    for (const fail of [false, true, `query`] as const) {
+      for (const final of [[], [{ id: `parent`, value: `validated` }]]) {
+        const history: SnapshotHistory = {
+          restored: [{ id: `parent`, value: `cached`, joined: `saved` }],
+          confirmed: true,
+          final,
+          parentFirst: false,
+          fail,
+          removeParent: false,
+          cacheWindow: 0,
+          receiver,
+        }
+        it(`observes the same completed result: ${JSON.stringify(history)}`, async () => {
+          await observeCompletedSnapshot(history)
+        })
+      }
+    }
+  }
+  for (const final of [[], [{ id: `parent`, value: `validated` }]]) {
+    const history: SnapshotHistory = {
+      restored: [{ id: `parent`, value: `cached`, joined: `saved` }],
+      confirmed: true,
+      final,
+      parentFirst: false,
+      fail: false,
+      removeParent: false,
+      cacheWindow: 0,
+      optimistic: true,
+    }
+    it(`holds an edit until completion and observes its rollback: ${JSON.stringify(history)}`, async () => {
+      await observeCompletedSnapshot(history)
+    })
+  }
+})
+
+describe(`completed snapshots after first readiness`, () => {
+  for (const final of [[], [{ id: `parent`, value: `validated` }]]) {
+    const history: SnapshotHistory = {
+      restored: [{ id: `parent`, value: `cached`, joined: `saved` }],
+      confirmed: true,
+      final,
+      parentFirst: false,
+      fail: false,
+      removeParent: false,
+      cacheWindow: 0,
+      later: true,
+    }
+    it(`retains its completed view while later demand is pending: ${JSON.stringify(history)}`, async () => {
+      await observeCompletedSnapshot(history)
+    })
+  }
 })

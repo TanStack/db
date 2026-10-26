@@ -3101,3 +3101,65 @@ Use functional variants when you need:
 The callbacks in functional variants are actual JavaScript functions that get executed, unlike the standard API which uses declarative expressions. This gives you complete control over the logic but comes with the trade-off of reduced optimization opportunities.
 
 However, prefer the standard API when possible, as it provides better performance and optimization opportunities.
+
+### Persisting a completed query result
+
+A source Collection's on-demand cache can contain only some matching rows.
+To restore a coherent joined result, persist the live-query Collection itself
+and set `snapshotPublication: 'complete'`:
+
+```tsx
+import { createCollection, liveQueryCollectionOptions } from '@tanstack/db'
+import { persistedCollectionOptions } from '@tanstack/browser-db-sqlite-persistence'
+import { useLiveQuery } from '@tanstack/react-db'
+
+type SavedTask = { id: number; rank: number; title: string }
+
+const savedTasks = createCollection(
+  persistedCollectionOptions({
+    ...liveQueryCollectionOptions({
+      // Include the query definition, parameters and user scope in this identity.
+      id: `ranked-tasks-v1:${workspaceId}:${userId}`,
+      snapshotPublication: 'complete',
+      getKey: (row: SavedTask) => row.id,
+      query: (q) => q.from({ task: tasksCollection })
+        .orderBy(({ task }) => task.rank, 'asc')
+        .orderBy(({ task }) => task.id, 'asc')
+        .limit(20)
+        .select(({ task }) => ({ id: task.id, rank: task.rank, title: task.title })),
+    }),
+    persistence, // The existing SQLite/OPFS persistence instance.
+    schemaVersion: 1,
+    // Restore the whole output; the input Collections may remain on-demand.
+    syncMode: 'eager',
+    // Supply durable ordering; graph-local sort indices are not serialized.
+    compare: (a, b) => a.rank - b.rank || a.id - b.id,
+    initialRender: { strategy: 'network-first', networkTimeoutMs: 0 },
+  }),
+)
+
+const { data, isReady, isPersistedReady, isError, persistedError } = useLiveQuery(savedTasks)
+// Gate initial content on isReady || isPersistedReady; handle errors explicitly.
+```
+
+The first query result waits for its current source Collections and reachable
+subset demands. The persisted rows remain intact until that result can replace
+them in one transaction. A successful empty result clears old rows and saves
+completion metadata. `preload()` and Collection readiness still wait for network
+coverage. Later changes that open new subset demand also retain the last
+completed result until their demand settles. Already-covered updates publish
+normally. This does not create a transaction across independent providers.
+
+A new empty database is not a previous completed query result. Fallback also
+requires a consistent resume snapshot and a matching saved window. A saved
+window from a later `setWindow()` cannot masquerade as the initial window on a
+new sync run. Use a stable `getKey`; change the persistence id or schema version
+when the query, parameters, selected shape or authorization scope changes.
+Do not share a persisted result between users or workspaces with different access.
+
+This saves additional result rows and does not reduce server requests. The
+previous result can remain stale while the slowest dependency loads, including
+while a source edit is optimistic. Server changes can still cause one visible
+replacement. Cold queries get no cached-result benefit. Persist only values the
+adapter can serialize; Collection-valued include facades are runtime objects,
+not portable persisted result rows.

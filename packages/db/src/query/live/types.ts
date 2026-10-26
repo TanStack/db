@@ -111,6 +111,15 @@ export interface LiveQueryCollectionConfig<
   gcTime?: number
 
   /**
+   * Publish only after current sources and reachable demands settle. The first
+   * publication replaces restored output atomically, including an empty result.
+   * Updates needing new demand retain the last completed result; already-covered
+   * updates publish normally. Persisted results need a stable
+   * getKey and a persistence id/schema version identifying the query and scope.
+   */
+  snapshotPublication?: 'complete'
+
+  /**
    * If enabled the collection will return a single object instead of an array
    */
   singleResult?: true

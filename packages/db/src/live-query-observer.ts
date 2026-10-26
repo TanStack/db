@@ -26,9 +26,13 @@ const NO_PERSISTED_READINESS = {
   error: undefined,
 } as const
 
-interface PersistedSourceEntry {
-  collection: Collection<any, any, any>
+interface PersistedBoundary {
   readiness: PersistedReadinessSource
+  hasSnapshot?: () => boolean
+}
+
+interface PersistedSourceEntry extends PersistedBoundary {
+  collection: Collection<any, any, any>
 }
 
 function collectPersistedReadinessSources(
@@ -36,21 +40,43 @@ function collectPersistedReadinessSources(
 ): ReadonlyArray<PersistedSourceEntry> | undefined {
   // A few integrations provide Collection-compatible objects without config.
   if (!(root as { config?: unknown }).config) return undefined
-  const seen = new Set<Collection<any, any, any>>()
+  // The same source may be reached both through a restored view and directly.
+  // Those paths have different restore obligations and cannot share one seen bit.
+  const seen = new Map<
+    Collection<any, any, any>,
+    Set<PersistedReadinessSource | undefined>
+  >()
   const sources: Array<PersistedSourceEntry> = []
-  const visit = (collection: Collection<any, any, any>): boolean => {
-    if (seen.has(collection)) return true
-    seen.add(collection)
-    // A few integrations provide Collection-compatible objects without config.
+  const visit = (
+    collection: Collection<any, any, any>,
+    inherited?: PersistedBoundary,
+  ): boolean => {
+    let boundaries = seen.get(collection)
+    if (boundaries?.has(inherited?.readiness)) return true
+    if (!boundaries) seen.set(collection, (boundaries = new Set()))
+    boundaries.add(inherited?.readiness)
     const config = (collection as { config?: typeof collection.config }).config
     if (!config) return false
     const builder = getBuilderFromConfig(config)
-    if (builder) {
-      return builder.getSourceCollections().every(visit)
-    }
     const source = getPersistedReadinessSource(config)
-    if (!source) return false
-    sources.push({ collection, readiness: source })
+    if (builder) {
+      const boundary =
+        inherited ??
+        (source && builder.getPersistedSnapshotState() !== undefined
+          ? {
+              readiness: source,
+              hasSnapshot: () => builder.getPersistedSnapshotState() === true,
+            }
+          : undefined)
+      // Keep the actual leaf Collections for network-error classification. A
+      // graph error in the persisted view must not masquerade as network failure.
+      return builder
+        .getSourceCollections()
+        .every((child) => visit(child, boundary))
+    }
+    const boundary = inherited ?? (source && { readiness: source })
+    if (!boundary) return false
+    sources.push({ collection, ...boundary })
     return true
   }
   return visit(root) && sources.length > 0 ? sources : undefined
@@ -391,6 +417,7 @@ class LiveQueryObserverImpl<
     const sources = this.persistedSources
     if (!sources) return NO_PERSISTED_READINESS
     let loading = false
+    let unavailable = false
     let error: unknown | undefined
     let failed = false
     for (const source of sources) {
@@ -400,11 +427,15 @@ class LiveQueryObserverImpl<
         failed = true
       } else if (snapshot.status === `loading`) {
         loading = true
+      } else if (source.hasSnapshot?.() === false) {
+        unavailable = true
       }
     }
     return failed
       ? { status: `error`, error }
-      : { status: loading ? `loading` : `ready`, error: undefined }
+      : unavailable
+        ? NO_PERSISTED_READINESS
+        : { status: loading ? `loading` : `ready`, error: undefined }
   }
 
   private getVisibleEntries(
