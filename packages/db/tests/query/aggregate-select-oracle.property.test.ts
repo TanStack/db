@@ -8,6 +8,7 @@ import {
   createLiveQueryCollection,
   eq,
   groupKeys,
+  gt,
   inArray,
   include as includeWrap,
   materialize,
@@ -104,8 +105,7 @@ import { createOracleReach } from '../oracle-reach.js'
  * query with no aggregate anywhere, in its select, HAVING, or orderBy, throws
  * `GroupingOperatorRequiredError` unless it wraps its keys in `groupKeys()`;
  * any aggregate brings the compiler, and the query compiles all its
- * aggregates with it. This grammar generates no orderBy; the pinned
- * witnesses in `hand-built-ir-operators.test.ts` cover it. A query builder in
+ * aggregates with it. A query builder in
  * a select value is a subquery only inside `include()`, `toArray()`, or
  * `materialize()`: a bare one throws `IncludeOperatorRequiredError` when the
  * select is built, as a field, inside a nested object, or in a conditional
@@ -126,23 +126,36 @@ import { createOracleReach } from '../oracle-reach.js'
  *
  * Each history chooses whether a grouped query passes its keys bare, where a
  * nested include sits and how it is wrapped (`toArray()`, `include()`,
- * `materialize()`, or not at all), and, in two histories of five, whether the
- * driver strips one kind of operator code, the grouping compiler or the
- * include runtime, from the IR it built before compiling it through
+ * `materialize()`, or not at all), and, in three generated histories of six,
+ * whether the driver strips one kind of operator code, the grouping compiler, the
+ * include runtime, or the orderBy aggregate's compiler, from the IR it built before compiling it through
  * `new BaseQueryBuilder(ir)`. Stripping one kind at a time keeps a missing
  * include runtime from hiding behind a missing grouping compiler. A history
  * that strips the include runtime gives its include a child query that is
  * valid on its own, `count()` alone, so only the missing runtime can fail it.
  * Half the histories that strip the grouping compiler likewise give the
  * top-level query a select of `count()` alone, with an aggregate HAVING when
- * the generated shape has one. A model error set of exactly
+ * the generated shape has one. One history in three is such a forced
+ * history: it strips the grouping compiler everywhere or from orderBy only,
+ * with no grouping, one key, or two keys, in turn, so every campaign reaches
+ * each path whatever its seed. A model error set of exactly
  * `groupingRequired` then witnesses each path, grouped, one implicit group,
  * and HAVING, where no other error can hide the missing compiler. The
  * property declares the states these laws need with `createOracleReach` and
  * fails when a campaign does not reach each of them.
  *
- * Limits: one parent field (`x`), one source field (`v`) and one group key
- * (`k`); numbers only. A nested include in a unionAll query is rejected
+ * The top-level query may order its groups by one aggregate, ascending or
+ * descending. Published rows then fall into blocks of equal orderBy value in
+ * that order; order within a block is not part of the law. In one generated
+ * history of six, and in half the forced ones, the driver strips the grouping compiler from the orderBy aggregate
+ * only; the query then compiles with the compiler that `groupKeys()` or a
+ * select or HAVING aggregate brings, and throws `GroupingOperatorRequiredError`
+ * when none does. Half the generated ones and all forced ones select the
+ * aggregate they order by, so only that path can fail them.
+ *
+ * Limits: one parent field (`x`) and one source field (`v`); groups by one
+ * key or by the pair `c.k`, `gt(c.v, 1)`; numbers only. orderBy appears only
+ * on the top-level query and on one aggregate. A nested include in a unionAll query is rejected
  * before compilation, so the driver checks only that it throws.
  */
 
@@ -170,6 +183,11 @@ type Shape = {
   having?: { part: Part; lit: number | string; selected?: string }
   spread?: `source` | `parent`
   /**
+   * A top-level `orderBy` on one aggregate. Like a HAVING aggregate, it reads
+   * the same aggregate selected as a top-level field.
+   */
+  orderBy?: { fn: `count` | `sum` | `max`; dir: `asc` | `desc` }
+  /**
    * A nested include beside the aggregate: wrapped in `toArray()` or bare, as
    * a field, inside a nested object, or in both branches of a conditional.
    */
@@ -183,8 +201,10 @@ type Shape = {
  * How a history groups: not at all, by the ref `c.k`, or by the computed
  * expression `upper(c.k)` or `inArray(c.k, ['a', 'b'])`. The `key` leaf is
  * that group expression, built again with a new list literal each time.
+ * `pair` groups by two keys, `c.k` and `gt(c.v, 1)`; its `key` leaf is `c.k`,
+ * and an update of `v` can move a row to another group.
  */
-type Grouping = `none` | `key` | `upper` | `inList` | `date` | `nan`
+type Grouping = `none` | `key` | `upper` | `inList` | `date` | `nan` | `pair`
 
 type Issue = { id: number; k: string; x: number }
 type Comment = { id: number; k: string; v: number }
@@ -220,7 +240,7 @@ function readsSourceOutsideAggregate(part: Part, grouping: Grouping): boolean {
     // Under `upper(c.k)`, `a` and `A` share a group, so `c.k` is a source
     // field with no single value for it.
     case `rawKey`:
-      return grouping !== `key`
+      return grouping !== `key` && grouping !== `pair`
     case `add`:
       return [part.a, part.b].some(reads)
     case `case`:
@@ -259,11 +279,7 @@ function modelError(
   grouping: Grouping,
 ): `nonAggregate` | `aggregateNotInSelect` | undefined {
   if (modelThrows(shape, grouping)) return `nonAggregate`
-  const selected = new Set(
-    Object.values(shape.fields).flatMap((part) =>
-      part.k === `agg` ? [part.fn] : [],
-    ),
-  )
+  const selected = selectedAggregates(shape)
   if (
     shape.having &&
     shape.having.selected === undefined &&
@@ -271,6 +287,15 @@ function modelError(
   )
     return `aggregateNotInSelect`
   return undefined
+}
+
+/** The aggregates the select holds as top-level fields. */
+function selectedAggregates(shape: Shape): Set<`count` | `sum` | `max`> {
+  return new Set(
+    Object.values(shape.fields).flatMap((part) =>
+      part.k === `agg` ? [part.fn] : [],
+    ),
+  )
 }
 
 function modelThrows(shape: Shape, grouping: Grouping): boolean {
@@ -293,8 +318,8 @@ type ModelError =
   | `groupingRequired`
   | `nestedInclude`
 
-/** An aggregate in the select or HAVING brings the grouping compiler. */
-function shapeHasAggregate(shape: Shape): boolean {
+/** Whether the select or HAVING holds an aggregate. */
+function selectOrHavingAggregate(shape: Shape): boolean {
   return (
     Object.values(shape.fields).some(hasAggregate) ||
     (shape.having !== undefined &&
@@ -303,8 +328,17 @@ function shapeHasAggregate(shape: Shape): boolean {
   )
 }
 
-/** Which operator code a hand-built history leaves out of its IR. */
-type Stripped = `none` | `grouping` | `runtime`
+/** An aggregate in the select, HAVING, or orderBy brings the grouping compiler. */
+function shapeHasAggregate(shape: Shape): boolean {
+  return selectOrHavingAggregate(shape) || shape.orderBy !== undefined
+}
+
+/**
+ * Which operator code a hand-built history leaves out of its IR: the grouping
+ * compiler everywhere, the include runtime, or the grouping compiler on the
+ * orderBy aggregate only.
+ */
+type Stripped = `none` | `grouping` | `runtime` | `orderBy`
 
 /** Every error the model says applies. The query must throw one of them. */
 function modelErrors(
@@ -338,6 +372,23 @@ function modelErrors(
   // Bare group keys carry no grouping compiler, and no aggregate brings one.
   if (grouping !== `none` && bareKeys && !shapeHasAggregate(shape))
     errors.add(`groupingRequired`)
+  // An orderBy aggregate without its compiler compiles with the one that
+  // `groupKeys()` or a select or HAVING aggregate brings, if any.
+  if (
+    stripped === `orderBy` &&
+    shape.orderBy !== undefined &&
+    !(grouping !== `none` && !bareKeys) &&
+    !selectOrHavingAggregate(shape)
+  )
+    errors.add(`groupingRequired`)
+  // An orderBy aggregate reads the same aggregate selected as a top-level
+  // field. The docs state this rule for HAVING only (error 72); `main`
+  // applies it to orderBy too, and this model keeps that behavior.
+  if (
+    shape.orderBy !== undefined &&
+    !selectedAggregates(shape).has(shape.orderBy.fn)
+  )
+    errors.add(`aggregateNotInSelect`)
   const error = modelError(shape, grouping)
   if (error) errors.add(error)
   return errors
@@ -373,6 +424,7 @@ function groupKeyOf(
 
 /** Group identity by value: equal Dates and NaN each form one group. */
 function groupIdOf(row: Comment, grouping: Grouping): string {
+  if (grouping === `pair`) return `${row.k}|${String(row.v > 1)}`
   const key = groupKeyOf(row, grouping)
   return key instanceof Date
     ? `date:${key.getTime()}`
@@ -419,13 +471,13 @@ function evaluate(
   }
 }
 
-/** One published row per group; a grouped query groups by `k`. */
-function modelGroup(
+/** The groups that HAVING keeps; a grouped query groups by `k`. */
+function modelGroups(
   shape: Shape,
   rows: ReadonlyArray<Comment>,
   parent: Issue | undefined,
   grouping: Grouping,
-): Array<Record<string, unknown>> {
+): Array<ReadonlyArray<Comment>> {
   const groups =
     grouping !== `none`
       ? [...new Set(rows.map((row) => groupIdOf(row, grouping)))].map((k) =>
@@ -438,22 +490,63 @@ function modelGroup(
   // on `$selected` reads a select field's group value.
   const havingPart = (having: NonNullable<Shape[`having`]>) =>
     having.selected === undefined ? having.part : shape.fields[having.selected]!
-  const kept = shape.having
+  return shape.having
     ? groups.filter(
         (group) =>
           evaluate(havingPart(shape.having!), group, parent, grouping) ===
           shape.having!.lit,
       )
     : groups
+}
+
+function modelRow(
+  shape: Shape,
+  group: ReadonlyArray<Comment>,
+  parent: Issue | undefined,
+  grouping: Grouping,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(shape.fields).map(([key, part]) => [
+      key,
+      evaluate(part, group, parent, grouping),
+    ]),
+  )
+}
+
+/** One published row per kept group. */
+function modelGroup(
+  shape: Shape,
+  rows: ReadonlyArray<Comment>,
+  parent: Issue | undefined,
+  grouping: Grouping,
+): Array<Record<string, unknown>> {
   return sortRows(
-    kept.map((group) =>
-      Object.fromEntries(
-        Object.entries(shape.fields).map(([key, part]) => [
-          key,
-          evaluate(part, group, parent, grouping),
-        ]),
-      ),
+    modelGroups(shape, rows, parent, grouping).map((group) =>
+      modelRow(shape, group, parent, grouping),
     ),
+  )
+}
+
+/**
+ * The published order under `orderBy`: blocks of rows with equal orderBy
+ * values, in ascending or descending value order. Order within a block is
+ * not part of the law.
+ */
+function modelOrderBlocks(
+  shape: Shape,
+  rows: ReadonlyArray<Comment>,
+  grouping: Grouping,
+): Array<Array<Record<string, unknown>>> {
+  const { fn, dir } = shape.orderBy!
+  const keyed = modelGroups(shape, rows, undefined, grouping).map((group) => ({
+    value: evaluate({ k: `agg`, fn }, group, undefined, grouping) as number,
+    row: modelRow(shape, group, undefined, grouping),
+  }))
+  const values = [...new Set(keyed.map(({ value }) => value))].sort((a, b) =>
+    dir === `asc` ? a - b : b - a,
+  )
+  return values.map((value) =>
+    sortRows(keyed.filter((k) => k.value === value).map(({ row }) => row)),
   )
 }
 
@@ -570,6 +663,20 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
         ),
         { nil: undefined, freq: 5 },
       ),
+      // Only the top-level query, which has no parent, orders its groups.
+      orderBy: include
+        ? fc.constant(undefined)
+        : fc.option(
+            fc.record({
+              fn: fc.constantFrom(
+                `count` as const,
+                `sum` as const,
+                `max` as const,
+              ),
+              dir: fc.constantFrom(`asc` as const, `desc` as const),
+            }),
+            { nil: undefined, freq: 2 },
+          ),
       include: fc.option(
         fc.record({
           wrap: fc.constantFrom(
@@ -648,6 +755,8 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 /** Build the select value of a part from the query's refs. */
 /** The group expression of the current history. */
 let keyExpression: (c: any) => any = (c) => c.k
+/** What the history passes to `groupBy`: its key, or for `pair` two keys. */
+let groupExpressions: (c: any) => any = (c) => c.k
 
 function build(p: Part, c: any, issue: any): any {
   switch (p.k) {
@@ -778,6 +887,21 @@ function withoutOperatorCode<T>(value: T, stripped: Stripped): T {
   return strip(value)
 }
 
+/** A copy of query IR whose orderBy aggregates lack the grouping compiler. */
+function withoutOrderByGrouping(ir: any): any {
+  return {
+    ...ir,
+    orderBy: ir.orderBy?.map((clause: any) => ({
+      ...clause,
+      expression: Object.assign(
+        Object.create(Object.getPrototypeOf(clause.expression)),
+        clause.expression,
+        { grouping: undefined },
+      ),
+    })),
+  }
+}
+
 async function runHistory(
   top: Shape,
   nested: Shape,
@@ -802,6 +926,12 @@ async function runHistory(
       fields: { f0: { k: `agg`, fn: `count` } },
       having: top.having && { part: { k: `agg`, fn: `count` }, lit: 2 },
     }
+  // Likewise half the orderBy-stripped histories select the aggregate they
+  // order by, so the select aggregate's compiler must order the rows.
+  if (stripped === `orderBy` && alone) {
+    const order = top.orderBy ?? { fn: `sum`, dir: `asc` }
+    top = { fields: { f0: { k: `agg`, fn: order.fn } }, orderBy: order }
+  }
   reach?.beginHistory()
   if (stripped === `runtime`) reach?.reach(`include runtime stripped`)
   for (const s of [top, nested]) {
@@ -829,6 +959,8 @@ async function runHistory(
           : grouping === `nan`
             ? (c) => add(c.v, NaN)
             : (c) => c.k
+  groupExpressions =
+    grouping === `pair` ? (c) => [c.k, gt(c.v, 1)] : keyExpression
   const suffix = Math.random().toString(36).slice(2)
   let issues: Array<Issue> = [
     { id: 1, k: `a`, x: 1 },
@@ -871,7 +1003,7 @@ async function runHistory(
     alias === undefined ? refs : refs[alias]
   const group = (query: any, alias: string | undefined) => {
     if (!grouped) return query
-    const keys = (refs: any) => keyExpression(rowOf(refs, alias))
+    const keys = (refs: any) => groupExpressions(rowOf(refs, alias))
     return query.groupBy(bareKeys ? keys : groupKeys(keys))
   }
   const having = (
@@ -913,14 +1045,40 @@ async function runHistory(
   const finish = (built: any) =>
     stripped === `none`
       ? built
-      : new BaseQueryBuilder(withoutOperatorCode(getQueryIR(built), stripped))
+      : new BaseQueryBuilder(
+          stripped === `orderBy`
+            ? withoutOrderByGrouping(getQueryIR(built))
+            : withoutOperatorCode(getQueryIR(built), stripped),
+        )
+  const order = (s: Shape, query: any, alias: string | undefined) =>
+    s.orderBy
+      ? query.orderBy(
+          (refs: any) =>
+            build(
+              { k: `agg`, fn: s.orderBy!.fn },
+              rowOf(refs, alias),
+              undefined,
+            ),
+          s.orderBy.dir,
+        )
+      : query
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
       finish(
-        having(
+        order(
           top,
-          group(topSource(q), topAlias).select((refs: any) =>
-            buildSelect(top, rowOf(refs, topAlias), undefined, q, issueSource),
+          having(
+            top,
+            group(topSource(q), topAlias).select((refs: any) =>
+              buildSelect(
+                top,
+                rowOf(refs, topAlias),
+                undefined,
+                q,
+                issueSource,
+              ),
+            ),
+            topAlias,
           ),
           topAlias,
         ),
@@ -975,6 +1133,13 @@ async function runHistory(
       )
         reach?.reach(`grouping stripped alone: HAVING aggregate`)
     }
+    if (
+      stripped === `orderBy` &&
+      label === `top` &&
+      s.orderBy !== undefined &&
+      errors.size === 0
+    )
+      reach?.reach(`orderBy aggregate stripped beside a select aggregate`)
     // A nested include cannot correlate with a unionAll row, which has no
     // source alias, so the builder rejects it first.
     const unionInclude = label === `top` && union && s.include !== undefined
@@ -1006,6 +1171,25 @@ async function runHistory(
           ),
           `${label}: top-level rows`,
         ).toEqual(modelGroup(top, comments, undefined, grouping))
+        if (grouping === `pair` && topQuery.value.toArray.length > 1)
+          reach?.reach(`two group keys publish several groups`)
+        if (top.orderBy) {
+          // The published sequence splits into the model's blocks in order.
+          const published = topQuery.value.toArray.map((row: any) =>
+            stripVirtualProps(row),
+          )
+          const blocks = modelOrderBlocks(top, comments, grouping)
+          let at = 0
+          for (const block of blocks) {
+            expect(
+              sortRows(published.slice(at, at + block.length)),
+              `${label}: rows in orderBy position ${at}`,
+            ).toEqual(block)
+            at += block.length
+          }
+          if (blocks.length > 1)
+            reach?.reach(`orderBy aggregate orders the published rows`)
+        }
       }
       if (includeQuery.ok) {
         for (const issue of issues) {
@@ -1066,27 +1250,72 @@ async function runHistory(
   }
 }
 
-const history = fc
-  .constantFrom<Grouping>(`none`, `key`, `upper`, `inList`, `date`, `nan`)
-  .chain((grouping) =>
-    fc.tuple(
-      shape(false, grouping),
-      shape(true, grouping),
-      fc.constant(grouping),
-      fc.boolean(),
-      fc.array(step, { maxLength: 6 }),
-      fc.boolean(),
-      fc.boolean(),
-      // Two histories in five build their IR by hand without one kind of
-      // operator code.
-      fc.oneof(
-        { weight: 3, arbitrary: fc.constant<Stripped>(`none`) },
-        fc.constant<Stripped>(`grouping`),
-        fc.constant<Stripped>(`runtime`),
-      ),
-      fc.boolean(),
-    ),
+const groupings = [
+  `none`,
+  `key`,
+  `upper`,
+  `inList`,
+  `date`,
+  `nan`,
+  `pair`,
+] as const satisfies ReadonlyArray<Grouping>
+
+const historyFor = (
+  grouping: Grouping,
+  stripped: fc.Arbitrary<Stripped>,
+  alone: fc.Arbitrary<boolean>,
+) =>
+  fc.tuple(
+    shape(false, grouping),
+    shape(true, grouping),
+    fc.constant(grouping),
+    fc.boolean(),
+    fc.array(step, { maxLength: 6 }),
+    fc.boolean(),
+    fc.boolean(),
+    stripped,
+    alone,
   )
+
+// Three generated histories in six build their IR by hand without one kind
+// of operator code. One history in three instead strips the grouping
+// compiler, everywhere or from orderBy only, and takes the forced shape,
+// for one or several groups chosen in turn. About 40 forced histories per
+// campaign make each path's reach state certain in practice: a campaign
+// misses the rarest one about once in 1,500 seeds.
+const history = fc.oneof(
+  {
+    weight: 2,
+    arbitrary: fc
+      .constantFrom(...groupings)
+      .chain((grouping) =>
+        historyFor(
+          grouping,
+          fc.oneof(
+            { weight: 3, arbitrary: fc.constant<Stripped>(`none`) },
+            fc.constant<Stripped>(`grouping`),
+            fc.constant<Stripped>(`runtime`),
+            fc.constant<Stripped>(`orderBy`),
+          ),
+          fc.boolean(),
+        ),
+      ),
+  },
+  {
+    weight: 1,
+    arbitrary: fc
+      .constantFrom(
+        ...([`none`, `key`, `pair`] as const).flatMap((grouping) =>
+          ([`grouping`, `orderBy`] as const).map(
+            (stripped) => [grouping, stripped] as const,
+          ),
+        ),
+      )
+      .chain(([grouping, stripped]) =>
+        historyFor(grouping, fc.constant(stripped), fc.constant(true)),
+      ),
+  },
+)
 
 /** The states the operator laws need; each campaign must reach all of them. */
 const reachStates = [
@@ -1102,6 +1331,9 @@ const reachStates = [
   `grouping stripped alone: one group`,
   `grouping stripped alone: HAVING aggregate`,
   `include runtime stripped`,
+  `orderBy aggregate stripped beside a select aggregate`,
+  `orderBy aggregate orders the published rows`,
+  `two group keys publish several groups`,
 ] as const
 let reach:
   ReturnType<typeof createOracleReach<(typeof reachStates)[number]>> | undefined

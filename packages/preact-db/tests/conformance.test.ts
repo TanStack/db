@@ -215,13 +215,14 @@ function mountControllable<P>(
         : useLiveQuery((q: any) => build(q, param)),
     {
       initialProps: { param: initial },
-      onCommit: (result) => published.record(result.data),
+      onCommit: (result) => published.record(result.data, result.state),
     },
   )
   const handle = makeHandle(hook)
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(param: P) {
       hook.rerender({ param })
       await settle()
@@ -245,13 +246,14 @@ function mountKeyedControllable<P>(
       } as any),
     {
       initialProps: { param: initial },
-      onCommit: (result) => published.record(result.data),
+      onCommit: (result) => published.record(result.data, result.state),
     },
   )
   const handle = makeHandle(hook)
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(param: P) {
       hook.rerender({ param })
       await settle()

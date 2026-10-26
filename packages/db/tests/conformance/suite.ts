@@ -533,8 +533,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           const before = moving.publications().length
           await moving.setParam(team)
           const published = moving.publications().slice(before)
+          // The keyed state map follows the same law as `data`.
+          const states = moving.statePublications().slice(before)
           expect(published.length).toBeGreaterThan(0)
-          for (const value of published) expectOnlyRowsOf(value, rows)
+          for (const value of [...published, ...states])
+            expectOnlyRowsOf(value, rows)
         }
 
         await switchTo(`b`, [SEED[1]!])
@@ -638,6 +641,42 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             return h.current()
           },
           /^groupBy\(\) without an aggregate needs groupKeys\(\)/,
+        )
+        expectNoRowsAfterRejection(h)
+      },
+    )
+
+    // Any compile error after mount follows the rejection law, not only a
+    // missing operator: a select that mixes a source field with an
+    // aggregate has no value for one implicit group.
+    scenario(
+      `compile-error-after-rerender`,
+      `a re-render whose query fails to compile rejects and shows no rows`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountControllable<boolean>(
+          (q, valid) =>
+            q
+              .from({ items: source.collection })
+              .select(({ items }: any) =>
+                valid
+                  ? { id: items.id }
+                  : { id: items.id, n: ops.count(items.id) },
+              ),
+          true,
+        )
+        await h.flush()
+        expectUnorderedRows(
+          h.current().data,
+          SEED.map(({ id }) => ({ id })),
+        )
+        await expectRejection(
+          `GroupByError`,
+          async () => {
+            await h.setParam(false)
+            return h.current()
+          },
+          /^Non-aggregate expression 'id' must also appear in GROUP BY clause/,
         )
         expectNoRowsAfterRejection(h)
       },
@@ -1964,7 +2003,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(45)
+      expect(registry.size).toBe(46)
     })
   })
 }

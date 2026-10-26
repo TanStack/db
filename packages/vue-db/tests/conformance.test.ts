@@ -230,8 +230,8 @@ function mountControllable<P>(
         : useLiveQuery((q: any) => build(q, param.value), [() => param.value])
     // Vue renders the value present at each pre-flush.
     watch(
-      () => query.data.value,
-      (data) => published.record(data),
+      () => [query.data.value, [...query.state.value.values()]],
+      ([data]) => published.record(data, query.state.value),
       { flush: `pre`, immediate: true },
     )
     return query
@@ -240,12 +240,13 @@ function mountControllable<P>(
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param.value = next
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       await nextTick()
-      published.record(result.data.value)
+      published.record(result.data.value, result.state.value)
       await settle()
     },
   }

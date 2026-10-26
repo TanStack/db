@@ -199,6 +199,12 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
    * show reads these, not only the value after `setParam` settles.
    */
   publications: () => ReadonlyArray<unknown>
+  /**
+   * The keyed `state` map's rows at the same publication points. A binding
+   * that applies row changes to its map can show rows there that `data`
+   * never holds.
+   */
+  statePublications: () => ReadonlyArray<unknown>
 }
 
 /**

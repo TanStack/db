@@ -6,6 +6,7 @@ import {
   createLiveQueryCollection,
   groupKeys,
   include,
+  pooledLiveQueries,
 } from '../../src/query/index.js'
 import {
   GroupingOperatorRequiredError,
@@ -64,6 +65,7 @@ import {
   getRuntimeReferenceIdentity,
 } from '../../src/query/runtime-reference-identity.js'
 import { createValueIdentity } from '../../src/query/equality-value-identity.js'
+import { getPreparedLiveQueryIdentity } from '../../src/live-query-options.js'
 import type { BasicExpression, OrderBy, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -1990,5 +1992,201 @@ describe(`operator-code identity`, () => {
       for (const b of results)
         if (a.outcome !== b.outcome)
           expect(a.identity, `${a.label} vs ${b.label}`).not.toBe(b.identity)
+  })
+
+  /**
+   * The wide product: every way the query can hold operator code, each
+   * present or missing. The compile outcome here is production's own: the
+   * law relates two separate functions, identity and compilation, and the
+   * aggregate-select oracle owns which error each shape throws. Several
+   * errors may apply to one shape, so a hand model would have to pick one.
+   * Each identity function a hook uses must satisfy the law: the IR
+   * identity, and the prepared identity with a pool, which takes a shortcut
+   * for a query that a pool can serve.
+   */
+  type Slot = `none` | `built` | `stripped`
+  type Include =
+    | `none`
+    | `field`
+    | `field-stripped`
+    | `case`
+    | `case-stripped`
+    | `child-aggregate`
+    | `child-aggregate-stripped`
+  type Wide = {
+    groupBy: GroupBy
+    select: Slot
+    having: Slot
+    orderBy: Slot
+    include: Include
+    // An `eq` filter and no select make a query that a pool can serve.
+    poolable: boolean
+  }
+
+  // A deep copy that leaves out operator code: aggregates lose their
+  // grouping compiler, includes their runtime. Neither enters an include's
+  // child query.
+  function strip(node: any, field: `grouping` | `runtime`): any {
+    if (Array.isArray(node)) return node.map((item) => strip(item, field))
+    if (node === null || typeof node !== `object`) return node
+    if (node instanceof IncludesSubquery)
+      return field === `runtime` ? without(node, `runtime`) : node
+    // A ref's binding is not an own enumerable field, so refs and values
+    // stay as they are.
+    if (node instanceof PropRef || node instanceof Value) return node
+    const copy = Object.create(Object.getPrototypeOf(node))
+    for (const [key, value] of Object.entries(node))
+      copy[key] =
+        key === `collection` || key === `query` ? value : strip(value, field)
+    if (field === `grouping` && `grouping` in node && `args` in node)
+      copy.grouping = undefined
+    return copy
+  }
+
+  function buildWide(w: Wide): QueryIR {
+    const keys = ({ user }: any) => user.teamId
+    const child = (user: any, aggregate: boolean) =>
+      include(
+        new Query()
+          .from({ post: postsCollection })
+          .where(({ post }) => eq(post.userId, user.id))
+          .select(({ post }) =>
+            aggregate ? { n: count(post.id) } : { id: post.id },
+          ),
+      )
+    let query: any = new Query().from({ user: usersCollection })
+    if (w.poolable) query = query.where(({ user }: any) => eq(user.teamId, `a`))
+    if (w.groupBy === `bare`) query = query.groupBy(keys)
+    if (w.groupBy === `groupKeys`) query = query.groupBy(groupKeys(keys))
+    if (!w.poolable)
+      query = query.select(({ user }: any) => ({
+        // One implicit group selects only its aggregate.
+        ...(w.groupBy !== `none`
+          ? { teamId: user.teamId }
+          : w.select === `none`
+            ? { id: user.id }
+            : {}),
+        ...(w.select === `none` ? {} : { n: count(user.id) }),
+        ...(w.include === `none`
+          ? {}
+          : {
+              posts: w.include.startsWith(`case`)
+                ? caseWhen(
+                    eq(user.id, 1),
+                    child(user, false),
+                    child(user, false),
+                  )
+                : child(user, w.include.startsWith(`child-aggregate`)),
+            }),
+      }))
+    if (w.having !== `none`)
+      query = query.having(({ user }: any) => eq(count(user.id), 2))
+    if (w.orderBy !== `none`)
+      query = query.orderBy(({ user }: any) => count(user.id))
+    const ir = getQueryIR(query)
+    const select = ir.select && ({ ...ir.select } as Record<string, any>)
+    if (select && w.select === `stripped`)
+      select.n = strip(select.n, `grouping`)
+    if (
+      select &&
+      (w.include === `field-stripped` || w.include === `case-stripped`)
+    )
+      select.posts = strip(select.posts, `runtime`)
+    if (select && w.include === `child-aggregate-stripped`)
+      select.posts = Object.assign(without(select.posts, `query`), {
+        query: {
+          ...select.posts.query,
+          select: strip(select.posts.query.select, `grouping`),
+        },
+      })
+    return {
+      ...ir,
+      ...(select ? { select } : {}),
+      ...(w.having === `stripped`
+        ? { having: strip(ir.having, `grouping`) }
+        : {}),
+      ...(w.orderBy === `stripped`
+        ? { orderBy: strip(ir.orderBy, `grouping`) }
+        : {}),
+    }
+  }
+
+  function wideOutcome(ir: QueryIR): string {
+    try {
+      createLiveQueryCollection({ query: new BaseQueryBuilder(ir) as any })
+      return `compiles`
+    } catch (error) {
+      return error instanceof Error ? error.constructor.name : `unknown`
+    }
+  }
+
+  const slots = [`none`, `built`, `stripped`] as const
+  const wideCases: Array<Wide> = []
+  for (const groupBy of [`none`, `bare`, `groupKeys`] as const)
+    for (const select of slots)
+      for (const having of slots)
+        for (const orderBy of slots)
+          for (const inc of [
+            `none`,
+            `field`,
+            `field-stripped`,
+            `case`,
+            `case-stripped`,
+            `child-aggregate`,
+            `child-aggregate-stripped`,
+          ] as const)
+            for (const poolable of [false, true])
+              // A query without a select holds no select aggregate or include;
+              // an include sits beside no aggregate or grouping, where it
+              // could not compile anyway.
+              if (
+                (!poolable || (select === `none` && inc === `none`)) &&
+                (inc === `none` || (groupBy === `none` && select === `none`))
+              )
+                wideCases.push({
+                  groupBy,
+                  select,
+                  having,
+                  orderBy,
+                  include: inc,
+                  poolable,
+                })
+
+  it(`keeps every operator-code variant with a different compile outcome distinct`, () => {
+    const identities = {
+      ir: (ir: QueryIR) => getQueryIdentity(ir),
+      pooled: (ir: QueryIR) =>
+        JSON.stringify(
+          getPreparedLiveQueryIdentity(
+            new BaseQueryBuilder(ir),
+            pooledLiveQueries,
+          ),
+        ),
+    }
+    const built = wideCases.map((w) => {
+      const ir = buildWide(w)
+      return { label: JSON.stringify(w), ir, outcome: wideOutcome(ir) }
+    })
+    // The product must reach each outcome the law separates.
+    const outcomes = new Set(built.map(({ outcome }) => outcome))
+    for (const expected of [
+      `compiles`,
+      `GroupingOperatorRequiredError`,
+      `IncludeOperatorRequiredError`,
+    ])
+      expect(outcomes, `reaches ${expected}`).toContain(expected)
+    for (const [name, identityOf] of Object.entries(identities)) {
+      const byIdentity = new Map<string, { label: string; outcome: string }>()
+      for (const { label, ir, outcome } of built) {
+        const identity = identityOf(ir)
+        const seen = byIdentity.get(identity)
+        if (seen)
+          expect(
+            outcome,
+            `${name} identity shared by ${seen.label} and ${label}`,
+          ).toBe(seen.outcome)
+        else byIdentity.set(identity, { label, outcome })
+      }
+    }
   })
 })

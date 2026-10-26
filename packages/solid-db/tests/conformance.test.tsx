@@ -234,18 +234,19 @@ function mountControllable<P>(
         : // Reading param() inside the query fn makes Solid recompute on change.
           useLiveQuery((q: any) => build(q, param()))
     // Solid renders the value each render effect reads.
-    createRenderEffect(() => published.record(query.data))
+    createRenderEffect(() => published.record(query.data, query.state))
     return query
   })
   const handle = makeHandle(getResult, dispose)
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       setParam(() => next)
       // The first paint after the change: the framework ran its reactive
       // work synchronously, but no later task has run.
-      published.record(getResult().data)
+      published.record(getResult().data, getResult().state)
       await settle()
     },
   }

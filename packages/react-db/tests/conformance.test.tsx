@@ -203,7 +203,7 @@ const mountControllableWith = (path: IdentityPath) =>
               : useLiveQuery(query, [param])
         // A layout effect records each committed value.
         useLayoutEffect(() => {
-          published.record(result.data)
+          published.record(result.data, result.state)
         })
         return result
       },
@@ -214,6 +214,7 @@ const mountControllableWith = (path: IdentityPath) =>
     return {
       ...handle,
       publications: published.values,
+      statePublications: published.stateValues,
       async setParam(param: P) {
         await guard(() =>
           act(async () => {
@@ -281,7 +282,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
             ? useLiveQuery(config)
             : useLiveQuery(config, [param])
         useLayoutEffect(() => {
-          published.record(result.data)
+          published.record(result.data, result.state)
         })
         return result
       },
@@ -292,6 +293,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
     return {
       ...handle,
       publications: published.values,
+      statePublications: published.stateValues,
       async setParam(param: P) {
         await guard(() =>
           act(async () => {

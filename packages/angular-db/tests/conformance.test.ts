@@ -281,7 +281,7 @@ function mountControllable<P>(
     })
     // Angular renders the value each effect run reads.
     effect(() => {
-      published.record(query.data())
+      published.record(query.data(), query.state())
     })
     return query
   })
@@ -289,12 +289,13 @@ function mountControllable<P>(
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param.set(next)
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       TestBed.tick()
-      published.record(result.data())
+      published.record(result.data(), result.state())
       await settle()
     },
   }

@@ -220,19 +220,20 @@ function mountControllable<P>(
         : useLiveQuery((q: any) => build(q, param), [() => param])
     // Svelte renders the value each pre-effect run reads.
     $effect.pre(() => {
-      published.record(query.data)
+      published.record(query.data, query.state)
     })
   })
   const handle = makeHandle(() => query, dispose)
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param = next
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       flushSync()
-      published.record(query.data)
+      published.record(query.data, query.state)
       await settle()
     },
   }
