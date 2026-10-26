@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import electronPath from 'electron'
 import { expect, it, onTestFinished } from 'vitest'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 
 const fixture = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -125,6 +126,22 @@ function runApp(out: string, databases: string): Promise<Result> {
   })
 }
 
+// The app's comparison of each fixed reload history with the oracle: every
+// expected history reports, and none reports a violation.
+function expectReloadClassLawsHold(result: Result): void {
+  expect(result.expected.length).toBeGreaterThan(0)
+  expect(result.results.map(({ name }) => name)).toEqual(result.expected)
+  expect(
+    result.results.filter(
+      (entry) =>
+        entry.failedBeforeCheckpoint !== undefined ||
+        (entry.violations?.length ?? 0) > 0,
+    ),
+  ).toEqual([])
+}
+
+declareOracle({ check: [expectReloadClassLawsHold] })
+
 it(`real Electron reload is free of avoidable work ahead of its reads`, async () => {
   const out = mkdtempSync(join(tmpdir(), `reload-class-app-`))
   const databases = mkdtempSync(join(tmpdir(), `reload-class-db-`))
@@ -135,13 +152,5 @@ it(`real Electron reload is free of avoidable work ahead of its reads`, async ()
   await bundle(out)
   const result = await runApp(out, databases)
   if (process.env.RELOAD_ORACLE_DEBUG) console.log(JSON.stringify(result))
-  expect(result.expected.length).toBeGreaterThan(0)
-  expect(result.results.map(({ name }) => name)).toEqual(result.expected)
-  expect(
-    result.results.filter(
-      (entry) =>
-        entry.failedBeforeCheckpoint !== undefined ||
-        (entry.violations?.length ?? 0) > 0,
-    ),
-  ).toEqual([])
+  expectReloadClassLawsHold(result)
 }, 600_000)
