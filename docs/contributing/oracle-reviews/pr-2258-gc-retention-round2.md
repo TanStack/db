@@ -269,5 +269,5 @@ Final local verification:
 The final pushed head and its CI are tracked separately; this local record
 claims bounded tested behavior, not that green local checks imply merge readiness.
 
-Test source growth versus the evaluation baseline: 28,137 uncompressed bytes.
+Test source growth versus the evaluation baseline: 28,143 uncompressed bytes.
 Documentation/changeset/manifest source growth: 25868 uncompressed bytes.
