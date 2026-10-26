@@ -240,6 +240,30 @@ export class CollectionConfigBuilder<
     return this.collectionSources.map(({ collection }) => collection)
   }
 
+  /** A completed persisted result is independent of its sources' fresh coverage. */
+  getPersistedSnapshotState(): boolean | undefined {
+    if (this.config.snapshotPublication !== `complete`) return undefined
+    const metadata = this.currentSyncConfig?.metadata
+    return (
+      deepEquals(
+        metadata?.collection.get(`live-query:confirmed`),
+        this.snapshotMetadata(),
+      ) &&
+      metadata?.persistence?.resumeSnapshot.getKeySetEvidence()?.status ===
+        `consistent`
+    )
+  }
+
+  private snapshotMetadata() {
+    const window = this.currentWindow ?? this.initialWindow
+    const limit = window?.limit ?? this.query.limit ?? Infinity
+    return {
+      version: 1,
+      offset: window?.offset ?? this.query.offset ?? 0,
+      limit: limit === Infinity ? null : limit,
+    }
+  }
+
   /**
    * Recursively checks if a query or any of its subqueries contains joins
    */
@@ -959,6 +983,7 @@ export class CollectionConfigBuilder<
     // transaction, avoiding duplicate key errors when joins produce multiple outputs
     // for the same key (e.g., first output with null, then output with joined data).
     let pendingChanges: Map<unknown, Changes<TResult>> = new Map()
+    let initialSnapshotPending = this.config.snapshotPublication === `complete`
 
     pipeline.pipe(
       output((data) => {
@@ -994,7 +1019,27 @@ export class CollectionConfigBuilder<
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
-      const hasParentChanges = pendingChanges.size > 0
+      if (
+        this.config.snapshotPublication === `complete` &&
+        (!this.currentSyncState?.subscribedToAllCollections ||
+          !this.allRequiredSourcesReady() ||
+          [...this.activeDemands.values()].some((demand) => !demand.settled) ||
+          this.liveQueryCollection?.isLoadingSubset)
+      )
+        return
+      const metadata =
+        this.config.snapshotPublication === `complete`
+          ? this.snapshotMetadata()
+          : undefined
+      const hasMetadataChanges =
+        metadata !== undefined &&
+        config.metadata !== undefined &&
+        !deepEquals(
+          config.metadata.collection.get(`live-query:confirmed`),
+          metadata,
+        )
+      const hasParentChanges =
+        pendingChanges.size > 0 || initialSnapshotPending || hasMetadataChanges
       const hasChildChanges = bucketFacades?.hasPendingChanges() ?? false
 
       if (!hasParentChanges && !hasChildChanges) {
@@ -1059,18 +1104,31 @@ export class CollectionConfigBuilder<
         facadePublication?.prepare()
         if (hasParentChanges) {
           begin()
+          if (initialSnapshotPending) config.truncate({ markReady: false })
+          if (metadata)
+            config.metadata?.collection.set(`live-query:confirmed`, metadata)
           let lookup: ((key: string | number) => boolean) | undefined
           const hasSyncedKey = (key: string | number) => {
             lookup ??= config.collection._state.createSyncedKeyLookup()
             return lookup(key)
           }
-          changesToApply.forEach(
-            this.applyChanges.bind(this, config, hasSyncedKey),
-          )
+          changesToApply.forEach((changes, key) => {
+            if (initialSnapshotPending && changes.inserts <= changes.deletes)
+              return
+            this.applyChanges(
+              config,
+              hasSyncedKey,
+              initialSnapshotPending
+                ? { ...changes, inserts: 1, deletes: 0 }
+                : changes,
+              key,
+            )
+          })
           if (hasOrderOnlyMove(changesToApply)) {
             markLayoutChange(config.collection)
           }
           commit()
+          initialSnapshotPending = false
         }
       } catch (error) {
         rootPublication?.discard()
@@ -1197,6 +1255,7 @@ export class CollectionConfigBuilder<
         this.maybeRunGraphFn?.()
       }
       if (
+        this.config.snapshotPublication === `complete` ||
         Object.values(this.optimizableOrderByCollections).some(
           (info) => info.joinedFilterSourceId === sourceId,
         )
@@ -1246,6 +1305,13 @@ export class CollectionConfigBuilder<
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
     if (subscribedToAll && allReady && allDemandsSettled && !isLoading) {
+      if (this.config.snapshotPublication === `complete`) {
+        if (this.currentSyncState?.graph.pendingWork()) {
+          this.maybeRunGraphFn?.()
+          return
+        }
+        this.currentSyncState?.flushPendingChanges?.()
+      }
       markReady()
     }
   }

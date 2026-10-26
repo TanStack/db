@@ -275,6 +275,7 @@ export function getPreparedLiveQueryIdentity(
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
+      [`snapshotPublication`, config.snapshotPublication],
       [
         `defaultStringCollation`,
         getStringCollationIdentity(config.defaultStringCollation),

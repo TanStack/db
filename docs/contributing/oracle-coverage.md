@@ -2986,6 +2986,27 @@ network provider; it does not prove browser scheduling or arbitrary histories.
 The framework identity scenario does not cover every possible rejection value
 or an error already present before a hook mounts.
 
+### Completed initial query snapshots (proposal)
+
+The same persisted-readiness owner now has an independent completed-result
+model and a controlled LEFT-join driver. Its finite grammar crosses saved
+empty/nonempty output, completion metadata present/absent, matching/mismatched
+windows, empty/nonempty joined data, source-completion order, parent removal,
+and failure. Receiving histories use a derived observer, a direct peer sharing
+one input, and an optimistic edit followed by rollback. Each partial checkpoint
+compares the whole previous result; completion recomputes the join independently.
+The adapter recorder also checks that replacement rows and completion metadata
+cross one truncating persistence transaction.
+
+This is proposed opt-in behavior under `snapshotPublication: 'complete'`, not a
+change to ordinary progressive queries. The contract covers the controlled
+persistence/Collection/observer boundary. Native SQLite, OPFS worker/browser
+scheduling, crash durability, Collection-valued includes, and arbitrary query
+identity migration are not established by this driver. The caller owns a stable
+persistence id/schema version. Existing ordered and pagination oracles retain
+their normal publication laws. See the [review record](oracle-reviews/completed-query-snapshots.md) for exact
+RED/GREEN, mutants and scope.
+
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to

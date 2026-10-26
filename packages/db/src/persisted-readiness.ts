@@ -109,6 +109,10 @@ export function waitForPersistedInitialRender({
       const sourceFailed = sources.some(
         (source) => source.collection.status === `error`,
       )
+      // A zero-delay fallback must not win the microtask race against an
+      // already-failed query. Its preload supplies the actual rejection.
+      if (!networkFailed && collectionStatus() === `error` && !sourceFailed)
+        return
       const clientStreamFailed =
         failedClientStream !== undefined &&
         currentClientQuery() === failedClientStream
@@ -123,7 +127,10 @@ export function waitForPersistedInitialRender({
         persisted.status === `ready`
       ) {
         finish()
-      } else if (networkFailed && persisted.status === `error`) {
+      } else if (
+        networkFailed &&
+        (persisted.status === `error` || persisted.status === `unavailable`)
+      ) {
         finish({ error: networkError ?? persisted.error })
       } else if (!deadlinePassed && !networkFailed) {
         timer = setTimeout(check, remainingNetworkMs)

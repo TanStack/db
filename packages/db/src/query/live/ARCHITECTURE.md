@@ -1288,6 +1288,32 @@ source-order changes invalidate finite coverage as described below. Cleanup
 and truncate discard the boundary; replay establishes an authoritative source
 replacement instead of reviving a stale cursor.
 
+### Completed query snapshots (opt-in proposal)
+
+`snapshotPublication: 'complete'` withholds live-query output until every
+current source and reachable demand is ready. A wrapping persistence adapter
+may restore the previous completed result while this private graph advances.
+The first completed output replaces that result in one sync transaction,
+including a validated empty result. Failure leaves the restored result intact.
+Later changes that open new subset demand retain the last completed result
+until that demand settles. Already-covered updates publish normally. This keeps
+later partial results from replacing the completed result in persistence.
+
+The replacement stores `live-query:confirmed` metadata with version 1 and the
+published window's offset and limit (`null` means unbounded). Local fallback
+requires a consistent persisted resume snapshot with matching metadata. An
+empty database with no completion metadata is not a completed cached query.
+A persisted query supplies the restore boundary for its source graph; source
+errors still come from the underlying source Collections, so a derived graph
+error is not mistaken for network failure.
+
+The caller owns the persistence id and schema version. They must identify the
+query, parameters, selected shape and user scope. Serialization supports only
+values accepted by the persistence adapter; runtime Collection facades are not
+portable cached rows. Ordered persisted views need a durable row comparator in
+the wrapping Collection options because graph-local order indices do not
+survive serialization. This proposal does not persist compiler graph state.
+
 ### Atomic window publication
 
 An initial ordered load or imperative window move includes every page,
@@ -1549,7 +1575,7 @@ continuation, core returns to graph work before deciding whether that ordered
 source needs another acquisition. Input progress is graph-wide: a quiet
 ordered source cannot drain its continuation around pending sibling input.
 
-Pending demand does not hide the parent row. An active empty bucket gives it
+By default, pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
 the current partial materialization when the source supports progressive
 delivery. Later source rows enter D2 as ordinary deltas and recompute the
@@ -1733,7 +1759,8 @@ every row before the top-K (a recorded limit).
    started by its active replay demands settles; failure keeps the prior public
    result and later partial source changes private until an authoritative replay
    succeeds. A failed replay with no remaining logical demand cannot gate other
-   graph work.
+   graph work. The opt-in complete snapshot policy additionally withholds output
+    while current source coverage or reachable demand remains unsettled.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered and every eager source is ready; obsolete demand does not block
     it, and an on-demand source's own Collection readiness does not gate it.

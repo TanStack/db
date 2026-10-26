@@ -2190,3 +2190,29 @@ describe(`operator-code identity`, () => {
     }
   })
 })
+
+/** Publication policy changes which initial snapshots a consumer may observe.
+ * Equal policies may reuse an identity; different policies must not. The finite
+ * grammar crosses both policies at both identity positions with one fixed plan.
+ * This checks runtime query identity, not portable persistence-id generation.
+ */
+describe(`complete snapshot publication identity`, () => {
+  it(`shares a config identity exactly when its publication policies agree`, () => {
+    const source = new CollectionImpl<{ id: number }>({
+      id: `snapshot-policy-identity`,
+      getKey: (row) => row.id,
+      sync: { sync: () => {} },
+    })
+    const query = new BaseQueryBuilder().from({ item: source })
+    const policies = [undefined, `complete`] as const
+    for (const left of policies) {
+      for (const right of policies) {
+        const identity = (snapshotPublication: typeof left) =>
+          JSON.stringify(
+            getPreparedLiveQueryIdentity({ query, snapshotPublication }),
+          )
+        expect(identity(left) === identity(right)).toBe(left === right)
+      }
+    }
+  })
+})

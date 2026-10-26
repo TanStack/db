@@ -413,5 +413,6 @@
   "ssrQueryWaiters": "bL",
   "includesRuntimeCache": "ch",
   "failSsrQueryWaiters": "cA",
-  "gcGraceUntil": "aP"
+  "gcGraceUntil": "aP",
+  "snapshotMetadata": "bT"
 }
