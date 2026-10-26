@@ -65,8 +65,19 @@ function toBinding(value: unknown): string | number | bigint | null {
   return String(value)
 }
 
+// Work outside a transaction waits behind an active transaction, as the
+// driver contract (`tests/contracts/sqlite-driver-contract.ts`) requires.
 function createDriver(database: DatabaseSync): SQLiteDriver {
-  const driver: SQLiteDriver = {
+  let tail: Promise<unknown> = Promise.resolve()
+  const serialize = <T>(task: () => Promise<T>): Promise<T> => {
+    const result = tail.then(task, task)
+    tail = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+  const direct: SQLiteDriver = {
     exec: (sql) => {
       database.exec(sql)
       return Promise.resolve()
@@ -82,19 +93,25 @@ function createDriver(database: DatabaseSync): SQLiteDriver {
       database.prepare(sql).run(...params.map(toBinding))
       return Promise.resolve()
     },
-    transaction: async (transaction) => {
-      database.exec(`BEGIN IMMEDIATE`)
-      try {
-        const result = await transaction(driver)
-        database.exec(`COMMIT`)
-        return result
-      } catch (error) {
-        database.exec(`ROLLBACK`)
-        throw error
-      }
-    },
+    transaction: (transaction) => transaction(direct),
   }
-  return driver
+  return {
+    exec: (sql) => serialize(() => direct.exec(sql)),
+    query: (sql, params) => serialize(() => direct.query(sql, params)),
+    run: (sql, params) => serialize(() => direct.run(sql, params)),
+    transaction: (transaction) =>
+      serialize(async () => {
+        database.exec(`BEGIN IMMEDIATE`)
+        try {
+          const result = await transaction(direct)
+          database.exec(`COMMIT`)
+          return result
+        } catch (error) {
+          database.exec(`ROLLBACK`)
+          throw error
+        }
+      }),
+  }
 }
 
 const rows: Array<Item> = [

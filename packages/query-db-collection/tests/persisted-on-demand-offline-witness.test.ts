@@ -30,7 +30,15 @@ import type { QueryCollectionUtils } from '../src/query'
  *
  * Expected, from the law: a covered demand stays loading before the wait, then
  * becomes ready on its restored rows; a rejected `queryFn` settles a covered
- * demand at once; a demand that session 1 never loaded keeps loading. Limits:
+ * demand at once; a demand that session 1 never loaded keeps loading.
+ *
+ * Query DB retention can delete a released query's rows: once its retention
+ * time passes, Query DB removes rows that no other query owns. Coverage
+ * describes those rows, so it must end with them (maintainer decision,
+ * 2026-10-26). In the history `loaded group a, then retention expired`,
+ * session 1 releases the query with a 20 ms `gcTime`, and a positive witness
+ * checks that Query DB deleted the rows. Session 2 then behaves as if session
+ * 1 never loaded group a. Limits:
  * one filter, no ordered window or cursor page, no Query cache persistence, and
  * no SSR dehydration.
  */
@@ -113,9 +121,9 @@ function groupOf(options: LoadSubsetOptions | undefined): string | undefined {
   return where?.name === `eq` ? (where.args?.[1]?.value as string) : undefined
 }
 
-function items(driver: SQLiteDriver, network: Network) {
+function items(driver: SQLiteDriver, network: Network, gcTime = Infinity) {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    defaultOptions: { queries: { retry: false, gcTime } },
   })
   const fetches: Array<string | undefined> = []
   const collection = createCollection(
@@ -163,8 +171,11 @@ async function drain() {
 
 type Observation = { ready: boolean; rows: Array<string> }
 
+type Session1 =
+  `loaded group a` | `loaded group a, then retention expired` | `nothing`
+
 async function runHistory(
-  session1: `loaded group a` | `nothing`,
+  session1: Session1,
   network: Exclude<Network, `online`>,
 ): Promise<{
   beforeWait: Observation
@@ -174,12 +185,25 @@ async function runHistory(
 }> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   let session1Fetches: Array<string | undefined> = []
-  if (session1 === `loaded group a`) {
-    const first = items(driver, `online`)
+  if (session1 !== `nothing`) {
+    const expires = session1 === `loaded group a, then retention expired`
+    const first = items(driver, `online`, expires ? 20 : Infinity)
     const query = groupQuery(first.collection, `a`)
     try {
       await query.preload()
       session1Fetches = first.fetches
+      if (expires) {
+        await query.cleanup()
+        // Positive witness: retention expiry deleted the released rows.
+        await vi.waitFor(
+          () =>
+            expect(
+              first.collection.toArray.filter((row) => row.group === `a`),
+            ).toEqual([]),
+          { timeout: 2000 },
+        )
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
     } finally {
       await query.cleanup()
       await first.collection.cleanup()
@@ -254,6 +278,14 @@ describe(`persisted on-demand Query DB query while offline with network-first`, 
         atWait: { ready: false, rows: [] },
       },
     ],
+    [
+      `loaded group a, then retention expired`,
+      `pending`,
+      {
+        beforeWait: { ready: false, rows: [] },
+        atWait: { ready: false, rows: [] },
+      },
+    ],
   ] as const)(
     `session 1: %s, session 2 network: %s`,
     async (session1, network, expected) => {
@@ -263,7 +295,7 @@ describe(`persisted on-demand Query DB query while offline with network-first`, 
       // Positive witnesses: session 1 fetched exactly group a when it loaded,
       // and session 2 asked the network for group a.
       expect(observed.session1Fetches).toEqual(
-        session1 === `loaded group a` ? [`a`] : [],
+        session1 === `nothing` ? [] : [`a`],
       )
       expect(observed.session2Fetches).toContain(`a`)
       expect({
