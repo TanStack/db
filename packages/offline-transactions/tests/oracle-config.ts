@@ -23,9 +23,13 @@ export function readOfflineOracleConfig({
   runs: number
   random: ReturnType<typeof oraclePropertyOptions>
 } {
+  // Both lanes share one budget: the scaled base plus the reserved fixed
+  // examples. A path replay keeps its single run.
+  const runs = oracleRuns(defaultRuns) + reservedRuns
+  const random = oraclePropertyOptions(defaultRuns, property)
   return {
-    runs: oracleRuns(defaultRuns) + reservedRuns,
-    random: oraclePropertyOptions(defaultRuns + reservedRuns, property),
+    runs,
+    random: random.path === undefined ? { ...random, numRuns: runs } : random,
   }
 }
 
