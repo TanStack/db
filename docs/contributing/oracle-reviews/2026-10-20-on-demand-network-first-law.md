@@ -1,9 +1,11 @@
 # Draft law: persisted demand coverage
 
-Status: proposal. This revises an accepted contract; it is not a defect report
-under the current one. No production or oracle code implements it yet. The
-matching `ARCHITECTURE.md` and glossary edits are in the same worktree and must
-land with the implementation. This proposal belongs to issue #2102, item 1.
+Status: implemented in PR #2263, which also contains the oracle, the matching
+`ARCHITECTURE.md` and glossary edits, and the review record
+(`2026-10-21-persisted-demand-coverage-review.md`). The law revised an
+accepted contract; it was not a defect report under the old one. It belongs to
+issue #2102, item 1. Later sections record maintainer decisions made during
+review, with their dates.
 
 ## Question
 
@@ -88,8 +90,23 @@ the same demand starts its own wait and may settle from SQLite again.
 Settling from SQLite does not change Collection readiness.
 
 An upstream load that settles successfully records coverage for its exact
-demand. Coverage is written durably with the load's rows or after them. A
-certified complete resume baseline covers every demand.
+demand. Coverage is written durably with the load's rows or after them, and
+records how many rows the demand reads from SQLite at that moment. Three more
+rules came from review:
+
+- A load that a reset made obsolete records no coverage (law 6 in
+  `ARCHITECTURE.md`).
+- A load with `refetch: true` never settles from SQLite. It starts a new
+  acquisition that waits for its own applied rows.
+- Coverage counts only while the persisted subset restore returns at least as
+  many rows as coverage recorded. A row deleted afterwards, by the source or by
+  Query DB retention, ends coverage until the demand loads online again
+  (maintainer decision, 2026-10-26).
+
+The first draft also let a certified complete resume baseline cover every
+demand. No path implemented that, and a source that resumes from a complete
+baseline already settles its own loads at once, so the clause was dropped
+(maintainer decision, 2026-10-26).
 
 ### Terms
 
@@ -101,12 +118,12 @@ These require glossary entries; the draft entry is in
   the Collection, in the current sync run. The result may be empty.
 - **persisted demand coverage**: a record, in one persisted cache generation,
   that a load of one exact demand reached applied settlement with its rows
-  durably committed. A certified complete baseline covers every demand.
+  durably committed.
 
 ### Why coverage matches by exact demand
 
-Coverage matches by the canonical demand key (`getLoadSubsetDemandKey`) or by
-a complete baseline. The law never infers that one demand covers a different
+Coverage matches by the canonical demand key (`getLoadSubsetDemandKey`). The
+law never infers that one demand covers a different
 one. #1797 made the same choice for request deduplication. It removed subset
 algebra after it treated "requests as established coverage." Law 7 in
 `ARCHITECTURE.md` already says settlement proves no broader extent than the
@@ -134,7 +151,8 @@ settlement. Settling a covered load therefore reaches all of them:
 
 `ARCHITECTURE.md` already states that a source resuming from complete local
 rows settles its loads at once. This law applies the same idea to one demand
-instead of the whole Collection. No live-query component changes.
+instead of the whole Collection. The live query adds one query-level signal,
+described next.
 
 ### Queries over several sources
 
@@ -185,8 +203,10 @@ failure ends the wait early.
 
 Coverage belongs to one persisted cache generation. It ends with that
 generation and with any reset that replaces the durable rows: truncate,
-must-refetch, schema reset, or cache-claim rotation. A crash between writing
-the rows and writing the coverage must not leave coverage without rows.
+must-refetch, schema reset, or cache-claim rotation. A record that memory still
+holds after a rotation in the same sync run does not count. A crash between
+writing the rows and writing the coverage must not leave coverage without rows.
+Coverage also ends when the restore returns fewer rows than it recorded.
 
 ### Limits
 

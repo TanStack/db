@@ -42,21 +42,25 @@ export interface PersistedInitialRenderSource {
   demandOwner: Collection<any, any, any> | undefined
 }
 
-// An eager source permits local rendering once its wait has passed; an
-// on-demand source waits inside each load, so it permits it once the query's
-// demands on it have settled.
-function permitsLocalRender(source: PersistedInitialRenderSource): boolean {
-  const owner = source.demandOwner
-  if (!owner) return Date.now() >= source.readiness.getOrStartNetworkDeadline()
-  const builder = getBuilderFromConfig(owner.config)
-  return builder ? builder.initialDemandsSettled() : !owner.isLoadingSubset
-}
-
-/** Whether every source permits rendering from local data now. */
+/**
+ * Whether every source permits rendering from local data now. An eager
+ * source permits it once its wait has passed or the network failed. An
+ * on-demand source waits inside each load, so it permits it only once the
+ * query's demands on it have settled, whatever the network did.
+ */
 export function permitsPersistedInitialRender(
   sources: ReadonlyArray<PersistedInitialRenderSource>,
+  networkFailed: boolean,
 ): boolean {
-  return sources.every(permitsLocalRender)
+  return sources.every(({ demandOwner: owner, readiness }) => {
+    if (!owner) {
+      return (
+        networkFailed || Date.now() >= readiness.getOrStartNetworkDeadline()
+      )
+    }
+    const builder = getBuilderFromConfig(owner.config)
+    return builder ? builder.initialDemandsSettled() : !owner.isLoadingSubset
+  })
 }
 
 // An on-demand source's demands settle without a persisted readiness change,
@@ -162,8 +166,10 @@ export function waitForPersistedInitialRender({
       )
       const remainingNetworkMs = Math.max(0, networkDeadlineAt - Date.now())
       // A pending on-demand demand rechecks when its demands settle.
-      const localRenderAllowed =
-        remainingNetworkMs === 0 && permitsPersistedInitialRender(sources)
+      const localRenderAllowed = permitsPersistedInitialRender(
+        sources,
+        networkFailed,
+      )
       const sourceFailed = sources.some(
         (source) => source.collection.status === `error`,
       )
@@ -176,10 +182,7 @@ export function waitForPersistedInitialRender({
         (collectionStatus() === `error` || !clientStreamFailed)
       ) {
         finish({ error: networkError })
-      } else if (
-        (localRenderAllowed || networkFailed) &&
-        persisted.status === `ready`
-      ) {
+      } else if (localRenderAllowed && persisted.status === `ready`) {
         finish()
       } else if (networkFailed && persisted.status === `error`) {
         finish({ error: networkError ?? persisted.error })

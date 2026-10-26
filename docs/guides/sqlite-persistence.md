@@ -326,11 +326,13 @@ The rule applies to each demand separately:
 - The network load keeps running. Its rows replace the restored rows when they arrive. If it fails after the load settled, the query stays ready on the rows it shows.
 - A demand that never settled online is not covered. Offline, it waits for the network. A query that has never run therefore stays loading offline unless a completed progressive full sync already holds every row.
 - A source truncate, such as an Electric must-refetch, ends coverage for every demand. A new cache generation starts without coverage.
+- Coverage also ends when SQLite holds fewer rows for the demand than it held when the demand settled. A row that the source deletes, or that Query DB retention removes after `gcTime`, therefore ends coverage until the demand loads online again.
+- A load with `refetch: true` always waits for the network.
 - Only the default single-process coordinator supports this. If you pass a multi-tab coordinator, such as `BrowserCollectionCoordinator`, on-demand loads do not settle from SQLite. They wait for the network, as they did before this option.
 
 Coverage proves that the rows were complete when the earlier load settled. It does not prove that they are current. The wait changes when readiness arrives, not which rows the source has. A cursor page or a demand built from other rows' values is covered only if the restored rows produce the same demand again.
 
-For a query that joins eager and on-demand sources, the network-first wait ends when every eager source has restored and passed its deadline, and every on-demand demand of the query has settled.
+For a query that joins eager and on-demand sources, the network-first wait ends when every eager source has restored and either passed its deadline or seen the network fail, and every demand that the query reaches on an on-demand source has settled. A network or source failure alone does not release an on-demand demand that has not settled.
 
 Persisted readiness does not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately. The fallback does not classify source errors.
 

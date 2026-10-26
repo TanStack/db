@@ -2910,28 +2910,84 @@ class PersistedCollectionRuntime<
   // started has passed or its upstream load has failed. The upstream load
   // keeps running; its rows are ordinary source writes, and a later failure
   // is reported but leaves the demand settled.
-  private settleCoveredDemand(
+  //
+  // A refetch starts a new acquisition that waits for its own rows
+  // (`ARCHITECTURE.md`, "Demand grouping and ownership"), so coverage never
+  // settles it.
+  private async settleCoveredDemand(
     options: LoadSubsetOptions,
     upstream: Promise<void>,
     startedAt: number,
   ): Promise<void> {
     if (
       !this.persistedReadiness?.onDemand ||
-      this.syncControls.metadata?.collection.get(demandCoverageKey(options)) ===
-        undefined
+      options.refetch === true ||
+      !(await this.isDemandCovered(options))
     ) {
       return upstream
     }
     const deadlineAt = startedAt + this.persistedReadiness.networkTimeoutMs
     return new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, Math.max(0, deadlineAt - Date.now()))
-      void upstream
-        .catch(() => undefined)
-        .then(() => {
-          clearTimeout(timer)
-          resolve()
-        })
+      const settle = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      // A released load owns no wait, even if its source ignores the abort.
+      options.signal?.addEventListener(`abort`, settle, { once: true })
+      void upstream.catch(() => undefined).then(settle)
     })
+  }
+
+  // Coverage belongs to one persisted cache generation. A rotation changes
+  // the storage ID, so a record that memory still holds from the previous
+  // generation does not count.
+  private currentCoverageRecord(
+    options: LoadSubsetOptions,
+  ): { rows: number } | undefined {
+    const record = this.syncControls.metadata?.collection.get(
+      demandCoverageKey(options),
+    ) as { generation?: unknown; rows?: unknown } | undefined
+    return record?.generation === this.storageCollectionId &&
+      typeof record.rows === `number`
+      ? { rows: record.rows }
+      : undefined
+  }
+
+  // The rows that this demand reads from SQLite in the current generation.
+  private async countDemandRows(options: LoadSubsetOptions): Promise<number> {
+    const rows = await this.persistence.adapter.loadSubset(
+      this.storageTargetFor(),
+      options,
+      {
+        requiredIndexSignatures: this.getRequiredIndexSignatures(),
+        cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
+      },
+    )
+    return rows.length
+  }
+
+  // A row deleted after the covered load settled, by the source or by
+  // retention, leaves fewer rows than coverage recorded, so it no longer
+  // proves the demand complete (maintainer decision, 2026-10-26).
+  private async isDemandCovered(options: LoadSubsetOptions): Promise<boolean> {
+    const record = this.currentCoverageRecord(options)
+    return (
+      record !== undefined &&
+      (await this.countDemandRows(options)) >= record.rows
+    )
+  }
+
+  // The coverage record for a load that just settled, or undefined when the
+  // current record already says the same.
+  async nextCoverageRecord(
+    options: LoadSubsetOptions,
+  ): Promise<
+    { settledAt: number; generation: string; rows: number } | undefined
+  > {
+    const rows = await this.countDemandRows(options)
+    if (this.currentCoverageRecord(options)?.rows === rows) return undefined
+    return { settledAt: Date.now(), generation: this.storageCollectionId, rows }
   }
 
   loadHydratedSubset(
@@ -6457,10 +6513,13 @@ function createWrappedSyncConfig<
         isCurrent: () => boolean,
       ): Promise<void> => {
         if (!isCurrent()) return
+        const record = await runtime.nextCoverageRecord(demand)
+        if (!record || !isCurrent()) return
         wrappedParams.begin()
-        wrappedParams.metadata?.collection.set(demandCoverageKey(demand), {
-          settledAt: Date.now(),
-        })
+        wrappedParams.metadata?.collection.set(
+          demandCoverageKey(demand),
+          record,
+        )
         await wrappedParams.commit()
       }
 

@@ -9,7 +9,7 @@ import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
-import type { PersistedReadinessSource } from './persisted-readiness.js'
+import type { PersistedInitialRenderSource } from './persisted-readiness.js'
 import type { ChangeMessage, CollectionStatus } from './types.js'
 
 export type LiveQueryPersistedStatus =
@@ -26,15 +26,8 @@ const NO_PERSISTED_READINESS = {
 } as const
 const noop = () => {}
 
-interface PersistedSourceEntry {
+type PersistedSourceEntry = PersistedInitialRenderSource & {
   collection: Collection<any, any, any>
-  readiness: PersistedReadinessSource
-  /**
-   * The live query whose demands an on-demand source serves. A source read
-   * by several live queries has one entry per owner, so every demand the
-   * query reaches on it gates local rendering.
-   */
-  demandOwner: Collection<any, any, any> | undefined
 }
 
 function collectPersistedReadinessSources(
@@ -61,11 +54,17 @@ function collectPersistedReadinessSources(
     }
     const source = getPersistedReadinessSource(config)
     if (!source) return false
-    sources.push({
-      collection,
-      readiness: source,
-      demandOwner: source.onDemand ? (owner ?? collection) : undefined,
-    })
+    // A source read by several live queries has one entry per owner, so
+    // every demand the query reaches on it gates local rendering.
+    const demandOwner = source.onDemand ? (owner ?? collection) : undefined
+    if (
+      sources.every(
+        (entry) =>
+          entry.collection !== collection || entry.demandOwner !== demandOwner,
+      )
+    ) {
+      sources.push({ collection, readiness: source, demandOwner })
+    }
     return true
   }
   return visit(root) && sources.length > 0 ? sources : undefined
@@ -1045,13 +1044,15 @@ class LiveQueryObserverImpl<
     const sourceFailed = sources.some(
       (source) => source.collection.status === `error`,
     )
-    if (collection.status === `error`) return sourceFailed
+    if (collection.status === `error` && !sourceFailed) return false
     const clientQuery =
       this.client && this.queryHash
         ? this.client._getLiveQuery(this.queryHash)
         : undefined
-    if (clientQuery?.status === `error`) return true
-    return sources[0]!.readiness.permitsInitialRender(sources)
+    return sources[0]!.readiness.permitsInitialRender(
+      sources,
+      collection.status === `error` || clientQuery?.status === `error`,
+    )
   }
 
   preloadForInitialRender(): Promise<void> {

@@ -210,3 +210,77 @@ no law: a source's literal `true` becomes a promise, and each load writes one
 metadata record. Accepted: coverage keys grow until a truncate or expiry
 (#2211).
 
+## 2026-10-26: CodeRabbit and xhigh reviews of PR #2263
+
+Reviewed head: `3de5a922f` (CI green). CodeRabbit review `5655576117` gave five
+findings (CR1-CR5) and an xhigh code review gave fifteen (X1-X15). The oracle
+was extended first and run against the parent's production code. Maintainer
+decisions: Query DB retention expiry ends coverage, through a row-count check
+that also covers deletes in a limited window; the certified-baseline clause
+is dropped; multi-tab coordinators stay out of scope.
+
+Oracle and witness changes:
+
+- Part 1 adds `settled-then-row-deleted`, and its wrong design "coverage
+  ignores rows deleted after it settled".
+- Part 2b adds two same-session histories: a load of D after a cache rotation,
+  and a `refetch: true` load of D. Both must wait for the network.
+- Part 3 adds a source failure on a never-covered demand, which must not
+  release the wait.
+- The Query DB witness adds a retention-expiry history.
+- The Electric witness driver now serializes work, as the driver contract
+  requires.
+
+RED on the parent production code (`3de5a922f`): the oracle failed 14 of 188
+(11 row-deletion cells, and the refetch, rotation, and source-failure
+histories), and the Query DB witness failed its retention history. All
+failures were assertions at a named checkpoint.
+
+Repair: a coverage record stores the cache generation's storage ID and the
+number of rows the demand reads from SQLite. It counts only for the current
+generation and while the restore returns at least that many rows. A load
+rewrites the record only when that count changes. A `refetch` load never
+settles from coverage. An aborted load clears its wait timer. The gate checks
+on-demand settlement on the network-failure path too, and the observer keeps
+one entry for each source and owning live query.
+
+GREEN: the oracle passes 188 of 188 and the Query DB witness 4 of 4. Also:
+`db` 13,462, persistence 1,415, `react-db` 601, `solid-db` 99,
+`electric-db-collection` 719, `query-db-collection` 929. Size against `main`:
+`app` +78 B gzip, `db-sqlite-persistence-core` +475 B gzip.
+
+Mutants, all killed by assertion:
+
+| Mutant | Outcome |
+| --- | --- |
+| Drop the row count | 11 row-deletion cells and the Query DB retention history fail |
+| Require more rows than recorded | 28 covered cases fail |
+| Ignore the cache generation | The rotation history fails |
+| Let a refetch settle on coverage | The refetch history fails |
+| Let a network failure bypass on-demand settlement | The source-failure history fails |
+
+Counters, not oracle cases: five loads of one covered demand now cause one
+coverage commit, not five. Releasing a covered load leaves no settlement timer
+behind, while the unfixed code keeps one.
+
+| ID | Verdict | Action |
+| --- | --- | --- |
+| CR1, X11 | Confirmed: the glossary entry claimed demand settlement | Fixed: the entry now names the source status only, and the network-first entry carries the demand rule |
+| CR2 | Confirmed | Fixed: the law record states its implementation and the query-level signal |
+| CR3 | Confirmed | Fixed in the guide |
+| CR4, X4 | Confirmed (RED) | Fixed |
+| CR5 | Confirmed by reading the driver | Fixed |
+| X1 | Confirmed (RED) | Fixed by the row count |
+| X2 | Confirmed (RED) | Fixed by the generation check |
+| X3 | Confirmed (RED) | Fixed |
+| X5 | Refuted: a truncate clears hydrated demand, so the later load must hydrate, and the wrapper rejects a source transaction that crosses a hydration cycle | Recorded as an excluded, illegal history in the oracle |
+| X6 | Confirmed by counter | Fixed for writes; each load still reads its row count, and a synchronous `true` result settles asynchronously |
+| X7 | Not reproduced; read from the code | Open in the coverage map |
+| X8 | Confirmed by reading; deletes are now reached through `settled-then-row-deleted` | Fixed by the row count for deletes; an order change without a delete stays open |
+| X9 | Confirmed by counter | Fixed |
+| X10 | Confirmed by reading | Fixed: one entry for each source and owner |
+| X12 | Accepted as the design direction | The generation and the row count replace per-path invalidation, except the truncate deletion that empty demands still need |
+| X13 | Confirmed | Fixed: the observer reuses the exported type |
+| X14 | Confirmed | Partly fixed: the eager deadline is read once per source; the demand key is still computed more than once per load (cost only) |
+| X15 | Confirmed | The clause is dropped from the law record and the glossary |
+

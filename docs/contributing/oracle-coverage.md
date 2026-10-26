@@ -2607,9 +2607,10 @@ after the configured wait or an upstream failure. Its bounded enumeration
 crosses twelve session-1 histories (not requested, failed, overlapping
 filter, same filter with another window, same filter with another order,
 rejected durable row write, settled empty, settled, settled then truncated,
-and three in which a reset lands after the load's rows but before it settles:
-a source truncate, a completed scoped recovery that rotates the cache
-generation, and a scoped recovery still pending), two waits, and six
+three in which a reset lands after the load's rows but before it settles (a
+source truncate, a completed scoped recovery that rotates the cache
+generation, and a scoped recovery still pending), and one in which the source
+deletes a row of D after D settles), two waits, and six
 session-2 upstream schedules (pending, early and late failure, early and late
 answer, late empty answer), over the real wrapper and
 `SQLiteCorePersistenceAdapter` on `node:sqlite`. Session 1 creates coverage
@@ -2622,7 +2623,9 @@ wait releases an eager and an on-demand source only when the on-demand demand
 is covered, read directly and through an outer live query, with the joined row
 visible at release. A third shape reaches the on-demand source through two
 live queries; covering only the inner query's demand must not release the
-wait. Model-level calibration shows that seventeen wrong designs (fourteen
+wait. A source failure on a never-covered demand must not release it either.
+Two fixed same-session histories check that a load of D after a cache
+rotation, and a `refetch: true` load of D, both wait for the network. Model-level calibration shows that eighteen wrong designs (fifteen
 single-demand, two lifecycle, one joined) each differ from the law at a named
 case. Before the implementation, every
 production case failed at setup because `initialRender` rejected
@@ -2640,7 +2643,13 @@ recorded coverage after a truncate or rotation (22 cells), a coverage record
 during pending recovery failed the session-1 load (12 cells), and the first
 live query reached on a source stood for every reader (one cell). After the
 repair, mutants that restore each defect, or that check only for a truncate,
-fail those cases; a gate that ignores the
+fail those cases. A third review round added the row-deletion history, the
+source-failure history, and the rotation and refetch histories; on the parent
+production code they failed 14 cases by assertion, and the Query DB witness
+failed its retention history. Mutants that drop the row count, require more
+rows than recorded, ignore the cache generation, let a refetch settle on
+coverage, or let a network failure bypass on-demand settlement each fail
+those cases; a gate that ignores the
 eager deadline fails the persisted-readiness oracle instead. The Electric
 progressive witness in
 `packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
@@ -2650,7 +2659,9 @@ in `packages/query-db-collection/tests/persisted-on-demand-offline-witness.test.
 receives it with a fresh QueryClient per session: a covered on-demand query
 stays loading until the wait and then shows its restored rows, a rejected
 `queryFn` settles it at once, and a never-loaded query keeps loading; a mutant
-that ignores coverage fails both covered histories. React
+that ignores coverage fails both covered histories. A fourth history lets
+Query DB retention delete the released rows after a 20 ms `gcTime`; session 2
+must then keep loading. React
 (`useLiveSuspenseQuery.test.tsx`) and Solid (`useLiveQuery.test.tsx`) Suspense
 receive the joined gate with capability fixtures: an eager source that restores
 but never becomes ready and an on-demand source keep the first render
@@ -2659,7 +2670,10 @@ opt-in permit fallback alone fails both. Ordered windows, cursor
 pages, and later demand in session 2 (including a demand key that ignores
 offset or cursor but honors limit, which no history distinguishes),
 optimistic writes on a covered demand, a failure before the restore
-publishes, cache-claim expiry rotation, must-refetch, schema reset,
+publishes, cache-claim expiry rotation, must-refetch, schema reset, a
+covered window whose order changes without a delete, a pending coverage
+record that a truncate lists and a later abort turns into a terminal failure
+(code reading only),
 and Suspense over a real
 persisted on-demand Collection remain open. A coordinator other than the
 default `SingleProcessCoordinator`, as in multi-tab Browser and Electron
