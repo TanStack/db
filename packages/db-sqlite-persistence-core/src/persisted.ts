@@ -1617,6 +1617,12 @@ class PersistedCollectionRuntime<
   private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
+  // Keys a peer's source wrote in this sync run, from its committed notices.
+  // A storage read of such a row is a source row, not a previous run's cache.
+  // A notice that requires a full reload names no keys, so after one every
+  // stored row may be this run's.
+  private runWrittenKeys = new Set<TKey>()
+  private runWritesUnknown = false
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
@@ -2105,6 +2111,8 @@ class PersistedCollectionRuntime<
     const previousCollection = this.collection
     const previousControls = this.syncControls
     this.setSyncControls(syncControls)
+    this.runWrittenKeys.clear()
+    this.runWritesUnknown = false
     if (this.collection === collection) {
       this.boundCollection ??= collection
       return
@@ -3633,9 +3641,10 @@ class PersistedCollectionRuntime<
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
       // A row read from storage that the Collection does not hold as a
-      // source row is a previous run's cache: a seed, older than every source
-      // write (decision C). Core holds it as it holds a DbClient seed, so a
-      // later seed can replace it until the source writes it.
+      // source row, and that no peer's source wrote in this run, is a
+      // previous run's cache: a seed, older than every source write
+      // (decision 9). Core holds it as it holds a DbClient seed, so a later
+      // seed can replace it until the source writes it.
       const state = this.collection?._state
       const pending = state?.pendingSyncedTransactions.at(-1)
       if (pending) pending.preserveHydrationSeedKeys = true
@@ -3704,6 +3713,8 @@ class PersistedCollectionRuntime<
         }
         if (
           state &&
+          !this.runWritesUnknown &&
+          !this.runWrittenKeys.has(row.key) &&
           (!state.syncedData.has(row.key) ||
             state.hydrationSeedKeys.has(row.key))
         )
@@ -4856,6 +4867,7 @@ class PersistedCollectionRuntime<
             pullResponse.latestRowVersion,
           )
           if (pullResponse.requiresFullReload) {
+            this.runWritesUnknown = true
             await this.runInHydrationScope((adapter) =>
               this.reloadActiveSubsetsUnsafe(adapter),
             )
@@ -4867,6 +4879,7 @@ class PersistedCollectionRuntime<
           }
           const deltas = pullResponse.deltas
           if (!deltas) {
+            this.runWritesUnknown = true
             await this.runInHydrationScope((adapter) =>
               this.reloadActiveSubsetsUnsafe(adapter),
             )
@@ -5016,6 +5029,13 @@ class PersistedCollectionRuntime<
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
+    if (txCommitted.requiresFullReload) this.runWritesUnknown = true
+    else
+      for (const key of [
+        ...txCommitted.changedRows.map((row) => row.key),
+        ...txCommitted.deletedKeys,
+      ])
+        this.runWrittenKeys.add(key as TKey)
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
       return
@@ -5663,9 +5683,12 @@ function createWrappedSyncConfig<
         if (index === -1) return
         pendingPublicationTransactions.splice(index, 1)
         // A deferred transaction that never reaches the Collection releases
-        // the optimistic rows it held.
-        if (!transaction.handedToCollection)
+        // the optimistic rows it held, and enclosing inserts judged against
+        // its writes are judged again without them.
+        if (!transaction.handedToCollection) {
           params.collection._state.recomputeOptimisticState(false)
+          rejudgeEnclosing(transaction)
+        }
       }
       // Committed source transactions not yet handed to the Collection. Core
       // holds settled optimistic rows on their keys until they apply, and a

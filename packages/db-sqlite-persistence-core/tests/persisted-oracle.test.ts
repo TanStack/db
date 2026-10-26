@@ -32023,3 +32023,148 @@ describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
     },
   )
 })
+
+// A row another tab's source wrote in this run reaches this tab when it loads
+// a new demand from storage. It is a source row, not a persisted cache row,
+// so a later DbClient hydration seed cannot replace it (D4; decision 9 marks
+// only previous runs' rows as seeds). Recorded in
+// docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
+it.each([`named keys`, `a full reload`] as const)(
+  `keeps a row another tab wrote this run when a later seed arrives (%s)`,
+  async (notice) => {
+    const adapter = createRecordingAdapter([])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `remote-write-then-seed`
+    const client = new DbClient()
+    const collection = client.collection(
+      collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      ),
+    )
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+      adapter.rows.set(`remote`, { id: `remote`, title: `written by a peer` })
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `peer-write`,
+          latestRowVersion: 1,
+          ...(notice === `named keys`
+            ? {
+                requiresFullReload: false as const,
+                changedRows: [
+                  {
+                    key: `remote`,
+                    value: { id: `remote`, title: `written by a peer` },
+                  },
+                ],
+                deletedKeys: [],
+              }
+            : { requiresFullReload: true as const }),
+        },
+        `peer`,
+        collectionId,
+      )
+      await flushAsyncWork()
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({})),
+        `demand loaded`,
+      )
+      await vi.waitFor(() =>
+        expect(collection.get(`remote`)?.title).toBe(`written by a peer`),
+      )
+      client.hydrate({
+        collections: [
+          {
+            collectionId,
+            rows: [
+              {
+                key: `remote`,
+                value: { id: `remote`, title: `stale seed` },
+                metadata: { seeded: true },
+              },
+            ],
+          },
+        ],
+      })
+      await flushAsyncWork()
+      expect(collection.get(`remote`)?.title).toBe(`written by a peer`)
+    } finally {
+      await client.cleanup()
+    }
+  },
+)
+
+// A source transaction committed while a storage read runs waits, before
+// its durable step, until the read ends. Aborting its signal then abandons it
+// (the commit contract: an abort before acceptance). An enclosing open
+// transaction's inserts were judged against it, so they are judged again
+// without it: here the enclosing insert clears metadata once more.
+it(`judges enclosing inserts again when a buffered inner transaction is abandoned`, async () => {
+  const adapter = createRecordingAdapter([])
+  let source!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `abandoned-buffered-inner`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.markReady()
+          return { loadSubset: () => true }
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+  source.begin()
+  source.write({
+    type: `insert`,
+    value: { id: `1`, title: `first` },
+    metadata: { m: 0 },
+  })
+  await atPersistedOracleCheckpoint(
+    Promise.resolve(source.commit()),
+    `first row applied`,
+  )
+  source.begin()
+  source.write({ type: `insert`, value: { id: `1`, title: `second` } })
+  expect(source.metadata?.row.get(`1`)).toBeUndefined()
+  const gate = createDeferred()
+  const loadSubset = adapter.loadSubset
+  adapter.loadSubset = async (...args) => {
+    await gate.promise
+    return loadSubset(...args)
+  }
+  const loading = Promise.resolve(collection._sync.loadSubset({ limit: 5 }))
+  await flushAsyncWork()
+  source.begin()
+  source.write({ type: `insert`, value: { id: `1`, title: `second` } })
+  const controller = new AbortController()
+  const receipt = source.commit(controller.signal)
+  // The inner equal re-insert commits ahead, so the enclosing insert keeps.
+  expect(source.metadata?.row.get(`1`)).toEqual({ m: 0 })
+  controller.abort()
+  gate.resolve()
+  await loading
+  await expect(Promise.resolve(receipt)).rejects.toMatchObject({
+    name: `AbortError`,
+  })
+  await flushAsyncWork()
+  expect(source.metadata?.row.get(`1`)).toBeUndefined()
+})

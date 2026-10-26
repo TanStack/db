@@ -1523,13 +1523,13 @@ export function queryCollectionOptions(
 
       const result = new Set(Object.keys(owners as Record<string, true>))
       if (rowKey === undefined) return result
-      // Resolved Queries supersede stale persisted edges; accepted in-memory
-      // edges supplement owners whose metadata has not published yet.
+      // Resolved Queries supersede stale persisted edges. An owner set that a
+      // held sync transaction staged is readable here, because metadata reads
+      // include every accepted sync transaction in commit order.
       result.forEach((owner) => {
         const rows = queryToRows.get(owner)
         if (rows && !rows.has(rowKey)) result.delete(owner)
       })
-      rowToQueries.get(rowKey)?.forEach((owner) => result.add(owner))
       return result
     }
 

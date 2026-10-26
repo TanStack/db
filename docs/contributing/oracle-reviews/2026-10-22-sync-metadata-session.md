@@ -455,19 +455,20 @@ The repair keeps the existing structures and changes these rules.
   re-insert's planned row. Key independence skips histories that invalidate
   a transaction. The persisted test adapter stores no rows: its cached row is
   readable only until the run's first durable commit, so reloads within a run
-  are not exercised. That also bounds decision 9: a storage read marks a row
-  a seed unless core holds it as a source row, so a row the source wrote
-  that later left core and is read back would become a seed; no lane
-  reaches that. The error an invalid commit rejects with, and restart
+  are not exercised. Decision 9's storage-read rule has receiving witnesses
+  for rows that peers wrote in this run, not a grammar dimension: the
+  session drivers have one tab. The error an invalid commit rejects with, and restart
   and resume, stay outside this oracle.
 
 ### Code weight
 
 `pnpm size:compare` against `427a7c31e` (`origin/main` after the second
-merge): the typical `app` scenario grows 131 bytes gzip; `@tanstack/db` as a
-whole package grows 322 (`client.js` +459 minified bytes,
-`collection/sync.js` +288, `collection/state.js` +331);
-`db-sqlite-persistence-core` grows 785; `query-db-collection` shrinks 5.
+merge): the typical `app` scenario grows 117 bytes gzip; `@tanstack/db` as a
+whole package grows 327; `db-sqlite-persistence-core` grows 876;
+`query-db-collection` shrinks 14. The private-member mangle cache now
+covers the branch's new private methods. Removing Query's owner supplement
+saved 9 bytes, and tracking peer writes and judging enclosing inserts again
+after an abandoned transaction added 91 to persistence.
 
 The prep-PR round changed these numbers. Decision 9 costs core 12 minified
 bytes (a wrapper's `originalSyncType` passes through `write`), paid for by
@@ -594,16 +595,17 @@ late-abort probe for E, a scaling experiment for D, and a churn count for H.
 | B: a hold hides a duplicate source insert (`acceptSyncTransaction` refreshes the projection only when a transaction moves) | Fixed. The grammar never wrote a different insert over a row the source wrote; the `conflictingInsert` action does, and the model expects core's duplicate-key error (decision 8 keeps duplicates in core). On `743a6ce14` plus decision 9, 26 core tests fail, every seeded lane among them, including hold invariance. Core's classifier now exempts only a row that only seeds supplied; a seed beneath an open insert keeps that insert's kind in the replay instead |
 | C: a seed hides a duplicate insert in the same or an enclosing transaction | Fixed by the same change and caught by the same action (`seed(1) begin upsert(1) conflictingInsert(1)` was accepted) |
 | D: the wrapper's staged-row fold is O(N²) per transaction | Fixed. 4000 inserts in one transaction took 48 ms against 0.8 ms on `origin/main`. Each staged transaction now keeps its row per key, so a write-time read folds one entry per transaction; 16000 inserts take 6 ms. A mutant that drops partial updates' merge base fails three witnesses and four persisted campaigns. No oracle measures work; the scaling run is the evidence |
-| E: an aborted staged transaction leaves enclosing implicit metadata judged against it | Refuted for the signal path: `commit` says that aborting after acceptance has no effect, and a store-held inner transaction whose signal aborted still applied. A durable failure ends the run with a terminal error, outside this law. A hydration-buffered transaction dropped on abort is not probed |
+| E: an aborted staged transaction leaves enclosing implicit metadata judged against it | Refuted for a store-held transaction: `commit` says that aborting after acceptance has no effect, and its inner transaction still applied. Confirmed and fixed for a transaction buffered behind a storage read, which an abort abandons before acceptance: when a deferred transaction leaves without reaching the Collection, the wrapper judges the enclosing inserts again. Witness `judges enclosing inserts again when a buffered inner transaction is abandoned` fails without it. A durable failure ends the run with a terminal error, outside this law |
+| A storage read marked every row the Collection did not hold as a seed, including a row a peer's source wrote in this run and that this tab loads for a new demand | Fixed: the runtime records the keys that peer notices name as written in this run, and stops marking seeds after a notice or catch-up that needs a full reload, because it names no keys. Witnesses `keeps a row another tab wrote this run when a later seed arrives` (named keys, full reload) fail on `e4b562448`; a mutant that ignores a full reload fails the second |
+| Query owner supplement (`rowToQueries` in `getOwnersFromMetadata`) | Removed. Each edge Query adds stages its owner set in the same sync transaction, and Query rolls edges back when that transaction fails, so the supplement only covered owner metadata that held transactions hid from reads. The commit-order reader makes it redundant; all 1,486 Query tests pass without it |
 | F: Query's owner read lost its applied-metadata fallback for a sync without `metadata` | No action: core always supplies `metadata`, and no wrapper in the repository drops it |
 | G: state internals are public for `client.ts` | Accepted design: the seed authority lookups moved to `client.ts` so that an app without `DbClient` ships 130 fewer gzip bytes |
 | A later seed merged into an outer re-insert's row by an inner update that commits ahead (random seed 50521469; also fails in core on `743a6ce14`) | Decision 10: the model now counts such a seed in the insert's kind. Witnesses `lateSeedUnderMergedUpdate` and `heldLateSeedUnderMergedUpdate` (core) and `lets an inner update merged over a later seed change an enclosing re-insert` (persisted). The held witness kills a core that keeps the insert's kind after the accepted inner write; without a hold the inner write applies and clears the seed mark, so that mutant is invisible there |
 | H: `appliedAdapterMetadataKeys` grows with every deleted key | Fixed: the deleted-key and metadata-key sets became one map, `appliedAdapterKeys`, from each key whose metadata an applied adapter write fixed to whether that write deleted the row. After 5000 keys were inserted and deleted it holds 5000 entries instead of 10000 across two sets; the deleted keys remain, as D4 requires. The hydration authority grid gains `delete,update` cells, which a mutant that loses the returning key's authority fails. `sourceWrittenKeys` in the wrapper is unchanged |
 ## Open
 
-- **Query owner supplement.** The `rowToQueries` supplement in
-  `getOwnersFromMetadata` survived every mutant run; it may be removable.
-  Not attempted in this change.
+Nothing in this bug class is known to be open. The limits in the evidence
+block still apply.
 
 ## Oracle guide requirements
 

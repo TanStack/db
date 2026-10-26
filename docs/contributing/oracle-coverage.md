@@ -2651,9 +2651,9 @@ the review record:
 
 The persisted test adapter stores no rows of its own, so reloads within one
 run are not exercised. A storage read marks a row a seed unless core holds it
-as a source row, so a source row that left core and is read back within the
-run would become a seed; no lane reaches that. The Query owner supplement in `getOwnersFromMetadata`
-remains open in the review record. Restart and resume reads belong to the
+as a source row or a peer's notice named it as written in this run; the
+persisted oracle's receiving witnesses cover peer writes, and the session
+drivers have one tab. Restart and resume reads belong to the
 SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
 with one sync run.
 ## Deferred contracts and evidence
