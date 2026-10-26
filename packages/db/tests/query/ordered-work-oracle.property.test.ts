@@ -6122,11 +6122,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         }
         // The repair a report starts reads each window's bounded prefix,
         // tie, and refill; a whole-source read would be the cost the report
-        // exists to avoid. Two documented fallbacks read the full source
-        // instead: a page that ends on a null or NaN rank, and the refill of
-        // an unindexed plan whose bounded prefix leaves the window short
-        // (ARCHITECTURE.md, "an underfilled unindexed prefix retains the
-        // established full-source fallback").
+        // exists to avoid. One documented fallback reads the full source
+        // instead: a page that ends on a null or NaN rank. An unindexed plan
+        // whose bounded prefix leaves the window short grows the prefix
+        // (ARCHITECTURE.md, "an underfilled unindexed prefix grows").
         const shortRefill =
           !testCase.indexed && prefixLeavesWindowShort(rows, shown)
         if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
@@ -6135,11 +6134,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
             else unindexedRefetchChecks++
           }
         }
-        if (
-          signalsRefetch &&
-          unexpressiblePageEnds === unexpressibleBefore &&
-          !shortRefill
-        ) {
+        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
@@ -6430,6 +6425,14 @@ type OptimisticWindowCheckpoint =
   `initial` | `optimistic` | `settled` | `restored`
 const MAX_OPTIMISTIC_WINDOW_REQUESTS = 8
 const OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS = 8
+
+// The most rows a bounded refill may ask for. An indexed plan pages past
+// the window. An unindexed plan grows its prefix to twice the rows it
+// installed (ARCHITECTURE.md, "an underfilled unindexed prefix grows"), and
+// a request also covers the one row that the pending transaction overlays.
+function refillBound({ indexed, width, installedIds }: OptimisticWindowCase) {
+  return indexed ? width + 2 : 2 * installedIds.length + 1
+}
 
 type OptimisticWindowCase = {
   shape: OptimisticWindowShape
@@ -7185,7 +7188,7 @@ function optimisticWindowViolations(
     needsAcquisition &&
     (refillAttempt?.direction !== (testCase.direction ?? `desc`) ||
       refillAttempt.limit === undefined ||
-      refillAttempt.limit > width + 2)
+      refillAttempt.limit > refillBound(testCase))
   ) {
     violations.push(`refill used an unbounded provider request`)
   } else if (
@@ -7396,10 +7399,9 @@ describe(`eager indexed ordered windows`, () => {
 
   // An unindexed joined window whose only domain row is ineligible. After a
   // signalling refetch the repair's bounded prefix holds just that row, so
-  // the window is short and the refill takes the documented full-source
-  // fallback. The refetch law allows that read for an unindexed plan only
-  // when its prefix leaves the window short.
-  it(`allows the full-source refill of a short unindexed window after a signalling refetch`, async () => {
+  // the window is short. The refill grows the prefix instead of reading the
+  // full source, which the refetch law forbids.
+  it(`grows the prefix of a short unindexed window after a signalling refetch`, async () => {
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -7636,7 +7638,17 @@ describe(`eager indexed ordered windows`, () => {
                       ? [4, 3]
                       : [4, 3, 2]
                   : [1, 2, 3, 4],
-                acquisition: extent === `missing` ? `required` : `forbidden`,
+                // An unindexed plan proves rows only up to its bounded
+                // prefix, so behind a joined filter it may grow the prefix
+                // even when the replacement row is installed (ARCHITECTURE.md,
+                // "an underfilled unindexed prefix grows"). A source filter
+                // leaves no rows out of the prefix, so it needs no request.
+                acquisition:
+                  extent === `missing`
+                    ? `required`
+                    : shape === `source`
+                      ? `forbidden`
+                      : `allowed`,
               }
             }),
           ),
@@ -7677,6 +7689,27 @@ describe(`eager indexed ordered windows`, () => {
           acquisition: `required` as const,
           answerTiming: `after-settlement` as const,
         })),
+      ),
+    ),
+    // An unindexed one-row window behind a joined filter installs only the
+    // prefix it grew to: the rejected leading row 4 and the window row 3.
+    // The departure of row 3 leaves the replacement row 2 missing, so the
+    // refill must grow the prefix before persistence settles.
+    ...([`joined`, `anti-joined`] as const).flatMap((shape) =>
+      ([`update`, `delete`] as const).flatMap((mutation) =>
+        ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+          ([`collection`, `effect`] as const).map((consumer) => ({
+            shape,
+            mutation,
+            consumer,
+            outcome,
+            width: 1 as const,
+            indexed: false,
+            extent: `missing` as const,
+            installedIds: [4, 3],
+            acquisition: `required` as const,
+          })),
+        ),
       ),
     ),
     {
@@ -8382,9 +8415,10 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   // The refetch law over unindexed joined windows behind a signalling
-  // provider. A repair must not read the full source, except for the
-  // documented refill of an unindexed plan whose bounded prefix leaves the
-  // window short. The campaign must reach both sides of that exception.
+  // provider. A repair must not read the full source, including the refill
+  // of an unindexed plan whose bounded prefix leaves the window short, which
+  // grows the prefix. The campaign must reach windows the prefix fills and
+  // windows it leaves short.
   // Ineligible rows crowd the bounded prefix and leave the window short, so
   // half the cases start with every row eligible, where the law applies.
   const eagerUnindexedRefetchCase = fc
@@ -8400,7 +8434,7 @@ describe(`eager indexed ordered windows`, () => {
         : testCase.initial,
     }))
   for (const campaign of [`fixed`, `random`] as const) {
-    it(`reads the full source after a signalling refetch only for a short unindexed refill (${campaign} campaign)`, async () => {
+    it(`grows a short unindexed prefix instead of reading the full source after a signalling refetch (${campaign} campaign)`, async () => {
       const property = `ordered-work.eager-unindexed-refetch`
       const reach = createOracleReach(
         property,

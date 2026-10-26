@@ -118,6 +118,8 @@ export class OrderedSourceLoader {
   private authorityGeneration = 0
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
+  // The rows the source's prefix held when it last grew.
+  private grownPrefixRows: number | undefined
   // The count of the last request that read from the start of the order,
   // until a continuation reads past it.
   private ownPrefixCount: number | undefined
@@ -482,14 +484,31 @@ export class OrderedSourceLoader {
     continuesOrderedPrefixRepair = false,
   ): void {
     if (!this.active || this.pending || this.stagedContinuation) return
-    if (this.lastPrefixCount === count) {
-      if ((this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) > 0) {
-        if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair()
-        this.loadFullSource(windowOperationGeneration)
-      } else if (continuesOrderedPrefixRepair) {
-        this.finishOrderedPrefixRepair(windowOperationGeneration)
+    const last = this.lastPrefixCount ?? 0
+    if (last >= count) {
+      if ((this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) === 0) {
+        if (continuesOrderedPrefixRepair) {
+          this.finishOrderedPrefixRepair(windowOperationGeneration)
+        }
+        return
       }
-      return
+      // A filter after the read dropped rows, so the prefix doubles: each read
+      // stays bounded by twice the last one, and none reads the full source.
+      // A short prefix can hide optimistic rows from this count, so it grows
+      // while growing still adds rows. Once growing adds none, the source
+      // holds no more rows.
+      const rows = this.subscription.readOrderedSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: last,
+      }).length
+      if (rows < last && rows <= (this.grownPrefixRows ?? -1)) {
+        if (continuesOrderedPrefixRepair) {
+          this.finishOrderedPrefixRepair(windowOperationGeneration)
+        }
+        return
+      }
+      this.grownPrefixRows = rows
+      count = last * 2
     }
     this.requestAndObserve(
       (tracking) =>
@@ -637,6 +656,7 @@ export class OrderedSourceLoader {
     }
     this.lastPage = undefined
     this.lastPrefixCount = undefined
+    this.grownPrefixRows = undefined
   }
 
   invalidateSourceOrdering(): void {
