@@ -470,6 +470,50 @@ const ownerGroups: ReadonlyArray<
     `sqlite-persistence`,
     `expression-index bigint-roundtrip bigint-rejection`,
   ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
+    `opfs`,
+    `page-lifecycle mixed-execute terminal-event close failure-cleanup`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts`,
+    `opfs`,
+    `request-order`,
+  ],
+  [
+    `db-ivm/tests/hash-failure-retry-oracle.property.test.ts`,
+    `ivm`,
+    `hash-failure-retry`,
+  ],
+  [`db-ivm/tests/hash-graph-oracle.property.test.ts`, `ivm`, `hash-graph`],
+  [
+    `db-ivm/tests/hash-mixed-graph-oracle.property.test.ts`,
+    `ivm`,
+    `hash-mixed-graph`,
+  ],
+  [`db-ivm/tests/hash-oracle.property.test.ts`, `ivm`, `hash-value`],
+  [
+    `db-ivm/tests/incrementalization-law-oracle.property.test.ts`,
+    `ivm`,
+    `incrementalization-law`,
+  ],
+  [
+    `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
+    `ivm`,
+    `topk-support-window`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,
+    `sqlite-persistence`,
+    `boolean-arity`,
+  ],
+  [`db/tests/btree-map-oracle.test.ts`, `btree-map`, `history`],
+  [
+    `db/tests/indexed-db/persistence-oracle.test.ts`,
+    `indexeddb`,
+    `settled-history`,
+  ],
+  [`db/tests/query/compiler/evaluators-oracle.test.ts`, `evaluators`, `like`],
 ]
 
 const owners = new Map<string, string>()
@@ -527,8 +571,17 @@ export type OracleReplayManifestEntry = {
   /**
    * `browser-replay` names a Playwright owner. The guarded Vitest runner
    * cannot witness it, so it rejects the target. Replay it with `command`.
+   * `seed-replay` names a property whose generator has no shrink path. A
+   * seed alone reproduces its history: `command` runs the owner directly
+   * with TANSTACK_DB_ORACLE_SEED, which reseeds its random campaign. The
+   * guarded runner, which witnesses a seed and path, rejects it.
    */
-  status: `assertion` | `statistics-only` | `browser-replay` | `no-named-owner`
+  status:
+    | `assertion`
+    | `statistics-only`
+    | `browser-replay`
+    | `seed-replay`
+    | `no-named-owner`
   file?: string
   /** The module that names the property, when the owner file imports it. */
   source?: string
@@ -568,6 +621,10 @@ const replayTestNames = new Map([
   ],
 ])
 
+// Properties whose own seeded generator replaces fast-check, so they have no
+// shrink path.
+const seedReplayProperties = new Set([`evaluators.like`])
+
 function directReplayTestName(property: string): string | undefined {
   if (property === `cold-join.compound`)
     return `recomputes generated compound histories, seed=undefined`
@@ -587,10 +644,12 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
       ? `no-named-owner`
       : file.endsWith(`.spec.ts`)
         ? `browser-replay`
-        : property.endsWith(`-statistics`) ||
-            property.endsWith(`.scenario-statistics`)
-          ? `statistics-only`
-          : `assertion`
+        : seedReplayProperties.has(property)
+          ? `seed-replay`
+          : property.endsWith(`-statistics`) ||
+              property.endsWith(`.scenario-statistics`)
+            ? `statistics-only`
+            : `assertion`
   const cwd = file?.split(`/`).slice(0, 2).join(`/`)
   return {
     property,
@@ -604,17 +663,21 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
         ? undefined
         : status === `browser-replay`
           ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
-          : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+          : status === `seed-replay`
+            ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
+            : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [
             `TANSTACK_DB_ORACLE_STATISTICS=1 (sampling only; no exact assertion replay)`,
           ]
-        : [
-            `TANSTACK_DB_ORACLE_SEED`,
-            `TANSTACK_DB_ORACLE_PATH`,
-            `TANSTACK_DB_ORACLE_PROPERTY`,
-          ],
+        : status === `seed-replay`
+          ? [`TANSTACK_DB_ORACLE_SEED`]
+          : [
+              `TANSTACK_DB_ORACLE_SEED`,
+              `TANSTACK_DB_ORACLE_PATH`,
+              `TANSTACK_DB_ORACLE_PROPERTY`,
+            ],
   }
 })
 

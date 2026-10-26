@@ -23,7 +23,12 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../../src'
-import { oracleRuns } from '../oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+  recordOracleReplay,
+} from '../oracle-config'
 import {
   Channel,
   assertRows,
@@ -303,50 +308,44 @@ describe('settled histories', () => {
     expect(sorted(expected)).toEqual(expected)
   })
 
-  const seedText = process.env.INDEXEDDB_ORACLE_SEED
-  const path = process.env.INDEXEDDB_ORACLE_PATH
-  if ((seedText === undefined) !== (path === undefined))
-    throw new Error(
-      'Replay requires INDEXEDDB_ORACLE_SEED and INDEXEDDB_ORACLE_PATH together',
-    )
-  if (
-    seedText !== undefined &&
-    (!/^-?\d+$/.test(seedText) || !/^\d+(?::\d+)*$/.test(path!))
-  )
-    throw new Error('Invalid oracle replay coordinates')
-  const campaigns =
-    seedText === undefined
-      ? [{ mode: 'fixed', seed: 1179001 }, { mode: 'random' }]
-      : [{ mode: 'replay', seed: Number(seedText), path }]
-  for (const { mode, ...parameters } of campaigns) {
-    it(
-      'matches authored data through ' + mode + ' histories',
-      async () => {
-        console.info('indexeddb.persistence campaign', mode, {
-          numRuns: oracleRuns(30),
-          ...parameters,
-        })
-        await fc.assert(fc.asyncProperty(history, runHistory), {
-          numRuns: oracleRuns(30),
-          verbose: true,
-          ...parameters,
-          asyncReporter: async (details) => {
-            console.info('indexeddb.persistence completed', {
-              mode,
-              seed: details.seed,
-              path: details.counterexamplePath,
-              runs: details.numRuns,
-              failed: details.failed,
-            })
-            const report = await fc.asyncDefaultReportMessage(details)
-            if (report !== undefined)
-              throw new Error(report, { cause: details.errorInstance })
-          },
-        })
-      },
-      30_000,
-    )
+  // A fixed campaign and a random campaign share one grammar and budget. A path
+  // replay of this property selects only its random campaign.
+  const settledProperty = `indexeddb.settled-history`
+  const settledCampaign = (
+    mode: `fixed` | `random`,
+    parameters: { numRuns: number; seed?: number; path?: string },
+  ) => {
+    return async () => {
+      console.info('indexeddb.persistence campaign', mode, parameters)
+      await fc.assert(fc.asyncProperty(history, runHistory), {
+        verbose: true,
+        ...parameters,
+        asyncReporter: async (details) => {
+          recordOracleReplay(settledProperty, details)
+          console.info('indexeddb.persistence completed', {
+            mode,
+            seed: details.seed,
+            path: details.counterexamplePath,
+            runs: details.numRuns,
+            failed: details.failed,
+          })
+          const report = await fc.asyncDefaultReportMessage(details)
+          if (report !== undefined)
+            throw new Error(report, { cause: details.errorInstance })
+        },
+      })
+    }
   }
+  oracleReplayTest(it)(
+    'matches authored data through fixed histories',
+    settledCampaign(`fixed`, { numRuns: oracleRuns(30), seed: 1179001 }),
+    30_000,
+  )
+  oracleReplayTest(it, settledProperty)(
+    'matches authored data through random histories',
+    settledCampaign(`random`, oraclePropertyOptions(30, settledProperty)),
+    30_000,
+  )
 })
 
 /** Three distinct Collection identities receive one mixed manual payload.

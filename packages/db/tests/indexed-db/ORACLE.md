@@ -214,13 +214,15 @@ facet without replaying both.
 From this package directory:
 
 ```sh
-INDEXEDDB_ORACLE_SEED=1179001 INDEXEDDB_ORACLE_PATH=0:1:0:0:2:2 \
+TANSTACK_DB_ORACLE_SEED=1179001 TANSTACK_DB_ORACLE_PATH=0:1:0:0:2:2 \
+  TANSTACK_DB_ORACLE_PROPERTY=indexeddb.settled-history \
   pnpm exec vitest run tests/indexed-db/persistence-oracle.test.ts \
-  -t 'replay histories' --coverage.enabled=false --typecheck.enabled=false
+  -t 'random histories' --coverage.enabled=false --typecheck.enabled=false
 ```
 
-Replay selects only that campaign without fixed/random execution first. This
-uses an array arbitrary, not fc.commands, so command replayPath does not apply.
+A path replay of `indexeddb.settled-history` runs only its random campaign; the
+fixed campaign stands aside. This uses an array arbitrary, not fc.commands, so
+command replayPath does not apply.
 Those coordinates reproduced the original clear failure at the public snapshot
 checkpoint and pass with the repair. The update/clear counterexample is also a
 permanent authored case. Cleanup captures the primary error before releasing

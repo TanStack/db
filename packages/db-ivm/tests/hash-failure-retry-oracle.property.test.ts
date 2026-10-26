@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
-import { oracleRuns } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 
 /**
  * A failed structural traversal must publish no reusable hash state.
@@ -43,26 +47,9 @@ const retryHistoryArbitrary = fc.record({
   value: fc.integer({ min: -20, max: 20 }),
 })
 
-const replaySeedText = process.env.TANSTACK_DB_IVM_HASH_RETRY_SEED
-const replayPath = process.env.TANSTACK_DB_IVM_HASH_RETRY_PATH
-if (replayPath !== undefined && replaySeedText === undefined) {
-  throw new Error(`TANSTACK_DB_IVM_HASH_RETRY_PATH requires a seed`)
-}
-const replaySeed =
-  replaySeedText === undefined ? undefined : Number(replaySeedText)
-if (
-  replaySeedText !== undefined &&
-  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-) {
-  throw new Error(`TANSTACK_DB_IVM_HASH_RETRY_SEED must be an integer`)
-}
-const campaigns =
-  replaySeed === undefined
-    ? [
-        { name: `fixed seed 205206`, seed: 205206, path: undefined },
-        { name: `random seed`, seed: undefined, path: undefined },
-      ]
-    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
+// The fixed campaign is stable. The random campaign is a fresh seed, or the
+// recorded seed and path of this property when replayed.
+const retryProperty = `ivm.hash-failure-retry`
 
 function expectFailureCut(
   error: unknown,
@@ -130,20 +117,28 @@ describe(`getter failure does not publish partial structural hashes`, () => {
     expectRetryHistory({ completed: 3, tail: 0, failures: 3, value: 20 })
   })
 
-  for (const { name, seed, path } of campaigns) {
-    it(`preserves failure causes and retry cuts (${name})`, () => {
+  oracleReplayTest(it)(
+    `preserves failure causes and retry cuts (fixed seed 205206)`,
+    () => {
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
         ),
-        {
-          numRuns: oracleRuns(100),
-          ...(seed === undefined ? {} : { seed }),
-          ...(path === undefined ? {} : { path }),
-        },
+        { numRuns: oracleRuns(100), seed: 205206 },
       )
-    })
-  }
+    },
+  )
+  oracleReplayTest(it, retryProperty)(
+    `preserves failure causes and retry cuts (random seed)`,
+    () => {
+      fc.assert(
+        fc.property(retryHistoryArbitrary, (history) =>
+          expectRetryHistory(history),
+        ),
+        oraclePropertyOptions(100, retryProperty),
+      )
+    },
+  )
 
   it(`rejects cached-sibling and substituted-error observations`, () => {
     const error = new Error(`getter rejected`)

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
-import { oracleRuns } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 
 /**
  * Structural hash follows the reachable value graph, not object identity.
@@ -21,28 +25,7 @@ import { oracleRuns } from '../../db/tests/oracle-config.js'
  */
 
 const fixedSeed = 1657019
-const replaySeedText = process.env.TANSTACK_DB_IVM_HASH_GRAPH_SEED
-const replayPath = process.env.TANSTACK_DB_IVM_HASH_GRAPH_PATH
-const replaySeed =
-  replaySeedText === undefined ? undefined : Number(replaySeedText)
-if (
-  replaySeedText !== undefined &&
-  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-) {
-  throw new Error(`TANSTACK_DB_IVM_HASH_GRAPH_SEED must be an integer`)
-}
-if (replayPath !== undefined && replaySeed === undefined) {
-  throw new Error(
-    `TANSTACK_DB_IVM_HASH_GRAPH_PATH requires TANSTACK_DB_IVM_HASH_GRAPH_SEED`,
-  )
-}
-const campaigns =
-  replaySeed === undefined
-    ? [
-        { name: `fixed`, seed: fixedSeed, path: undefined },
-        { name: `random`, seed: undefined, path: undefined },
-      ]
-    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
+const graphProperty = `ivm.hash-graph`
 
 // This adjacency list exists only in the model; production receives a rooted
 // JavaScript value. Kahn's algorithm checks reachability without using the
@@ -176,20 +159,28 @@ describe(`structural hash graph boundary`, () => {
     expectGraphHash(edges)
   })
 
-  for (const campaign of campaigns) {
-    it(`matches reachable graph cycles and shared DAGs (${campaign.name})`, () => {
+  oracleReplayTest(it)(
+    `matches reachable graph cycles and shared DAGs (fixed)`,
+    () => {
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
         }),
-        {
-          numRuns: oracleRuns(300),
-          ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-          ...(campaign.path === undefined ? {} : { path: campaign.path }),
-        },
+        { numRuns: oracleRuns(300), seed: fixedSeed },
       )
-    })
-  }
+    },
+  )
+  oracleReplayTest(it, graphProperty)(
+    `matches reachable graph cycles and shared DAGs (random)`,
+    () => {
+      fc.assert(
+        fc.property(graphArbitrary, (edges) => {
+          expectGraphHash(edges)
+        }),
+        oraclePropertyOptions(300, graphProperty),
+      )
+    },
+  )
 
   it(`rejects cycle acceptance while accepting its acyclic near-neighbor`, () => {
     expect(() => expectGraphHash([[1], [0]], () => 0)).toThrow()

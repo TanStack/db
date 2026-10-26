@@ -463,6 +463,26 @@ describe(`named oracle replay manifest`, () => {
     ).toEqual([])
   })
 
+  it(`replays a property without a shrink path from its seed alone`, () => {
+    // The LIKE oracle draws its cases from its own seeded generator, so the
+    // guarded runner, which witnesses a seed and a path, cannot witness it.
+    expect(
+      oracleReplayManifest
+        .filter(({ status }) => status === `seed-replay`)
+        .map(({ property, command, environment }) => ({
+          property,
+          command,
+          environment,
+        })),
+    ).toEqual([
+      {
+        property: `evaluators.like`,
+        command: `pnpm exec vitest run tests/query/compiler/evaluators-oracle.test.ts`,
+        environment: [`TANSTACK_DB_ORACLE_SEED`],
+      },
+    ])
+  })
+
   it(`gives every index and pagination matrix property a direct test selector`, () => {
     const direct = oracleReplayManifest.filter(({ property }) =>
       /^(index-update|pagination\.matrix)\./.test(property),

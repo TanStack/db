@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
-import { oracleRuns } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 import type { Arbitrary } from 'fast-check'
 
 /**
@@ -79,47 +83,24 @@ function expectPermutedHashes(
 }
 
 // The reusable value laws run with identical generators and checks in a
-// stable campaign and a fresh campaign. Select a single test name with Vitest
-// when replaying, for example:
-// TANSTACK_DB_IVM_HASH_SEED=123 TANSTACK_DB_IVM_HASH_PATH=0:1 \
+// fixed campaign and a random campaign. A path replay of `ivm.hash-value`
+// selects only its random campaign. Replay it with Vitest, for example:
+// TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 \
+//   TANSTACK_DB_ORACLE_PROPERTY=ivm.hash-value \
 //   pnpm exec vitest --run tests/hash-oracle.property.test.ts -t 'cloned arrays have same hash'
-const valueReplaySeedText = process.env.TANSTACK_DB_IVM_HASH_SEED
-const valueReplayPath = process.env.TANSTACK_DB_IVM_HASH_PATH
-const valueReplaySeed =
-  valueReplaySeedText === undefined ? undefined : Number(valueReplaySeedText)
-const valueCampaigns =
-  valueReplaySeedText === undefined && valueReplayPath === undefined
-    ? [
-        { name: `fixed`, seed: 1657021 },
-        { name: `random`, seed: undefined },
-      ]
-    : [{ name: `replay`, seed: valueReplaySeed }]
+const valueProperty = `ivm.hash-value`
 
 function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   [K in keyof Ts]: Arbitrary<Ts[K]>
 }) {
   return (name: string, check: (...values: Ts) => void): void => {
     const property = fc.property(...arbitraries, check)
-    for (const { name: campaign, seed } of valueCampaigns) {
-      it(`${name} (${campaign})`, () => {
-        if (valueReplayPath !== undefined && valueReplaySeedText === undefined)
-          throw new Error(`TANSTACK_DB_IVM_HASH_PATH requires a seed`)
-        if (
-          valueReplaySeedText !== undefined &&
-          (valueReplaySeedText.trim() === `` ||
-            typeof seed !== `number` ||
-            !Number.isSafeInteger(seed) ||
-            seed < -2147483648 ||
-            seed > 2147483647)
-        )
-          throw new Error(`TANSTACK_DB_IVM_HASH_SEED must be a 32-bit integer`)
-        fc.assert(property, {
-          numRuns: oracleRuns(100),
-          ...(seed === undefined ? {} : { seed }),
-          ...(valueReplayPath === undefined ? {} : { path: valueReplayPath }),
-        })
-      })
-    }
+    oracleReplayTest(it)(`${name} (fixed)`, () => {
+      fc.assert(property, { numRuns: oracleRuns(100), seed: 1657021 })
+    })
+    oracleReplayTest(it, valueProperty)(`${name} (random)`, () => {
+      fc.assert(property, oraclePropertyOptions(100, valueProperty))
+    })
   }
 }
 

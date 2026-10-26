@@ -26,7 +26,10 @@ const entry = oracleReplayManifest.find(
 )
 if (entry?.status !== `assertion`) {
   throw new Error(
-    `oracle replay target ${property}: ${entry?.status ?? `missing manifest entry`}`,
+    `oracle replay target ${property}: ${entry?.status ?? `missing manifest entry`}` +
+      (entry?.command === undefined
+        ? ``
+        : `. Replay it with: ${entry.environment.join(` `)} ${entry.command}`),
   )
 }
 
