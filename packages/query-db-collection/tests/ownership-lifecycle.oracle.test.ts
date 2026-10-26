@@ -6496,6 +6496,12 @@ describe(`query collection ownership lifecycle`, () => {
     }
 
     await collection._sync.loadSubset(detail)
+    // Earlier result transactions apply first, so the count below grows only
+    // with the expiry's held transaction.
+    await vi.waitFor(
+      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+      retentionWait,
+    )
     mutation.mutate(() => collection.insert(blocker))
     collection._sync.unloadSubset(detail)
     const pendingBeforeExpiry =
@@ -6579,6 +6585,12 @@ describe(`query collection ownership lifecycle`, () => {
     }
 
     await collection._sync.loadSubset(detail)
+    // Earlier result transactions apply first, so the count below grows only
+    // with the expiry's held transaction.
+    await vi.waitFor(
+      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+      retentionWait,
+    )
     mutation.mutate(() => collection.insert(blocker))
     collection._sync.unloadSubset(detail)
     const pendingBeforeExpiry =
@@ -6704,6 +6716,12 @@ describe(`query collection ownership lifecycle`, () => {
 
     await collection._sync.loadSubset(detail)
     await collection._sync.loadSubset(peer)
+    // Earlier result transactions apply first, so the count below grows only
+    // with the expiry's held transaction.
+    await vi.waitFor(
+      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+      retentionWait,
+    )
     mutation.mutate(() => collection.insert(blocker))
     collection._sync.unloadSubset(detail)
     const pendingBeforeExpiry =
@@ -6795,6 +6813,12 @@ describe(`query collection ownership lifecycle`, () => {
 
     await collection._sync.loadSubset(detail)
     await collection._sync.loadSubset(peer)
+    // Earlier result transactions apply first, so the count below grows only
+    // with the expiry's held transaction.
+    await vi.waitFor(
+      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+      retentionWait,
+    )
     mutation.mutate(() => collection.insert(blocker))
     collection._sync.unloadSubset(detail)
     const pendingBeforeExpiry =
@@ -7604,6 +7628,12 @@ describe(`query collection ownership lifecycle`, () => {
     })
 
     await collection._sync.loadSubset(detail)
+    // Earlier result transactions apply first, so the count below grows only
+    // with the expiry's held transaction.
+    await vi.waitFor(
+      () => expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+      retentionWait,
+    )
     mutation.mutate(() => collection.insert(blocker))
     collection._sync.unloadSubset(detail)
     await settleTurn()
