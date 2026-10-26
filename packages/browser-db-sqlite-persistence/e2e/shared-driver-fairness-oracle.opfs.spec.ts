@@ -11,6 +11,7 @@
  * the scheduling laws.
  */
 import { expect, test } from '@playwright/test'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import type { Page } from '@playwright/test'
 import type { OPFSOracleResult } from './shared-driver-fairness.opfs'
 
@@ -64,6 +65,8 @@ function expectLawsHold(result: OPFSOracleResult): void {
   expect(result.observation.cleanupFailures).toEqual([])
   expect(result.opfsCleanupFailures).toEqual([])
 }
+
+declareOracle({ check: [expectLawsHold] })
 
 test(`real Chromium OPFS fixture reaches and cleans up cold hydration`, async ({
   page,

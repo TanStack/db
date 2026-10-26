@@ -1,6 +1,7 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
@@ -244,6 +245,8 @@ TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
+declareOracle({ check: [checkDiagnostic], model: [referenceMessage] })
+
 describe(`OPFS worker diagnostics oracle`, () => {
   if (!oracleReplayRequested()) {
     it.each(diagnosticExamples)(
