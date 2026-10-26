@@ -41,7 +41,9 @@ import type {
  * plus caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
- * locking, real bfcache admission, or browser process teardown.
+ * locking, real bfcache admission, or browser process teardown. The open
+ * histories begin after asset resolution; the packaged-consumer e2e test holds
+ * the built package's Vite asset lookup for the same deadline and abort.
  */
 
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>

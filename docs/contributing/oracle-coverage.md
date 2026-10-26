@@ -1601,6 +1601,17 @@ the lock. This controlled lock holder does not
 reproduce a frozen tab or establish behavior in other browsers.
 The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
 preserves the exact-head unit and Chromium evidence and the queued-lock mutant.
+The jsdom open cases start after asset resolution. Under a Vite dev server, the
+built package first asks Vite for the asset URLs that the dependency optimizer
+did not move. The packaged-consumer
+[receiving witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
+holds that WASM lookup in Chromium. It expects the fixed open outcomes: the
+deadline rejects with `TimeoutError`, an abort rejects with its reason, neither
+creates a worker after the lookup completes, and a later open succeeds. The
+earlier opener, which started the deadline after asset resolution, left both
+opens pending. The witness restates those outcomes because the lifecycle open
+cases are fixed examples without a shared model module. It covers one held
+lookup in Vite development, not webpack, Turbopack, or a failed lookup.
 
 The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how

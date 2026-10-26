@@ -204,6 +204,7 @@ beforeAll(async () => {
   vi.stubGlobal(`FileSystemFileHandle`, {
     prototype: { createSyncAccessHandle: () => {} },
   })
+  vi.stubGlobal(`location`, { href: `https://example.test/` })
   // The connection registers pagehide here; the worker registers message.
   vi.stubGlobal(
     `addEventListener`,

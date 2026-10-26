@@ -13,6 +13,9 @@ function packageWaSqliteWasm(): Plugin {
     name: `package-wa-sqlite-wasm`,
     enforce: `pre`,
     apply: `build`,
+    // Source served by Vite already has resolved asset URLs. Only the built
+    // package must find its assets after Vite's dependency optimizer moves it.
+    config: () => ({ define: { __BROWSER_SQLITE_PACKAGE_BUILD__: `true` } }),
     resolveId(id) {
       if (id === waSqliteWasmImport) return waSqliteWasmModule
       return undefined

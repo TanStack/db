@@ -19,7 +19,10 @@ import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build, createServer, preview } from 'vite'
 import type { Response } from '@playwright/test'
-import type { BrowserWASQLiteDatabase } from '../src'
+import type {
+  BrowserWASQLiteDatabase,
+  OpenBrowserWASQLiteOPFSDatabaseOptions,
+} from '../src'
 
 const packageDirectory = fileURLToPath(new URL('../', import.meta.url))
 const temporaryDirectory = realpathSync(
@@ -78,7 +81,7 @@ function createConsumer(): void {
   writeFileSync(
     join(consumerDirectory, `main.js`),
     `import { openBrowserWASQLiteOPFSDatabase } from '@tanstack/browser-db-sqlite-persistence';
-globalThis.openDatabase = () => openBrowserWASQLiteOPFSDatabase({ databaseName: 'consumer.sqlite' });`,
+globalThis.openDatabase = (options) => openBrowserWASQLiteOPFSDatabase({ databaseName: 'consumer.sqlite', ...options });`,
   )
 }
 
@@ -202,6 +205,146 @@ it(`opens and queries SQLite under a nested base without asset configuration`, a
   } finally {
     await productionServer?.close()
     await rootCacheServer.close()
+    await developmentServer.close()
+    await browser.close()
+  }
+}, 120_000)
+
+type ProbeGlobal = typeof globalThis & {
+  openDatabase: (
+    options?: Partial<OpenBrowserWASQLiteOPFSDatabaseOptions>,
+  ) => Promise<BrowserWASQLiteDatabase>
+  createdWorkers: number
+}
+
+/*
+ * The OPFS page lifecycle oracle owns the open deadline and caller abort with a
+ * controlled Worker in jsdom. Under a Vite dev server, the built package has an
+ * earlier open step: it asks Vite for the asset URLs that the dependency
+ * optimizer did not move. Only a real dev server reaches that step. This
+ * receiving witness holds the WASM lookup and expects the oracle's fixed open
+ * outcomes: the deadline rejects with TimeoutError, an abort rejects with its
+ * reason, and neither creates a worker, even after the held lookup completes.
+ * A later open in the same page still succeeds.
+ */
+it(`applies the open deadline and abort while Vite resolves packaged assets`, async () => {
+  const heldLookups: Array<() => void> = []
+  let holdLookups = true
+  const browser = await chromium.launch({ headless: true })
+  const developmentServer = await createServer({
+    configFile: false,
+    root: consumerDirectory,
+    base: consumerBase,
+    logLevel: `error`,
+    server: { host: `127.0.0.1`, port: 0 },
+    plugins: [
+      {
+        name: `hold-packaged-wasm-lookup`,
+        configureServer(server) {
+          server.middlewares.use((request, _response, next) => {
+            if (
+              holdLookups &&
+              request.url?.includes(
+                `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`,
+              )
+            ) {
+              heldLookups.push(next)
+              return
+            }
+            next()
+          })
+        },
+      },
+    ],
+  })
+
+  try {
+    await developmentServer.listen()
+    const page = await browser.newPage()
+    await page.addInitScript(() => {
+      const probe = globalThis as ProbeGlobal
+      const NativeWorker = probe.Worker
+      probe.createdWorkers = 0
+      probe.Worker = class extends NativeWorker {
+        constructor(...args: ConstructorParameters<typeof Worker>) {
+          probe.createdWorkers++
+          super(...args)
+        }
+      }
+    })
+    await page.goto(developmentServer.resolvedUrls!.local[0]!)
+
+    const interrupted = await page.evaluate(async () => {
+      const probe = globalThis as ProbeGlobal
+      // A bounded wait reports an open that ignores its deadline or signal.
+      const settle = (open: Promise<BrowserWASQLiteDatabase>) =>
+        Promise.race([
+          open.then(
+            () => ({ name: `opened`, message: `` }),
+            (error: Error) => ({ name: error.name, message: error.message }),
+          ),
+          new Promise<{ name: string; message: string }>((resolve) =>
+            setTimeout(() => resolve({ name: `pending`, message: `` }), 2_000),
+          ),
+        ])
+      const timedOut = await settle(probe.openDatabase({ timeoutMs: 100 }))
+      const controller = new AbortController()
+      const aborted = settle(
+        probe.openDatabase({ timeoutMs: 0, signal: controller.signal }),
+      )
+      setTimeout(() => {
+        controller.abort(new DOMException(`App stopped opening`, `AbortError`))
+      }, 50)
+      return {
+        timedOut,
+        aborted: await aborted,
+        createdWorkers: probe.createdWorkers,
+      }
+    })
+    expect(interrupted).toEqual({
+      timedOut: {
+        name: `TimeoutError`,
+        message: `Opening browser OPFS database timed out after 100 ms`,
+      },
+      aborted: { name: `AbortError`, message: `App stopped opening` },
+      createdWorkers: 0,
+    })
+    expect(heldLookups.length).toBeGreaterThan(0)
+
+    holdLookups = false
+    const lookupCompleted = page.waitForResponse((response) =>
+      response
+        .url()
+        .includes(
+          `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`,
+        ),
+    )
+    for (const release of heldLookups.splice(0)) release()
+    await lookupCompleted
+
+    const reopened = await page.evaluate(async () => {
+      const probe = globalThis as ProbeGlobal
+      // Let continuations of the interrupted opens run before observing.
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const workersAfterLateLookup = probe.createdWorkers
+      const database = await probe.openDatabase()
+      try {
+        return {
+          workersAfterLateLookup,
+          rows: await database.execute(`SELECT 42 AS value`),
+          createdWorkers: probe.createdWorkers,
+        }
+      } finally {
+        await database.close?.()
+      }
+    })
+    expect(reopened).toEqual({
+      workersAfterLateLookup: 0,
+      rows: [{ value: 42 }],
+      createdWorkers: 1,
+    })
+  } finally {
+    for (const release of heldLookups.splice(0)) release()
     await developmentServer.close()
     await browser.close()
   }
