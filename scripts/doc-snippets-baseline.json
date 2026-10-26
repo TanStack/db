@@ -61,6 +61,7 @@
     "a066dfd28d064b54"
   ],
   "docs/framework/angular/overview.md": ["55d749380b445d1a"],
+  "docs/framework/preact/overview.md": ["a3802a251c868f43"],
   "docs/framework/react/overview.md": ["1c1f2ec0a48394e3", "d89b6c8f8cab169d"],
   "docs/framework/solid/overview.md": ["1d73c50b6fbcdc45"],
   "docs/guides/collection-options-creator.md": [
@@ -326,6 +327,7 @@
     "d5e14ff028e79b54",
     "e8cea9396752d82a"
   ],
+  "packages/preact-db/skills/preact-db/SKILL.md": ["c936ef17942636b1"],
   "packages/react-db/skills/react-db/SKILL.md": [
     "35981f7ab4a5825e",
     "47c932367431a68f",

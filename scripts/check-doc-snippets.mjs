@@ -194,8 +194,9 @@ const exported = new Map()
 }
 
 // The framework a file documents, for names several adapters export.
+// `preact` comes before `react`, which its name contains.
 const frameworkOf = (file) =>
-  [`angular`, `solid`, `svelte`, `vue`, `react`].find((name) =>
+  [`angular`, `solid`, `svelte`, `vue`, `preact`, `react`].find((name) =>
     file.includes(name),
   ) ?? `react`
 
@@ -204,7 +205,7 @@ function packageFor(name, file) {
   if (owners.length === 1) return owners[0]
   return (
     owners.find((owner) => owner === `@tanstack/db`) ??
-    owners.find((owner) => owner.includes(frameworkOf(file))) ??
+    owners.find((owner) => owner === `@tanstack/${frameworkOf(file)}-db`) ??
     owners[0]
   )
 }

@@ -990,9 +990,19 @@ Development builds show the full message. For example:
 setWindow() cannot change the limit of a findOne() query.
 ```
 
-<a id="error-246"></a>
+<a id="error-245"></a>
 
-## Error 246: `GroupingOperatorRequiredError`
+## Error 245: `SourceCollectionIdReuseError`
+
+Development builds show the full message. For example:
+
+```text
+[useLiveQuery] Collection ID "todos" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.
+```
+
+<a id="error-247"></a>
+
+## Error 247: `GroupingOperatorRequiredError`
 
 Development builds show the full message. For example:
 
@@ -1000,9 +1010,9 @@ Development builds show the full message. For example:
 groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.
 ```
 
-<a id="error-247"></a>
+<a id="error-248"></a>
 
-## Error 247: `IncludeOperatorRequiredError`
+## Error 248: `IncludeOperatorRequiredError`
 
 Development builds show the full message. For example:
 
@@ -2490,9 +2500,19 @@ Development builds show this message, with `${...}` replaced by values:
 A windowed or findOne result row has no include route
 ```
 
-<a id="error-248"></a>
+<a id="error-246"></a>
 
-## Error 248: `query/builder/index.ts`
+## Error 246: `live-query-window-binding.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.
+```
+
+<a id="error-249"></a>
+
+## Error 249: `query/builder/index.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2500,9 +2520,9 @@ Development builds show this message, with `${...}` replaced by values:
 include() must wrap a subquery builder
 ```
 
-<a id="error-249"></a>
+<a id="error-250"></a>
 
-## Error 249: `query/builder/index.ts`
+## Error 250: `query/builder/index.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 

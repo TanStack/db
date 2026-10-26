@@ -929,12 +929,19 @@
     "template": "A windowed or findOne result row has no include route",
     "literals": ["A windowed or findOne result row has no include route"]
   },
-  "248": {
+  "246": {
+    "file": "live-query-window-binding.ts",
+    "template": "getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.",
+    "literals": [
+      "getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination."
+    ]
+  },
+  "249": {
     "file": "query/builder/index.ts",
     "template": "include() must wrap a subquery builder",
     "literals": ["include() must wrap a subquery builder"]
   },
-  "249": {
+  "250": {
     "file": "query/builder/index.ts",
     "template": "include() must wrap a subquery builder",
     "literals": ["include() must wrap a subquery builder"]

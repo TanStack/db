@@ -615,7 +615,7 @@ export class IncludeOperatorRequiredError extends QueryBuilderError {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `A subquery in select() needs include(), toArray(), or materialize(). Wrap the ${field} field: ${field}: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.`
-        : codedMessage(247, { field }),
+        : codedMessage(248, { field }),
     )
   }
 }
@@ -731,7 +731,7 @@ export class GroupingOperatorRequiredError extends QueryCompilationError {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.`
-        : codedMessage(246),
+        : codedMessage(247),
     )
   }
 }
@@ -1191,5 +1191,26 @@ export class UnhashableQueryIRError extends Error {
         : codedMessage(87, { path, reason }),
     )
     this.name = `UnhashableQueryIRError`
+  }
+}
+
+/**
+ * Error thrown when a mounted framework binding that compares query identity
+ * reads a different source Collection under a Collection ID it has already
+ * read, in an earlier query or the same one. The identity names each source by
+ * its ID, so the binding could otherwise keep a live query that reads the old
+ * source.
+ */
+export class SourceCollectionIdReuseError extends TanStackDBError {
+  constructor(
+    public readonly bindingName: string,
+    public readonly collectionId: string,
+  ) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[${bindingName}] Collection ID "${collectionId}" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.`
+        : codedMessage(245, { bindingName, collectionId }),
+    )
+    this.name = `SourceCollectionIdReuseError`
   }
 }

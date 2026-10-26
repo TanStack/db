@@ -1140,7 +1140,7 @@ function buildNestedSelect(
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `include() must wrap a subquery builder`
-          : codedMessage(248),
+          : codedMessage(249),
       )
     }
     return buildIncludesSubquery(
@@ -1218,7 +1218,7 @@ function buildNestedSelect(
         throw new Error(
           devBuild() && process.env.NODE_ENV !== `production`
             ? `include() must wrap a subquery builder`
-            : codedMessage(249),
+            : codedMessage(250),
         )
       }
       out[k] = buildIncludesSubquery(

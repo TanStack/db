@@ -261,6 +261,9 @@
   "SetWindowFindOneLimitError": [
     "setWindow() cannot change the limit of a findOne() query."
   ],
+  "SourceCollectionIdReuseError": [
+    "[useLiveQuery] Collection ID \"todos\" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID."
+  ],
   "GroupingOperatorRequiredError": [
     "groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra."
   ],

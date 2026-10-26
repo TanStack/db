@@ -26,6 +26,7 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type { PooledLiveQueries } from '@tanstack/db'
@@ -51,10 +52,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-svelte-${sourceSeq++}`,
+      id: collectionId ?? `conformance-svelte-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -206,6 +208,7 @@ function mountControllable<P>(
 ): ControllableHandle<P> {
   let param = $state(initial)
   let query: any
+  const published = createPublicationLog()
   const dispose = $effect.root(() => {
     query = opts?.pool
       ? useLiveQuery(
@@ -213,12 +216,21 @@ function mountControllable<P>(
           [() => param],
         )
       : useLiveQuery((q: any) => build(q, param), [() => param])
+    // Svelte renders the value each pre-effect run reads.
+    $effect.pre(() => {
+      published.record(query.data)
+    })
   })
   const handle = makeHandle(() => query, dispose)
   return {
     ...handle,
+    publications: published.values,
     async setParam(next: P) {
       param = next
+      // The first paint after the change: the framework has flushed its
+      // reactive work, but no later task has run.
+      flushSync()
+      published.record(query.data)
       await settle()
     },
   }
@@ -226,6 +238,8 @@ function mountControllable<P>(
 
 const svelteDriver: LiveQueryDriver = {
   name: `svelte`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,

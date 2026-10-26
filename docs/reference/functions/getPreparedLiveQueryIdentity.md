@@ -7,7 +7,7 @@ title: getPreparedLiveQueryIdentity
 function getPreparedLiveQueryIdentity(value, pool?): unknown;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L167)
+Defined in: [packages/db/src/live-query-options.ts:231](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L231)
 
 ## Parameters
 

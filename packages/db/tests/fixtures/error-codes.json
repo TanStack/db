@@ -91,6 +91,7 @@
   "GetKeyRequiredError": 178,
   "DuplicateTransactionIdError": 233,
   "SetWindowFindOneLimitError": 244,
-  "GroupingOperatorRequiredError": 246,
-  "IncludeOperatorRequiredError": 247
+  "SourceCollectionIdReuseError": 245,
+  "GroupingOperatorRequiredError": 247,
+  "IncludeOperatorRequiredError": 248
 }
