@@ -853,6 +853,15 @@ const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
 const DEMAND_COVERAGE_PREFIX = `persisted:coverage:`
 const demandCoverageKey = (options: LoadSubsetOptions): string =>
   `${DEMAND_COVERAGE_PREFIX}${getLoadSubsetDemandKey(options)}`
+// A window covers exactly the rows it held (maintainer decision,
+// 2026-10-26), so its coverage also records their keys, in any order.
+const windowKeys = (
+  options: LoadSubsetOptions,
+  rows: ReadonlyArray<{ key: string | number }>,
+): string | undefined =>
+  options.limit === undefined
+    ? undefined
+    : JSON.stringify(rows.map(({ key }) => key).sort())
 const CACHE_CLAIM_RENEW_WINDOW_MS = 60_000
 const MAX_TIMER_TIMEOUT_MS = 2_147_483_647
 
@@ -2928,6 +2937,8 @@ class PersistedCollectionRuntime<
     ) {
       return upstream
     }
+    // A released load owns no wait, even if its source ignores the abort.
+    if (options.signal?.aborted) return
     const deadlineAt = startedAt + this.persistedReadiness.networkTimeoutMs
     return new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, Math.max(0, deadlineAt - Date.now()))
@@ -2935,7 +2946,6 @@ class PersistedCollectionRuntime<
         clearTimeout(timer)
         resolve()
       }
-      // A released load owns no wait, even if its source ignores the abort.
       options.signal?.addEventListener(`abort`, settle, { once: true })
       void upstream.catch(() => undefined).then(settle)
     })
@@ -2946,63 +2956,76 @@ class PersistedCollectionRuntime<
   // generation does not count.
   private currentCoverageRecord(
     options: LoadSubsetOptions,
-  ): { rows: number } | undefined {
+  ): { rows: number; keys?: string } | undefined {
     const record = this.syncControls.metadata?.collection.get(
       demandCoverageKey(options),
-    ) as { generation?: unknown; rows?: unknown } | undefined
+    ) as { generation?: unknown; rows?: unknown; keys?: string } | undefined
     return record?.generation === this.storageCollectionId &&
       typeof record.rows === `number`
-      ? { rows: record.rows }
+      ? { rows: record.rows, keys: record.keys }
       : undefined
   }
 
   // The rows that this demand reads from SQLite in the current generation.
-  // A read under an expired cache claim proves nothing: it returns undefined
-  // and starts claim recovery. Any other failure propagates.
-  private async countDemandRows(
+  // The read waits behind every source transaction already committed, so it
+  // sees their rows durably. Coverage is bookkeeping: a failed read proves
+  // nothing and returns undefined, and the load keeps its own outcome. A
+  // read under an expired cache claim also starts claim recovery.
+  private async readDemandRows(
     options: LoadSubsetOptions,
-  ): Promise<number | undefined> {
+  ): Promise<Array<{ key: string | number }> | undefined> {
     try {
-      const rows = await this.persistence.adapter.loadSubset(
-        this.storageTargetFor(),
-        options,
-        {
+      return await this.applyMutex.run(() =>
+        this.persistence.adapter.loadSubset(this.storageTargetFor(), options, {
           requiredIndexSignatures: this.getRequiredIndexSignatures(),
           cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
-        },
+        }),
       )
-      return rows.length
-    } catch (error) {
-      if (!this.hasExpiredCacheClaim()) throw error
-      this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
+    } catch {
+      if (this.hasExpiredCacheClaim()) {
+        this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
+      }
       return undefined
     }
   }
 
   // A row deleted after the covered load settled, by the source or by
   // retention, leaves fewer rows than coverage recorded, so it no longer
-  // proves the demand complete (maintainer decision, 2026-10-26).
+  // proves the demand complete (maintainer decision, 2026-10-26). A window
+  // must also hold the same rows.
   private async isDemandCovered(options: LoadSubsetOptions): Promise<boolean> {
     const record = this.currentCoverageRecord(options)
     if (record === undefined) return false
-    const rows = await this.countDemandRows(options)
-    return rows !== undefined && rows >= record.rows
+    const rows = await this.readDemandRows(options)
+    return (
+      rows !== undefined &&
+      rows.length >= record.rows &&
+      windowKeys(options, rows) === record.keys
+    )
   }
 
   // The coverage record for a load that just settled, or undefined when the
   // current record already says the same.
-  async nextCoverageRecord(
-    options: LoadSubsetOptions,
-  ): Promise<
-    { settledAt: number; generation: string; rows: number } | undefined
+  async nextCoverageRecord(options: LoadSubsetOptions): Promise<
+    | {
+        settledAt: number
+        generation: string
+        rows: number
+        keys?: string
+      }
+    | undefined
   > {
-    const rows = await this.countDemandRows(options)
-    if (
-      rows === undefined ||
-      this.currentCoverageRecord(options)?.rows === rows
-    )
-      return undefined
-    return { settledAt: Date.now(), generation: this.storageCollectionId, rows }
+    const rows = await this.readDemandRows(options)
+    if (rows === undefined) return undefined
+    const keys = windowKeys(options, rows)
+    const current = this.currentCoverageRecord(options)
+    if (current?.rows === rows.length && current.keys === keys) return undefined
+    return {
+      settledAt: Date.now(),
+      generation: this.storageCollectionId,
+      rows: rows.length,
+      keys,
+    }
   }
 
   loadHydratedSubset(

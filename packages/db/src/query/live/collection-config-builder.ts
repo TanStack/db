@@ -472,6 +472,9 @@ export class CollectionConfigBuilder<
     demand.settled = true
     try {
       this.maybeRunGraphFn?.()
+      // A query in error runs no graph and so no status check, but its
+      // settled demands can still permit a persisted fallback render.
+      this.notifyIfDemandsSettled()
       demand.participant?.resolve()
     } catch (error) {
       demand.participant?.reject(error)
@@ -1214,10 +1217,16 @@ export class CollectionConfigBuilder<
     // Mark ready when the initial demands have settled and every eager
     // source Collection is ready. This prevents marking the live query ready
     // before its data is processed (fixes issue where useLiveQuery returns
-    // isReady=true with empty data)
-    if (!this.initialDemandsSettled()) return
+    // isReady=true with empty data). A query in error does not become ready,
+    // but its settled demands still permit a persisted fallback render.
+    if (!this.notifyIfDemandsSettled()) return
+    if (!this.isInErrorState && this.allRequiredSourcesReady()) markReady()
+  }
+
+  private notifyIfDemandsSettled(): boolean {
+    if (!this.initialDemandsSettled()) return false
     for (const listener of this.demandsSettledListeners) listener()
-    if (this.allRequiredSourcesReady()) markReady()
+    return true
   }
 
   /** Called whenever a status check finds the initial demands settled. */
@@ -1234,7 +1243,6 @@ export class CollectionConfigBuilder<
    */
   initialDemandsSettled(): boolean {
     return (
-      !this.isInErrorState &&
       this.currentSyncState?.subscribedToAllCollections === true &&
       [...this.activeDemands.values()].every((demand) => demand.settled) &&
       !this.liveQueryCollection?.isLoadingSubset

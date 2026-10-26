@@ -346,3 +346,34 @@ another demand's hydration, truncated, and started scoped recovery left the
 Collection `ready`, but it did not prove that the record was queued when the
 truncate listed metadata.
 
+
+## 2026-10-26: high code review after the shared test driver
+
+Starting head: `5d85ce247` (CI green). A high code review reported nine
+findings, H1 to H9. The oracle was extended for every behavioral finding before
+any production change, and each extension was run on the starting head.
+
+| Finding | Law and authority | Oracle change | RED on `5d85ce247` | Repair |
+| --- | --- | --- | --- | --- |
+| H1: a source error leaves the network-first wait pending forever when the query reaches an on-demand source | The glossary's network-first gate permits a render once every eager source passed its deadline or saw the network fail and every on-demand demand settled. A source failure does not settle a demand and does not block a settled one. | Part 3: P or C reports an error before C's 1000 ms wait ends, observed before the wait and after a late checkpoint. The observation adds rejection and the observer's synchronous gate. | Both covered histories: not released, not rejected; the never-requested histories pass | `initialDemandsSettled` no longer reads the error state, which still blocks `markReady`. `settleDemand` notifies settlement listeners, because a query in error runs no graph and so no status check. |
+| H2: a failed coverage read fails the load | Prior behavior: a load settles as its upstream load did. The law record makes coverage bookkeeping. | Part 2c: the read after the load fails; the read during the coverage check fails. | Session-1 query `error`; D `error` before the network answers | Any failed coverage read returns no rows. An expired claim also starts claim recovery. |
+| H3: a synchronous answer's coverage counts rows before they are durable | Law: coverage records the rows SQLite holds for the demand when the load settles, so a later deletion ends it. | Part 2c: a synchronous answer, with and without a later deletion of one row. | With the deletion, D settled offline | The coverage read waits on the apply mutex behind every committed source transaction. |
+| H4 (= X7): the truncate's metadata list makes a pending coverage transaction fail-stop on abort | — | None: not reachable | — | A coverage transaction has no abort signal. Its only abort is `SyncTransactionAbortedError` after its lifecycle was replaced, and the fail-stop then marks a terminal failure on the replaced lifecycle generation, which `getCurrentTerminalFailure` ignores. X7 is closed. |
+| H5: the row count accepts a window that lost one row and gained another | The approved window law (maintainer decision, 2026-10-26): a window settles only while its restore holds the same rows. | Part 4: `row-replaced` (`a1` replaced below the boundary) and `row-gained-under-limit` (an under-full window gains a row). Neither changes the tie-boundary key. | Both settled from SQLite | Coverage of a limited load records its sorted row keys, and the restore must return the same keys. |
+| H6: a release during the coverage check leaves the wait's timer running | Law record: a released load owns no wait. | Part 2c: release while the coverage read is held. | The source Collection still loaded after release | `settleCoveredDemand` returns at once when the signal is already aborted. |
+| H7: a second SQLite read per load | Cost, not behavior | None | — | Kept. The read now also waits on the apply mutex. Reusing the restore read for the check is a possible optimization. |
+| H8: duplicated builder-or-Collection lookup | Maintainability | None | — | Declined: a shared helper does not reduce shipped bytes. |
+| H9: settlement listeners fire only from the status check | — | None: not reachable | — | `retireDemand` runs only for an empty demand update inside a graph run, which ends with a status check. Setup sends only nonempty initial keys. `settleDemand` now notifies directly (H1). |
+
+The unordered part of H5 is a law question, not an enforcement gap: the
+approved row-count rule accepts an unordered demand that lost one row and
+gained another. It is reported to the maintainer.
+
+Hostile mutants, beyond the starting head:
+
+- a window check that accepts any superset of the recorded keys survives
+  `row-replaced` and is killed by `row-gained-under-limit`;
+- dropping the error-state check without notifying from `settleDemand` is
+  killed by both covered source-failure histories.
+
+GREEN: the oracle passes 260 of 260.

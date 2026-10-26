@@ -2623,7 +2623,8 @@ wait releases an eager and an on-demand source only when the on-demand demand
 is covered, read directly and through an outer live query, with the joined row
 visible at release. A third shape reaches the on-demand source through two
 live queries; covering only the inner query's demand must not release the
-wait. A source failure on a never-covered demand must not release it either.
+wait. A source failure on a never-covered demand must not release it either,
+and the wait then neither renders nor rejects.
 Two fixed same-session histories check that a load of D after a cache
 rotation, and a `refetch: true` load of D, both wait for the network. Model-level calibration shows that eighteen wrong designs (fifteen
 single-demand, two lifecycle, one joined) each differ from the law at a named
@@ -2685,14 +2686,25 @@ from a real persisted on-demand Collection on `node:sqlite`. Mutants that drop
 the early rejection handler, keep collection metadata across a schema reset,
 key coverage without cursor and offset, ignore coverage, or let a coverage
 read under an expired claim fail the load each fail these cases.
+A fifth round added Part 2c and five more histories. Part 2c checks that a
+failed coverage read, after the load or during the check, keeps the load's
+own outcome; that a synchronous answer's coverage counts its rows, so a
+later deletion ends it; and that a release during the coverage check stops
+the source Collection loading. Part 3 adds a source failure, from the eager
+or the on-demand source, before a covered demand's wait ends: the wait must
+release once the demand settles, and the observer's synchronous gate must
+agree. Part 4 adds a row replaced below the window boundary and a row gained
+by an under-full window, which keep the tie-boundary key. Each failed on the
+parent production code. A window check that accepts a superset of the
+recorded keys, and a builder that drops its error-state check without
+notifying settlement, each fail named cases.
 
-Remaining limits: a pending coverage record that a truncate lists and a later
-abort turns into a terminal failure (code reading; a probe of the path did not
-show the failure and did not prove its precondition); coverage relies on the
-source settling a load only after its rows are durable (law 7), so a source
-that breaks that rule records too low a row count; ordered windows with
-duplicate ranks and offset-based pages without an index; and multi-tab
-coordinators, outside the law by maintainer decision (2026-10-26).
+Remaining limits: coverage relies on the source committing a load's rows
+before it settles that load (law 7); an unordered demand that loses one row
+and gains another keeps its row count and stays covered (the approved
+row-count rule); ordered windows with duplicate ranks and offset-based pages
+without an index; and multi-tab coordinators, outside the law by maintainer
+decision (2026-10-26).
 
 ## Deferred contracts and evidence
 

@@ -102,6 +102,10 @@ rules came from review:
   many rows as coverage recorded. A row deleted afterwards, by the source or by
   Query DB retention, ends coverage until the demand loads online again
   (maintainer decision, 2026-10-26).
+- Coverage is bookkeeping beside a load. A coverage read that fails proves
+  nothing: the load records no coverage, or waits for its upstream load, and
+  otherwise keeps its own outcome. A load released during its coverage check
+  owns no wait.
 
 The first draft also let a certified complete resume baseline cover every
 demand. No path implemented that, and a source that resumes from a complete
@@ -164,6 +168,11 @@ permits it:
 - an on-demand source, after every demand the query reaches on it has settled,
   from SQLite or from the network.
 
+A source failure does not change these conditions. It never settles a demand,
+and it does not keep a settled demand from permitting a render: a covered
+demand that settles from SQLite after a source reports an error still permits
+the fallback render, as an eager source's restore does after a source failure.
+
 This is initial-query readiness with one substitution: an eager source's
 persisted restore stands in for its Collection readiness. A query over only
 on-demand sources needs no substitution, because its readiness already follows
@@ -218,26 +227,35 @@ Coverage also ends when the restore returns fewer rows than it recorded.
   demand keys from other rows' values. If restored rows differ from the
   previous session, the key differs too. That demand is then uncovered and
   waits for the network.
-- **Uncovered demand while offline.** It waits indefinitely. The in-progress
-  error-reporting work owns how that condition is reported.
+- **Uncovered demand while offline.** It waits indefinitely, also after a
+  source reports an error: the network-first wait neither renders nor
+  rejects. The in-progress error-reporting work owns how that condition is
+  reported.
 - **A failure after a settlement from SQLite.** The query stays ready and the
   failure does not reach it, so the application cannot tell that a refresh
   failed. The in-progress error-reporting work owns whether such a failure is
   reported elsewhere; the guides must state the behavior.
 - **Optimistic writes while offline.** An optimistic mutation that touches a
   covered demand's rows is outside this law. Optimistic overlay rules apply as
-  usual, and this proposal has no witness for them.
+  usual; the oracle checks one write and its rollback on a demand settled
+  from SQLite.
 - **Ordered windows.** A window settles from SQLite only while its restore
-  holds the rows it held when it settled (maintainer decision, 2026-10-26). The tie-boundary load's key comes
-  from the restored boundary row, so a window that lost, gained, or replaced
-  a row asks for a key that no load covered.
-- **Expired cache claims.** A coverage read under an expired claim proves
-  nothing. The wrapper then starts claim recovery: it records no coverage, and
+  holds the rows it held when it settled (maintainer decision, 2026-10-26).
+  Coverage of a limited load records its row keys, and the restore must
+  return the same keys in any order. The tie-boundary load's key comes from
+  the restored boundary row, so most changed windows also ask for a key that
+  no load covered; the recorded keys catch a row replaced or gained without a
+  boundary change.
+- **Failed coverage reads.** A coverage read that fails, including one under
+  an expired cache claim, proves nothing. The wrapper records no coverage, and
   a load that would settle from SQLite waits for the network. Neither path
-  fails a load whose rows applied.
-- **Source settlement.** Coverage counts the rows that SQLite holds when the
-  load settles. It relies on the source settling a load only after its rows
-  are durable (law 7 in `ARCHITECTURE.md`).
+  fails a load whose rows applied. An expired claim also starts claim
+  recovery. A failed coverage write is a durable failure, which fails the
+  runtime as any failed source transaction does.
+- **Source settlement.** The coverage read waits behind every source
+  transaction already committed, so it counts their rows durably, also for a
+  source that answers synchronously. It relies on the source committing a
+  load's rows before it settles that load (law 7 in `ARCHITECTURE.md`).
 - **Multi-tab coordinators.** By maintainer decision (2026-10-26), the law
   covers only the default `SingleProcessCoordinator`. Under a Browser or
   Electron multi-tab coordinator, demand routes through the coordinator, so a
