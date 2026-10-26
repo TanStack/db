@@ -8,7 +8,6 @@ title: "@tanstack/react-db"
 - [ConditionalUseLiveQueryConfig](type-aliases/ConditionalUseLiveQueryConfig.md)
 - [DbProviderProps](type-aliases/DbProviderProps.md)
 - [HydrationBoundaryProps](type-aliases/HydrationBoundaryProps.md)
-- [LiveQueryKey](type-aliases/LiveQueryKey.md)
 - [UseLiveInfiniteQueryConfig](type-aliases/UseLiveInfiniteQueryConfig.md)
 - [UseLiveInfiniteQueryReturn](type-aliases/UseLiveInfiniteQueryReturn.md)
 - [UseLiveInfiniteQueryReturnWithCollection](type-aliases/UseLiveInfiniteQueryReturnWithCollection.md)

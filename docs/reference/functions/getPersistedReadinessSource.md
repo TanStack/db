@@ -9,7 +9,7 @@ function getPersistedReadinessSource(config):
   | undefined;
 ```
 
-Defined in: [packages/db/src/persisted-readiness.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/persisted-readiness.ts#L20)
+Defined in: [packages/db/src/persisted-readiness.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/persisted-readiness.ts#L160)
 
 ## Parameters
 
