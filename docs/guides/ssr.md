@@ -589,10 +589,11 @@ Common reasons to add `queryKey`:
   the structured query
 - a render path where derived identity becomes measurably expensive
 
-Before 1.0, DB warns when structured IR cannot be hashed and preserves the
-legacy mount-stable identity. The query still works, but captured values inside
-opaque logic are not reactive unless they are represented in `queryKey`. In 1.0,
-an unhashable query without `queryKey` will throw.
+When structured IR cannot be hashed and the query has no `queryKey`, a hook
+that compares identity throws `UnhashableQueryIRError`: React and Preact hooks,
+and any hook backed by a `DbClient`, which matches queries by identity hash. An
+empty `queryKey` counts as none. Represent the values that opaque logic
+captures in `queryKey`, so the query recompiles when they change.
 
 DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
@@ -781,8 +782,8 @@ Still supported:
 Warnings:
 
 - React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` warns in development and keeps legacy
-  mount-stable identity until 1.0. In 1.0 it will throw.
+- Opaque query IR without `queryKey` throws `UnhashableQueryIRError` in a
+  hook that compares identity (React, Preact, or any `DbClient`-backed hook).
 - Expensive derived identity warns in development and suggests `queryKey`.
 
 Required for SSR:

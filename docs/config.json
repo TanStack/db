@@ -109,6 +109,10 @@
           "to": "framework/react/overview"
         },
         {
+          "label": "Preact",
+          "to": "framework/preact/overview"
+        },
+        {
           "label": "Vue",
           "to": "framework/vue/overview"
         },
@@ -218,6 +222,23 @@
             {
               "label": "useLiveQuery",
               "to": "framework/react/reference/functions/useLiveQuery"
+            }
+          ]
+        },
+        {
+          "label": "preact",
+          "children": [
+            {
+              "label": "Preact Hooks",
+              "to": "framework/preact/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/preact/reference/functions/useLiveQuery"
+            },
+            {
+              "label": "useLiveInfiniteQuery",
+              "to": "framework/preact/reference/functions/useLiveInfiniteQuery"
             }
           ]
         },

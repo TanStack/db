@@ -791,6 +791,7 @@ export type PersistedCollectionLeadershipState = {
   isLeader: boolean
 }
 
+/** Local persistence owns these names; caller utility collisions throw. */
 export interface PersistedCollectionUtils extends UtilsRecord {
   acceptMutations: (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
@@ -7030,7 +7031,7 @@ export function persistedCollectionOptions<
   options: PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils> & {
     schema?: never
   },
-): PersistedSyncOptionsResult<T, TKey, TSchema, TUtils>
+): PersistedSyncOptionsResult<T, TKey, never, TUtils>
 
 export function persistedCollectionOptions<
   T extends object,
@@ -7041,7 +7042,7 @@ export function persistedCollectionOptions<
   options: PersistedLocalOnlyOptions<T, TKey, TSchema, TUtils> & {
     schema?: never
   },
-): PersistedLocalOnlyOptionsResult<T, TKey, TSchema, TUtils>
+): PersistedLocalOnlyOptionsResult<T, TKey, never, TUtils>
 
 export function persistedCollectionOptions<
   T extends object,
@@ -7145,6 +7146,22 @@ export function persistedCollectionOptions<
     )
   }
 
+  const persistedUtils: PersistedCollectionUtils = {
+    acceptMutations: async (transaction) => {
+      await runtime.acceptTransactionMutations(transaction)
+    },
+    getLeadershipState: () => runtime.getLeadershipState(),
+    forceReloadSubset: (subsetOptions) =>
+      runtime.forceReloadSubset(subsetOptions),
+  }
+  for (const name of Object.keys(persistedUtils)) {
+    if (options.utils && name in options.utils) {
+      throw new InvalidPersistedCollectionConfigError(
+        `utils.${name} is reserved for local-only persisted Collections`,
+      )
+    }
+  }
+
   const {
     schemaVersion,
     initialRender: _initialRender,
@@ -7223,19 +7240,6 @@ export function persistedCollectionOptions<
     )
 
     return handlerResult ?? {}
-  }
-
-  const acceptMutations = async (transaction: {
-    mutations: Array<PendingMutation<Record<string, unknown>>>
-  }) => {
-    await runtime.acceptTransactionMutations(transaction)
-  }
-
-  const persistedUtils: PersistedCollectionUtils = {
-    acceptMutations,
-    getLeadershipState: () => runtime.getLeadershipState(),
-    forceReloadSubset: (subsetOptions: LoadSubsetOptions) =>
-      runtime.forceReloadSubset(subsetOptions),
   }
 
   const mergedUtils = {

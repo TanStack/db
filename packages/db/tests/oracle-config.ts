@@ -3,6 +3,10 @@ import { oracleReplayReporter } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `persisted-options.types.core`,
+  `persisted-options.types.browser`,
+  `persisted-options.utilities.core`,
+  `persisted-options.utilities.browser`,
   `cursor-pagination.no-peek`,
   `cursor-pagination.history`,
   `cursor-pagination.cache`,
