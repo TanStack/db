@@ -4,7 +4,11 @@ import { createCollection } from '../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleRuns,
+} from './oracle-config.js'
 
 /**
  * # Is a retained live-query snapshot point-in-time?
@@ -236,6 +240,8 @@ async function checkHistory(
     await cleanup()
   }
 }
+
+declareOracle({ check: [checkRead, checkHistory], model: [modelRows] })
 
 const history = fc.array(command, { minLength: 1, maxLength: 24 })
 const reads = fc.array(
