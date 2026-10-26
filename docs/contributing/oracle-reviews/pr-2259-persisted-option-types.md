@@ -553,6 +553,7 @@ TANSTACK_DB_ORACLE_PATH=0 node scripts/calibrate-persisted-option-types.mjs read
 
 # Current grammar rejects these controls. Use the browser receiver for readonly-row too.
 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs readonly-row
+ORACLE_RECEIVER=browser TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs readonly-row
 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs schema-output-rejection
 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0 node scripts/calibrate-persisted-option-types.mjs blanket-never
 
