@@ -440,17 +440,17 @@
     ]
   },
   "154": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Canonical query row has negative multiplicity",
     "literals": ["Canonical query row has negative multiplicity"]
   },
   "155": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Canonical query row has no positive contributor",
     "literals": ["Canonical query row has no positive contributor"]
   },
   "156": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent",
     "literals": ["Query contributors for public key ", " are not congruent"]
   },
@@ -935,5 +935,15 @@
     "literals": [
       "getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination."
     ]
+  },
+  "249": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
+  },
+  "250": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
   }
 }

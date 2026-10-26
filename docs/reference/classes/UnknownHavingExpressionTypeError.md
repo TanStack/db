@@ -3,7 +3,7 @@ id: UnknownHavingExpressionTypeError
 title: UnknownHavingExpressionTypeError
 ---
 
-Defined in: [packages/db/src/errors.ts:977](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L977)
+Defined in: [packages/db/src/errors.ts:997](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L997)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:977](https://github.com/TanStack/db/blob/
 new UnknownHavingExpressionTypeError(type): UnknownHavingExpressionTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:978](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L978)
+Defined in: [packages/db/src/errors.ts:998](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L998)
 
 #### Parameters
 

@@ -415,5 +415,6 @@
   "coverSource": "fN",
   "windowRequestGeneration": "av",
   "latestWindowRequest": "gE",
-  "gcGraceUntil": "gT"
+  "includesRuntimeCache": "gT",
+  "gcGraceUntil": "fD"
 }

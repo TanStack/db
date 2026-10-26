@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): QueryResult<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:147](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L147)
+Defined in: [useLiveQuery.ts:153](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L153)
 
 Subscribe a Preact component to a live query.
 
@@ -64,7 +64,7 @@ const { data, isEnabled } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(queryFn): ConditionalQueryResult<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:151](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L151)
+Defined in: [useLiveQuery.ts:157](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L157)
 
 Subscribe a Preact component to a live query.
 
@@ -119,7 +119,7 @@ const { data, isEnabled } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(queryFn): ConditionalQueryResult<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:157](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L157)
+Defined in: [useLiveQuery.ts:163](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L163)
 
 Subscribe a Preact component to a live query.
 
@@ -177,7 +177,7 @@ const { data, isEnabled } = useLiveQuery((q) =>
 function useLiveQuery<TResult, TKey, TUtils>(queryFn): UseConditionalLiveQueryResult<TResult, TKey, TResult[], Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>>;
 ```
 
-Defined in: [useLiveQuery.ts:163](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L163)
+Defined in: [useLiveQuery.ts:169](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L169)
 
 Subscribe a Preact component to a live query.
 
@@ -243,7 +243,7 @@ const { data, isEnabled } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(config): QueryResult<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:187](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L187)
+Defined in: [useLiveQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L193)
 
 Subscribe to a live query described by a config object.
 
@@ -278,7 +278,7 @@ const { data } = useLiveQuery({
 function useLiveQuery<TContext>(config): ConditionalQueryResult<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:191](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L191)
+Defined in: [useLiveQuery.ts:197](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L197)
 
 Subscribe a Preact component to a live query.
 
@@ -333,7 +333,7 @@ const { data, isEnabled } = useLiveQuery((q) =>
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryResult<TResult, TKey, TResult[], Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>>;
 ```
 
-Defined in: [useLiveQuery.ts:205](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L205)
+Defined in: [useLiveQuery.ts:211](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L211)
 
 Subscribe to an existing live-query Collection. The hook starts its sync and
 leaves its retention policy to the caller.
@@ -377,7 +377,7 @@ const { data, collection } = useLiveQuery(activeTodos)
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryResult<TResult, TKey, TResult | undefined, Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult> & SingleResult>;
 ```
 
-Defined in: [useLiveQuery.ts:218](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L218)
+Defined in: [useLiveQuery.ts:224](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L224)
 
 Subscribe a Preact component to a live query.
 

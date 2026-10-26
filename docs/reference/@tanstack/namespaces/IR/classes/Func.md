@@ -3,7 +3,7 @@ id: Func
 title: Func
 ---
 
-Defined in: [packages/db/src/query/ir.ts:245](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L245)
+Defined in: [packages/db/src/query/ir.ts:250](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L250)
 
 ## Extends
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/query/ir.ts:245](https://github.com/TanStack/db/blo
 new Func<T>(name, args): Func<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:247](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L247)
+Defined in: [packages/db/src/query/ir.ts:252](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L252)
 
 #### Parameters
 
@@ -53,7 +53,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L83)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 **`Internal`**
 
@@ -73,7 +73,7 @@ BaseExpression.__returnType
 args: BasicExpression<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L249)
+Defined in: [packages/db/src/query/ir.ts:254](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L254)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: [packages/db/src/query/ir.ts:249](https://github.com/TanStack/db/blo
 name: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:248](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L248)
+Defined in: [packages/db/src/query/ir.ts:253](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L253)
 
 ***
 
@@ -93,7 +93,7 @@ Defined in: [packages/db/src/query/ir.ts:248](https://github.com/TanStack/db/blo
 type: "func";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:246](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L246)
+Defined in: [packages/db/src/query/ir.ts:251](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L251)
 
 #### Overrides
 
