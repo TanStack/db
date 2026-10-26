@@ -6,20 +6,21 @@
  * received by the existing outbox engine's NonRetriableError boundary.
  *
  * The model is an ordered dependency list: args, mutation, sync. A failure
- * admits only its prefix. Generated histories choose the failing stage or no
- * failure, plus arbitrary text and durable keys. Each stage records its call;
- * the comparison checks the prefix and caller error after settlement. It does
- * not model outbox storage or leadership, whose owners remain in that package.
- * The real process-crash witness uses actual Convex mutations in e2e.
+ * admits only its prefix. Each generated history constructively crosses every
+ * failure stage with arbitrary text and durable keys; this prevents a random
+ * campaign from missing a classification boundary. The comparison checks calls
+ * and caller error after settlement. Storage and leadership have other owners.
  */
 import { createCollection, withAcceptedReceipt } from '@tanstack/db'
 import fc from 'fast-check'
 import { NonRetriableError } from '@tanstack/offline-transactions'
 import { makeFunctionReference } from 'convex/server'
 import { expect, it } from 'vitest'
+import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { convexCollectionOptions } from '../src/index'
 import { convexOfflineMutation } from '../src/offline'
 import { controlledClient, query, withTestCleanup } from './helpers'
+import type { Row } from './helpers'
 import type { ConvexClient } from 'convex/browser'
 import type { OfflineConfig } from '@tanstack/offline-transactions'
 
@@ -29,289 +30,382 @@ const mutation = makeFunctionReference<
   null
 >(`tasks:save`)
 const stages = [`args`, `mutation`, `sync`] as const
-const property = fc.asyncProperty(
-  fc.record({
-    failure: fc.constantFrom(`none`, ...stages),
-    key: fc.string({ maxLength: 15 }),
-    text: fc.string({ maxLength: 15 }),
-  }),
-  async ({ failure, key, text }) => {
-    const trace: Array<string> = []
-    const cause = new Error(`injected ${failure}`)
-    const enter = (stage: string) => {
-      trace.push(stage)
-      if (failure === stage) throw cause
-    }
-    const send = (
-      _ref: unknown,
-      args: { idempotencyKey: string; text: string },
-    ) => {
-      enter(`mutation`)
-      expect(args).toEqual({ idempotencyKey: key, text })
-      return Promise.resolve(null)
-    }
-    const persist = convexOfflineMutation({
-      client: { mutation: send } as unknown as Pick<ConvexClient, `mutation`>,
-      mutation,
-      getArgs: () => {
-        enter(`args`)
-        return { text }
-      },
-      collections: [
-        {
-          utils: {
-            awaitSync: () => {
-              enter(`sync`)
-              return Promise.resolve()
-            },
-          },
-        },
-      ],
-    })
-    const params = {
-      transaction: { mutations: [] },
-      idempotencyKey: key,
-    } as unknown as Parameters<OfflineConfig[`mutationFns`][string]>[0]
-    const observed = await persist(params).then(
-      () => ({ status: `fulfilled` as const }),
-      (error: unknown) => ({ status: `rejected` as const, error }),
-    )
-    const boundary = stages.indexOf(failure as (typeof stages)[number])
-    expect(trace).toEqual(
-      boundary === -1 ? stages : stages.slice(0, boundary + 1),
-    )
-    expect(observed.status).toBe(boundary === -1 ? `fulfilled` : `rejected`)
-    if (observed.status === `rejected`) {
-      if (boundary < 2) expect(observed.error).toBeInstanceOf(NonRetriableError)
-      else expect(observed.error).toBe(cause)
-    }
-  },
-)
+const failures = [`none`, ...stages] as const
 
 it(`preserves ordered replay and retry classification across bridge failures`, async () => {
-  const seed = process.env.CONVEX_OFFLINE_ORACLE_SEED
-  if (seed)
-    await fc.assert(property, {
-      seed: Number(seed),
-      path: process.env.CONVEX_OFFLINE_ORACLE_PATH,
-      numRuns: 60,
-    })
-  else {
-    await fc.assert(property, { seed: 20261022, numRuns: 60 })
-    await fc.assert(property, { numRuns: 60 })
-  }
+  await runOracleCampaign(
+    `CONVEX_OFFLINE_ORACLE`,
+    failures,
+    async (reach, parameters) => {
+      const property = fc.asyncProperty(
+        fc.record({
+          key: fc.string({ maxLength: 15 }),
+          text: fc.string({ maxLength: 15 }),
+        }),
+        async ({ key, text }) => {
+          reach.beginHistory()
+          for (const failure of failures) {
+            const trace: Array<string> = []
+            const cause = new Error(`injected ${failure}`)
+            const enter = (stage: string) => {
+              trace.push(stage)
+              if (failure === stage) throw cause
+            }
+            const send = (
+              _ref: unknown,
+              args: { idempotencyKey: string; text: string },
+            ) => {
+              enter(`mutation`)
+              expect(args).toEqual({ idempotencyKey: key, text })
+              return Promise.resolve(null)
+            }
+            const persist = convexOfflineMutation({
+              client: { mutation: send } as unknown as Pick<
+                ConvexClient,
+                `mutation`
+              >,
+              mutation,
+              getArgs: () => {
+                enter(`args`)
+                return { text }
+              },
+              collections: [
+                {
+                  utils: {
+                    awaitSync: () => {
+                      enter(`sync`)
+                      return Promise.resolve()
+                    },
+                  },
+                },
+              ],
+            })
+            const params = {
+              transaction: { mutations: [] },
+              idempotencyKey: key,
+            } as unknown as Parameters<OfflineConfig[`mutationFns`][string]>[0]
+            const observed = await persist(params).then(
+              () => ({ status: `fulfilled` as const }),
+              (error: unknown) => ({ status: `rejected` as const, error }),
+            )
+            reach.reach(failure)
+            const boundary = stages.indexOf(failure as (typeof stages)[number])
+            expect(trace).toEqual(
+              boundary === -1 ? stages : stages.slice(0, boundary + 1),
+            )
+            expect(observed.status).toBe(
+              boundary === -1 ? `fulfilled` : `rejected`,
+            )
+            if (observed.status === `rejected`) {
+              if (boundary < 2)
+                expect(observed.error).toBeInstanceOf(NonRetriableError)
+              else expect(observed.error).toBe(cause)
+            }
+          }
+        },
+      )
+      await fc.assert(property, { numRuns: 60, ...parameters })
+    },
+    { fixedSeed: 20261022 },
+  )
 })
 
 /**
- * Source acceptance is owed by the bridge's documented Collection boundary,
- * even on cold replay. This second driver uses real Collections, rather than
- * treating an awaitSync stub as evidence of source acceptance. The independent
- * model has one fact, whether a valid source snapshot has arrived. Before that
- * fact, a successful mutation cannot fulfill replay. A provider failure rejects
- * replay and preserves its cause. A valid empty snapshot counts as acceptance.
+ * Source acceptance is owed by the documented Collection boundary even on cold
+ * replay. Real Collections receive held provider callbacks. The independent
+ * judgment is whether a valid source snapshot arrived: pending data cannot
+ * fulfill replay, a provider failure rejects with its cause, and a valid empty
+ * snapshot counts as acceptance. Provider errors can recover on a valid result.
  *
- * Histories start idle, awaiting a result, or failed during startup, then cross
- * empty/nonempty snapshots and failures before the first result. The provider
- * holds callbacks at an explicit cut. We observe bridge settlement and public
- * rows before and after that delivery. This does not model durable outbox I/O.
+ * Every generated history crosses idle/pending/failed startup with each first
+ * delivery, using generated text. Startup failure has no live provider and is
+ * terminal at this cut. This bounded matrix ensures that the declared cuts are
+ * reached in both normal campaigns; it does not model durable outbox I/O.
  */
-const sourceProperty = fc.asyncProperty(
-  fc.record({
-    state: fc.constantFrom(`idle`, `pending`, `startup-error`),
-    delivery: fc.constantFrom(`empty`, `rows`, `error`, `cleanup`),
-    text: fc.string({ maxLength: 15 }),
-  }),
-  async ({ state, delivery, text }) => {
-    const transport = controlledClient()
-    const cause = new Error(`source unavailable`)
-    const collection = createCollection(
-      convexCollectionOptions({
-        client:
-          state === `startup-error`
-            ? {
-                onUpdate: () => {
-                  throw cause
-                },
-              }
-            : transport.client,
-        query,
-        queryArgs: { owner: `alice` },
-        getKey: (row) => row._id,
-        gcTime: 0,
-      }),
-    )
-    if (state !== `idle`) collection.startSyncImmediate()
-    const persist = convexOfflineMutation({
-      client: { mutation: () => Promise.resolve(null) } as unknown as Pick<
-        ConvexClient,
-        `mutation`
-      >,
-      mutation,
-      getArgs: () => ({ text }),
-      collections: [collection],
-    })
-    let outcome: { status: string; error?: unknown } = { status: `pending` }
-    const pending = persist({
-      transaction: { mutations: [] },
-      idempotencyKey: `source-key`,
-    } as unknown as Parameters<typeof persist>[0]).then(
-      () => {
-        outcome = { status: `fulfilled` }
-      },
-      (error) => {
-        outcome = { status: `rejected`, error }
-      },
-    )
-    await withTestCleanup(
-      async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        if (state === `startup-error`) {
-          expect(outcome).toEqual({ status: `rejected`, error: cause })
-        } else {
-          expect(outcome.status).toBe(`pending`)
-          expect(transport.counts().subscriptions).toBe(1)
-          if (delivery === `error`) transport.error(cause)
-          else if (delivery === `cleanup`) await collection.cleanup()
-          else transport.emit(delivery === `empty` ? [] : [{ _id: `a`, text }])
-          await pending
-          expect(outcome.status).toBe(
-            delivery === `error` || delivery === `cleanup`
-              ? `rejected`
-              : `fulfilled`,
-          )
-          if (delivery === `error`) {
-            expect(outcome.error).toBe(cause)
-            // Provider errors can recover in this run when a valid result arrives.
-            transport.emit([{ _id: `a`, text }])
-            await persist({
-              transaction: { mutations: [] },
-              idempotencyKey: `source-key`,
-            } as unknown as Parameters<typeof persist>[0])
-            expect(collection.get(`a`)?.text).toBe(text)
-          }
-          if (delivery === `rows`) expect(collection.get(`a`)?.text).toBe(text)
-          if (delivery === `empty`) expect(collection.size).toBe(0)
-        }
-      },
-      async () => {
-        await collection.cleanup()
-      },
-    )
-  },
-)
+const sourceStarts = [`idle`, `pending`, `startup-error`] as const
+const sourceDeliveries = [`empty`, `rows`, `error`, `cleanup`] as const
+const sourceReachStates = [
+  ...sourceStarts,
+  ...sourceDeliveries,
+  `provider-recovery`,
+] as const
 
 it(`requires real source acceptance through cold replay histories`, async () => {
-  const seed = process.env.CONVEX_OFFLINE_SOURCE_ORACLE_SEED
-  if (seed)
-    await fc.assert(sourceProperty, {
-      seed: Number(seed),
-      path: process.env.CONVEX_OFFLINE_SOURCE_ORACLE_PATH,
-      numRuns: 60,
-    })
-  else {
-    await fc.assert(sourceProperty, { seed: 20261023, numRuns: 60 })
-    await fc.assert(sourceProperty, { numRuns: 60 })
-  }
+  await runOracleCampaign(
+    `CONVEX_OFFLINE_SOURCE_ORACLE`,
+    sourceReachStates,
+    async (reach, parameters) => {
+      const property = fc.asyncProperty(
+        fc.string({ maxLength: 15 }),
+        async (text) => {
+          reach.beginHistory()
+          for (const state of sourceStarts) {
+            for (const delivery of sourceDeliveries) {
+              const transport = controlledClient()
+              const cause = new Error(`source unavailable`)
+              const collection = createCollection(
+                convexCollectionOptions({
+                  client:
+                    state === `startup-error`
+                      ? {
+                          onUpdate: () => {
+                            throw cause
+                          },
+                        }
+                      : transport.client,
+                  query,
+                  queryArgs: { owner: `alice` },
+                  getKey: (row) => row._id,
+                  gcTime: 0,
+                }),
+              )
+              if (state !== `idle`) collection.startSyncImmediate()
+              const persist = convexOfflineMutation({
+                client: {
+                  mutation: () => Promise.resolve(null),
+                } as unknown as Pick<ConvexClient, `mutation`>,
+                mutation,
+                getArgs: () => ({ text }),
+                collections: [collection],
+              })
+              let outcome: { status: string; error?: unknown } = {
+                status: `pending`,
+              }
+              const pending = persist({
+                transaction: { mutations: [] },
+                idempotencyKey: `source-key`,
+              } as unknown as Parameters<typeof persist>[0]).then(
+                () => {
+                  outcome = { status: `fulfilled` }
+                },
+                (error) => {
+                  outcome = { status: `rejected`, error }
+                },
+              )
+              await withTestCleanup(
+                async () => {
+                  await new Promise((resolve) => setTimeout(resolve, 0))
+                  reach.reach(state)
+                  if (state === `startup-error`) {
+                    expect(outcome).toEqual({
+                      status: `rejected`,
+                      error: cause,
+                    })
+                  } else {
+                    expect(outcome.status).toBe(`pending`)
+                    expect(transport.counts().subscriptions).toBe(1)
+                    if (delivery === `error`) transport.error(cause)
+                    else if (delivery === `cleanup`) await collection.cleanup()
+                    else
+                      transport.emit(
+                        delivery === `empty` ? [] : [{ _id: `a`, text }],
+                      )
+                    await pending
+                    reach.reach(delivery)
+                    expect(outcome.status).toBe(
+                      delivery === `error` || delivery === `cleanup`
+                        ? `rejected`
+                        : `fulfilled`,
+                    )
+                    if (delivery === `error`) {
+                      expect(outcome.error).toBe(cause)
+                      transport.emit([{ _id: `a`, text }])
+                      await persist({
+                        transaction: { mutations: [] },
+                        idempotencyKey: `source-key`,
+                      } as unknown as Parameters<typeof persist>[0])
+                      reach.reach(`provider-recovery`)
+                      expect(collection.get(`a`)?.text).toBe(text)
+                    }
+                    if (delivery === `rows`)
+                      expect(collection.get(`a`)?.text).toBe(text)
+                    if (delivery === `empty`) expect(collection.size).toBe(0)
+                  }
+                },
+                () => collection.cleanup(),
+              )
+            }
+          }
+        },
+      )
+      await fc.assert(property, { numRuns: 60, ...parameters })
+    },
+    { fixedSeed: 20261023 },
+  )
 })
 
 /**
  * A durable wrapper can reject before handing a committed source proposal to
- * core, as specified by whenSyncAccepted. Once that happens, later diffs cannot
- * assume that proposal became the source base. This run stays failed until an
- * explicit cleanup/restart establishes a fresh authoritative snapshot.
+ * core, as specified by whenSyncAccepted. The public guide requires that run to
+ * stay failed until cleanup/restart, including when an earlier snapshot was
+ * accepted. Same-cache reads and changed callbacks cannot restore that authority.
  *
- * The reference has two states, failed run and restarted run. Same-cache reads
- * and new provider callbacks cannot distinguish failed states, all reject with
- * the durable cause. Restart is the one action that changes that judgment.
- * Histories vary empty/nonempty initial snapshots and one to four retries with
- * unchanged or changed cached rows. Actual commit is deferred behind a rejected
- * durability promise, matching the persistence adapter's acceptance boundary.
+ * The reference retains only the previously accepted rows and failed/restarted
+ * judgment. Each generated history crosses first empty/nonempty proposals with
+ * later insert/update/delete/replacement proposals over accepted empty/nonempty
+ * bases. The wrapper defers actual core commit behind durability. At rejection
+ * and every retry, the bridge must reject with the exact durable cause and public
+ * rows must equal the accepted base. Both unchanged and changed cache retries
+ * occur in every history, followed by generated extra retries and fresh-run
+ * recovery. These are receipt-interface histories, not native SQLite failures.
  */
-const acceptanceProperty = fc.asyncProperty(
-  fc.boolean(),
-  fc.array(fc.boolean(), { minLength: 1, maxLength: 4 }),
-  fc.string({ maxLength: 12 }),
-  async (empty, retries, text) => {
-    const transport = controlledClient()
-    const cause = new Error(`durable acceptance failed`)
-    let rejectDurable!: (error: unknown) => void
-    let durable = new Promise<void>((_resolve, reject) => {
-      rejectDurable = reject
-    })
-    const options = convexCollectionOptions({
-      client: transport.client,
-      query,
-      queryArgs: { owner: `alice` },
-      getKey: (row) => row._id,
-      gcTime: 0,
-    })
-    const collection = createCollection({
-      ...options,
-      sync: {
-        ...options.sync,
-        sync: (syncParams) =>
-          options.sync.sync({
-            ...syncParams,
-            commit: () => {
-              const visible = durable
-                .then(async () => {
-                  await syncParams.commit()
-                })
-                .then(() => undefined)
-              return withAcceptedReceipt(visible, durable)
-            },
-          }),
-      },
-    })
-    const persist = convexOfflineMutation({
-      client: { mutation: () => Promise.resolve(null) } as unknown as Pick<
-        ConvexClient,
-        `mutation`
-      >,
-      mutation,
-      getArgs: () => ({ text }),
-      collections: [collection],
-    })
-    const params = {
-      transaction: { mutations: [] },
-      idempotencyKey: `same-durable-key`,
-    } as unknown as Parameters<typeof persist>[0]
-    await withTestCleanup(
-      async () => {
-        const pending = persist(params)
-        const rejected = expect(pending).rejects.toBe(cause)
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        const initial = empty ? [] : [{ _id: `a`, text }]
-        transport.emit(initial)
-        rejectDurable(cause)
-        await rejected
-        for (const changed of retries) {
-          if (changed) transport.emit([{ _id: `a`, text: `new:${text}` }])
-          await expect(persist(params)).rejects.toBe(cause)
-          expect(collection.size).toBe(0)
-        }
-        await collection.cleanup()
-        durable = Promise.resolve()
-        transport.cache([{ _id: `a`, text: `restarted:${text}` }])
-        collection.startSyncImmediate()
-        await persist(params)
-        expect(collection.get(`a`)?.text).toBe(`restarted:${text}`)
-      },
-      () => collection.cleanup(),
-    )
-  },
-)
+const acceptanceScenes = [
+  `first-empty`,
+  `first-rows`,
+  `accepted-empty-insert`,
+  `accepted-row-insert`,
+  `accepted-row-update`,
+  `accepted-row-delete`,
+  `accepted-row-replacement`,
+] as const
+const acceptanceReachStates = [
+  ...acceptanceScenes,
+  `unchanged-cache-retry`,
+  `changed-cache-retry`,
+  `restart-recovery`,
+] as const
 
 it(`keeps rejected source acceptance terminal until a fresh sync run`, async () => {
-  const seed = process.env.CONVEX_OFFLINE_ACCEPTANCE_ORACLE_SEED
-  if (seed)
-    await fc.assert(acceptanceProperty, {
-      seed: Number(seed),
-      path: process.env.CONVEX_OFFLINE_ACCEPTANCE_ORACLE_PATH,
-      numRuns: 60,
-    })
-  else {
-    await fc.assert(acceptanceProperty, { seed: 20261023, numRuns: 60 })
-    await fc.assert(acceptanceProperty, { numRuns: 60 })
-  }
+  await runOracleCampaign(
+    `CONVEX_OFFLINE_ACCEPTANCE_ORACLE`,
+    acceptanceReachStates,
+    async (reach, parameters) => {
+      const property = fc.asyncProperty(
+        fc.record({
+          text: fc.string({ maxLength: 12 }),
+          extraRetries: fc.array(fc.boolean(), { maxLength: 2 }),
+          changedFirst: fc.boolean(),
+        }),
+        async ({ text, extraRetries, changedFirst }) => {
+          reach.beginHistory()
+          for (const scene of acceptanceScenes) {
+            const transport = controlledClient()
+            const cause = new Error(`durable acceptance failed`)
+            let rejectDurable!: (error: unknown) => void
+            let durable = Promise.resolve()
+            let acceptImmediately = true
+            const prior: Array<Row> = scene.startsWith(`accepted-row`)
+              ? [{ _id: `a`, text }]
+              : []
+            const proposed: Array<Row> =
+              scene === `first-empty` || scene === `accepted-row-delete`
+                ? []
+                : scene === `accepted-row-insert`
+                  ? [...prior, { _id: `b`, text: `inserted:${text}` }]
+                  : scene === `accepted-row-replacement`
+                    ? [{ _id: `b`, text: `replacement:${text}` }]
+                    : [{ _id: `a`, text: `proposed:${text}` }]
+            const options = convexCollectionOptions({
+              client: transport.client,
+              query,
+              queryArgs: { owner: `alice` },
+              getKey: (row) => row._id,
+              gcTime: 0,
+            })
+            const collection = createCollection({
+              ...options,
+              sync: {
+                ...options.sync,
+                sync: (syncParams) =>
+                  options.sync.sync({
+                    ...syncParams,
+                    commit: () => {
+                      if (acceptImmediately) return syncParams.commit()
+                      const visible = durable.then(async () => {
+                        await syncParams.commit()
+                      })
+                      return withAcceptedReceipt(visible, durable)
+                    },
+                  }),
+              },
+            })
+            const persist = convexOfflineMutation({
+              client: {
+                mutation: () => Promise.resolve(null),
+              } as unknown as Pick<ConvexClient, `mutation`>,
+              mutation,
+              getArgs: () => ({ text }),
+              collections: [collection],
+            })
+            const params = {
+              transaction: { mutations: [] },
+              idempotencyKey: `same-durable-key`,
+            } as unknown as Parameters<typeof persist>[0]
+            await withTestCleanup(
+              async () => {
+                if (scene.startsWith(`accepted`)) {
+                  const accepted = collection.utils.awaitSync()
+                  transport.emit(prior)
+                  await accepted
+                  expect(
+                    [...collection.values()].map(
+                      ({ _id, text: observedText }) => ({
+                        _id,
+                        text: observedText,
+                      }),
+                    ),
+                  ).toEqual(prior)
+                } else collection.startSyncImmediate()
+                acceptImmediately = false
+                durable = new Promise<void>((_resolve, reject) => {
+                  rejectDurable = reject
+                })
+                transport.emit(proposed)
+                const pending = persist(params)
+                const rejected = expect(pending).rejects.toBe(cause)
+                await new Promise((resolve) => setTimeout(resolve, 0))
+                rejectDurable(cause)
+                await rejected
+                reach.reach(scene)
+                expect(
+                  [...collection.values()].map(
+                    ({ _id, text: observedText }) => ({
+                      _id,
+                      text: observedText,
+                    }),
+                  ),
+                ).toEqual(prior)
+                const retries = changedFirst
+                  ? [true, false, ...extraRetries]
+                  : [false, true, ...extraRetries]
+                for (const changed of retries) {
+                  if (changed)
+                    transport.emit([{ _id: `a`, text: `new:${text}` }])
+                  await expect(persist(params)).rejects.toBe(cause)
+                  reach.reach(
+                    changed ? `changed-cache-retry` : `unchanged-cache-retry`,
+                  )
+                  expect(
+                    [...collection.values()].map(
+                      ({ _id, text: observedText }) => ({
+                        _id,
+                        text: observedText,
+                      }),
+                    ),
+                  ).toEqual(prior)
+                }
+                await collection.cleanup()
+                acceptImmediately = true
+                transport.cache([{ _id: `a`, text: `restarted:${text}` }])
+                collection.startSyncImmediate()
+                await persist(params)
+                reach.reach(`restart-recovery`)
+                expect(
+                  [...collection.values()].map(
+                    ({ _id, text: observedText }) => ({
+                      _id,
+                      text: observedText,
+                    }),
+                  ),
+                ).toEqual([{ _id: `a`, text: `restarted:${text}` }])
+              },
+              () => collection.cleanup(),
+            )
+          }
+        },
+      )
+      await fc.assert(property, { numRuns: 60, ...parameters })
+    },
+    { fixedSeed: 20261023 },
+  )
 })

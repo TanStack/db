@@ -171,7 +171,7 @@ The adapter keeps each loaded cursor range subscribed. Fixed `endCursor` boundar
 
 The cap does not limit the bytes in a server response or guarantee peak memory use. A single reactive page can already exceed it. `pageSize` does not bound total memory or initial load time. Initial acquisition can inspect earlier cached pages repeatedly as it extends the cursor chain.
 
-This API uses eager sync and does not translate DB's `loadSubset` requests. Demand-driven loading remains a separate API decision because it needs an application-supplied filter and ordering translation, ownership of overlapping windows, and rejection of unsupported requests. Until that API exists, narrow the server query or use another adapter when fetching only a requested window is required.
+This factory uses eager sync; `syncMode: 'on-demand'` and DB's `loadSubset` protocol are not currently implemented. Convex cursor pagination can support lazy acquisition for a fixed query, but each load must establish the requested subset before reporting success. DB filters and ordering are not automatically translated into your server function arguments. An incomplete source page cannot stand in for a complete filtered or differently ordered result. Scope the server query when using this eager mirror.
 
 For paginated collections, `select` receives the complete row array. DB still applies local filters, joins, ordering, and limits. Pagination loads a finite query completely into memory, it does not push DB predicates to your server.
 

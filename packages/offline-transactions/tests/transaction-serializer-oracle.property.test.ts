@@ -1,3 +1,4 @@
+import { types as nativeTypes } from 'node:util'
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
@@ -6,6 +7,7 @@ import {
   MissingTemporalConstructorError,
   TransactionSerializer,
 } from '../src/outbox/TransactionSerializer'
+import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { FakeStorageAdapter } from './harness'
 import { readOfflineOracleConfig } from './oracle-config'
@@ -1601,9 +1603,11 @@ it.each(
  * Missing, mismatched, or failing codecs reject reads without changing storage.
  *
  * The supplied fixture codec uses Node's V8 structured serialization. Expected
- * runtime values come directly from generated native leaves, not a reimplementation
- * of production dispatch or codec output. Histories cross insert/update/delete,
- * native values nested in all three mutation payloads, fresh readers, and
+ * runtime values come directly from independently generated before/after native
+ * leaves, not production dispatch or codec output. Real Collection operations
+ * construct legal insert/update/delete operands, including equal-payload updates
+ * and removed fields. Declared reach checks these distinctions and each native
+ * scalar class per fixed/random campaign. Histories also cross fresh readers and
  * unsupported reader configurations. Existing v3 histories remain unchanged.
  * The Convex receiving witness supplies its real public value codec and tests
  * disk/process replay against the actual backend.
@@ -1621,136 +1625,280 @@ it(`preserves opt-in mutation values and rejects unreadable codec records withou
     fc.constantFrom(NaN, Infinity, -Infinity, -0),
     fc.uint8Array({ maxLength: 12 }).map((bytes) => bytes.buffer),
   )
-  const property = fc.asyncProperty(
-    fc.array(native, { minLength: 1, maxLength: 5 }),
-    fc.constantFrom(`insert`, `update`, `delete`),
-    async (values, kind) => {
-      type CodecRow = { id: string; values: Array<unknown> }
-      const makeCollection = (id: string) =>
-        createCollection<CodecRow>({
-          id,
-          getKey: (row) => row.id,
-          sync: { sync: ({ markReady }) => markReady() },
-        })
-      const writer = makeCollection(`codec-writer`)
-      const reader = makeCollection(`codec-reader`)
-      const row: CodecRow = { id: `one`, values }
-      const transaction: OfflineTransaction = {
-        id: `codec-transaction`,
-        mutationFnName: `save`,
-        keys: [`one`],
-        idempotencyKey: `stable`,
-        createdAt: new Date(0),
-        retryCount: 0,
-        nextAttemptAt: 0,
-        version: 1,
-        metadata: { when: new Date(0) },
-        mutations: [
-          {
-            globalKey: `one`,
-            type: kind,
-            modified: row,
-            original: row,
-            changes: { values },
-            collection: writer,
-          } as unknown as PendingMutation,
-        ],
-      }
-      const storage = new FakeStorageAdapter()
-      let hasPrimaryFailure = false
-      try {
-        await new OutboxManager(storage, { rows: writer }, codec).add(
-          transaction,
-        )
-        const before = storage.snapshot()
-        const restored = await new OutboxManager(
-          storage,
-          { rows: reader },
-          codec,
-        ).get(`codec-transaction`)
-        expect(restored?.mutations[0]?.modified).toEqual(row)
-        expect(restored?.mutations[0]?.original).toEqual(row)
-        expect(restored?.mutations[0]?.changes).toEqual({ values })
-        expect(restored?.mutations[0]?.collection).toBe(reader)
-        expect(restored?.metadata).toEqual({ when: new Date(0) })
-        const invalidEncoder = {
-          ...codec,
-          encode: () => null,
-        } as unknown as typeof codec
-        await expect(
-          new OutboxManager(storage, { rows: writer }, invalidEncoder).add(
-            transaction,
-          ),
-        ).rejects.toThrow(`codec`)
-        expect(storage.snapshot()).toEqual(before)
-        const wire = JSON.parse(Object.values(before)[0]!)
-        expect(wire.valueEncoding).toBe(4)
-        expect(wire.mutationEncoding).toBe(codec.id)
-        for (const unsupported of [
-          undefined,
-          { ...codec, id: `other` },
-          {
-            ...codec,
-            decode: () => {
-              throw new Error(`broken codec`)
-            },
-          },
-        ]) {
-          const outbox = new OutboxManager(
-            storage,
-            { rows: reader },
-            unsupported,
-          )
-          await expect(outbox.get(`codec-transaction`)).rejects.toThrow(`codec`)
-          await expect(outbox.getAll()).rejects.toThrow(`codec`)
-          expect(storage.snapshot()).toEqual(before)
-        }
-        const plain = { id: `one`, values: [] }
-        const legacy = {
-          ...transaction,
-          id: `legacy-transaction`,
-          mutations: [
-            {
-              ...transaction.mutations[0]!,
-              modified: plain,
-              original: plain,
-              changes: { values: [] },
-            },
-          ],
-        }
-        await new OutboxManager(storage, { rows: writer }).add(legacy)
-        const mixed = await new OutboxManager(
-          storage,
-          { rows: reader },
-          codec,
-        ).getAll()
-        expect(mixed).toHaveLength(2)
-        expect(
-          mixed.find((entry) => entry.id === legacy.id)?.mutations[0]?.modified,
-        ).toEqual(plain)
-      } catch (error) {
-        hasPrimaryFailure = true
-        throw error
-      } finally {
-        await cleanupOfflineOracle(
-          [() => writer.cleanup(), () => reader.cleanup()],
-          hasPrimaryFailure,
-        )
-      }
-    },
-  )
+  // An explicit type/field projection preserves own undefined fields and bytes
+  // without depending on V8's object prototypes or serializer wire tags. Node's
+  // native ArrayBuffer brand check also recognizes V8's restored realm.
+  const observe = (value: unknown): unknown => {
+    if (nativeTypes.isArrayBuffer(value))
+      return [`bytes`, [...new Uint8Array(value)]]
+    if (Array.isArray(value)) return [`array`, value.map(observe)]
+    if (value !== null && typeof value === `object`)
+      return [
+        `object`,
+        Object.entries(value)
+          .map(([key, field]) => [key, observe(field)])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      ]
+    if (typeof value === `number`)
+      return [`number`, Object.is(value, -0) ? `-0` : String(value)]
+    return [typeof value, String(value)]
+  }
   const config = readOfflineOracleConfig({
     prefix: `OFFLINE_CODEC_ORACLE`,
     defaultRuns: 60,
   })
-  if (config.seed !== undefined)
-    await fc.assert(property, {
-      numRuns: config.runs,
-      seed: config.seed,
-      path: config.path,
-    })
-  else {
-    await fc.assert(property, { numRuns: config.runs, seed: 20261022 })
-    await fc.assert(property, { numRuns: config.runs })
-  }
+  await runOracleCampaign(
+    `OFFLINE_CODEC_ORACLE`,
+    [
+      `insert`,
+      `update`,
+      `delete`,
+      `different-operands`,
+      `equal-payload-update`,
+      `changed-payload-update`,
+      `removed-field-update`,
+      `int64`,
+      `special-float`,
+      `binary`,
+    ],
+    async (reach, parameters) => {
+      const values = fc.array(native, { minLength: 1, maxLength: 5 })
+      const property = fc.asyncProperty(
+        fc.record({
+          kind: fc.constantFrom(
+            `insert` as const,
+            `update` as const,
+            `delete` as const,
+          ),
+          beforeValues: values,
+          afterValues: values,
+          samePayload: fc.boolean(),
+          removeField: fc.boolean(),
+        }),
+        async ({
+          kind,
+          beforeValues,
+          afterValues,
+          samePayload,
+          removeField,
+        }) => {
+          reach.beginHistory()
+          type CodecRow = {
+            id: string
+            revision: number
+            values: Array<unknown>
+            removable?: unknown
+          }
+          const original: CodecRow = {
+            id: `one`,
+            revision: 0,
+            values: beforeValues,
+            removable: beforeValues[0],
+          }
+          const modified: CodecRow = {
+            id: `one`,
+            revision: 1,
+            values: samePayload ? beforeValues : afterValues,
+            ...(removeField ? {} : { removable: beforeValues[0] }),
+          }
+          const writer = createCollection<CodecRow>({
+            id: `codec-writer`,
+            getKey: (row) => row.id,
+            startSync: true,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                begin()
+                if (kind !== `insert`)
+                  write({ type: `insert`, value: original })
+                commit()
+                markReady()
+              },
+            },
+          })
+          const reader = createCollection<CodecRow>({
+            id: `codec-reader`,
+            getKey: (row) => row.id,
+            sync: { sync: ({ markReady }) => markReady() },
+          })
+          const local = createTransaction({
+            autoCommit: false,
+            mutationFn: async () => {},
+          })
+          const rollback = local.isPersisted.promise.catch(() => undefined)
+          const storage = new FakeStorageAdapter()
+          let hasPrimaryFailure = false
+          try {
+            // Core constructs legal CRUD operands. Different authored trees
+            // prevent one operand from masquerading as another; revision also
+            // keeps equal-payload updates observable. The serializer owns
+            // preservation, while core owns changes composition.
+            local.mutate(() => {
+              if (kind === `insert`) writer.insert(modified)
+              else if (kind === `delete`) writer.delete(`one`)
+              else
+                writer.update(`one`, (draft) => {
+                  draft.revision = modified.revision
+                  draft.values = modified.values
+                  if (removeField) delete draft.removable
+                })
+            })
+            expect(local.mutations).toHaveLength(1)
+            const mutation = local.mutations[0]!
+            const expectedOriginal = kind === `insert` ? {} : original
+            // Snapshot before the writer: its input aliases the seeded row.
+            // In-place corruption must not rewrite the expected original too.
+            const expectedOriginalObservation = observe(expectedOriginal)
+            // Core owns its full-row and removed-field representation; this
+            // owner preserves that complete supplied operand at the codec cut.
+            const expectedModified = observe(mutation.modified)
+            const expectedChanges = observe(mutation.changes)
+            expect(mutation.original).toEqual(expectedOriginal)
+            expect(mutation.modified.revision).toBe(kind === `delete` ? 0 : 1)
+            expect(observe(mutation.modified.values)).toEqual(
+              observe(kind === `delete` ? original.values : modified.values),
+            )
+            reach.reach(kind)
+            if (kind !== `delete`) reach.reach(`different-operands`)
+            if (kind === `update` && samePayload)
+              reach.reach(`equal-payload-update`)
+            if (
+              kind === `update` &&
+              JSON.stringify(observe(beforeValues)) !==
+                JSON.stringify(observe(modified.values))
+            )
+              reach.reach(`changed-payload-update`)
+            if (kind === `update` && removeField) {
+              expect(Object.hasOwn(mutation.changes, `removable`)).toBe(true)
+              expect(mutation.changes.removable).toBeUndefined()
+              reach.reach(`removed-field-update`)
+            }
+            const recordNative = (value: unknown): void => {
+              if (typeof value === `bigint`) reach.reach(`int64`)
+              else if (
+                typeof value === `number` &&
+                (!Number.isFinite(value) || Object.is(value, -0))
+              )
+                reach.reach(`special-float`)
+              else if (nativeTypes.isArrayBuffer(value)) reach.reach(`binary`)
+              else if (value !== null && typeof value === `object`)
+                Object.values(value).forEach(recordNative)
+            }
+            recordNative(mutation.original)
+            recordNative(mutation.modified)
+            recordNative(mutation.changes)
+            const transaction: OfflineTransaction = {
+              id: `codec-transaction`,
+              mutationFnName: `save`,
+              keys: [mutation.globalKey],
+              idempotencyKey: `stable`,
+              createdAt: new Date(0),
+              retryCount: 0,
+              nextAttemptAt: 0,
+              version: 1,
+              metadata: { when: new Date(0) },
+              mutations: local.mutations,
+            }
+            await new OutboxManager(storage, { rows: writer }, codec).add(
+              transaction,
+            )
+            const before = storage.snapshot()
+            const restored = await new OutboxManager(
+              storage,
+              { rows: reader },
+              codec,
+            ).get(`codec-transaction`)
+            expect(
+              observe(restored?.mutations[0]?.modified),
+              `modified operand`,
+            ).toEqual(expectedModified)
+            expect(
+              observe(restored?.mutations[0]?.original),
+              `original operand`,
+            ).toEqual(expectedOriginalObservation)
+            expect(
+              observe(restored?.mutations[0]?.changes),
+              `changes operand`,
+            ).toEqual(expectedChanges)
+            expect(restored?.mutations[0]?.collection).toBe(reader)
+            expect(restored?.metadata).toEqual({ when: new Date(0) })
+            const invalidEncoder = {
+              ...codec,
+              encode: () => null,
+            } as unknown as typeof codec
+            await expect(
+              new OutboxManager(storage, { rows: writer }, invalidEncoder).add(
+                transaction,
+              ),
+            ).rejects.toThrow(`codec`)
+            expect(storage.snapshot()).toEqual(before)
+            const wire = JSON.parse(Object.values(before)[0]!)
+            expect(wire.valueEncoding).toBe(4)
+            expect(wire.mutationEncoding).toBe(codec.id)
+            for (const unsupported of [
+              undefined,
+              { ...codec, id: `other` },
+              {
+                ...codec,
+                decode: () => {
+                  throw new Error(`broken codec`)
+                },
+              },
+            ]) {
+              const outbox = new OutboxManager(
+                storage,
+                { rows: reader },
+                unsupported,
+              )
+              await expect(outbox.get(`codec-transaction`)).rejects.toThrow(
+                `codec`,
+              )
+              await expect(outbox.getAll()).rejects.toThrow(`codec`)
+              expect(storage.snapshot()).toEqual(before)
+            }
+            const plain = { id: `one`, revision: 0, values: [] }
+            const legacy = {
+              ...transaction,
+              id: `legacy-transaction`,
+              mutations: [
+                {
+                  ...transaction.mutations[0]!,
+                  modified: plain,
+                  original: plain,
+                  changes: { values: [] },
+                },
+              ],
+            }
+            await new OutboxManager(storage, { rows: writer }).add(legacy)
+            const mixed = await new OutboxManager(
+              storage,
+              { rows: reader },
+              codec,
+            ).getAll()
+            expect(mixed).toHaveLength(2)
+            expect(
+              mixed.find((entry) => entry.id === legacy.id)?.mutations[0]
+                ?.modified,
+            ).toEqual(plain)
+          } catch (error) {
+            hasPrimaryFailure = true
+            throw error
+          } finally {
+            await cleanupOfflineOracle(
+              [
+                () => {
+                  local.rollback()
+                },
+                () => rollback,
+                () => writer.cleanup(),
+                () => reader.cleanup(),
+              ],
+              hasPrimaryFailure,
+            )
+          }
+        },
+      )
+      await fc.assert(property, { numRuns: config.runs, ...parameters })
+    },
+    { fixedSeed: 20261022 },
+  )
 })

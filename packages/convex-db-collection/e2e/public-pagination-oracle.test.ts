@@ -19,6 +19,13 @@
  * adapter client's real connections; a separate direct writer commits while
  * disconnected. The old public snapshot must remain until reconnect, then the
  * complete Collection and select-boundary order must equal the ledger.
+ * Every select and public change callback is retained, including replacements
+ * followed immediately by another replacement. Each must represent a complete
+ * ledger revision available at that observation. A direct writer's update may
+ * arrive before its mutation promise fulfills, so its one pending authored
+ * message is a possible committed revision. Later messages cannot justify an
+ * earlier observation. During disconnection only the previous complete result
+ * is allowed; reopening admits the complete revisions committed while offline.
  *
  * This is finite public-app conformance, not a browser-render test, a generated
  * history campaign, a total network-work bound, or a test of cloud hosting.
@@ -48,8 +55,12 @@ const backend = inject(`publicPaginationUrl`)
 const queries = [`list`, `listWithExtraArg`, `listWithTransformation`] as const
 type QueryName = (typeof queries)[number]
 
-function expectedRows(name: QueryName, author: string): Array<Message> {
-  return [...ledger]
+function expectedRows(
+  name: QueryName,
+  author: string,
+  messages: ReadonlyArray<Message> = ledger,
+): Array<Message> {
+  return [...messages]
     .reverse()
     .filter(
       (message) => name !== `listWithExtraArg` || message.author === author,
@@ -92,6 +103,46 @@ describe.each([`javascript`, `react`] as const)(
           PaginationResult<Message>
         >(`messages:${name}`)
         let selected: ReadonlyArray<Message> = []
+        let recording = false
+        let disconnected = false
+        let allowedSnapshots: Array<Array<Message>> = []
+        const disconnectedSnapshots: Array<Array<Message>> = []
+        const observations: Array<{
+          boundary: `select` | `publication`
+          rows: Array<Message>
+          allowed: Array<Array<Message>>
+        }> = []
+        const byBody = (a: Message, b: Message) => a.body.localeCompare(b.body)
+        // Snapshot the allowed revisions now. Extending the ledger later must
+        // not retroactively excuse an impossible earlier observation. Public
+        // Collection iteration order is not provider order; select preserves it.
+        const record = (
+          boundary: `select` | `publication`,
+          rows: ReadonlyArray<Message>,
+        ) => {
+          if (!recording) return
+          const project = (snapshot: ReadonlyArray<Message>) => {
+            const projected = snapshot.map(({ author: from, body }) => ({
+              author: from,
+              body,
+            }))
+            return boundary === `publication`
+              ? projected.sort(byBody)
+              : projected
+          }
+          observations.push({
+            boundary,
+            rows: project(rows),
+            allowed: allowedSnapshots.map(project),
+          })
+        }
+        const checkObservations = () => {
+          for (const observation of observations)
+            expect(
+              observation.allowed,
+              `${observation.boundary} must expose a complete ledger revision`,
+            ).toContainEqual(observation.rows)
+        }
         const collection = createCollection(
           convexPaginatedCollectionOptions({
             client,
@@ -103,6 +154,7 @@ describe.each([`javascript`, `react`] as const)(
                 author: from,
                 body,
               }))
+              record(`select`, selected)
               return rows
             },
             getKey: (row) => row.body,
@@ -113,6 +165,11 @@ describe.each([`javascript`, `react`] as const)(
           const message = {
             author: from,
             body: `message ${ledger.length} from ${from}`,
+          }
+          if (recording) {
+            const next = expectedRows(name, author, [...ledger, message])
+            if (disconnected) disconnectedSnapshots.push(next)
+            else allowedSnapshots.push(next)
           }
           await writer.mutation(send, message)
           ledger.push(message)
@@ -128,13 +185,24 @@ describe.each([`javascript`, `react`] as const)(
           expect(
             [...collection.values()]
               .map(({ author: from, body }) => ({ author: from, body }))
-              .sort((a, b) => a.body.localeCompare(b.body)),
-          ).toEqual([...expected].sort((a, b) => a.body.localeCompare(b.body)))
+              .sort(byBody),
+          ).toEqual([...expected].sort(byBody))
+          checkObservations()
+          // Both cuts have reached this complete source revision. A later
+          // source phase may repeat it or advance through new complete revisions.
+          allowedSnapshots = [expected]
         }
+        let subscription:
+          ReturnType<typeof collection.subscribeChanges> | undefined
         await withTestCleanup(
           async () => {
             for (let index = 0; index < 17; index++)
               await publish(index % 2 === 0 ? author : `other:${author}`)
+            allowedSnapshots = [expectedRows(name, author)]
+            recording = true
+            subscription = collection.subscribeChanges(() => {
+              record(`publication`, [...collection.values()])
+            })
             await collection.preload()
             await check(false)
             await publish(author)
@@ -142,6 +210,7 @@ describe.each([`javascript`, `react`] as const)(
             await publish(`other:${author}`)
             await check()
             const before = [...selected]
+            disconnected = true
             gate.disconnect()
             await expect
               .poll(() => client.connectionState().isWebSocketConnected)
@@ -152,11 +221,25 @@ describe.each([`javascript`, `react`] as const)(
             expect(
               [...collection.values()]
                 .map(({ author: from, body }) => ({ author: from, body }))
-                .sort((a, b) => a.body.localeCompare(b.body)),
-            ).toEqual([...before].sort((a, b) => a.body.localeCompare(b.body)))
+                .sort(byBody),
+            ).toEqual([...before].sort(byBody))
+            checkObservations()
+            allowedSnapshots.push(...disconnectedSnapshots)
+            disconnected = false
             gate.reconnect()
             await check()
+            expect(
+              observations.some(
+                (observation) => observation.boundary === `select`,
+              ),
+            ).toBe(true)
+            expect(
+              observations.some(
+                (observation) => observation.boundary === `publication`,
+              ),
+            ).toBe(true)
           },
+          () => subscription?.unsubscribe(),
           () => collection.cleanup(),
           () => client.close(),
           () => writer.close(),
