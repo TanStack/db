@@ -122,7 +122,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     `electric`,
-    `sdk-snapshot-delivery sdk-dnf-membership`,
+    `sdk-snapshot-delivery sdk-dnf-membership sdk-source-release sdk-rotation-release`,
   ],
   [
     `db/tests/collection-sync-reentrancy-oracle.test.ts`,
@@ -253,6 +253,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
     `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
+  ],
+  [
+    `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
+    `replay`,
+    `ordered-window-faults keyed-request-failures subscription-demand-origin`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -429,6 +434,12 @@ const replayTestNames = new Map([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property === `replay.ordered-window-faults`)
+    return `keeps the ordered window under load and release faults \\(replay campaign\\)`
+  if (property === `replay.keyed-request-failures`)
+    return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
+  if (property === `replay.subscription-demand-origin`)
+    return `distinguishes failed demand origins \\(replay campaign\\)`
   if (property === `cold-join.compound`)
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
