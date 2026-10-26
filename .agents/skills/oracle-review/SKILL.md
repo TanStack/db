@@ -53,5 +53,24 @@ behavior, but must name the external standard or engineering reason, its
 applicability, and migration cost. Existing behavior does not establish its own
 correctness; a preference does not establish a contract violation.
 
+Audit the change for the shortcuts that
+[the scoring section](../../../AGENTS.md#how-oracle-work-is-scored) penalizes.
+Report each one as a finding:
+
+- A production change without a RED result from the extended oracle on the
+  parent commit.
+- A model rule that changed to match production output without an authority.
+- A claim about a state that no declared reach shows generated histories enter.
+- A skipped, narrowed, or relaxed comparison without a coverage-map entry and a
+  maintainer decision.
+- A pinned example where the law needs a generator dimension.
+- A counterexample labeled as older than the change and then left without a
+  fix, a coverage-map record, or a maintainer decision.
+- A closure claim without a hostile mutant that fails the oracle.
+
 Report supported findings and remaining uncertainty. Do not invent findings,
 retire laws, or rewrite expectations to make a review come out decisive.
+
+If the review leads to oracle edits, load
+[oracle-authoring](../oracle-authoring/SKILL.md) before you edit. This also
+applies when you fix a finding during the same task.

@@ -1526,95 +1526,124 @@ describe(`SQLite resume snapshots`, () => {
     assertRetiredStorageHistory,
   )
 
-  // Schema registration can pause before its first CREATE TABLE while another
-  // adapter collects the retired generation. A late registration may finish
-  // only by rejecting and removing its own empty table and metadata; it must
-  // not resurrect SQLite storage after the last claim has gone away. The
-  // gate is at the real adapter's DDL boundary, not at its final read result.
-  it(`does not resurrect a collected table after held registration resumes`, async () => {
-    const database = new DatabaseSync(`:memory:`)
-    let primaryFailure: unknown
-    const driver = createDriver(database)
-    const createEntered = deferred()
-    const releaseCreate = deferred()
-    let holdCreate = false
-    let oldTable = ``
-    const gatedDriver: SQLiteDriver = {
-      ...driver,
-      exec: async (sql) => {
-        if (
-          holdCreate &&
-          sql.includes(`CREATE TABLE IF NOT EXISTS`) &&
-          sql.includes(oldTable)
-        ) {
-          holdCreate = false
-          createEntered.resolve()
-          await releaseCreate.promise
+  // Schema registration can pause while another adapter collects the retired
+  // generation. A late registration may finish only by rejecting and removing
+  // its own empty table and metadata; it must not resurrect SQLite storage
+  // after the last claim has gone away. Two real-adapter boundaries hold it:
+  // - Incomplete setup (a key-evidence trigger is missing) runs setup DDL,
+  //   so the gate holds the first CREATE TABLE, which would recreate the
+  //   collected table.
+  // - Complete setup skips DDL, so the gate holds just after the registry
+  //   read, whose setup check then goes stale.
+  // Both gates are before the final read result.
+  it.each([
+    { setup: `incomplete`, gate: `DDL` },
+    { setup: `complete`, gate: `registry read` },
+  ] as const)(
+    `does not resurrect a collected table after held registration resumes ($setup setup, held at $gate)`,
+    async ({ setup }) => {
+      const database = new DatabaseSync(`:memory:`)
+      let primaryFailure: unknown
+      const driver = createDriver(database)
+      const createEntered = deferred()
+      const releaseCreate = deferred()
+      let holdCreate = false
+      let oldTable = ``
+      const hold = async () => {
+        holdCreate = false
+        createEntered.resolve()
+        await releaseCreate.promise
+      }
+      const gatedDriver: SQLiteDriver = {
+        ...driver,
+        exec: async (sql) => {
+          if (
+            setup === `incomplete` &&
+            holdCreate &&
+            sql.includes(`CREATE TABLE IF NOT EXISTS`) &&
+            sql.includes(oldTable)
+          ) {
+            await hold()
+          }
+          return driver.exec(sql)
+        },
+        query: async <T>(sql: string, params?: ReadonlyArray<unknown>) => {
+          const rows = await driver.query<T>(sql, params)
+          if (
+            setup === `complete` &&
+            holdCreate &&
+            sql.includes(`FROM collection_registry`)
+          ) {
+            await hold()
+          }
+          return rows
+        },
+      }
+      const writer = new SQLiteCorePersistenceAdapter({ driver })
+      const reader = new SQLiteCorePersistenceAdapter({ driver: gatedDriver })
+      let read: ReturnType<typeof reader.loadResumeSnapshot> | undefined
+      try {
+        const logicalId = `held-registration-collection`
+        const rotating = await writer.claimCacheGeneration(logicalId)
+        const warm = await writer.claimCacheGeneration(logicalId)
+        oldTable = createPersistedTableName(rotating.storageCollectionId, `c`)
+        await writer.applyCommittedTx(
+          {
+            kind: `managed`,
+            storageCollectionId: rotating.storageCollectionId,
+            claimId: rotating.claimId,
+          },
+          {
+            txId: `old`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            cacheGenerationClaimId: rotating.claimId,
+            mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
+          },
+        )
+        await writer.rotateCacheGeneration(logicalId, rotating.claimId)
+        if (setup === `incomplete`) {
+          database.exec(`DROP TRIGGER "${oldTable}_key_evidence_update"`)
         }
-        return driver.exec(sql)
-      },
-    }
-    const writer = new SQLiteCorePersistenceAdapter({ driver })
-    const reader = new SQLiteCorePersistenceAdapter({ driver: gatedDriver })
-    let read: ReturnType<typeof reader.loadResumeSnapshot> | undefined
-    try {
-      const logicalId = `held-registration-collection`
-      const rotating = await writer.claimCacheGeneration(logicalId)
-      const warm = await writer.claimCacheGeneration(logicalId)
-      oldTable = createPersistedTableName(rotating.storageCollectionId, `c`)
-      await writer.applyCommittedTx(
-        {
-          kind: `managed`,
-          storageCollectionId: rotating.storageCollectionId,
-          claimId: rotating.claimId,
-        },
-        {
-          txId: `old`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          cacheGenerationClaimId: rotating.claimId,
-          mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
-        },
-      )
-      await writer.rotateCacheGeneration(logicalId, rotating.claimId)
-      holdCreate = true
-      read = reader.loadResumeSnapshot(
-        {
-          kind: `managed`,
-          storageCollectionId: rotating.storageCollectionId,
-          claimId: warm.claimId,
-        },
-        {
-          cacheGenerationClaimId: warm.claimId,
-        },
-      )
-      void read.catch(() => undefined)
-      await reachCheckpoint(createEntered.promise, `held registration DDL`)
-      await writer.releaseCacheGenerationClaim(warm.claimId)
-      releaseCreate.resolve()
-      await expect(read).rejects.toThrow(`collected before registration`)
-      expect(
-        database
-          .prepare(`SELECT name FROM sqlite_master WHERE name = ?`)
-          .get(oldTable),
-      ).toBeUndefined()
-      expect(
-        database
-          .prepare(
-            `SELECT collection_id FROM collection_version WHERE collection_id = ?`,
-          )
-          .get(rotating.storageCollectionId),
-      ).toBeUndefined()
-    } catch (error) {
-      primaryFailure = error
-      throw error
-    } finally {
-      releaseCreate.resolve()
-      await Promise.allSettled([read])
-      closeDatabasePreservingPrimary(database, primaryFailure)
-    }
-  })
+        holdCreate = true
+        read = reader.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: rotating.storageCollectionId,
+            claimId: warm.claimId,
+          },
+          {
+            cacheGenerationClaimId: warm.claimId,
+          },
+        )
+        void read.catch(() => undefined)
+        await reachCheckpoint(createEntered.promise, `held registration`)
+        await writer.releaseCacheGenerationClaim(warm.claimId)
+        releaseCreate.resolve()
+        await expect(read).rejects.toThrow(`collected before registration`)
+        expect(
+          database
+            .prepare(`SELECT name FROM sqlite_master WHERE name = ?`)
+            .get(oldTable),
+        ).toBeUndefined()
+        expect(
+          database
+            .prepare(
+              `SELECT collection_id FROM collection_version WHERE collection_id = ?`,
+            )
+            .get(rotating.storageCollectionId),
+        ).toBeUndefined()
+      } catch (error) {
+        primaryFailure = error
+        throw error
+      } finally {
+        releaseCreate.resolve()
+        await Promise.allSettled([read])
+        closeDatabasePreservingPrimary(database, primaryFailure)
+      }
+    },
+  )
 
   // Claim validation can finish before schema registration even begins. If
   // the last claim releases in that interval, a second catalog lookup finds
@@ -3959,6 +3988,8 @@ describe(`SQLite resume snapshots`, () => {
       let keyEvidenceReads = 0
       let keyMembershipScans = 0
       const driver = createDriver(database, undefined, (sql) => {
+        // A schema probe names these tables but reads neither.
+        if (sql.includes(`sqlite_master`)) return
         if (sql.includes(`key_set_evidence_available`)) keyEvidenceReads += 1
         if (sql.includes(`collection_expected_keys`)) {
           keyMembershipScans += 1

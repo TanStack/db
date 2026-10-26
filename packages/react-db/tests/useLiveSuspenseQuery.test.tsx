@@ -7,12 +7,14 @@ import {
 } from '@testing-library/react'
 import {
   DbClient,
+  UnhashableQueryIRError,
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
   eq,
   getStableValueHash,
   gt,
+  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { Component, StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -95,6 +97,7 @@ describe(`useLiveSuspenseQuery`, () => {
         value: {
           networkTimeoutMs: 60_000,
           onDemand: false,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -161,6 +164,7 @@ describe(`useLiveSuspenseQuery`, () => {
           value: {
             networkTimeoutMs: 60_000,
             onDemand: false,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: `ready` }),
             subscribe: () => () => {},
@@ -314,6 +318,7 @@ describe(`useLiveSuspenseQuery`, () => {
         value: {
           networkTimeoutMs: 60_000,
           onDemand: false,
+          waitForInitialRender: waitForPersistedInitialRender,
           getOrStartNetworkDeadline: () => Date.now() + 60_000,
           getSnapshot: () => ({ status: `ready` }),
           subscribe: () => () => {},
@@ -423,6 +428,7 @@ describe(`useLiveSuspenseQuery`, () => {
           value: {
             networkTimeoutMs,
             onDemand: false,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () =>
               (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
             getSnapshot: () => ({ status: persistedStatus }),
@@ -492,6 +498,7 @@ describe(`useLiveSuspenseQuery`, () => {
     const readiness = (onDemand: boolean) => ({
       networkTimeoutMs: 0,
       onDemand,
+      waitForInitialRender: waitForPersistedInitialRender,
       getOrStartNetworkDeadline: () => Date.now(),
       getSnapshot: () => ({ status: `ready` }),
       subscribe: () => () => {},
@@ -698,7 +705,6 @@ describe(`useLiveSuspenseQuery`, () => {
   })
 
   it(`requires queryKey for an opaque query during SSR streaming`, () => {
-    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const descriptor = collectionOptions(`streamed-people`, () => ({
       id: `streamed-people`,
       getKey: (person: Person) => person.id,
@@ -727,11 +733,7 @@ describe(`useLiveSuspenseQuery`, () => {
           }),
         { wrapper },
       ),
-    ).toThrow(/Provide an explicit serializable queryKey/)
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(`cannot derive a stable identity`),
-    )
-    warn.mockRestore()
+    ).toThrow(UnhashableQueryIRError)
   })
 
   it(`throws the original streamed query error`, async () => {

@@ -6,6 +6,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   getStableValueHash,
+  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -131,6 +132,7 @@ describe(`useLiveSuspenseQuery preload recovery`, () => {
           value: {
             networkTimeoutMs: 60_000,
             onDemand: false,
+            waitForInitialRender: waitForPersistedInitialRender,
             getOrStartNetworkDeadline: () => Date.now() + 60_000,
             getSnapshot: () => ({ status: persistedStatus }),
             subscribe: (listener: () => void) => {

@@ -1,14 +1,8 @@
 import { computed, shallowRef, toValue, watchEffect } from 'vue'
 import {
-  assertLiveQueryWindowManyResult,
-  compareLiveQueryWindowDependencies,
-  createLiveQueryCollection,
-  createLiveQueryWindowController,
+  bindLiveQueryWindow,
   fetchNextLiveQueryWindowPage,
-  getLiveQueryWindowCollectionWarning,
-  normalizeLiveQueryWindowPageSize,
-  resolveLiveQueryWindowInput,
-  shouldPreserveLiveQueryWindowPageCount,
+  readLiveQueryWindowPageShape,
 } from '@tanstack/db'
 import type {
   Collection,
@@ -18,19 +12,12 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryPersistedStatus,
+  LiveQueryWindowBinding,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
-
-const DEFAULT_GC_TIME_MS = 1
-
-type InternalCollection = Collection<object, string | number, UtilsRecord>
-
-type PreviousController = {
-  getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
-}
 
 type InfiniteQueryOptions = {
   pageSize?: number
@@ -125,96 +112,23 @@ export function useLiveInfiniteQuery<
   config: InfiniteQueryOptions,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
-  if (`getNextPageParam` in config) {
-    throw new Error(
-      `getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.`,
-    )
-  }
-  let validatedCollection: InternalCollection | null = null
-  let previousController: PreviousController | null = null
-  let previousInput: ReturnType<
-    typeof resolveLiveQueryWindowInput<TContext>
-  > | null = null
-  let previousDependencies: Array<unknown> | null = null
-  let previousPageSize: number | null = null
-  let previousInitialPageParam: number | null = null
+  let binding: LiveQueryWindowBinding | null = null
 
+  // Vue reruns this only when something it reads changed: the input, a
+  // dependency, the page shape, or a ref the query callback reads.
   const controller = computed(() => {
-    const dependencies = deps.map((dependency) => toValue(dependency))
-
-    const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
-    const initialPageParam = config.initialPageParam ?? 0
-    const unwrappedInput =
-      typeof queryFnOrCollection === `function`
-        ? queryFnOrCollection
-        : toValue(queryFnOrCollection)
-    const input = resolveLiveQueryWindowInput<TContext>(unwrappedInput)
-    const dependencyComparison = compareLiveQueryWindowDependencies(
-      previousDependencies,
-      dependencies,
-    )
-    const dependenciesChanged = dependencyComparison.changed
-    const dependenciesStructurallyEqual = dependencyComparison.structurallyEqual
-    const pageShapeChanged =
-      previousPageSize !== pageSize ||
-      previousInitialPageParam !== initialPageParam
-    const sameCollection =
-      input.kind === `collection` &&
-      previousInput?.kind === `collection` &&
-      previousInput.collection === input.collection
-    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
-      hasPreviousController: previousController !== null,
-      previousInputKind: previousInput?.kind,
-      inputKind: input.kind,
-      sameCollection,
-      dependenciesChanged,
-      dependenciesStructurallyEqual,
-      pageShapeChanged,
+    const previous = binding
+    binding = bindLiveQueryWindow(previous, {
+      ...readLiveQueryWindowPageShape(config),
+      input:
+        typeof queryFnOrCollection === `function`
+          ? queryFnOrCollection
+          : toValue(queryFnOrCollection),
+      dependencies: deps.map((dependency) => toValue(dependency)),
+      recompile: `always`,
     })
-    const previousPageCount = previousController
-      ? Math.max(1, previousController.getSnapshot().pages.length)
-      : 1
-    const initialPageCount = canPreservePageCount ? previousPageCount : 1
-
-    previousInput = input
-    previousDependencies = [...dependencies]
-    previousPageSize = pageSize
-    previousInitialPageParam = initialPageParam
-
-    if (input.kind === `collection`) {
-      const collection = input.collection
-      const warning = getLiveQueryWindowCollectionWarning(
-        collection,
-        pageSize + 1,
-      )
-
-      if (validatedCollection !== collection) {
-        validatedCollection = collection
-        if (warning) console.warn(warning)
-      }
-
-      const currentController = createLiveQueryWindowController(collection, {
-        pageSize,
-        initialPageParam,
-        initialPageCount,
-      })
-      previousController = currentController
-      return currentController
-    }
-
-    const collection = createLiveQueryCollection({
-      query: input.query.limit(pageSize + 1).offset(0),
-      startSync: false,
-      gcTime: DEFAULT_GC_TIME_MS,
-    })
-    assertLiveQueryWindowManyResult(collection)
-    const currentController = createLiveQueryWindowController(collection, {
-      pageSize,
-      initialPageParam,
-      initialPageCount,
-    })
-    previousController = currentController
-    return currentController
+    if (binding !== previous && binding.warning) console.warn(binding.warning)
+    return binding.controller
   })
 
   const snapshot = shallowRef(controller.value.getSnapshot())

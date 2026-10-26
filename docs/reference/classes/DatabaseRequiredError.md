@@ -3,7 +3,7 @@ id: DatabaseRequiredError
 title: DatabaseRequiredError
 ---
 
-Defined in: [packages/db/src/indexed-db.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L33)
+Defined in: [packages/db/src/indexed-db.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L37)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/indexed-db.ts:33](https://github.com/TanStack/db/bl
 new DatabaseRequiredError(): DatabaseRequiredError;
 ```
 
-Defined in: [packages/db/src/indexed-db.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L34)
+Defined in: [packages/db/src/indexed-db.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L38)
 
 #### Returns
 

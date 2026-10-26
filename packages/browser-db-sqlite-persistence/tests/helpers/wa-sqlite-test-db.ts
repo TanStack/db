@@ -22,8 +22,13 @@ function executeWithBindings<TRow>(
 
 export function createWASQLiteTestDatabase(options: {
   filename: string
+  /** Milliseconds a busy statement blocks before SQLITE_BUSY. */
+  timeout?: number
 }): BrowserWASQLiteDatabase {
-  const database = new BetterSqlite3(options.filename)
+  const database = new BetterSqlite3(
+    options.filename,
+    options.timeout === undefined ? {} : { timeout: options.timeout },
+  )
 
   return {
     execute: <TRow = unknown>(

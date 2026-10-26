@@ -990,6 +990,16 @@ Development builds show the full message. For example:
 setWindow() cannot change the limit of a findOne() query.
 ```
 
+<a id="error-245"></a>
+
+## Error 245: `SourceCollectionIdReuseError`
+
+Development builds show the full message. For example:
+
+```text
+[useLiveQuery] Collection ID "todos" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.
+```
+
 ## Other errors and log messages
 
 These are plain `Error`, `TypeError`, `RangeError`, or
@@ -2468,4 +2478,14 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 A windowed or findOne result row has no include route
+```
+
+<a id="error-246"></a>
+
+## Error 246: `live-query-window-binding.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.
 ```
