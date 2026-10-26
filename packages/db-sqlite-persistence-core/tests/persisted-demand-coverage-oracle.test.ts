@@ -1620,6 +1620,52 @@ async function runSynchronousAnswerThenDelete(
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
+// An unordered demand keeps its row count when the source deletes one of
+// its rows and adds another, so it stays covered (maintainer decision,
+// 2026-10-26: unordered demands keep the row-count rule). This rejects the
+// wrong design "every demand must hold the keys it held", which the window
+// law needs and unordered demands do not.
+async function runUnorderedRowReplaced(): Promise<{
+  settledOffline: boolean
+  rows?: Array<string>
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  {
+    const { collection, upstream } = onDemandSource(
+      new SQLiteCorePersistenceAdapter({ driver }),
+      0,
+    )
+    const query = filterQuery(collection, `a`)
+    await withCleanup(async () => {
+      const preload = query.preload()
+      await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+      await upstream.answer([A1, A2])
+      await preload
+      await upstream.remove([A1])
+      await upstream.write([{ id: `a3`, group: `a`, rank: 3, value: `v1` }])
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      // Positive witness: D lost a1 and gained a3 while it was active.
+      expect(query.toArray.map((row) => row.id).sort()).toEqual([`a2`, `a3`])
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const query = filterQuery(collection, `a`)
+  const state = trackPreload(query)
+  return withCleanup(async () => {
+    await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return state() === `resolved`
+      ? {
+          settledOffline: true,
+          rows: query.toArray.map((row) => row.id).sort(),
+        }
+      : { settledOffline: false }
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
 async function runReleaseDuringCoverageCheck(): Promise<{
   loadingAfterRelease: boolean
   heldReads: number
@@ -2582,6 +2628,14 @@ describe(`persisted demand coverage oracle`, () => {
       )
     },
   )
+
+  it(`keeps an unordered demand covered when it loses one row and gains another`, async () => {
+    quietConsole()
+    expect(await runUnorderedRowReplaced()).toEqual({
+      settledOffline: true,
+      rows: [`a2`, `a3`],
+    })
+  })
 
   it(`stops loading at release during the coverage check`, async () => {
     quietConsole()

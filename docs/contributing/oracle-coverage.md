@@ -2701,8 +2701,9 @@ notifying settlement, each fail named cases.
 
 Remaining limits: coverage relies on the source committing a load's rows
 before it settles that load (law 7); an unordered demand that loses one row
-and gains another keeps its row count and stays covered (the approved
-row-count rule); ordered windows with duplicate ranks and offset-based pages
+and gains another keeps its row count and stays covered, so a row that
+retention removed can be missing from a covered restore (maintainer
+decision, 2026-10-26; a fixed history pins the rule); ordered windows with duplicate ranks and offset-based pages
 without an index; and multi-tab coordinators, outside the law by maintainer
 decision (2026-10-26).
 

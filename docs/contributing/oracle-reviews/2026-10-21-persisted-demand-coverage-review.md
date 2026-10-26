@@ -365,9 +365,12 @@ any production change, and each extension was run on the starting head.
 | H8: duplicated builder-or-Collection lookup | Maintainability | None | — | Declined: a shared helper does not reduce shipped bytes. |
 | H9: settlement listeners fire only from the status check | — | None: not reachable | — | `retireDemand` runs only for an empty demand update inside a graph run, which ends with a status check. Setup sends only nonempty initial keys. `settleDemand` now notifies directly (H1). |
 
-The unordered part of H5 is a law question, not an enforcement gap: the
+The unordered part of H5 was a law question, not an enforcement gap: the
 approved row-count rule accepts an unordered demand that lost one row and
-gained another. It is reported to the maintainer.
+gained another. The maintainer kept the row count for unordered demands
+(2026-10-26) over recording every row key. A fixed history now pins that
+choice: an unordered demand that loses `a1` and gains `a3` settles offline
+on `a2` and `a3`. A mutant that records keys for every demand fails it.
 
 Hostile mutants, beyond the starting head:
 
@@ -376,4 +379,4 @@ Hostile mutants, beyond the starting head:
 - dropping the error-state check without notifying from `settleDemand` is
   killed by both covered source-failure histories.
 
-GREEN: the oracle passes 260 of 260.
+GREEN: the oracle passes 262 of 262 with the unordered history (vitest counts its type checks too).

@@ -101,7 +101,10 @@ rules came from review:
 - Coverage counts only while the persisted subset restore returns at least as
   many rows as coverage recorded. A row deleted afterwards, by the source or by
   Query DB retention, ends coverage until the demand loads online again
-  (maintainer decision, 2026-10-26).
+  (maintainer decision, 2026-10-26). An unordered demand counts only rows: one
+  that loses a row and gains another keeps its count and stays covered, even
+  when retention removed the lost row (maintainer decision, 2026-10-26,
+  chosen over recording every row key, whose storage grows with the demand).
 - Coverage is bookkeeping beside a load. A coverage read that fails proves
   nothing: the load records no coverage, or waits for its upstream load, and
   otherwise keeps its own outcome. A load released during its coverage check
