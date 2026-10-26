@@ -101,12 +101,16 @@ import { createOracleReach } from '../oracle-reach.js'
  *
  * A query also needs the operator code its select and grouping use. Group
  * keys passed to `groupBy` bare carry no grouping compiler, so a grouped
- * query whose select and HAVING hold no aggregate throws
+ * query with no aggregate anywhere, in its select, HAVING, or orderBy, throws
  * `GroupingOperatorRequiredError` unless it wraps its keys in `groupKeys()`;
- * any aggregate brings the compiler. A query builder in a select value is a
- * subquery only inside `include()`, `toArray()`, or `materialize()`: a bare
- * one throws `IncludeOperatorRequiredError` when the select is built, as a
- * field, inside a nested object, or in a conditional branch. Authority: the
+ * any aggregate brings the compiler, and the query compiles all its
+ * aggregates with it. This grammar generates no orderBy; the pinned
+ * witnesses in `hand-built-ir-operators.test.ts` cover it. A query builder in
+ * a select value is a subquery only inside `include()`, `toArray()`, or
+ * `materialize()`: a bare one throws `IncludeOperatorRequiredError` when the
+ * select is built, as a field, inside a nested object, or in a conditional
+ * branch. A wrapped include inside a nested object throws; a conditional
+ * branch may be one, which the includes-collection oracle publishes. Authority: the
  * maintainer's decision in PR #2232 that these operators are opt-in and that
  * a missing operator throws. When several errors apply, the query throws one
  * of them; which one is not part of the law.
@@ -115,7 +119,8 @@ import { createOracleReach } from '../oracle-reach.js'
  * compiler on each aggregate and on `groupKeys()` keys, and the include
  * runtime on each include. IR without it throws the coded error for the
  * missing operator when it compiles, on every path: a grouped query, one
- * implicit group, HAVING, and an include. Authority: the changeset ("Code that
+ * implicit group, HAVING, and an include, unless another aggregate or
+ * `groupKeys()` brings the grouping compiler. Authority: the changeset ("Code that
  * builds query IR by hand must supply the operator code") and AGENTS.md, which
  * requires a contract contradiction to fail at the boundary.
  *
@@ -127,9 +132,14 @@ import { createOracleReach } from '../oracle-reach.js'
  * `new BaseQueryBuilder(ir)`. Stripping one kind at a time keeps a missing
  * include runtime from hiding behind a missing grouping compiler. A history
  * that strips the include runtime gives its include a child query that is
- * valid on its own, `count()` alone, so only the missing runtime can fail it. The property declares
- * the states these laws need with `createOracleReach` and fails when a
- * campaign does not reach each of them.
+ * valid on its own, `count()` alone, so only the missing runtime can fail it.
+ * Half the histories that strip the grouping compiler likewise give the
+ * top-level query a select of `count()` alone, with an aggregate HAVING when
+ * the generated shape has one. A model error set of exactly
+ * `groupingRequired` then witnesses each path, grouped, one implicit group,
+ * and HAVING, where no other error can hide the missing compiler. The
+ * property declares the states these laws need with `createOracleReach` and
+ * fails when a campaign does not reach each of them.
  *
  * Limits: one parent field (`x`), one source field (`v`) and one group key
  * (`k`); numbers only. A nested include in a unionAll query is rejected
@@ -293,10 +303,10 @@ function shapeHasAggregate(shape: Shape): boolean {
   )
 }
 
-/** Every error the model says applies. The query must throw one of them. */
 /** Which operator code a hand-built history leaves out of its IR. */
 type Stripped = `none` | `grouping` | `runtime`
 
+/** Every error the model says applies. The query must throw one of them. */
 function modelErrors(
   shape: Shape,
   grouping: Grouping,
@@ -316,12 +326,13 @@ function modelErrors(
     errors.add(`includeRequired`)
   // A bare query builder is no include; the select rejects it when built.
   if (shape.include?.wrap === `bare`) errors.add(`includeRequired`)
-  // An include is a top-level select value (db-core skill, "Includes
-  // rules"), so one inside a nested object or a conditional branch throws.
+  // An include inside a nested object throws (db-core skill, "Includes
+  // rules"). A conditional branch may be an include: the includes-collection
+  // oracle publishes one through guard transitions.
   if (
     shape.include !== undefined &&
     shape.include.wrap !== `bare` &&
-    shape.include.at !== `field`
+    shape.include.at === `nested`
   )
     errors.add(`nestedInclude`)
   // Bare group keys carry no grouping compiler, and no aggregate brings one.
@@ -776,17 +787,22 @@ async function runHistory(
   union = false,
   bareKeys = false,
   stripped: Stripped = `none`,
+  alone = false,
 ): Promise<void> {
   const grouped = grouping !== `none`
   // Most generated shapes throw on their own; a runtime-stripped history
   // needs an include that only the missing runtime can fail.
   if (stripped === `runtime`)
     nested = { fields: { f0: { k: `agg`, fn: `count` } } }
+  // Half the grouping-stripped histories give the top-level query a select
+  // that is valid on its own, with an aggregate HAVING when the generated
+  // shape has one, so only the missing grouping compiler can fail it.
+  if (stripped === `grouping` && alone)
+    top = {
+      fields: { f0: { k: `agg`, fn: `count` } },
+      having: top.having && { part: { k: `agg`, fn: `count` }, lit: 2 },
+    }
   reach?.beginHistory()
-  if (stripped === `grouping`)
-    reach?.reach(
-      grouped ? `grouping stripped: grouped` : `grouping stripped: one group`,
-    )
   if (stripped === `runtime`) reach?.reach(`include runtime stripped`)
   for (const s of [top, nested]) {
     if (s.include?.wrap === `bare`)
@@ -944,6 +960,21 @@ async function runHistory(
     // The include query's `kids` include loses its runtime too.
     if (stripped === `runtime` && label === `include`)
       errors.add(`includeRequired`)
+    // A stripped grouping compiler is witnessed on a path only where no
+    // other error could hide it.
+    if (stripped === `grouping` && errors.size === 1 && shapeHasAggregate(s)) {
+      reach?.reach(
+        grouped
+          ? `grouping stripped alone: grouped`
+          : `grouping stripped alone: one group`,
+      )
+      if (
+        s.having !== undefined &&
+        s.having.selected === undefined &&
+        hasAggregate(s.having.part)
+      )
+        reach?.reach(`grouping stripped alone: HAVING aggregate`)
+    }
     // A nested include cannot correlate with a unionAll row, which has no
     // source alias, so the builder rejects it first.
     const unionInclude = label === `top` && union && s.include !== undefined
@@ -1053,6 +1084,7 @@ const history = fc
         fc.constant<Stripped>(`grouping`),
         fc.constant<Stripped>(`runtime`),
       ),
+      fc.boolean(),
     ),
   )
 
@@ -1066,8 +1098,9 @@ const reachStates = [
   `bare group keys beside an aggregate`,
   `include() wrap`,
   `materialize() wrap`,
-  `grouping stripped: grouped`,
-  `grouping stripped: one group`,
+  `grouping stripped alone: grouped`,
+  `grouping stripped alone: one group`,
+  `grouping stripped alone: HAVING aggregate`,
   `include runtime stripped`,
 ] as const
 let reach:
@@ -1080,7 +1113,17 @@ describe(`aggregate select shapes`, () => {
     await fc.assert(
       fc.asyncProperty(
         history,
-        ([top, nested, grouping, shadow, steps, union, bareKeys, stripped]) =>
+        ([
+          top,
+          nested,
+          grouping,
+          shadow,
+          steps,
+          union,
+          bareKeys,
+          stripped,
+          alone,
+        ]) =>
           runHistory(
             top,
             nested,
@@ -1090,6 +1133,7 @@ describe(`aggregate select shapes`, () => {
             union,
             bareKeys,
             stripped,
+            alone,
           ),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
@@ -1103,7 +1147,17 @@ describe(`aggregate select shapes`, () => {
     await fc.assert(
       fc.asyncProperty(
         history,
-        ([top, nested, grouping, shadow, steps, union, bareKeys, stripped]) =>
+        ([
+          top,
+          nested,
+          grouping,
+          shadow,
+          steps,
+          union,
+          bareKeys,
+          stripped,
+          alone,
+        ]) =>
           runHistory(
             top,
             nested,
@@ -1113,6 +1167,7 @@ describe(`aggregate select shapes`, () => {
             union,
             bareKeys,
             stripped,
+            alone,
           ),
       ),
       oraclePropertyOptions(120, PROPERTY),

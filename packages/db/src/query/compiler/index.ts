@@ -1124,11 +1124,13 @@ function compileQueryInternal(
   }
   // An aggregate value or groupKeys brings the grouping compiler. A groupBy,
   // or an aggregate anywhere, needs it; query IR built by hand may lack it.
-  const aggregate = findAggregate([
-    query.select,
-    query.having,
-    query.orderBy?.map((clause) => clause.expression),
-  ])
+  // The query compiles every aggregate with the compiler any one brings.
+  const aggregate =
+    selectAggregate ??
+    findAggregate([
+      query.having,
+      query.orderBy?.map((clause) => clause.expression),
+    ])
   const grouping = query.grouping ?? aggregate?.grouping
   const grouped = (query.groupBy?.length ?? 0) > 0
   if ((grouped || aggregate) && !grouping)
@@ -1272,6 +1274,7 @@ function compileQueryInternal(
       // With no explicit order, top-K breaks ties by the public row key.
       query.orderBy ?? [],
       query.select || {},
+      grouping,
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
       (windowFn) => (ownWindowFn = windowFn),

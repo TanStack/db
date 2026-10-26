@@ -15,6 +15,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -210,12 +211,13 @@ function mountControllable<P>(
   let query: any
   const published = createPublicationLog()
   const dispose = $effect.root(() => {
-    query = opts?.pool
-      ? useLiveQuery(
-          { query: (q: any) => build(q, param), pool: opts.pool } as any,
-          [() => param],
-        )
-      : useLiveQuery((q: any) => build(q, param), [() => param])
+    query =
+      opts?.pool !== undefined
+        ? useLiveQuery(
+            { query: (q: any) => build(q, param), pool: opts.pool } as any,
+            [() => param],
+          )
+        : useLiveQuery((q: any) => build(q, param), [() => param])
     // Svelte renders the value each pre-effect run reads.
     $effect.pre(() => {
       published.record(query.data)
@@ -241,7 +243,7 @@ const svelteDriver: LiveQueryDriver = {
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

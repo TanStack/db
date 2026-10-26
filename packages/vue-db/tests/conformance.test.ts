@@ -16,6 +16,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -217,12 +218,16 @@ function mountControllable<P>(
   const param = ref(initial) as { value: P }
   const published = createPublicationLog()
   const { result, scope } = runInScope(() => {
-    const query = opts?.pool
-      ? useLiveQuery(
-          { query: (q: any) => build(q, param.value), pool: opts.pool } as any,
-          [() => param.value],
-        )
-      : useLiveQuery((q: any) => build(q, param.value), [() => param.value])
+    const query =
+      opts?.pool !== undefined
+        ? useLiveQuery(
+            {
+              query: (q: any) => build(q, param.value),
+              pool: opts.pool,
+            } as any,
+            [() => param.value],
+          )
+        : useLiveQuery((q: any) => build(q, param.value), [() => param.value])
     // Vue renders the value present at each pre-flush.
     watch(
       () => query.data.value,
@@ -251,7 +256,7 @@ const vueDriver: LiveQueryDriver = {
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

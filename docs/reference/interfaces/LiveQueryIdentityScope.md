@@ -3,7 +3,7 @@ id: LiveQueryIdentityScope
 title: LiveQueryIdentityScope
 ---
 
-Defined in: [packages/db/src/live-query-adapter.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L121)
+Defined in: [packages/db/src/live-query-adapter.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L122)
 
 Where a binding that compares query identity checks a prepared query.
 
@@ -15,7 +15,7 @@ Where a binding that compares query identity checks a prepared query.
 bindingName: string;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L125)
+Defined in: [packages/db/src/live-query-adapter.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L126)
 
 ***
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/live-query-adapter.ts:125](https://github.com/TanSt
 claims: LiveQuerySourceIdClaims;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L123)
+Defined in: [packages/db/src/live-query-adapter.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L124)
 
 This binding's source Collection ID claims.
 
@@ -37,7 +37,7 @@ This binding's source Collection ID claims.
 client: DbClient | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L124)
+Defined in: [packages/db/src/live-query-adapter.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L125)
 
 ***
 
@@ -47,7 +47,7 @@ Defined in: [packages/db/src/live-query-adapter.ts:124](https://github.com/TanSt
 optional onUnboundDescriptor: (alias) => never;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:127](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L127)
+Defined in: [packages/db/src/live-query-adapter.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L128)
 
 Report a descriptor source that no client bound.
 

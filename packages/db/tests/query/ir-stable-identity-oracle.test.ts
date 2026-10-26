@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { include } from '../../src/query/index.js'
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+  groupKeys,
+  include,
+} from '../../src/query/index.js'
+import {
+  GroupingOperatorRequiredError,
+  IncludeOperatorRequiredError,
+} from '../../src/errors.js'
 import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import { CollectionImpl } from '../../src/collection/index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
@@ -1879,5 +1888,107 @@ describe(`stable QueryIR identity smoke test`, () => {
     expect(() =>
       getQueryIdentity(createProfileValueQuery(new OpaqueValue())),
     ).not.toThrow()
+  })
+})
+
+/**
+ * Operator code is part of what a query means. Two queries with one identity
+ * may share one compiled live query, so a query that compiles must never share
+ * an identity with one that throws for missing operator code: a hook that
+ * reuses the compiled query would hide the error. Authority: the opt-in
+ * operator contract (a missing operator throws its coded error) and the
+ * identity contract above, that equal identities imply equal results.
+ *
+ * The model predicts the compile outcome from the operator code alone. A
+ * groupBy, or an aggregate, needs the grouping compiler, which `groupKeys()`
+ * or any aggregate the query builds with `count()` brings. An include needs
+ * its runtime. Hand-built IR may lack either. The check runs every
+ * combination, compares each outcome with production, and then requires
+ * distinct identities for each pair of combinations with different outcomes.
+ * Combinations with equal outcomes may share an identity or not.
+ */
+describe(`operator-code identity`, () => {
+  type GroupBy = `none` | `bare` | `groupKeys`
+  type Agg = `none` | `built` | `stripped`
+  type Inc = `none` | `built` | `stripped`
+  type Outcome = `compiles` | `groupingRequired` | `includeRequired`
+
+  function modelOutcome(groupBy: GroupBy, agg: Agg, inc: Inc): Outcome {
+    const grouping = groupBy === `groupKeys` || agg === `built`
+    if ((groupBy !== `none` || agg !== `none`) && !grouping)
+      return `groupingRequired`
+    if (inc === `stripped`) return `includeRequired`
+    return `compiles`
+  }
+
+  // A copy of an IR node without one field of operator code.
+  const without = <T extends object>(node: T, field: string): T =>
+    Object.assign(Object.create(Object.getPrototypeOf(node)), node, {
+      [field]: undefined,
+    })
+
+  function buildIR(groupBy: GroupBy, agg: Agg, inc: Inc): QueryIR {
+    const keys = ({ user }: any) => user.teamId
+    let query: any = new Query().from({ user: usersCollection })
+    if (groupBy === `bare`) query = query.groupBy(keys)
+    if (groupBy === `groupKeys`) query = query.groupBy(groupKeys(keys))
+    query = query.select(({ user }: any) => ({
+      // A grouped select reads its key; one implicit group reads none.
+      ...(groupBy === `none` ? {} : { teamId: user.teamId }),
+      ...(agg === `none` ? {} : { n: count(user.id) }),
+      ...(groupBy === `none` && agg === `none` ? { id: user.id } : {}),
+      ...(inc === `none`
+        ? {}
+        : {
+            posts: include(
+              new Query()
+                .from({ post: postsCollection })
+                .where(({ post }) => eq(post.userId, user.id)),
+            ),
+          }),
+    }))
+    const ir = getQueryIR(query)
+    const select = { ...ir.select! } as Record<string, any>
+    if (agg === `stripped`) select.n = without(select.n, `grouping`)
+    if (inc === `stripped`) select.posts = without(select.posts, `runtime`)
+    return { ...ir, select }
+  }
+
+  function productionOutcome(ir: QueryIR): Outcome | `other` {
+    try {
+      createLiveQueryCollection({ query: new BaseQueryBuilder(ir) as any })
+      return `compiles`
+    } catch (error) {
+      if (error instanceof GroupingOperatorRequiredError)
+        return `groupingRequired`
+      if (error instanceof IncludeOperatorRequiredError)
+        return `includeRequired`
+      return `other`
+    }
+  }
+
+  // Includes beside a grouped select are outside this law; an include joins
+  // only the ungrouped, aggregate-free shape.
+  const cases = ([`none`, `bare`, `groupKeys`] as const).flatMap((groupBy) =>
+    ([`none`, `built`, `stripped`] as const).flatMap((agg) =>
+      (groupBy === `none` && agg === `none`
+        ? ([`none`, `built`, `stripped`] as const)
+        : ([`none`] as const)
+      ).map((inc) => ({ groupBy, agg, inc })),
+    ),
+  )
+
+  it(`keeps queries whose operator code changes the compile outcome distinct`, () => {
+    const results = cases.map(({ groupBy, agg, inc }) => {
+      const ir = buildIR(groupBy, agg, inc)
+      const label = `${groupBy} groupBy, ${agg} aggregate, ${inc} include`
+      const outcome = modelOutcome(groupBy, agg, inc)
+      expect(productionOutcome(ir), `${label}: compile outcome`).toBe(outcome)
+      return { label, outcome, identity: getQueryIdentity(ir) }
+    })
+    for (const a of results)
+      for (const b of results)
+        if (a.outcome !== b.outcome)
+          expect(a.identity, `${a.label} vs ${b.label}`).not.toBe(b.identity)
   })
 })

@@ -10,7 +10,7 @@ function identifyLiveQuery<TIdentity>(
    identify): TIdentity;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L137)
+Defined in: [packages/db/src/live-query-adapter.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L138)
 
 Identify a prepared query for a binding that compares query identity. The
 identity throws `UnhashableQueryIRError` for IR without a stable identity,

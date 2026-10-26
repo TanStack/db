@@ -28,9 +28,10 @@ import type {
 /**
  * A hook config's pool: `pooledLiveQueries` or nothing. Any other value, such
  * as the removed boolean form, contradicts the hook contract, so every reader
- * rejects it the same way, whatever the config's other options.
+ * rejects it the same way, whatever the config's other options. An adapter
+ * that reads the pool from its own options, as Angular does, checks it here.
  */
-function configPool(config: object): PooledLiveQueries | undefined {
+export function configPool(config: object): PooledLiveQueries | undefined {
   const { pool } = config as { pool?: unknown }
   if (
     pool !== undefined &&
@@ -324,13 +325,11 @@ export function resolveLiveQueryValue(
     gcTime?: number
     // `false` keeps a hook that cannot pool, such as a Suspense or DbClient
     // query, from pooling even when its config passes `pooledLiveQueries`.
+    // A pool here has passed `configPool`.
     pool?: PooledLiveQueries | false
     startSync?: boolean
   } = {},
 ): Collection<any, any, any> | null {
-  // An adapter that passes the hook's pool here, as Angular does, gets the
-  // same check as a pool in the config.
-  if (pool !== false) configPool({ pool })
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
     value.startSyncImmediate()

@@ -89,7 +89,6 @@ export {
   sum,
   min,
   max,
-  // Includes helpers
 } from './builder/functions.js'
 export { include, materialize, toArray } from './builder/include-functions.js'
 

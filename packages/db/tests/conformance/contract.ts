@@ -52,14 +52,18 @@
  * the next `current()` read. After a rejection, no later read exposes rows:
  * each `current()` throws or holds none, so a framework whose memo throws once
  * cannot fall back to the previous query's rows. Each driver releases any
- * native scope that a rejected mount acquired. In the current drivers this
- * check cannot fail, and reactive drivers do not reject here. React unmounts
- * a tree whose render throws, so its driver rethrows on later reads. Preact
- * keeps a component whose render throws mounted, so its driver mounts the hook
- * under an error boundary, as an application must to recover, and rethrows on
- * later reads. A Preact component without a boundary is outside this cut. It guards a future driver whose binding stays mounted. The one such
- * binding today, a `DbClient`-backed Svelte query, has its own witness in the
- * Svelte descriptor release oracle, which reads each field after a rejection.
+ * native scope that a rejected mount acquired. A reactive driver rejects
+ * after mount when its new input fails to compile, as when a re-render drops
+ * `groupKeys()`. Vue's computed serves its previous value after it throws
+ * once, so vue-db catches the error in a computed that does not throw and
+ * clears its rows before it rethrows; before that repair this check failed
+ * there. React unmounts a tree whose render throws, so its driver rethrows
+ * on later reads. Preact keeps a component whose render throws mounted, so
+ * its driver mounts the hook under an error boundary, as an application must
+ * to recover, and rethrows on later reads. A Preact component without a
+ * boundary is outside this cut. A `DbClient`-backed Svelte query also stays
+ * mounted; the Svelte descriptor release oracle reads each of its fields
+ * after a rejection.
  *
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
@@ -130,6 +134,7 @@ export interface DbOps {
   count: (a: any) => any
   sum: (a: any) => any
   coalesce: (...args: Array<any>) => any
+  groupKeys: (callback: (refs: any) => any) => any
   /** Build an optimistic action: onMutate applies optimistic state, mutationFn confirms. */
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void

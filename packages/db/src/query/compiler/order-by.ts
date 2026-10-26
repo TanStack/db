@@ -20,9 +20,9 @@ import { hasVirtualPropPath } from '../../virtual-props.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
-import { findAggregate } from './find-aggregate.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
+import type { Grouping } from './grouping.js'
 import type { CompiledSingleRowExpression } from './evaluators.js'
 import type { OrderBy, OrderByClause, QueryIR, Select } from '../ir.js'
 import type {
@@ -124,6 +124,8 @@ export function processOrderBy(
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
   selectClause: Select,
+  // The query's grouping compiler, if it has one, rewrites aggregates.
+  grouping: Grouping | undefined,
   collection: Collection,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
@@ -132,11 +134,10 @@ export function processOrderBy(
   groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   const compiledOrderBy = orderByClause.map((clause) => {
-    // Aggregate references read the SELECT result under $selected. The
-    // aggregate brings the code that rewrites them.
-    const aggregate = findAggregate(clause.expression)
-    const clauseWithoutAggregates = aggregate
-      ? aggregate.grouping.replaceAggregatesByRefs(
+    // Aggregate references read the SELECT result under $selected. A query
+    // without the grouping compiler has no aggregates.
+    const clauseWithoutAggregates = grouping
+      ? grouping.replaceAggregatesByRefs(
           clause.expression,
           selectClause,
           `$selected`,

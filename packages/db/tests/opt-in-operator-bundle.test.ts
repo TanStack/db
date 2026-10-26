@@ -99,6 +99,7 @@ const adapterValues = [
   `BaseQueryBuilder`,
   `UnhashableQueryIRError`,
   `bindLiveQueryWindow`,
+  `configPool`,
   `createEffect`,
   `createLiveQueryObserver`,
   `createLiveQuerySourceIdClaims`,

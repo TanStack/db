@@ -16,6 +16,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -191,14 +192,15 @@ const mountControllableWith = (path: IdentityPath) =>
       ({ param }: { param: P }) => {
         const query = (q: any) => build(q, param)
         // A pooled query uses the config form, on either identity path.
-        const result = opts?.pool
-          ? path === `derived`
-            ? useLiveQuery({ query, pool: opts.pool })
-            : useLiveQuery({ query, pool: opts.pool }, [param])
-          : path === `derived`
-            ? // The callback captures param, so its IR identity changes with it.
-              useLiveQuery(query)
-            : useLiveQuery(query, [param])
+        const result =
+          opts?.pool !== undefined
+            ? path === `derived`
+              ? useLiveQuery({ query, pool: opts.pool })
+              : useLiveQuery({ query, pool: opts.pool }, [param])
+            : path === `derived`
+              ? // The callback captures param, so its IR identity changes with it.
+                useLiveQuery(query)
+              : useLiveQuery(query, [param])
         // A layout effect records each committed value.
         useLayoutEffect(() => {
           published.record(result.data)
@@ -306,7 +308,7 @@ const reactDriver: LiveQueryDriver = {
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

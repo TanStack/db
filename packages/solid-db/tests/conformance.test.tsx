@@ -17,6 +17,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -223,14 +224,15 @@ function mountControllable<P>(
   const [param, setParam] = createSignal<P>(initial)
   const published = createPublicationLog()
   const { getResult, dispose } = inRoot(() => {
-    const query = opts?.pool
-      ? // Reading param() in the config accessor makes Solid recompute on change.
-        useLiveQuery(() => {
-          const value = param()
-          return { query: (q: any) => build(q, value), pool: opts.pool }
-        })
-      : // Reading param() inside the query fn makes Solid recompute on change.
-        useLiveQuery((q: any) => build(q, param()))
+    const query =
+      opts?.pool !== undefined
+        ? // Reading param() in the config accessor makes Solid recompute on change.
+          useLiveQuery(() => {
+            const value = param()
+            return { query: (q: any) => build(q, value), pool: opts.pool }
+          })
+        : // Reading param() inside the query fn makes Solid recompute on change.
+          useLiveQuery((q: any) => build(q, param()))
     // Solid renders the value each render effect reads.
     createRenderEffect(() => published.record(query.data))
     return query
@@ -254,7 +256,7 @@ const solidDriver: LiveQueryDriver = {
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

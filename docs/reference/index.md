@@ -367,6 +367,7 @@ title: "@tanstack/db"
 - [compileQuery](functions/compileQuery.md)
 - [compileSingleRowExpression](functions/compileSingleRowExpression.md)
 - [concat](functions/concat.md)
+- [configPool](functions/configPool.md)
 - [configureIndexDevMode](functions/configureIndexDevMode.md)
 - [count](functions/count.md)
 - [createArrayChangeProxy](functions/createArrayChangeProxy.md)

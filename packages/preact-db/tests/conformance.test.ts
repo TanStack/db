@@ -24,6 +24,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -208,7 +209,7 @@ function mountControllable<P>(
   const published = createPublicationLog()
   const hook = renderHook(
     ({ param }: { param: P }) =>
-      opts?.pool
+      opts?.pool !== undefined
         ? // The config form derives identity from the query on each render.
           useLiveQuery({ query: (q: any) => build(q, param), pool: opts.pool })
         : useLiveQuery((q: any) => build(q, param)),
@@ -263,7 +264,7 @@ const preactDriver: LiveQueryDriver = {
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

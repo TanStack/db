@@ -20,7 +20,6 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
-import type { Aggregate } from '../../src/query/ir.js'
 
 // Code that builds query IR by hand passes operator code to `IR.Aggregate`
 // and `IR.IncludesSubquery`. The public entry exports that code, and it must
@@ -46,8 +45,9 @@ describe(`operator code for hand-built IR`, () => {
 
   // Paths the aggregate-select oracle's grammar does not generate: a caller
   // that still passes the old IncludesSubquery arguments, and an aggregate in
-  // orderBy. Both must fail when the query compiles, with the coded error for
-  // the missing operator, not later with a TypeError or a wrong result.
+  // orderBy. A query without the operator code must fail when it compiles,
+  // with the coded error for the missing operator, not later with a
+  // TypeError or a wrong result.
   const rows = () =>
     createCollection(
       mockSyncCollectionOptions<{ id: number; k: string }>({
@@ -56,6 +56,12 @@ describe(`operator code for hand-built IR`, () => {
         initialData: [{ id: 1, k: `a` }],
       }),
     )
+
+  // A copy of an aggregate without its grouping compiler.
+  const strip = <T extends object>(aggregate: T): T =>
+    Object.assign(Object.create(Object.getPrototypeOf(aggregate)), aggregate, {
+      grouping: undefined,
+    })
 
   it(`rejects an include whose runtime slot holds the old parentFilters argument`, () => {
     const parents = rows()
@@ -98,20 +104,54 @@ describe(`operator code for hand-built IR`, () => {
             .select(({ c }) => ({ k: c.k }))
             .orderBy(({ c }) => count(c.id)),
         )
-        const strip = (aggregate: Aggregate) =>
-          Object.assign(
-            Object.create(Object.getPrototypeOf(aggregate)),
-            aggregate,
-            { grouping: undefined },
-          )
         return new BaseQueryBuilder({
           ...ir,
           orderBy: ir.orderBy!.map((clause) => ({
             ...clause,
-            expression: strip(clause.expression as unknown as Aggregate),
+            expression: strip(clause.expression),
           })),
         }) as any
       }),
     ).toThrow(GroupingOperatorRequiredError)
+  })
+
+  // The query compiles with the grouping compiler any of its aggregates
+  // brings, so an orderBy aggregate without one orders as the same aggregate
+  // built by `count()` does.
+  it(`orders by an aggregate without the grouping compiler when the select brings one`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: number; k: string }>({
+        id: `hand-built-ir-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 1, k: `a` },
+          { id: 2, k: `a` },
+          { id: 3, k: `b` },
+        ],
+      }),
+    )
+    const query = createLiveQueryCollection((q) => {
+      // Bare group keys: only the select aggregate brings the compiler.
+      const ir = getQueryIR(
+        q
+          .from({ c: source })
+          .groupBy(({ c }) => c.k)
+          .select(({ c }) => ({ k: c.k, n: count(c.id) }))
+          .orderBy(({ c }) => count(c.id), `asc`),
+      )
+      return new BaseQueryBuilder({
+        ...ir,
+        orderBy: ir.orderBy!.map((clause) => ({
+          ...clause,
+          expression: strip(clause.expression),
+        })),
+      }) as any
+    })
+    await query.preload()
+    expect(query.toArray.map((row: any) => [row.k, row.n])).toEqual([
+      [`b`, 1],
+      [`a`, 2],
+    ])
+    await query.cleanup()
   })
 })
