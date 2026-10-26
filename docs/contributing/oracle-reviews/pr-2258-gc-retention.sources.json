@@ -20,5 +20,33 @@
     "packages/db/package.json": "69bc01bcb55f9f27618fd65873f61eb63212d7f2270f549336f86d99fe9fc38c",
     "packages/db/tsconfig.json": "b759b1caa96020777b7833f756a9591c65939c467c4cb10b55f307ba325d7538",
     ".github/workflows/e2e-tests.yml": "26550f9c26fe312a240413a9e76e0f1ac19b2e28dd17493e78a44134e268bc88"
+  },
+  "round2": {
+    "baselineHead": "f1a39978e2822a96e5add42136a88674c7bc5d17",
+    "repairState": "sources evaluated for the second review; repair revision is the commit that first adds pr-2258-gc-retention-round2.md",
+    "sha256": {
+      "packages/db/src/collection/cleanup-queue.ts": "f1873937d0ae8e5f53a2557b607720636d17dec7eac34f5480a5480feb071005",
+      "packages/db/src/collection/lifecycle.ts": "99e63bc8e950b0e775a7b98e09168dc30434087b116e5eae421f866d757836f0",
+      "packages/db/src/transactions.ts": "5254e65c5b92bce077d8d70660827cee3c6cad3f309cc32d81593d26f60f2c09",
+      "packages/db/src/types.ts": "3cfeea62080865a55e4d65a1a2b4859a9be96d6ea87fd1200f18e21ff6ee1035",
+      "packages/db/mangle-cache.json": "62f59eb00d91ea76da4d4028468d9b04242a57d684233c97ff676bf3c843f51e",
+      "packages/db/tests/collection-gc-transaction-oracle.property.test.ts": "1cbe3ced6cbacd0e6eb72086a8d1968d2462bd8ee20083f9e1838fe3739fd49d",
+      "packages/db/tests/collection-gc-retention-oracle.property.test.ts": "4f1a79905e60d9ebab685d848d8ed2686666f69050048075cca510f4cbae57c7",
+      "packages/db/tests/collection-gc-retention-oracle.ts": "f15a756e72c3bddeaba9987132a95ce44bd20af30e92df71005902f3852b0789",
+      "packages/db/tests/oracle-config.ts": "61d3a191a34a7886c7e83fddbfa94a6597e12f8d52d3adef9dcf8b145acdd7ee",
+      "packages/db/tests/oracle-replay-manifest.ts": "492b9545f6102c4fc4f315b2bee841edf3957c29f91f3a75c38c1fc75cae2039",
+      "packages/db/tests/utils.ts": "13d5356bd2cb15850ba62967705d0dbb826d42427cf750340a516edd0f78fe3a",
+      "packages/db/e2e/collection-gc/browser.ts": "3162b0e273002ae99512007d6ee73781d9fe5b1d12fde78ccd05a2aaf8dd82d7",
+      "packages/db/e2e/collection-gc/browser.html": "4aa79460e5be04a6c3f46355ca0514c82305d6c4983152cce61fd127afc5cae1",
+      "packages/db/e2e/collection-gc/retention.spec.ts": "e7db26fc26c573b74836ecc762d79278d8727922bfb63885360fb7b6c261d718",
+      "packages/db/playwright.collection-gc.config.ts": "2c2ac0d6c14e17ff1f401e5b6b6ca2f7d43c1e205950ba6a8837f546e8c2bf37",
+      "packages/db/package.json": "69bc01bcb55f9f27618fd65873f61eb63212d7f2270f549336f86d99fe9fc38c",
+      "packages/db/tsconfig.json": "b759b1caa96020777b7833f756a9591c65939c467c4cb10b55f307ba325d7538",
+      ".github/workflows/e2e-tests.yml": "26550f9c26fe312a240413a9e76e0f1ac19b2e28dd17493e78a44134e268bc88",
+      "packages/db/src/collection/state.ts": "d01ed44ee09c5e9b9193b09e127a388f344f8a95985821e778e4ef55805bf3fa",
+      "packages/db/tests/collection-gc-retention-oracle.test.ts": "bfa15c78d55b79b902a7ceebf6a2d27e7b332669fcdcf61cf7ff595c696bfef6",
+      "packages/electric-db-collection/e2e/collection-gc.e2e.test.ts": "d0d7694199cdf3c88efa9cfe658435fc143acc0df4d28e78c09714d121aaea97",
+      "docs/guides/mutations.md": "1cd095f487793c8b61add9745cf6d5014d784d3a7a74d6550cf60b780f8e8796"
+    }
   }
 }

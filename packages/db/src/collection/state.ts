@@ -724,6 +724,9 @@ export class CollectionStateManager<
         settled.push(id)
         continue
       }
+      // Settlement can outlive cleanup. Keep pruning settled transactions,
+      // but do not republish a sibling from the discarded sync run.
+      if (this.lifecycle.hasStartedCleanup()) continue
       for (const mutation of transaction.mutations) {
         if (!this.isThisCollection(mutation.collection)) continue
         this.pendingLocalChanges.add(mutation.key)

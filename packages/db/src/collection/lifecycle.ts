@@ -248,6 +248,11 @@ export class CollectionLifecycleManager<
     return this.syncError
   }
 
+  /** Cleanup discards the current projection until a new sync run starts. */
+  public hasStartedCleanup(): boolean {
+    return this.cleaningUp || this.status === `cleaned-up`
+  }
+
   public assertCanStartSync(): void {
     if (this.cleaningUp) {
       throw new CollectionStateError(

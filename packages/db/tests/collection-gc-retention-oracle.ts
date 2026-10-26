@@ -1,7 +1,7 @@
 /**
  * A Collection may retire only after every subscriber, preload and persisting
  * transaction has released it for gcTime. A startup without subscribers, or a
- * completed preload, additionally establishes a 50ms handoff deadline. A real
+ * settled preload, additionally establishes a 50ms handoff deadline. A real
  * last unsubscribe removes that handoff constraint. These are the promises in
  * BaseCollectionConfig.gcTime; pending rollback preserves the existing deadline
  * by the maintainer's decision in the PR 2258 review evaluation.
@@ -11,6 +11,14 @@
  * it. An idle opportunity from an obsolete deadline has no special authority.
  * Explicit cleanup ignores every hold. Non-positive/non-finite gcTime disables
  * automatic retirement. Exact provider scheduling latency is not promised.
+ * The public retention law forbids early retirement; it does not require the
+ * first usable idle callback to retire the Collection. This controlled fixture
+ * additionally checks the current appointment-driven delivery at its nominated
+ * usable idle cuts. The reducer's exact retirement cut describes that fixture,
+ * not a new general host-liveness promise.
+ * Explicit cleanup clears rows at cleanup start, including while a transaction
+ * persists. Its public status retires only after the adapter cleanup settles,
+ * as specified by Collection.cleanup() and the glossary's cleanup boundary.
  *
  * The reference keeps only logical holds, their last release, and the absolute
  * handoff deadline. It imports no production lifecycle or scheduler. `ready`
@@ -18,6 +26,14 @@
  * A legal next unsubscribe distinguishes subscriber multiplicity; settlement
  * distinguishes pending from persisting and one transaction from its sibling;
  * an idle delivery distinguishes a handoff deadline from an ordinary delay.
+ * `cleanup-start` and `cleanup-settle` split the public cleanup operation at
+ * the glossary's cleanup-start and cleanup-settlement boundaries. `cleanup`
+ * keeps the same operation atomic for drivers whose adapter stops at once.
+ * `cleaningUp` is the model's projection of that held adapter interval.
+ * A pending manual transaction has no GC hold. Its caller can retain the
+ * Collection with a subscription. This owner checks that retained path and the
+ * ordinary delay after unsubscribe; it excludes restart and owes no optimistic
+ * restoration across cleanup under the maintainer's PR 2258 decision.
  *
  * The Node property and native-browser receiver use this same reducer and
  * public-observation checker. Neither actual callbacks nor queue state compute
@@ -33,9 +49,12 @@ export type GcAction =
   | { kind: `rollback`; slot: number }
   | { kind: `preload` }
   | { kind: `ready` }
+  | { kind: `preload-failure` }
   | { kind: `advance`; elapsedMs: number }
   | { kind: `idle`; hasTime: boolean; didTimeout: boolean }
   | { kind: `cleanup` }
+  | { kind: `cleanup-start` }
+  | { kind: `cleanup-settle` }
 
 export type GcModel = {
   gcTime: number
@@ -47,6 +66,8 @@ export type GcModel = {
   handoffUntil: number
   releasedAt: number
   retired: boolean
+  // Cleanup's synchronous row discard precedes its public retirement.
+  cleaningUp: boolean
 }
 
 export function createGcModel(gcTime: number, ready = true): GcModel {
@@ -60,11 +81,13 @@ export function createGcModel(gcTime: number, ready = true): GcModel {
     handoffUntil: 50,
     releasedAt: 0,
     retired: false,
+    cleaningUp: false,
   }
 }
 
 export function gcHeld(model: GcModel): boolean {
   return (
+    model.cleaningUp ||
     model.subscribers > 0 ||
     model.preload ||
     model.transactions.includes(`persisting`)
@@ -81,8 +104,22 @@ export function gcDeadline(model: GcModel): number {
 // In particular a pending transaction cannot settle its unstarted handler.
 export function gcActionLegal(model: GcModel, action: GcAction): boolean {
   if (action.kind === `cleanup`) return true
-  if (model.retired) return false
+  // Old transactions can settle after their Collection retires. They must not
+  // republish rows; new admission and restart remain outside this grammar.
+  if (
+    model.retired &&
+    ![`settle`, `rollback`, `advance`, `idle`].includes(action.kind)
+  )
+    return false
+  if (action.kind === `cleanup-settle`) return model.cleaningUp
+  if (
+    model.cleaningUp &&
+    ![`settle`, `rollback`, `advance`, `idle`].includes(action.kind)
+  )
+    return false
   switch (action.kind) {
+    case `preload-failure`:
+      return model.preload
     case `unsubscribe`:
       return model.subscribers > 0
     case `commit`:
@@ -136,6 +173,12 @@ export function stepGcModel(model: GcModel, action: GcAction): void {
         model.handoffUntil = model.now + 50
       }
       break
+    case `preload-failure`:
+      // Failure releases the same preload hold as success. It does not
+      // establish source readiness, and this grammar ends in cleanup.
+      model.preload = false
+      model.handoffUntil = model.now + 50
+      break
     case `advance`:
       model.now += action.elapsedMs
       break
@@ -148,6 +191,14 @@ export function stepGcModel(model: GcModel, action: GcAction): void {
       break
     case `cleanup`:
       model.retired = true
+      model.cleaningUp = false
+      break
+    case `cleanup-start`:
+      model.cleaningUp = true
+      break
+    case `cleanup-settle`:
+      model.cleaningUp = false
+      model.retired = true
       break
   }
   if (wasHeld && !gcHeld(model)) model.releasedAt = model.now
@@ -159,13 +210,16 @@ export type GcObservation = {
   transactionStates: Array<string>
 }
 
-// Check the actual status and every active optimistic row at the same cut.
-// A completed insert is not durable in this no-confirmation source; only
-// pending/persisting rows are promised, and explicit cleanup discards them.
+// Check status and exact public membership at the same cut. Core/native sources
+// supply no durable rows, so only pending/persisting inserts remain visible.
+// A provider driver can supply independently established source keys; these
+// never come from the observed Collection. Cleanup clears every row at its
+// synchronous start, even if a transaction stays active while the adapter stops.
 export function checkGcObservation(
   model: GcModel,
   actual: GcObservation,
   checkpoint: string,
+  sourceKeys: ReadonlyArray<number> = [],
 ): void {
   const fail = (message: string): never => {
     throw new Error(`${checkpoint} at ${model.now}ms: ${message}`)
@@ -174,12 +228,20 @@ export function checkGcObservation(
     fail(`retired expected ${model.retired}, got ${actual.retired}`)
   if (actual.transactionStates.join() !== model.transactions.join())
     fail(`transaction phases disagree`)
-  if (model.retired) return
-  for (const [slot, state] of model.transactions.entries()) {
-    if (
-      (state === `pending` || state === `persisting`) &&
-      !actual.visibleKeys.includes(slot + 1)
-    )
-      fail(`active optimistic row ${slot + 1} is missing`)
+  if (model.retired || model.cleaningUp) {
+    if (actual.visibleKeys.length)
+      fail(`cleanup left visible rows: ${actual.visibleKeys.join()}`)
+    return
   }
+  const expectedKeys = new Set(sourceKeys)
+  for (const [slot, state] of model.transactions.entries())
+    if (state === `pending` || state === `persisting`)
+      expectedKeys.add(slot + 1)
+  if (
+    actual.visibleKeys.length !== expectedKeys.size ||
+    [...expectedKeys].some((key) => !actual.visibleKeys.includes(key))
+  )
+    fail(
+      `visible keys expected [${[...expectedKeys].join()}], got [${actual.visibleKeys.join()}]`,
+    )
 }

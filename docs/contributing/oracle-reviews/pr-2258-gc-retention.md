@@ -145,3 +145,16 @@ pnpm size:compare --packages db --files
 ```
 
 In proxy-managed environments, native tests need localhost excluded from the proxy. Test logs and the original review were retained in task-local `/private/tmp/pr-2258-review/`; verdict-critical results are summarized here so the versioned evidence does not depend on those temporary files.
+
+
+## Second review follow-up, 2026-10-26
+
+The [second review and enforcement record](pr-2258-gc-retention-round2.md)
+supersedes this evaluation's open provider cell and narrower grammar limits.
+The maintainer chose fixture-specific first-idle timing and caller subscription
+ownership of pending draft visibility. Expanded exact-row and cleanup histories
+found and repaired sibling-row resurrection during and after explicit cleanup.
+Real Electric/Postgres confirmation now has four executed receiving histories
+and a no-hold runtime mutant rejected at the shared comparison. The original
+results and open verdicts above remain a record of the earlier evaluation;
+current sources are bound by the manifest's appended round-2 entry.

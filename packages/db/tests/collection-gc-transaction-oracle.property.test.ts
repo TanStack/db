@@ -18,7 +18,8 @@ import type { Deferred } from '../src/deferred.js'
  * the `gcTime` delay starts again when the last such transaction settles,
  * whether it completes or fails. A transaction that touches several
  * Collections holds each of them. An explicit `cleanup()` retires the
- * Collection at once, persisting transactions or not.
+ * Collection despite persisting transactions. This synchronous adapter fixture
+ * collapses cleanup start and adapter settlement into one observation.
  *
  * Authority: `gcTime` is the time a Collection with no subscribers waits
  * before it is collected (`BaseCollectionConfig.gcTime`), and collecting it
@@ -58,7 +59,7 @@ import type { Deferred } from '../src/deferred.js'
  * `cleanup()`, and controls each handler through a deferred. After each
  * step, on a fake clock whose pending timers and microtasks have run, the
  * comparison checks two public facts for each Collection: whether it is
- * `cleaned-up`, and that each persisting transaction's row is still visible.
+ * `cleaned-up`, and the exact persisting rows in this empty-source fixture.
  *
  * Limits: paced mutations, offline transactions, live-query Collections, and
  * wall-clock corrections are not generated. A transaction that never settles
@@ -202,11 +203,12 @@ async function runHistory(history: History): Promise<void> {
         collection.status === `cleaned-up`,
         `${label}: ${side} cleaned up at ${model.now} ms`,
       ).toBe(expected.retired)
-      for (const id of expected.persisting) {
-        expect(collection.has(id), `${label}: ${side} row ${id} visible`).toBe(
-          true,
-        )
-      }
+      expect(
+        [...collection.keys()].sort((a, b) => a - b),
+        `${label}: ${side} visible keys`,
+      ).toEqual(
+        expected.retired ? [] : [...expected.persisting].sort((a, b) => a - b),
+      )
     }
   }
 
@@ -311,6 +313,10 @@ async function runHistory(history: History): Promise<void> {
         expect(collections[side].status, `explicit cleanup of ${side}`).toBe(
           `cleaned-up`,
         )
+        expect(
+          [...collections[side].keys()],
+          `explicit cleanup rows of ${side}`,
+        ).toEqual([])
       }
     } else {
       const outcome = history.end === `drain-complete` ? `complete` : `fail`
