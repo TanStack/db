@@ -27,10 +27,19 @@ import tsParser from '@typescript-eslint/parser'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
 function git(...args) {
-  return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
+  // Pipe stderr so that a failed attempt in `mergeBase` prints nothing.
+  return execFileSync(`git`, args, {
+    cwd: root,
+    encoding: `utf8`,
+    stdio: [`ignore`, `pipe`, `pipe`],
+  }).trim()
 }
 
-function mergeBase() {
+/**
+ * The commit where this branch left main. Without one, the branch's own
+ * history cannot be found, so this fails instead of comparing too little.
+ */
+export function mergeBase() {
   for (const branch of [`origin/main`, `main`]) {
     try {
       return git(`merge-base`, `HEAD`, branch)

@@ -43,6 +43,7 @@ import oraclePlugin from './eslint-plugin-oracle/index.js'
 import {
   describeLoweredRunBudget,
   loweredRunBudgets,
+  mergeBase,
 } from './check-oracle-run-counts.mjs'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
@@ -86,24 +87,11 @@ function trackedOracleFiles() {
 
 /**
  * Every file that the branch adds or changes, including uncommitted work.
- * Without a main branch to compare against, the branch's own commits cannot
- * be found, so this fails instead of linting only the uncommitted work.
+ * `mergeBase` fails without a main branch, instead of linting only the
+ * uncommitted work.
  */
 function changedFiles() {
-  const base = [`origin/main`, `main`]
-    .map((branch) => {
-      try {
-        return git(`merge-base`, `HEAD`, branch)
-      } catch {
-        return undefined
-      }
-    })
-    .find((commit) => commit !== undefined)
-  if (base === undefined) {
-    throw new Error(
-      `Cannot find origin/main or main to compare this branch against. Run \`git fetch origin main\`.`,
-    )
-  }
+  const base = mergeBase()
   return repositoryFiles(
     git(`diff`, `--name-only`, `--diff-filter=ACMR`, base),
     git(`ls-files`, `--others`, `--exclude-standard`),
