@@ -22,7 +22,9 @@
  *   false in an ordinary run, so such a test runs there. An early `throw`
  *   fails the run loudly, and `continue` filters a loop's data, so neither
  *   guards a registration. A registration made through `oracleReplayTest`
- *   or `oracleCalibrationTest` is checked as a registration of its test.
+ *   or `oracleCalibrationTest`, directly or through a constant bound to its
+ *   result, or through a renamed import such as `import { it as vitestIt }`,
+ *   is checked as a registration of its test.
  * - Playwright's runtime `test.skip()` or `test.fixme()` inside a test,
  *   unless its condition is `browserName !== '<browser>'`: a control that
  *   only one browser supports.
@@ -116,7 +118,38 @@ function calleeChain(callee) {
       break
     }
   }
-  return { root: node.type === `Identifier` ? node.name : undefined, names }
+  return {
+    root: node.type === `Identifier` ? node.name : undefined,
+    rootNode: node,
+    names,
+  }
+}
+
+/**
+ * Whether an identifier names a test function: `it`, `test`, and the
+ * other test roots, a renamed import of one (`import { it as vitestIt }`),
+ * or a constant bound to one through a selection helper or a member chain
+ * (`const fixedCase = oracleReplayTest(it)`). A registration made through
+ * such a constant is checked as a registration of its test.
+ */
+function isTestRoot(node, sourceCode, seen = new Set()) {
+  if (node?.type !== `Identifier`) return false
+  if (testRoots.has(node.name)) return true
+  const definition = findVariable(sourceCode.getScope(node), node.name)?.defs[0]
+  if (definition === undefined || seen.has(definition.node)) return false
+  seen.add(definition.node)
+  if (definition.type === `ImportBinding`) {
+    const imported = definition.node.imported
+    return (
+      imported !== undefined && testRoots.has(imported.name ?? imported.value)
+    )
+  }
+  return (
+    definition.type === `Variable` &&
+    definition.parent.kind === `const` &&
+    definition.node.init !== null &&
+    isTestRoot(calleeChain(definition.node.init).rootNode, sourceCode, seen)
+  )
 }
 
 function isFunction(node) {
@@ -501,7 +534,7 @@ function isContextSkip(node, sourceCode) {
   return (
     registration.type === `CallExpression` &&
     registration.arguments.includes(fn) &&
-    testRoots.has(calleeChain(registration.callee).root)
+    isTestRoot(calleeChain(registration.callee).rootNode, sourceCode)
   )
 }
 
@@ -590,7 +623,7 @@ export default {
           context.report({ node, messageId: `skip`, data: { name: `skip` } })
           return
         }
-        const { root, names } = calleeChain(node.callee)
+        const { root, rootNode, names } = calleeChain(node.callee)
         if (runHelpers.has(root) && names.length === 0) {
           if (
             isSingleRunLiteral(constantNumber(node.arguments[0], sourceCode)) &&
@@ -601,7 +634,7 @@ export default {
           return
         }
         if (
-          !testRoots.has(root) ||
+          !isTestRoot(rootNode, sourceCode) ||
           !names.every((member) => registrationMembers.has(member))
         ) {
           return
@@ -676,9 +709,9 @@ export default {
         ) {
           return
         }
-        const { root, names } = calleeChain(node)
+        const { rootNode, names } = calleeChain(node)
         const name = names.find((member) => aliasModifiers.has(member))
-        if (testRoots.has(root) && name !== undefined) {
+        if (isTestRoot(rootNode, sourceCode) && name !== undefined) {
           context.report({ node, messageId: `alias`, data: { name } })
         }
       },

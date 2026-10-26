@@ -12,6 +12,16 @@ const ruleTester = new RuleTester({
 
 ruleTester.run(`oracle/no-disabled`, noDisabled, {
   valid: [
+    // A selection helper's result used as a registration, with no modifier.
+    {
+      code: `import { oracleReplayTest } from './oracle-config.js'\nimport { it as vitestIt } from 'vitest'\nconst fixedCase = oracleReplayTest(vitestIt)\nfixedCase('checks the fixed history', () => check(history))`,
+      languageOptions: { sourceType: `module` },
+    },
+    // A constant that is not bound to a test function registers nothing.
+    {
+      code: `const helper = makeHelper()\nhelper.skip('a', () => check())`,
+      languageOptions: { sourceType: `module` },
+    },
     // The shared replay variables, and variables that select no replay.
     `const seed = process.env.TANSTACK_DB_ORACLE_SEED`,
     `const { TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_PROPERTY } = process.env`,
@@ -383,9 +393,43 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
       errors: [{ messageId: `singleRun` }],
     },
     {
+      // The rule reports the alias, and it also sees the skip through it.
       code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nconst t = it\nt.skip('a', () => check())`,
       languageOptions: { sourceType: `module` },
-      errors: [{ messageId: `aliasTest` }],
+      errors: [{ messageId: `aliasTest` }, { messageId: `skip` }],
+    },
+    // A registration through a selection helper's result is a registration of
+    // its test, so its modifiers and guards are checked.
+    {
+      code: `import { oracleReplayTest } from './oracle-config.js'\nconst fixedCase = oracleReplayTest(it)\nfixedCase.skip('checks the fixed history', () => check(history))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      code: `import { oracleReplayTest } from './oracle-config.js'\nconst fixedCase = oracleReplayTest(it)\nfixedCase.only('checks the fixed history', () => check(history))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `only` }],
+    },
+    {
+      code: `import { oracleReplayTest } from './oracle-config.js'\nconst fixedCase = oracleReplayTest(it)\nif (process.env.CI) fixedCase('checks the fixed history', () => check(history))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleCalibrationTest } from './oracle-config.js'\nconst witness = oracleCalibrationTest(it, 'p', 'fault')\nconst again = witness\nagain.skipIf(process.env.CI)('rejects the mutant', () => check(bad))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `conditional` }],
+    },
+    // A renamed import of a test function is that test function.
+    {
+      code: `import { it as vitestIt } from 'vitest'\nvitestIt.skip('checks a history', () => check(history))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `skip` }],
+    },
+    {
+      code: `import { oracleReplayTest } from './oracle-config.js'\nimport { test as fcTestAlias } from '@fast-check/vitest'\nconst campaign = oracleReplayTest(fcTestAlias, 'p')\ncampaign.todo.prop([history])('checks histories', (h) => check(h))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `skip` }],
     },
     {
       code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nconst tests = [it, test]\ntests[0]('a', () => check())`,
