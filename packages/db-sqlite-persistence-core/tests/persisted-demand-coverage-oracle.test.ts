@@ -119,6 +119,11 @@ type Row = { id: string; group: string; rank: number; value: string }
 // upstream load follows one schedule:
 //
 // - `pending`: the network never answers (offline).
+// - `fails-at-once`: the load rejects as soon as the wrapper forwards it, as
+//   a fetch does when the device is offline, so it lands before the
+//   `restored` checkpoint. This driver answers SQLite reads within the same
+//   microtask turn, so it cannot hold the rejection unobserved across a
+//   coverage read; the review record keeps a real-timer probe for that.
 // - `fails-early`: the load rejects before the wait passes.
 // - `answers-early`: the load answers before the wait passes.
 // - `answers-late`: the load answers after the wait passes.
@@ -140,7 +145,8 @@ type Row = { id: string; group: string; rank: number; value: string }
 // a load that a reset made obsolete; `recovering-in-flight` rejects "a failed
 // coverage record fails the load"; `settled-then-row-deleted` rejects
 // "coverage ignores rows deleted after it settled";  `settled` carries every positive case. The 1000 ms wait rejects "wait ignored" and "half deadline".
-// `fails-early` rejects "failure errors a covered demand"; `answers-late`
+// `fails-early` rejects "failure errors a covered demand"; `fails-at-once`
+// rejects "a failure during the coverage check goes unobserved"; `answers-late`
 // rejects "upstream aborted after SQLite"; `fails-late` rejects "late
 // failure undoes a settlement"; `answers-empty-late` checks that an empty
 // answer settles an uncovered demand and leaves a covered one unchanged;
@@ -172,6 +178,7 @@ type CoverageHistory = (typeof COVERAGE_HISTORIES)[number]
 
 const UPSTREAM_SCHEDULES = [
   `pending`,
+  `fails-at-once`,
   `fails-early`,
   `answers-early`,
   `answers-late`,
@@ -358,6 +365,7 @@ function expectedTrace(cell: Cell, design: Design = LAW): Trace {
 
   // restored (t = 0)
   if (covered && (cell.waitMs === 0 || !design.honorsWait)) settleFromSqlite()
+  if (cell.upstream === `fails-at-once`) fail()
   if (design.settlesBeforeRestore && covered) state.rowsAtEarlySettle = []
   const restored = observe()
 
@@ -565,6 +573,8 @@ type Upstream = {
   answer: (rows: ReadonlyArray<Row>) => Promise<void>
   fail: (error: unknown) => void
   truncate: () => Promise<void>
+  // When set, each later load rejects as soon as it is called.
+  rejectAtOnce: boolean
   // Writes rows without settling any load.
   write: (rows: ReadonlyArray<Row>) => Promise<void>
   // Settles only the oldest pending load, without writing rows.
@@ -591,6 +601,7 @@ function onDemandSource(
   let remove: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   const upstream: Upstream = {
     calls: [],
+    rejectAtOnce: false,
     pendingCount: () => pending.length,
     answer: async (rows) => {
       await write?.(rows)
@@ -641,6 +652,9 @@ function onDemandSource(
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               upstream.calls.push(options)
+              if (upstream.rejectAtOnce) {
+                return Promise.reject(new Error(`offline at once`))
+              }
               return new Promise<void>((resolve, reject) => {
                 pending.push({ resolve, reject })
               })
@@ -868,6 +882,7 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
     new SQLiteCorePersistenceAdapter({ driver }),
     cell.waitMs,
   )
+  if (cell.upstream === `fails-at-once`) upstream.rejectAtOnce = true
   const query = filterQuery(collection, `a`)
   const preload = trackPreload(query)
   const observe = () => observeQuery(query, preload)
@@ -1100,6 +1115,12 @@ async function runLifecycle(): Promise<{
 //
 // The wrong designs "coverage outlives a rotation in the same sync run" and
 // "a refetch settles on coverage" make each history settle instead.
+//
+// A third history checks that opting in keeps a synchronous answer
+// synchronous. The source writes its rows and returns `true`. A second request
+// for D, while D is already hydrated in this sync run, must report `true` to
+// core, as it did before the opt-in existed, rather than a promise that waits
+// for a coverage record.
 // ===========================================================================
 
 type SessionResetObservation = {
@@ -1203,6 +1224,62 @@ async function runSessionReset(
     () => subscription?.unsubscribe(),
     () => first.cleanup(),
     () => second?.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
+async function runSynchronousAnswer(): Promise<{
+  sourceCalls: number
+  secondResult: `true` | `promise` | `none`
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  let sourceCalls = 0
+  const collection = createCollection(
+    persistedCollectionOptions<Row, string>({
+      id: `demand-coverage-synchronous`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
+      persistence: { adapter: new SQLiteCorePersistenceAdapter({ driver }) },
+      sync: {
+        sync: ({ begin, write, commit }) => ({
+          loadSubset: () => {
+            sourceCalls++
+            begin()
+            for (const value of [A1, A2]) write({ type: `insert`, value })
+            commit()
+            return true
+          },
+        }),
+      },
+    }),
+  )
+  const first = filterQuery(collection, `a`)
+  let subscription: { unsubscribe: () => void } | undefined
+  return withCleanup(async () => {
+    await first.preload()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const callsBefore = sourceCalls
+    const second = { result: `none` as `true` | `promise` | `none` }
+    const changes = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription = changes
+    ;(
+      changes as unknown as { requestSnapshot: (options: object) => unknown }
+    ).requestSnapshot({
+      where: new IR.Func(`eq`, [new IR.PropRef([`group`]), new IR.Value(`a`)]),
+      onLoadSubsetResult: (result: true | Promise<void>) => {
+        second.result = result === true ? `true` : `promise`
+      },
+    })
+    return {
+      sourceCalls: sourceCalls - callsBefore,
+      secondResult: second.result,
+    }
+  }, [
+    () => subscription?.unsubscribe(),
+    () => first.cleanup(),
     () => collection.cleanup(),
   ])
 }
@@ -1762,6 +1839,15 @@ describe(`persisted demand coverage oracle`, () => {
     expect(await runJoined(`never requested`, `flat`, true)).toEqual(
       expectedJoined(`never requested`),
     )
+  })
+
+  it(`keeps a synchronous answer for an already hydrated demand synchronous`, async () => {
+    quietConsole()
+    // Positive witness: the second request reached the source.
+    expect(await runSynchronousAnswer()).toEqual({
+      sourceCalls: 1,
+      secondResult: `true`,
+    })
   })
 
   it.each([`rotation`, `refetch`] as const)(
