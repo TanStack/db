@@ -120,6 +120,19 @@ encoding the author had extended without asking. Three more followed on
    later seed does. The same review confirmed the metadata law that a kept
    value is not a write: an equal re-insert keeps metadata as an update
    does, so the latest seed still governs it until the source writes it.
+10. **A merged write can carry a later seed into an insert's kind
+    (2026-10-26).** Decision 7 said a seed accepted after an insert was
+    written cannot change the insert's kind. Decision "b" lets that seed
+    change a partial update's merge base. A random persisted campaign found
+    the two meeting: an outer equal re-insert, then a later seed, then an
+    inner partial update that merges over the seed and commits ahead. Core
+    and the wrapper re-judged the re-insert against the row the inner update
+    left, which differs, so core invalidated the outer transaction and the
+    wrapper cleared its metadata; the model kept the re-insert. The
+    maintainer chose production's reading ("2"): an insert's kind follows the
+    row it lands on. A later seed alone does not change it, and neither does
+    an open transaction's own write over the seed, but a transaction that
+    commits after the seed and merges over it does.
 
 ## Laws and sources
 
@@ -584,6 +597,7 @@ late-abort probe for E, a scaling experiment for D, and a churn count for H.
 | E: an aborted staged transaction leaves enclosing implicit metadata judged against it | Refuted for the signal path: `commit` says that aborting after acceptance has no effect, and a store-held inner transaction whose signal aborted still applied. A durable failure ends the run with a terminal error, outside this law. A hydration-buffered transaction dropped on abort is not probed |
 | F: Query's owner read lost its applied-metadata fallback for a sync without `metadata` | No action: core always supplies `metadata`, and no wrapper in the repository drops it |
 | G: state internals are public for `client.ts` | Accepted design: the seed authority lookups moved to `client.ts` so that an app without `DbClient` ships 130 fewer gzip bytes |
+| A later seed merged into an outer re-insert's row by an inner update that commits ahead (random seed 50521469; also fails in core on `743a6ce14`) | Decision 10: the model now counts such a seed in the insert's kind. Witnesses `lateSeedUnderMergedUpdate` and `heldLateSeedUnderMergedUpdate` (core) and `lets an inner update merged over a later seed change an enclosing re-insert` (persisted). The held witness kills a core that keeps the insert's kind after the accepted inner write; without a hold the inner write applies and clears the seed mark, so that mutant is invisible there |
 | H: `appliedAdapterMetadataKeys` grows with every deleted key | Fixed: the deleted-key and metadata-key sets became one map, `appliedAdapterKeys`, from each key whose metadata an applied adapter write fixed to whether that write deleted the row. After 5000 keys were inserted and deleted it holds 5000 entries instead of 10000 across two sets; the deleted keys remain, as D4 requires. The hydration authority grid gains `delete,update` cells, which a mutant that loses the returning key's authority fails. `sourceWrittenKeys` in the wrapper is unchanged |
 ## Open
 

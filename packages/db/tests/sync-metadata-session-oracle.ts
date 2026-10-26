@@ -547,8 +547,11 @@ function writesSource(action: SessionAction): boolean {
  * only seeds supplied, it is an insert, and one without metadata clears the
  * row's metadata; over an equal row the source wrote it is an equal
  * re-insert and keeps it. A seed is older than every source write, so a seed
- * accepted after the insert was written does not change its kind. An open
- * transaction's kinds follow the order as it changes; a commit fixes them.
+ * accepted after the insert was written does not by itself change its kind,
+ * nor does an open transaction's write that merges over it. A transaction
+ * that commits after the seed, ordered before the insert, can merge over it,
+ * and the insert then lands on the row that write left (decision 10). An open transaction's kinds follow the order as it changes; a commit
+ * fixes them.
  * When an inner transaction commits first, an enclosing transaction's insert
  * can land on a different row that the source wrote. That transaction is then
  * invalid, as a duplicate-key insert would be: no read includes its writes,
@@ -1069,7 +1072,9 @@ export class SessionModel {
 
   /**
    * An insert's kind against the row before it in the order. A seed
-   * accepted after the insert was written does not count.
+   * accepted after the insert was written counts only beneath a source write
+   * to the row that a transaction committed after it, as that write's merge
+   * base. An open transaction's own writes over the seed do not count.
    */
   private insertKind(
     entries: ReadonlyArray<ModelEntry>,
@@ -1077,9 +1082,22 @@ export class SessionModel {
   ): InsertKind {
     const event = (entries[index] as { event: ModelWrite }).event
     if (event.kind) return event.kind
-    const before = entries
-      .slice(0, index)
-      .filter((entry) => !(`seed` in entry) || entry.seed.seq < event.seq)
+    const prefix = entries.slice(0, index)
+    const before = prefix.filter(
+      (entry, position) =>
+        !(`seed` in entry) ||
+        entry.seed.seq < event.seq ||
+        prefix
+          .slice(position + 1)
+          .some(
+            (later) =>
+              `event` in later &&
+              !later.event.truncate &&
+              later.event.store === `row` &&
+              later.event.key === event.key &&
+              this.frames[later.event.frame]!.status !== `open`,
+          ),
+    )
     const row = this.fold(`row`, event.key, before)
     if (
       !row.present ||

@@ -479,6 +479,24 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
     )
   })
 
+  // A later seed beneath an open re-insert does not change its kind, but an
+  // inner update that merges over that seed and commits ahead does: the
+  // re-insert then lands on a different row and clears metadata (decision 10).
+  it(`lets an inner update merged over a later seed change an enclosing re-insert`, async () => {
+    await assertPersistedHistory(
+      [
+        { type: `begin` },
+        { type: `upsert`, key: 1, metadata: true },
+        { type: `reinsert`, key: 1, metadata: false },
+        { type: `begin` },
+        { type: `seed`, key: 1, bare: true },
+        { type: `upsert`, key: 1, metadata: false },
+        { type: `commit` },
+      ],
+      persistedNestedSeedLane,
+    )
+  })
+
   // An inner transaction reads the open writes of the transactions it began
   // inside: one session reads all its open writes.
   it(`reads an enclosing transaction's write inside a nested transaction`, async () => {

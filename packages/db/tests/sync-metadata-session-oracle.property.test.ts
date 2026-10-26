@@ -269,6 +269,38 @@ const a = (
  * wrong answers that production gives on `30175be48`.
  */
 const witnesses = {
+  // A later seed beneath an open re-insert does not change its kind, but a
+  // source update that merges over that seed and commits ahead does: the
+  // re-insert then lands on a different row (decision 10).
+  lateSeedUnderMergedUpdate: {
+    lane: nestedSeedLane,
+    history: [
+      a(`seed`, 1),
+      a(`begin`),
+      a(`upsert`, 1, true),
+      a(`reinsert`, 1, false),
+      a(`begin`),
+      { type: `seed`, key: 1, bare: true },
+      a(`upsert`, 1, false),
+      a(`commit`),
+    ] as Array<SessionAction>,
+  },
+  // The same under a hold: the inner commit stays accepted but unapplied, so
+  // the seed still marks the row.
+  heldLateSeedUnderMergedUpdate: {
+    lane: nestedSeedLane,
+    history: [
+      a(`hold`),
+      a(`seed`, 1),
+      a(`begin`),
+      a(`upsert`, 1, true),
+      a(`reinsert`, 1, false),
+      a(`begin`),
+      { type: `seed`, key: 1, bare: true },
+      a(`upsert`, 1, false),
+      a(`commit`),
+    ] as Array<SessionAction>,
+  },
   // Issue #2220: a held earlier write must stay visible after a later commit.
   heldCursor: {
     lane: flatLane,
