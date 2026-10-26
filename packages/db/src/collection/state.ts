@@ -540,10 +540,8 @@ export class CollectionStateManager<
   /**
    * Get all entries (virtual derived state)
    */
-  public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
-    for (const [key, value] of this.entries()) {
-      yield [key, value]
-    }
+  public [Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
+    return this.entries()
   }
 
   /**
@@ -718,10 +716,11 @@ export class CollectionStateManager<
    * it after it skips those recomputes.
    */
   private overlayActiveTransactions(): void {
-    const settled: Array<string> = []
     for (const [id, transaction] of this.transactions) {
       if (transaction.state === `completed` || transaction.state === `failed`) {
-        settled.push(id)
+        // Defer key-array changes until the next ordered read, so pruning the
+        // current entry cannot skip the next transaction in this iteration.
+        this.transactions.delete(id, true)
         continue
       }
       // Settlement can outlive cleanup. Keep pruning settled transactions,
@@ -740,22 +739,20 @@ export class CollectionStateManager<
         }
       }
     }
-    for (const id of settled) this.transactions.delete(id)
   }
 
   /**
    * Calculate the current size based on synced data and optimistic changes
    */
   private calculateSize(): number {
-    const syncedSize = this.syncedData.size
-    const deletesFromSynced = Array.from(this.optimisticDeletes).filter(
-      (key) => this.syncedData.has(key) && !this.optimisticUpserts.has(key),
-    ).length
-    const upsertsNotInSynced = Array.from(this.optimisticUpserts.keys()).filter(
-      (key) => !this.syncedData.has(key),
-    ).length
-
-    return syncedSize - deletesFromSynced + upsertsNotInSynced
+    let size = this.syncedData.size
+    for (const key of this.optimisticDeletes) {
+      if (this.syncedData.has(key) && !this.optimisticUpserts.has(key)) size--
+    }
+    for (const key of this.optimisticUpserts.keys()) {
+      if (!this.syncedData.has(key)) size++
+    }
+    return size
   }
 
   /**

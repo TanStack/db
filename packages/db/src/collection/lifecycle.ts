@@ -11,7 +11,6 @@ import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
 import { CleanupQueue, cleanupNow } from './cleanup-queue'
-import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { CollectionConfig, CollectionStatus } from '../types'
 import type { CollectionEventsManager } from './events'
@@ -295,7 +294,7 @@ export class CollectionLifecycleManager<
    */
   public startGCTimerIfUnsubscribed(): void {
     this.gcGraceUntil = cleanupNow() + UNSUBSCRIBED_GC_FLOOR_MS
-    this.startGCTimerAfterSettlement()
+    this.startGCTimer(true)
   }
 
   // A persisting transaction holds the Collection: collecting it would drop
@@ -310,20 +309,11 @@ export class CollectionLifecycleManager<
   }
 
   /**
-   * Start the garbage collection timer
-   * Called when the collection becomes inactive (no subscribers)
+   * Renew inactive retention. Settlement keeps the remaining startup/preload
+   * handoff; a real last unsubscribe clears it and uses gcTime exactly.
    */
-  public startGCTimer(): void {
-    // A real last unsubscribe uses gcTime exactly.
-    this.gcGraceUntil = 0
-    this.startGCTimerAfterSettlement()
-  }
-
-  /**
-   * Renew retention after a persisting hold ends, preserving any remaining
-   * startup/preload handoff time. Queued idle work belongs to the old deadline.
-   */
-  public startGCTimerAfterSettlement(): void {
+  public startGCTimer(preserveHandoff = false): void {
+    if (!preserveHandoff) this.gcGraceUntil = 0
     if (this.status === `idle` || this.status === `cleaned-up`) return
     this.cancelGCTimer()
     if (!this.canGarbageCollect()) return
@@ -376,43 +366,20 @@ export class CollectionLifecycleManager<
     // This ensures cleanup happens even if the browser is busy
     this.idleCallbackId = safeRequestIdleCallback(
       (deadline) => {
-        // Clean up if we still have no subscribers. Keep the callback ID
-        // only when cleanup rescheduled itself for a later idle period.
-        if (!this.canGarbageCollect()) {
-          this.idleCallbackId = null
-        } else if (this.performCleanup(deadline)) {
-          this.idleCallbackId = null
+        // Keep the callback ID only when cleanup schedules another idle period.
+        if (this.canGarbageCollect()) {
+          if (!(deadline.timeRemaining() > 0 || deadline.didTimeout)) {
+            this.scheduleIdleCleanup()
+            return
+          }
+          // Automatic GC has no caller to receive cleanup rejection. Core still
+          // finalizes the lifecycle; explicit cleanup returns adapter diagnostics.
+          void this.beginCleanup().catch(() => undefined)
         }
+        this.idleCallbackId = null
       },
       { timeout: 1000 },
     )
-  }
-
-  /**
-   * Perform cleanup operations, optionally in chunks during idle time
-   * @returns true if cleanup was completed, false if it was rescheduled
-   */
-  private performCleanup(deadline?: IdleCallbackDeadline): boolean {
-    // Nested cleanup belongs to this retirement, not a new lifecycle turn.
-    if (this.cleaningUp) return true
-    // If we have a deadline, we can potentially split cleanup into chunks
-    // For now, we'll do all cleanup at once but check if we have time
-    const hasTime =
-      !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
-
-    if (hasTime) {
-      const cleanup = this.beginCleanup()
-      // Automatic GC has no caller to receive cleanup rejection. Core still
-      // finalizes the lifecycle; adapter diagnostics remain observable through
-      // the returned promise for explicit cleanup.
-      void cleanup.catch(() => undefined)
-
-      return true
-    } else {
-      // If we don't have time, reschedule for the next idle period
-      this.scheduleIdleCleanup()
-      return false
-    }
   }
 
   private beginCleanup(): Promise<void> {
@@ -424,7 +391,6 @@ export class CollectionLifecycleManager<
     const localFailures: Array<unknown> = []
     let synchronousSyncFailure: { error: unknown } | undefined
     let syncCleanupComplete = true
-    let finished = false
 
     const attempt = (callback: () => void): void => {
       try {
@@ -441,8 +407,8 @@ export class CollectionLifecycleManager<
     }
 
     const finish = (syncFailure?: { error: unknown }) => {
-      if (finished) return
-      finished = true
+      // Sync cleanup either completes synchronously or calls this once after
+      // its promise settles. Reentrant callers share cleanupPromise above.
       this.cleaningUp = false
       attempt(() => this.setStatus(`cleaned-up`))
 
@@ -501,8 +467,6 @@ export class CollectionLifecycleManager<
     attempt(() => this.state.cleanup())
     attempt(() => this.changes.cleanup())
     attempt(() => this.indexes.cleanup())
-    CleanupQueue.getInstance().cancel(this)
-
     this.hasBeenReady = false
     this.syncError = undefined
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
@@ -535,11 +499,7 @@ export class CollectionLifecycleManager<
   }
 
   public cleanup(): Promise<void> {
-    // Cancel any pending idle cleanup
-    if (this.idleCallbackId !== null) {
-      safeCancelIdleCallback(this.idleCallbackId)
-      this.idleCallbackId = null
-    }
+    this.cancelGCTimer()
 
     // Return this exact retirement operation even if an event listener starts
     // a replacement run and cleanup while the first promise is still pending.

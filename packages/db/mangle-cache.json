@@ -324,7 +324,6 @@
   "sendChangesToD2": "fA",
   "warnUnoptimized": "fB",
   "handleTruncate": "fC",
-  "performCleanup": "fD",
   "getSyncConfig": "fE",
   "prepareChange": "fF",
   "applyChanges": "fG",

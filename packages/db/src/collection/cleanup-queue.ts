@@ -24,10 +24,7 @@ export class CleanupQueue {
   private constructor() {}
 
   public static getInstance(): CleanupQueue {
-    if (!CleanupQueue.instance) {
-      CleanupQueue.instance = new CleanupQueue()
-    }
-    return CleanupQueue.instance
+    return (CleanupQueue.instance ??= new CleanupQueue())
   }
 
   /**
@@ -81,37 +78,30 @@ export class CleanupQueue {
     }
 
     const delay = Math.max(0, earliestTime - cleanupNow())
-    this.timeoutId = setTimeout(() => this.process(), delay)
+    // Run every due task, then select the next shared wakeup.
+    this.timeoutId = setTimeout(() => {
+      this.timeoutId = null
+      const now = cleanupNow()
+      for (const [key, task] of this.tasks.entries()) {
+        if (now >= task.executeAt) {
+          this.tasks.delete(key)
+          try {
+            task.callback()
+          } catch (error) {
+            console.error(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? 'Error in CleanupQueue task:'
+                : codedMessage(214),
+              error,
+            )
+          }
+        }
+      }
+
+      this.updateTimeout()
+    }, delay)
     // Background collection GC must not keep an otherwise finished Node
     // process alive. Browsers return a numeric timer handle.
     if (typeof this.timeoutId === `object`) this.timeoutId.unref()
-  }
-
-  /**
-   * Runs every task whose deadline has passed, then schedules the next wakeup
-   * if there is still pending work.
-   */
-  private process(): void {
-    this.timeoutId = null
-    const now = cleanupNow()
-    for (const [key, task] of this.tasks.entries()) {
-      if (now >= task.executeAt) {
-        this.tasks.delete(key)
-        try {
-          task.callback()
-        } catch (error) {
-          console.error(
-            devBuild() && process.env.NODE_ENV !== `production`
-              ? 'Error in CleanupQueue task:'
-              : codedMessage(214),
-            error,
-          )
-        }
-      }
-    }
-
-    if (this.tasks.size > 0) {
-      this.updateTimeout()
-    }
   }
 }
