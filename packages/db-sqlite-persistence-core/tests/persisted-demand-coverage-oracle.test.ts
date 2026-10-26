@@ -37,7 +37,8 @@ import type { SQLiteDriver } from '../src/index.js'
  * 4. the restore returned at least as many rows as SQLite held for the demand
  *    when the covered load settled (maintainer decision, 2026-10-26). A row
  *    deleted afterwards, by the source or by retention, ends coverage until
- *    the demand loads online again.
+ *    the demand loads online again. An ordered window must hold the same
+ *    rows it held then, in any order.
  *
  * Otherwise the load waits for its upstream load, as it does without
  * persistence. After a settlement from SQLite the upstream load keeps
@@ -57,13 +58,17 @@ import type { SQLiteDriver } from '../src/index.js'
  * through real loads; nothing seeds coverage metadata. Session 2 controls
  * the upstream load and the clock.
  *
- * Limits: no Electric or Query DB source (they need receiving witnesses).
- * Resets are a source truncate and scoped recovery, which rotates the cache
- * generation; there is no cache-claim expiry, must-refetch, or schema reset.
- * There is no coordinator other than the default single-process one, no
- * ordered window or cursor page in session 2, no failure that arrives before
- * the persisted subset restore publishes, no framework rendering, and no
- * native host. Every block is a bounded enumeration or fixed history, not a
+ * Coverage is bookkeeping: a coverage read that fails, or a release during
+ * it, does not change the load's own outcome or lifetime (Part 2c).
+ *
+ * Limits: Electric, Query DB, React, and Solid have receiving witnesses in
+ * their packages, not here. Resets are a source truncate, scoped recovery,
+ * a schema reset, a refetch, and cache-claim expiry; Electric's must-refetch
+ * is in its witness. There is no coordinator other than the default
+ * single-process one (multi-tab is out of scope, maintainer decision
+ * 2026-10-26), no window with duplicate ranks, no unindexed offset page, and
+ * no native host. A failure before the persisted subset restore publishes is
+ * not a legal history (Part 1). Every block is a bounded enumeration or fixed history, not a
  * generated campaign, so ORC-007 and ORC-015 do not apply.
  */
 
@@ -1446,6 +1451,214 @@ async function runSynchronousAnswer(): Promise<{
 }
 
 // ===========================================================================
+// Part 2c: coverage bookkeeping
+//
+// Coverage is bookkeeping beside a load, so it must not change the load's
+// own outcome or lifetime (the law record's rules on applied loads):
+//
+// - A coverage read that fails after the load's rows applied records no
+//   coverage. The load still settles as its upstream load did.
+// - A coverage read that fails during the coverage check proves nothing, so
+//   the load waits for its upstream load, as an uncovered load does.
+// - A source that answers synchronously writes its rows before it returns.
+//   The coverage record must count those rows, so a later deletion of one of
+//   them ends coverage. The wrong design "count before the rows are durable"
+//   records too few rows, and the demand then settles from SQLite after the
+//   deletion.
+// - A load released during the coverage check owns no wait: the source
+//   Collection stops loading at release, not when the wait would have ended.
+// ===========================================================================
+
+// An adapter whose reads the test can fail or hold. `next` applies to the
+// first read after `armed()` returns true.
+function controlledReads(
+  adapter: SQLiteCorePersistenceAdapter,
+  armed: () => boolean,
+  next: `fail` | `hold`,
+) {
+  const reads = { failed: 0, held: 0, release: () => {} }
+  let used = false
+  const proxy = new Proxy(adapter, {
+    get(target, property) {
+      if (property === `loadSubset`) {
+        return (...args: Parameters<typeof target.loadSubset>) => {
+          if (used || !armed()) return target.loadSubset(...args)
+          used = true
+          if (next === `fail`) {
+            reads.failed++
+            return Promise.reject(new Error(`injected read failure`))
+          }
+          reads.held++
+          return new Promise<void>((resolve) => {
+            reads.release = resolve
+          }).then(() => target.loadSubset(...args))
+        }
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === `function` ? value.bind(target) : value
+    },
+  })
+  return { adapter: proxy, reads }
+}
+
+async function runCoverageReadFailsAfterLoad(): Promise<{
+  status: string
+  rows: Array<string>
+  failedReads: number
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const state = { armed: false }
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => state.armed,
+    `fail`,
+  )
+  const { collection, upstream } = onDemandSource(adapter, 0)
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+    // The next read after the answer is the coverage read.
+    state.armed = true
+    await upstream.answer([A1, A2])
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return {
+      status: query.status,
+      rows: query.toArray.map((row) => row.id).sort(),
+      failedReads: reads.failed,
+    }
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+async function runCoverageReadFailsDuringCheck(): Promise<{
+  beforeAnswer: string
+  afterAnswer: string
+  failedReads: number
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverD(driver)
+  const holder: { collection?: Collection<Row, string, any> } = {}
+  // The first read after the restore published D's rows is the check.
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => (holder.collection?.toArray.length ?? 0) > 0,
+    `fail`,
+  )
+  const { collection, upstream } = onDemandSource(adapter, 0)
+  holder.collection = collection
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const beforeAnswer = query.status
+    await upstream.answer([A1, A2])
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    return {
+      beforeAnswer,
+      afterAnswer: query.status,
+      failedReads: reads.failed,
+    }
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+async function runSynchronousAnswerThenDelete(
+  deleteAfterwards: boolean,
+): Promise<{ settledOffline: boolean }> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  {
+    const handles: { remove?: (row: Row) => void } = {}
+    // Same ID as `onDemandSource`, so session 2 restores these rows.
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id: `demand-coverage-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
+        persistence: { adapter: new SQLiteCorePersistenceAdapter({ driver }) },
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            handles.remove = (row) => {
+              begin()
+              write({ type: `delete`, value: row })
+              commit()
+            }
+            return {
+              loadSubset: () => {
+                begin()
+                for (const value of [A1, A2]) write({ type: `insert`, value })
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      }),
+    )
+    const query = filterQuery(collection, `a`)
+    await withCleanup(async () => {
+      await query.preload()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      // Positive witness: the synchronous answer applied both rows.
+      expect(query.toArray.map((row) => row.id).sort()).toEqual([`a1`, `a2`])
+      if (deleteAfterwards) {
+        handles.remove!(A1)
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const query = filterQuery(collection, `a`)
+  const state = trackPreload(query)
+  return withCleanup(async () => {
+    await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return { settledOffline: state() === `resolved` }
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+async function runReleaseDuringCoverageCheck(): Promise<{
+  loadingAfterRelease: boolean
+  heldReads: number
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverD(driver)
+  useFakeClock()
+  const holder: { collection?: Collection<Row, string, any> } = {}
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => (holder.collection?.toArray.length ?? 0) > 0,
+    `hold`,
+  )
+  const { collection, upstream } = onDemandSource(adapter, 1000)
+  holder.collection = collection
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, 1)
+    for (let i = 0; i < 200 && reads.held === 0; i++) await drain()
+    // The coverage check is in flight; release the demand now.
+    await query.cleanup()
+    await drain()
+    reads.release()
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    return {
+      loadingAfterRelease: collection.isLoadingSubset,
+      heldReads: reads.held,
+    }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
+// ===========================================================================
 // Part 3: joined sources
 //
 // An eager source P restored from SQLite and an on-demand source C. Offline,
@@ -1476,7 +1689,18 @@ async function runSynchronousAnswer(): Promise<{
 // A source failure is not coverage. When C reports an error while its
 // never-covered demand is pending, the wait must not release a local render:
 // that would show rows that no load proved complete. This rejects the wrong
-// design "a source failure permits fallback for every source".
+// design "a source failure permits fallback for every source". The demand
+// still waits for its upstream load, so the wait neither releases nor
+// rejects (the law record's limit "Uncovered demand while offline").
+//
+// A source failure does not block a covered demand either. In the failure
+// histories C waits 1000 ms, and P or C reports an error at once. Before the
+// wait passes nothing releases. After it, the covered demand has settled from
+// SQLite, so every condition of the gate holds and the wait releases the
+// joined row, even though the live query reports the source error. This
+// rejects the wrong design "a source error blocks every on-demand demand",
+// which leaves the wait pending with nothing left to change it. The observer's
+// synchronous gate, `isInitialRenderReady`, must agree with the wait.
 // ===========================================================================
 
 type ChildHistory =
@@ -1484,11 +1708,16 @@ type ChildHistory =
   | `covered by the inner query only`
   | `never requested`
 type JoinedShape = `flat` | `nested` | `two-readers`
+type JoinedFailure = `none` | `on-demand source fails` | `eager source fails`
+// A failure history observes before and after C's 1000 ms wait.
+type JoinedCheckpoint = `before the wait` | `after the wait`
 
 // `initialRenderReleased` is the network-first wait; `collectionReady` is the
 // live query's own readiness, which needs P's Collection to be ready.
 type JoinedObservation = {
   initialRenderReleased: boolean
+  initialRenderRejected: boolean
+  initialRenderReady: boolean
   collectionReady: boolean
   rows: unknown
 }
@@ -1498,11 +1727,15 @@ const JOINED_ROW = { id: `p1`, parentValue: `parent`, childValue: `child` }
 function expectedJoined(
   history: ChildHistory,
   optInPermitsAlone = false,
+  checkpoint: JoinedCheckpoint = `after the wait`,
 ): JoinedObservation {
   const covered = history === `covered by the same joined query`
-  const released = covered || optInPermitsAlone
+  const released =
+    checkpoint === `after the wait` && (covered || optInPermitsAlone)
   return {
     initialRenderReleased: released,
+    initialRenderRejected: false,
+    initialRenderReady: released,
     collectionReady: false,
     rows: released ? (covered ? [JOINED_ROW] : []) : undefined,
   }
@@ -1512,14 +1745,16 @@ type Parent = { id: string; value: string }
 type Child = { id: string; parentId: string; value: string }
 
 function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
-  return createCollection(
+  const source = { markError: (_error: unknown) => {} }
+  const collection = createCollection(
     persistedCollectionOptions<Parent, string>({
       id: `demand-coverage-parents`,
       getKey: (row) => row.id,
       initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
       persistence: { adapter },
       sync: {
-        sync: ({ begin, write, commit, markReady }) => {
+        sync: ({ begin, write, commit, markReady, markError }) => {
+          source.markError = markError
           if (online) {
             begin()
             write({ type: `insert`, value: { id: `p1`, value: `parent` } })
@@ -1531,11 +1766,13 @@ function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
       },
     }),
   )
+  return { collection, source }
 }
 
 function onDemandChildren(
   adapter: SQLiteCorePersistenceAdapter,
   online: boolean,
+  waitMs = 0,
 ) {
   const calls: Array<LoadSubsetOptions> = []
   const source = { markError: (_error: unknown) => {} }
@@ -1544,7 +1781,7 @@ function onDemandChildren(
       id: `demand-coverage-children`,
       getKey: (row) => row.id,
       syncMode: `on-demand`,
-      initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
+      initialRender: { strategy: `network-first`, networkTimeoutMs: waitMs },
       persistence: { adapter },
       sync: {
         sync: ({ begin, write, commit, markError }) => {
@@ -1622,15 +1859,15 @@ function joined(
 async function runJoined(
   history: ChildHistory,
   shape: JoinedShape,
-  sourceFails = false,
-): Promise<JoinedObservation> {
+  failure: JoinedFailure = `none`,
+): Promise<Record<JoinedCheckpoint, JoinedObservation>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
 
   // Session 1 is online. Both Collections share one adapter, as an
   // application does. The children load only through the session-1 query.
   {
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
-    const parents = eagerParents(adapter, true)
+    const { collection: parents } = eagerParents(adapter, true)
     const children = onDemandChildren(adapter, true)
     const session1 =
       history === `never requested`
@@ -1662,8 +1899,10 @@ async function runJoined(
 
   useFakeClock()
   const adapter = new SQLiteCorePersistenceAdapter({ driver })
-  const parents = eagerParents(adapter, false)
-  const children = onDemandChildren(adapter, false)
+  const eager = eagerParents(adapter, false)
+  const parents = eager.collection
+  const waitMs = failure === `none` ? 0 : 1000
+  const children = onDemandChildren(adapter, false, waitMs)
   const { inner, query } = shapedQuery(shape, parents, children.collection)
   const observer = createLiveQueryObserver(query)
   const unsubscribe = observer.subscribe(() => {})
@@ -1674,16 +1913,25 @@ async function runJoined(
         Object.entries(row).filter(([key]) => !key.startsWith(`$`)),
       ),
     )
-  const initialRender: { released: boolean; rows?: unknown } = {
-    released: false,
-  }
+  const initialRender: {
+    released: boolean
+    rejected: boolean
+    rows?: unknown
+  } = { released: false, rejected: false }
   void observer.preloadForInitialRender().then(
     () => {
       initialRender.released = true
       initialRender.rows = visibleRows()
     },
-    () => undefined,
+    () => (initialRender.rejected = true),
   )
+  const observe = (): JoinedObservation => ({
+    initialRenderReleased: initialRender.released,
+    initialRenderRejected: initialRender.rejected,
+    initialRenderReady: observer.isInitialRenderReady(),
+    collectionReady: observer.getSnapshot().isReady,
+    rows: initialRender.rows,
+  })
   return withCleanup(async () => {
     for (let i = 0; i < 200 && children.calls.length === 0; i++) {
       await vi.advanceTimersByTimeAsync(0)
@@ -1691,17 +1939,21 @@ async function runJoined(
     // Positive witness: session 2 reached the on-demand side's demand.
     expect(children.calls.length).toBeGreaterThan(0)
     await drain()
-    if (sourceFails) {
-      children.source.markError(new Error(`offline stream failed`))
+    if (failure !== `none`) {
+      const failing =
+        failure === `on-demand source fails` ? children.source : eager.source
+      failing.markError(new Error(`offline stream failed`))
       await drain()
     }
     await vi.advanceTimersByTimeAsync(1)
     await drain()
-    return {
-      initialRenderReleased: initialRender.released,
-      collectionReady: observer.getSnapshot().isReady,
-      rows: initialRender.rows,
-    }
+    const beforeWait = observe()
+    await vi.advanceTimersByTimeAsync(waitMs)
+    await drain()
+    // A late checkpoint: nothing else is scheduled to change the outcome.
+    await vi.advanceTimersByTimeAsync(10_000)
+    await drain()
+    return { 'before the wait': beforeWait, 'after the wait': observe() }
   }, [
     () => vi.useRealTimers(),
     unsubscribe,
@@ -1728,13 +1980,19 @@ async function runJoined(
 // - `row-moved-out`: the source moves `a2` to rank 10.
 // - `row-moved-in`: the source adds `a0` at rank 0.
 // - `rows-swapped`: the source swaps the ranks of `a1` and `a2`.
+// - `row-replaced`: the source deletes `a1` and adds `a15` at rank 1.5, so
+//   W keeps its size and its boundary row `a2`.
+// - `row-gained-under-limit`: session 1 has only `a1`, so W is not full.
+//   The source then adds `a0` at rank 0, and `a1` stays the boundary row.
 //
 // Law: W settles from SQLite only when its restore holds the same rows that
 // it held when it settled. Coverage proves that window complete; a window
 // that lost, gained, or replaced a row is not the proven one. A swap keeps
 // the same rows in a new order, so W stays covered and shows the new order.
 // The wrong designs "a window counts only rows" and "a window ignores its
-// tie-boundary" accept a row moved out or in.
+// tie-boundary" accept a row moved out or in. The last two histories keep
+// the boundary row, so its tie-boundary load key does not change; they
+// reject "a window counts only rows" by the row count alone.
 //
 // Two more histories move the window to its next page offline. Page 2 is
 // covered only when session 1 loaded it too. These histories index `rank`, so
@@ -1750,15 +2008,23 @@ type WindowHistory =
   | `row-moved-out`
   | `row-moved-in`
   | `rows-swapped`
+  | `row-replaced`
+  | `row-gained-under-limit`
 const WINDOW_HISTORIES: ReadonlyArray<WindowHistory> = [
   `unchanged`,
   `row-deleted`,
   `row-moved-out`,
   `row-moved-in`,
   `rows-swapped`,
+  `row-replaced`,
+  `row-gained-under-limit`,
 ]
 
 const A3: Row = { id: `a3`, group: `a`, rank: 3, value: `v1` }
+
+// The rows W held when it settled in session 1.
+const windowHeld = (history: WindowHistory): ReadonlyArray<string> =>
+  history === `row-gained-under-limit` ? [`a1`] : [`a1`, `a2`]
 
 // Each history's restored rows, in rank order. The window is covered exactly
 // when these are the rows it held when it settled, in any order.
@@ -1768,6 +2034,8 @@ const WINDOW_RESTORED: Record<WindowHistory, ReadonlyArray<string>> = {
   'row-moved-out': [`a1`, `a3`],
   'row-moved-in': [`a0`, `a1`],
   'rows-swapped': [`a2`, `a1`],
+  'row-replaced': [`a15`, `a2`],
+  'row-gained-under-limit': [`a0`, `a1`],
 }
 
 function expectedWindow(history: WindowHistory): {
@@ -1775,8 +2043,9 @@ function expectedWindow(history: WindowHistory): {
   rows?: ReadonlyArray<string>
 } {
   const restored = WINDOW_RESTORED[history]
+  const held = windowHeld(history)
   const sameRows =
-    restored.length === 2 && [`a1`, `a2`].every((id) => restored.includes(id))
+    restored.length === held.length && held.every((id) => restored.includes(id))
   return sameRows ? { ready: true, rows: restored } : { ready: false }
 }
 
@@ -1820,9 +2089,13 @@ async function runWindow(
     )
     const query = windowQuery(collection)
     await withCleanup(async () => {
-      await answerUntil(upstream, [A1, A2, A3], query.preload())
-      // Positive witness: W holds a1 and a2 online.
-      expect(query.toArray.map((row) => row.id)).toEqual([`a1`, `a2`])
+      await answerUntil(
+        upstream,
+        history === `row-gained-under-limit` ? [A1] : [A1, A2, A3],
+        query.preload(),
+      )
+      // Positive witness: W holds the rows of this history online.
+      expect(query.toArray.map((row) => row.id)).toEqual(windowHeld(history))
       await new Promise((resolve) => setTimeout(resolve, 50))
       if (history === `row-deleted`) await upstream.remove([A1])
       if (history === `row-moved-out`) {
@@ -1836,6 +2109,15 @@ async function runWindow(
           { ...A1, rank: 2 },
           { ...A2, rank: 1 },
         ])
+      }
+      if (history === `row-replaced`) {
+        await upstream.remove([A1])
+        await upstream.write([
+          { id: `a15`, group: `a`, rank: 1.5, value: `v1` },
+        ])
+      }
+      if (history === `row-gained-under-limit`) {
+        await upstream.write([{ id: `a0`, group: `a`, rank: 0, value: `v1` }])
       }
       await new Promise((resolve) => setTimeout(resolve, 50))
     }, [() => query.cleanup(), () => collection.cleanup()])
@@ -2210,16 +2492,28 @@ describe(`persisted demand coverage oracle`, () => {
     `releases the joined network-first wait only when the on-demand side is covered: %s, %s`,
     async (history, shape) => {
       quietConsole()
-      expect(await runJoined(history, shape)).toEqual(expectedJoined(history))
+      const actual = await runJoined(history, shape)
+      expect(actual[`after the wait`]).toEqual(expectedJoined(history))
     },
   )
 
-  it(`does not release the joined wait when the on-demand source fails before its demand is covered`, async () => {
-    quietConsole()
-    expect(await runJoined(`never requested`, `flat`, true)).toEqual(
-      expectedJoined(`never requested`),
-    )
-  })
+  it.each(
+    ([`on-demand source fails`, `eager source fails`] as const).flatMap(
+      (failure) =>
+        ([`covered by the same joined query`, `never requested`] as const).map(
+          (history) => [failure, history] as const,
+        ),
+    ),
+  )(
+    `releases the joined wait after a source failure only when the on-demand demand settles: %s, %s`,
+    async (failure, history) => {
+      quietConsole()
+      expect(await runJoined(history, `flat`, failure)).toEqual({
+        'before the wait': expectedJoined(history, false, `before the wait`),
+        'after the wait': expectedJoined(history),
+      })
+    },
+  )
 
   it(`does not settle D from SQLite after a schema reset`, async () => {
     quietConsole()
@@ -2258,6 +2552,45 @@ describe(`persisted demand coverage oracle`, () => {
     })
   })
 
+  it(`settles a load as its upstream load did when the coverage read after it fails`, async () => {
+    quietConsole()
+    expect(await runCoverageReadFailsAfterLoad()).toEqual({
+      status: `ready`,
+      rows: [`a1`, `a2`],
+      failedReads: 1,
+    })
+  })
+
+  it(`waits for the upstream load when the coverage check read fails`, async () => {
+    quietConsole()
+    expect(await runCoverageReadFailsDuringCheck()).toEqual({
+      beforeAnswer: `loading`,
+      afterAnswer: `ready`,
+      failedReads: 1,
+    })
+  })
+
+  it.each([
+    [false, { settledOffline: true }],
+    [true, { settledOffline: false }],
+  ] as const)(
+    `counts a synchronous answer's rows in its coverage (row deleted afterwards: %s)`,
+    async (deleteAfterwards, expected) => {
+      quietConsole()
+      expect(await runSynchronousAnswerThenDelete(deleteAfterwards)).toEqual(
+        expected,
+      )
+    },
+  )
+
+  it(`stops loading at release during the coverage check`, async () => {
+    quietConsole()
+    expect(await runReleaseDuringCoverageCheck()).toEqual({
+      loadingAfterRelease: false,
+      heldReads: 1,
+    })
+  })
+
   it.each([`rotation`, `refetch`] as const)(
     `does not settle a later load of D from SQLite after a %s in the same session`,
     async (kind) => {
@@ -2266,14 +2599,20 @@ describe(`persisted demand coverage oracle`, () => {
     },
   )
   it(`distinguishes the window law from "a window counts only rows"`, () => {
-    // Counting rows accepts every history that keeps two rows.
+    // Counting rows accepts every history that keeps at least the held count.
     const countOnly = (history: WindowHistory) =>
-      WINDOW_RESTORED[history].length === 2
+      WINDOW_RESTORED[history].length >= windowHeld(history).length
     expect(
       WINDOW_HISTORIES.filter(
         (history) => countOnly(history) !== expectedWindow(history).ready,
       ),
-    ).toEqual([`row-deleted`, `row-moved-out`, `row-moved-in`])
+    ).toEqual([
+      `row-deleted`,
+      `row-moved-out`,
+      `row-moved-in`,
+      `row-replaced`,
+      `row-gained-under-limit`,
+    ])
   })
 
   it.each(WINDOW_HISTORIES)(
