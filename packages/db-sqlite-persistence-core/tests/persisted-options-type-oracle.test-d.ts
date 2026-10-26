@@ -1,8 +1,9 @@
-import { describe, it } from 'vitest'
+import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src'
 import type { PersistenceAdapter } from '../src'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { CollectionConfig, WithVirtualProps } from '@tanstack/db'
 
 const adapter: PersistenceAdapter = {
   loadSubset: () => Promise.resolve([]),
@@ -112,14 +113,163 @@ describe(`persisted collection option type oracle`, () => {
     }
   })
 
+  type NumericRow = { id: number; rank: number; label: string }
+
+  const utils = { labelLength: (label: string) => label.length }
+  const stringConfig: Omit<
+    CollectionConfig<RowOutput, string, never, typeof utils>,
+    `sync`
+  > = {
+    id: `string-rows`,
+    getKey: (row: RowOutput) => row.id,
+  }
+  const numericConfig: Omit<
+    CollectionConfig<NumericRow, number, never, typeof utils>,
+    `sync`
+  > = {
+    id: `numeric-rows`,
+    getKey: (row: NumericRow) => row.id,
+  }
+  const stringOptions = { ...stringConfig, persistence: { adapter } }
+  const numericOptions = { ...numericConfig, persistence: { adapter } }
+  const sync = { sync: () => {} }
+
+  it(`infers row and utility types with string keys`, () => {
+    const localOptions = persistedCollectionOptions({ ...stringOptions, utils })
+    const syncedOptions = persistedCollectionOptions({
+      ...stringOptions,
+      utils,
+      sync,
+    })
+    const local = createCollection(localOptions)
+    const synced = createCollection(syncedOptions)
+
+    for (const collection of [local, synced]) {
+      collection.insert({ id: `row`, rank: 1, label: `input` })
+      expectTypeOf(collection.get(`row`)).toEqualTypeOf<
+        WithVirtualProps<RowOutput, string> | undefined
+      >()
+      expectTypeOf(collection.get).parameters.toEqualTypeOf<[string]>()
+      expectTypeOf(collection.utils.labelLength).toEqualTypeOf<
+        typeof utils.labelLength
+      >()
+      // @ts-expect-error rank must be a number
+      collection.insert({ id: `row`, rank: `1`, label: `input` })
+      // @ts-expect-error keys must be strings
+      collection.get(1)
+      // @ts-expect-error labelLength takes a string
+      collection.utils.labelLength(1)
+    }
+  })
+
+  it(`infers row and utility types with numeric keys`, () => {
+    const localOptions = persistedCollectionOptions({
+      ...numericOptions,
+      utils,
+    })
+    const syncedOptions = persistedCollectionOptions({
+      ...numericOptions,
+      utils,
+      sync,
+    })
+    const local = createCollection(localOptions)
+    const synced = createCollection(syncedOptions)
+
+    for (const collection of [local, synced]) {
+      collection.insert({ id: 1, rank: 1, label: `input` })
+      expectTypeOf(collection.get(1)).toEqualTypeOf<
+        WithVirtualProps<NumericRow, number> | undefined
+      >()
+      expectTypeOf(collection.get).parameters.toEqualTypeOf<[number]>()
+      expectTypeOf(collection.utils.labelLength).toEqualTypeOf<
+        typeof utils.labelLength
+      >()
+      // @ts-expect-error id must be a number
+      collection.insert({ id: `row`, rank: 1, label: `input` })
+      // @ts-expect-error keys must be numbers
+      collection.get(`row`)
+    }
+  })
+
+  it(`accepts explicit row and string key types`, () => {
+    const local = createCollection(
+      persistedCollectionOptions<RowOutput, string>(stringOptions),
+    )
+    const synced = createCollection(
+      persistedCollectionOptions<RowOutput, string>({ ...stringOptions, sync }),
+    )
+
+    for (const collection of [local, synced]) {
+      collection.insert({ id: `row`, rank: 1, label: `input` })
+      expectTypeOf(collection.get(`row`)).toEqualTypeOf<
+        WithVirtualProps<RowOutput, string> | undefined
+      >()
+      expectTypeOf(collection.get).parameters.toEqualTypeOf<[string]>()
+      // @ts-expect-error rank must be a number
+      collection.insert({ id: `row`, rank: `1`, label: `input` })
+      // @ts-expect-error keys must be strings
+      collection.get(1)
+    }
+  })
+
+  it(`accepts explicit row and numeric key types`, () => {
+    const local = createCollection(
+      persistedCollectionOptions<NumericRow, number>(numericOptions),
+    )
+    const synced = createCollection(
+      persistedCollectionOptions<NumericRow, number>({
+        ...numericOptions,
+        sync,
+      }),
+    )
+
+    for (const collection of [local, synced]) {
+      collection.insert({ id: 1, rank: 1, label: `input` })
+      expectTypeOf(collection.get(1)).toEqualTypeOf<
+        WithVirtualProps<NumericRow, number> | undefined
+      >()
+      expectTypeOf(collection.get).parameters.toEqualTypeOf<[number]>()
+      // @ts-expect-error id must be a number
+      collection.insert({ id: `row`, rank: 1, label: `input` })
+      // @ts-expect-error keys must be numbers
+      collection.get(`row`)
+    }
+  })
+
+  it(`accepts explicit never and utility type arguments`, () => {
+    const local = createCollection(
+      persistedCollectionOptions<RowOutput, string, never, typeof utils>({
+        ...stringOptions,
+        utils,
+      }),
+    )
+    const synced = createCollection(
+      persistedCollectionOptions<RowOutput, string, never, typeof utils>({
+        ...stringOptions,
+        utils,
+        sync,
+      }),
+    )
+
+    for (const collection of [local, synced]) {
+      expectTypeOf(collection.get(`row`)).toEqualTypeOf<
+        WithVirtualProps<RowOutput, string> | undefined
+      >()
+      expectTypeOf(collection.utils.labelLength).toEqualTypeOf<
+        typeof utils.labelLength
+      >()
+    }
+  })
+
   it(`discriminates sync mode from the presence of the sync key`, () => {
-    persistedCollectionOptions({
+    const localOptions = persistedCollectionOptions({
       id: `local`,
       getKey: (row: RowOutput) => row.id,
       persistence: { adapter },
     })
+    createCollection(localOptions)
 
-    persistedCollectionOptions({
+    const syncedOptions = persistedCollectionOptions({
       id: `synced`,
       getKey: (row: RowOutput) => row.id,
       sync: {
@@ -129,6 +279,7 @@ describe(`persisted collection option type oracle`, () => {
       },
       persistence: { adapter },
     })
+    createCollection(syncedOptions)
 
     persistedCollectionOptions({
       id: `invalid-undefined-sync`,

@@ -6773,7 +6773,7 @@ export function persistedCollectionOptions<
   options: PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils> & {
     schema?: never
   },
-): PersistedSyncOptionsResult<T, TKey, TSchema, TUtils>
+): PersistedSyncOptionsResult<T, TKey, never, TUtils>
 
 export function persistedCollectionOptions<
   T extends object,
@@ -6784,7 +6784,7 @@ export function persistedCollectionOptions<
   options: PersistedLocalOnlyOptions<T, TKey, TSchema, TUtils> & {
     schema?: never
   },
-): PersistedLocalOnlyOptionsResult<T, TKey, TSchema, TUtils>
+): PersistedLocalOnlyOptionsResult<T, TKey, never, TUtils>
 
 export function persistedCollectionOptions<
   T extends object,
