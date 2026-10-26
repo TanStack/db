@@ -329,11 +329,54 @@ function recordVisibilityListeners() {
       ).length
     },
     restore: () => {
-      add.mockRestore()
-      remove.mockRestore()
+      // The comparison has already run. Release even a failed subject's
+      // registrations so RED runs and shrinking do not retain dead streams.
+      try {
+        for (const [type, listener, options] of add.mock.calls)
+          if (type === `visibilitychange`)
+            document.removeEventListener(type, listener, options)
+      } finally {
+        add.mockRestore()
+        remove.mockRestore()
+      }
     },
   }
 }
+
+// Teardown must preserve a failed comparison and release its registrations.
+// Enumerate every retained subset of three fresh callbacks. Dispatch observes
+// actual EventTarget ownership independently of the recorder's live count.
+fixedCase(
+  `releases recorded listeners after preserving a primary failure`,
+  async () => {
+    for (let retained = 0; retained < 8; retained++) {
+      const listeners = recordVisibilityListeners()
+      const callbacks = Array.from({ length: 3 }, () => vi.fn())
+      const primary = new Error(`listener comparison failed`)
+      try {
+        await expect(
+          withElectricCleanup(() => {
+            for (const [index, callback] of callbacks.entries()) {
+              document.addEventListener(`visibilitychange`, callback)
+              if ((retained & (1 << index)) === 0)
+                document.removeEventListener(`visibilitychange`, callback)
+            }
+            expect(listeners.registered()).toBe(3)
+            throw primary
+          }, [() => listeners.restore()]),
+        ).rejects.toBe(primary)
+        document.dispatchEvent(new Event(`visibilitychange`))
+        for (const callback of callbacks)
+          expect(callback).not.toHaveBeenCalled()
+      } finally {
+        // Independent cleanup also makes this calibration safe on the old recorder.
+        for (const callback of callbacks)
+          document.removeEventListener(`visibilitychange`, callback)
+        listeners.restore()
+      }
+    }
+  },
+)
 
 // Deliver a coordinator notification through the same persistence wrapper
 // used by the installed-SDK receiver. The test still controls the provider
@@ -2226,8 +2269,10 @@ fixedCase.each(clientRetryCells)(
  * The history grammar has a sync mode and one to three sync runs. The first
  * run starts with the Collection; each later run is a restart of the
  * cleaned-up Collection through `preload()`. In each run the provider answers
- * zero to three requests, each with a row and an up-to-date, or with a 503
- * that `onError` retries. The run then stays open, gives up on one more 503
+ * zero to three requests: a row-only batch, a row with an up-to-date, an HTTP
+ * 409 reset, or a 503 that `onError` retries. Rows and resets may remain
+ * incomplete when cleanup starts; neither needs a later up-to-date first.
+ * The run then stays open, gives up on one more 503
  * because `onError` returns no retry, or aborts the external signal. Cleanup
  * ends the run. The signal stays aborted, so a run that starts after an abort
  * starts with an aborted signal and sends no request. The provider answers
@@ -2250,7 +2295,7 @@ fixedCase.each(clientRetryCells)(
  * for the retired session.
  */
 type ReleaseRun = {
-  answers: Array<`up-to-date` | `retry`>
+  answers: Array<`row` | `up-to-date` | `reset` | `retry`>
   end: `open` | `give-up` | `abort`
 }
 type ReleaseHistory = {
@@ -2263,6 +2308,8 @@ type ReleaseState =
   | `cleanup-after-give-up`
   | `cleanup-after-abort`
   | `cleanup-of-restarted-run`
+  | `cleanup-after-partial-delivery`
+  | `cleanup-during-reset`
 
 const createReleaseReach = () =>
   createOracleReach<ReleaseState>(`electric.sdk-source-release`, [
@@ -2271,6 +2318,8 @@ const createReleaseReach = () =>
     `cleanup-after-give-up`,
     `cleanup-after-abort`,
     `cleanup-of-restarted-run`,
+    `cleanup-after-partial-delivery`,
+    `cleanup-during-reset`,
   ])
 // Each campaign declares its own reach.
 let releaseReach = createReleaseReach()
@@ -2307,13 +2356,14 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
     }),
   )
 
-  // The model is `activeRuns`. `sending` and `ready` track the source only to
-  // choose legal provider steps and to classify reach.
+  // The model is `activeRuns`. `sending` chooses legal provider steps.
+  // `pendingAnswers` records authored rows/resets since the latest up-to-date,
+  // not adapter internals; readiness reach uses public Collection status.
   let activeRuns = 1
   let runsStarted = 1
   let sending = true
-  let ready = false
   let offset = 0
+  const pendingAnswers = new Set<`row` | `reset`>()
 
   const check = (label: string) =>
     expect(listeners.live(), `${label}: live listeners`).toBeLessThanOrEqual(
@@ -2331,12 +2381,12 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
         activeRuns = 1
         runsStarted++
         sending = !external.signal.aborted
-        ready = false
+        pendingAnswers.clear()
       }
       let request = sending ? await next(`run ${index} start`) : undefined
       for (const answer of run.answers) {
         if (!request) break
-        if (answer === `up-to-date`) {
+        if (answer === `row` || answer === `up-to-date`) {
           offset++
           request.respond(
             new Response(
@@ -2346,17 +2396,33 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
                   value: { id: `1`, name: `row` },
                   headers: { operation: `insert` },
                 },
-                {
-                  headers: {
-                    control: `up-to-date`,
-                    global_last_seen_lsn: String(offset),
-                  },
-                },
+                ...(answer === `up-to-date`
+                  ? [
+                      {
+                        headers: {
+                          control: `up-to-date`,
+                          global_last_seen_lsn: String(offset),
+                        },
+                      },
+                    ]
+                  : []),
               ]),
               { headers: headers(offset) },
             ),
           )
-          ready = true
+          if (answer === `up-to-date`) {
+            pendingAnswers.clear()
+          } else pendingAnswers.add(`row`)
+        } else if (answer === `reset`) {
+          offset++
+          request.respond(
+            new Response(
+              JSON.stringify([{ headers: { control: `must-refetch` } }]),
+              { status: 409, headers: { 'electric-handle': `shape` } },
+            ),
+          )
+          pendingAnswers.clear()
+          pendingAnswers.add(`reset`)
         } else {
           request.respond(new Response(`transient`, { status: 503 }))
         }
@@ -2382,11 +2448,15 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
           ? `cleanup-after-abort`
           : !sending
             ? `cleanup-after-give-up`
-            : ready
+            : collection.status === `ready`
               ? `cleanup-after-ready`
               : `cleanup-while-loading`,
       )
       if (index > 0) releaseReach.reach(`cleanup-of-restarted-run`)
+      if (pendingAnswers.has(`row`))
+        releaseReach.reach(`cleanup-after-partial-delivery`)
+      if (pendingAnswers.has(`reset`))
+        releaseReach.reach(`cleanup-during-reset`)
       await collection.cleanup()
       activeRuns = 0
       check(`run ${index} cleanup`)
@@ -2402,6 +2472,17 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
   ])
 }
 
+// Replay the smallest incomplete deliveries and their terminal neighbors in
+// every mode through the same driver and cleanup comparison as generation.
+fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
+  `releases listeners after incomplete delivery in %s mode`,
+  async (mode) => {
+    for (const answer of [`row`, `reset`] as const)
+      for (const end of [`open`, `give-up`, `abort`] as const)
+        await checkSourceRelease({ mode, runs: [{ answers: [answer], end }] })
+  },
+)
+
 const releaseViolation = sameViolation()
 const releaseProperty = fc.asyncProperty(
   fc.record({
@@ -2413,7 +2494,12 @@ const releaseProperty = fc.asyncProperty(
     runs: fc.array(
       fc.record({
         answers: fc.array(
-          fc.constantFrom(`up-to-date` as const, `retry` as const),
+          fc.constantFrom(
+            `row` as const,
+            `up-to-date` as const,
+            `reset` as const,
+            `retry` as const,
+          ),
           { maxLength: 3 },
         ),
         end: fc.constantFrom(
