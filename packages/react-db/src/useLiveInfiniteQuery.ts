@@ -246,6 +246,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
             : queryFnOrCollection,
         dependencies,
         scope: dbClient,
+        client: dbClient,
+        queryKey,
         recompile: usesLegacyDeps ? `dependencies` : `identity`,
       },
       rendered?.binding,
@@ -305,7 +307,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     [controller, renderState],
   )
   const getSnapshot = useCallback(() => controller.getSnapshot(), [controller])
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () =>
+    controller.getServerSnapshot(),
+  )
 
   const fetchNextPage = useCallback(
     () => fetchNextLiveQueryWindowPage(controller),
