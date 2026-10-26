@@ -1359,4 +1359,113 @@ describe(`useLiveSuspenseQuery`, () => {
       }
     },
   )
+
+  // A crash reaches the boundary under the same rule, at any time: the
+  // Collection can no longer serve reads, so the hook throws after the
+  // first ready too (glossary "crash"). A sync function that throws crashes
+  // the Collection while it starts. A crash after readiness is the one core
+  // raises for a broken local store; the witness raises it the same way.
+  it.each([
+    { kind: `an Error`, timing: `inside sync`, ready: false, isError: true },
+    {
+      kind: `an Error`,
+      timing: `after readiness`,
+      ready: true,
+      isError: true,
+    },
+    {
+      kind: `not an Error`,
+      timing: `inside sync`,
+      ready: false,
+      isError: false,
+    },
+    {
+      kind: `not an Error`,
+      timing: `after readiness`,
+      ready: true,
+      isError: false,
+    },
+  ])(
+    `sends a crash cause that is $kind to the boundary as an Error ($timing)`,
+    async ({ ready, isError }) => {
+      const cause: unknown = isError
+        ? new Error(`local store broke`)
+        : { code: `SQLITE_CORRUPT` }
+      const source = createCollection<Person>({
+        id: `suspense-crash-cause-${isError}-${ready}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            if (!ready) throw cause
+            params.markReady()
+          },
+        },
+      })
+      const caught: Array<unknown> = []
+      class RecordingBoundary extends Component<
+        { children: ReactNode },
+        { failed: boolean }
+      > {
+        state = { failed: false }
+        static getDerivedStateFromError() {
+          return { failed: true }
+        }
+        componentDidCatch(error: unknown) {
+          caught.push(error)
+        }
+        render() {
+          return this.state.failed ? (
+            <div>Boundary caught</div>
+          ) : (
+            this.props.children
+          )
+        }
+      }
+      function View() {
+        useLiveSuspenseQuery((q) => q.from({ person: source }))
+        return <div>Query ready</div>
+      }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const view = renderComponent(
+        <RecordingBoundary>
+          <Suspense fallback={<div>Loading query</div>}>
+            <View />
+          </Suspense>
+        </RecordingBoundary>,
+      )
+      try {
+        if (ready) {
+          await waitFor(() =>
+            expect(view.getByText(`Query ready`)).toBeTruthy(),
+          )
+          act(() =>
+            (
+              source as unknown as {
+                _lifecycle: { crash: (error: unknown) => void }
+              }
+            )._lifecycle.crash(cause),
+          )
+        }
+        await waitFor(() =>
+          expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+        )
+        expect(source.status).toBe(`crashed`)
+        expect(source.health.error?.cause).toBe(cause)
+        const thrown = caught[0]
+        if (isError) {
+          expect(thrown, `an Error cause is thrown as is`).toBe(cause)
+        } else {
+          expect(thrown, `a non-Error cause is wrapped`).toBeInstanceOf(Error)
+          expect((thrown as Error).message).toBe(source.health.error?.message)
+          expect((thrown as Error).cause).toBe(cause)
+        }
+      } finally {
+        view.unmount()
+        consoleError.mockRestore()
+        await source.cleanup().catch(() => undefined)
+      }
+    },
+  )
 })

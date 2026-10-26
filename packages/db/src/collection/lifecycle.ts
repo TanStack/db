@@ -459,8 +459,7 @@ export class CollectionLifecycleManager<
 
   /** @internal A live query's request failed after initial-query readiness. */
   public reportRequestError(key: string, error: unknown): void {
-    this.requestErrors.fail(key, error)
-    this.events.emitHealthChange()
+    if (this.requestErrors.fail(key, error)) this.events.emitHealthChange()
   }
 
   /** @internal The failed request settled or was released. */
@@ -789,25 +788,38 @@ export class CollectionLifecycleManager<
 
 /** @internal Requests that failed after initial-query readiness, by issuer. */
 export class RequestErrors {
-  // In failure order, so the latest failure still failing is last.
-  private readonly failed = new Map<string, CollectionErrorInfo>()
+  // Each failed request's problem, with the number that orders it among the
+  // failures. Two requests that failed with one error share one entry value.
+  private readonly failed = new Map<string, [CollectionErrorInfo, number]>()
+  private failures = 0
   problem: CollectionErrorInfo | null = null
 
-  fail(key: string, error: unknown): void {
+  /** Returns whether the shown problem changed. */
+  fail(key: string, error: unknown): boolean {
     this.failed.delete(key)
-    // Two requests that failed with one error show one problem.
-    this.problem =
-      [...this.failed.values()].find((problem) => problem.cause === error) ??
-      describeProblem(error)
-    this.failed.set(key, this.problem)
+    // Two requests that failed with one error show one problem, and it keeps
+    // its place among the failures.
+    this.failed.set(
+      key,
+      [...this.failed.values()].find(
+        ([problem]) => problem.cause === error,
+      ) ?? [describeProblem(error), ++this.failures],
+    )
+    return this.show()
   }
 
   /** Returns whether the shown problem changed. */
   settle(key: string): boolean {
-    if (!this.failed.delete(key)) return false
-    const shown = [...this.failed.values()].at(-1) ?? null
-    const changed = shown !== this.problem
-    this.problem = shown
+    return this.failed.delete(key) && this.show()
+  }
+
+  // The newest failure still failing shows.
+  private show(): boolean {
+    let newest: [CollectionErrorInfo | null, number] = [null, 0]
+    for (const entry of this.failed.values())
+      if (entry[1] > newest[1]) newest = entry
+    const changed = newest[0] !== this.problem
+    this.problem = newest[0]
     return changed
   }
 }

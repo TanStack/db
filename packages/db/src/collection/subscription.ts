@@ -599,7 +599,8 @@ export class CollectionSubscription
     }
 
     demand.acquisitionState = `active`
-    this.trackTruncateReplayParticipant(replayState, attempt, demand, result)
+    // Observe first: a failure reports before its settlement can publish the
+    // replay, also when a held replacement covers it and it settles last.
     this.observeLoadSubsetResult(
       result,
       demand,
@@ -607,6 +608,7 @@ export class CollectionSubscription
       true,
       () => isCurrent() && !next.options.signal?.aborted,
     )
+    this.trackTruncateReplayParticipant(replayState, attempt, demand, result)
   }
 
   private settleTruncateReplay(
@@ -1406,14 +1408,21 @@ export class CollectionSubscription
     return true
   }
 
-  /** Release one exact subset request while keeping the subscription alive. */
-  releaseSnapshot(where: BasicExpression<boolean>): void {
-    const index = this.subsetDemands.findIndex((demand) =>
-      this.requestedWhere(demand, where),
-    )
-    if (index === -1) return
-
-    this.releaseDemandAt(index)
+  /**
+   * Release exact subset requests while keeping the subscription alive. The
+   * releases are one demand change (law 9): an open replay is judged once,
+   * after all of them.
+   */
+  releaseSnapshot(...wheres: Array<BasicExpression<boolean>>): void {
+    const demands: Array<SubsetDemand> = []
+    for (const where of wheres) {
+      const demand = this.subsetDemands.find(
+        (candidate) =>
+          !demands.includes(candidate) && this.requestedWhere(candidate, where),
+      )
+      if (demand) demands.push(demand)
+    }
+    if (demands.length > 0) this.releaseDemands(demands)
   }
 
   /**
@@ -1448,49 +1457,44 @@ export class CollectionSubscription
     demand: SubsetDemand,
     primaryFailure?: { error: unknown },
   ): void {
-    if (!primaryFailure) {
-      const index = this.subsetDemands.indexOf(demand)
-      if (index !== -1) this.releaseDemandAt(index)
-      return
-    }
-
     try {
-      this.recordLoadSubsetError(
-        demand.acquisition.options,
-        primaryFailure.error,
-        true,
-      )
+      if (primaryFailure)
+        this.recordLoadSubsetError(
+          demand.acquisition.options,
+          primaryFailure.error,
+          true,
+        )
     } finally {
       // The failed request remains the public error, even if cleanup also fails.
-      const index = this.subsetDemands.indexOf(demand)
-      if (index !== -1) this.releaseDemandAt(index)
+      if (this.subsetDemands.includes(demand)) this.releaseDemands([demand])
     }
   }
 
-  private releaseDemandAt(index: number): void {
-    const demand = this.subsetDemands[index]
-    if (!demand) return
+  /** Retire held demands as one step, then judge an open replay once. */
+  private releaseDemands(demands: Array<SubsetDemand>): void {
     const replayState = this.truncateReplayState
-    const acquisition = demand.acquisition
-    this.subsetDemands.splice(index, 1)
-    demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
-    const releaseCallbacks = [
-      () => this.removeTruncateReplayParticipant(demand),
-      ...(demand.acquisitionState === `active`
-        ? [
-            // Adapter release is a supported reentrancy boundary. A demand
-            // started from unload joins this replacement before completion.
-            () => this.releaseAcquisition(acquisition),
-          ]
-        : []),
+    const releaseCallbacks: Array<() => void> = []
+    for (const demand of demands) {
+      const acquisition = demand.acquisition
+      this.subsetDemands.splice(this.subsetDemands.indexOf(demand), 1)
+      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      releaseCallbacks.push(() => this.removeTruncateReplayParticipant(demand))
+      // Adapter release is a supported reentrancy boundary. A demand started
+      // from unload joins this replacement before completion.
+      if (demand.acquisitionState === `active`)
+        releaseCallbacks.push(() => this.releaseAcquisition(acquisition))
+    }
+    runAllCallbacks([
+      ...releaseCallbacks,
       () => this.retireEmptyReplay(),
       () => {
         if (replayState) this.checkTruncateReplayComplete(replayState)
       },
       // Ready follows replacement publication, never the delete half of it.
-      () => this.stopDemandStatusParticipants(demand),
-    ]
-    runAllCallbacks(releaseCallbacks)
+      ...demands.map(
+        (demand) => () => this.stopDemandStatusParticipants(demand),
+      ),
+    ])
   }
 
   /**

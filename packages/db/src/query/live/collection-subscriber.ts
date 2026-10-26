@@ -44,10 +44,13 @@ export class CollectionSubscriber<
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoader: OrderedSourceLoader | undefined
-  // A request error clears as soon as a later load of its failed key succeeds.
-  private readonly demand = new SubsetDemandController((planId) =>
-    this.collectionConfigBuilder.clearFailedRequest(planId),
-  )
+  // Each needed key's failed request is a request error until a later load
+  // of the key succeeds or the query no longer needs it.
+  private readonly demand = new SubsetDemandController((planId, key, error) => {
+    const request = `${planId}:${key}`
+    if (error) this.collectionConfigBuilder.reportFailedRequest(request, error)
+    else this.collectionConfigBuilder.clearFailedRequest(request)
+  })
 
   constructor(
     private sourceId: string,
@@ -235,10 +238,6 @@ export class CollectionSubscriber<
       plan.id,
       update.ready instanceof Promise,
     )
-    // The request error also clears when the query stops needing the
-    // failed key.
-    if (!this.demand.hasFailedKeys(plan.id))
-      this.collectionConfigBuilder.clearFailedRequest(plan.id)
     const settle = () =>
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
     if (update.ready instanceof Promise) {
@@ -427,6 +426,7 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.getSyncRunGeneration()
     return {
       start: () => {
+        this.demand.startReplay()
         onStart?.()
       },
       succeed: () => {
@@ -438,10 +438,8 @@ export class CollectionSubscriber<
         }
         this.orderedLoader?.settleFullSourceReplay()
         // The replay loaded every demand this subscription holds again.
-        this.collectionConfigBuilder.settleReplayedRequests(
-          this.sourceId,
-          this.demand.settleReplay(),
-        )
+        this.demand.settleReplay()
+        this.collectionConfigBuilder.settleReplayedRequests(this.sourceId)
         this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
           syncRunGeneration,
         )

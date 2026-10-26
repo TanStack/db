@@ -196,6 +196,7 @@ const staticOracleProperties = [
   `subscription-lifecycle.publication-history`,
   `subscription-lifecycle.sync-history`,
   `subscription-lifecycle.async-history`,
+  `subscription-lifecycle.demand-change`,
   `subscription-lifecycle.async-restart`,
   `subscription-lifecycle.async-statistics`,
   `sorted-map.key`,
