@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { captureMicrotaskErrors, flushPromises } from './utils.js'
+import { declareOracle } from './oracle-config.js'
 
 /**
  * # What does concurrent effect disposal mean?
@@ -40,18 +41,51 @@ const scenarios = ([`abort`, `release`] as const).flatMap((reentry) =>
   ),
 )
 
+// The model: a release that throws reports exactly its thrown value, once.
+// A success reports nothing. Callers never see the failure.
+function expectedUncaughtReports(
+  outcome: (typeof scenarios)[number][`outcome`],
+  failure: Error,
+): Array<unknown> {
+  return outcome === `error`
+    ? [failure]
+    : outcome === `undefined`
+      ? [undefined]
+      : []
+}
+
+// The model: every caller of one attempt fulfills with the same outcome.
+function expectCallerOutcomes(
+  observed: ReadonlyArray<PromiseSettledResult<void>>,
+): void {
+  for (const result of observed) {
+    expect(result).toEqual({ status: `fulfilled`, value: undefined })
+  }
+}
+
+// The model: each reported value is the one the release threw, in order.
+function expectUncaughtReports(
+  errors: ReadonlyArray<unknown>,
+  reported: ReadonlyArray<unknown>,
+): void {
+  expect(errors).toHaveLength(reported.length)
+  errors.forEach((error, index) =>
+    expect(Object.is(error, reported[index])).toBe(true),
+  )
+}
+
+declareOracle({
+  check: [expectCallerOutcomes, expectUncaughtReports],
+  model: [expectedUncaughtReports],
+})
+
 describe(`Effect disposal outcome oracle`, () => {
   it.each(scenarios)(
     `joins all callers to one attempt: %j`,
     async ({ reentry, pendingHandler, outcome }) => {
       const failure = new Error(`release failed`)
       // The thrown value the model expects to see reported, if any.
-      const reported =
-        outcome === `error`
-          ? [failure]
-          : outcome === `undefined`
-            ? [undefined]
-            : []
+      const reported = expectedUncaughtReports(outcome, failure)
       const uncaught = captureMicrotaskErrors()
       const handler = createDeferred<void>()
       let nested: Promise<void> | undefined
@@ -127,14 +161,9 @@ describe(`Effect disposal outcome oracle`, () => {
         }
         handler.resolve()
         const observed = await results
-        for (const result of observed) {
-          expect(result).toEqual({ status: `fulfilled`, value: undefined })
-        }
+        expectCallerOutcomes(observed)
         await flushPromises()
-        expect(uncaught.errors).toHaveLength(reported.length)
-        uncaught.errors.forEach((error, index) =>
-          expect(Object.is(error, reported[index])).toBe(true),
-        )
+        expectUncaughtReports(uncaught.errors, reported)
         // A finished attempt does not make the acquisition lease retryable.
         await effect.dispose()
         await flushPromises()
