@@ -9,6 +9,7 @@ import { TransactionScope } from './transactions.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
+import { LiveQueryObserverClient } from './live-query-observer-client.js'
 import { createDeferred } from './deferred.js'
 import {
   getLiveQueryHash,
@@ -17,6 +18,7 @@ import {
   resumeDeferredLiveQueryCollections,
 } from './live-query-options.js'
 import { codedMessage, devBuild } from './error-message.js'
+import type { LiveQueryObserverClientHost } from './live-query-observer-client.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
@@ -715,6 +717,22 @@ export class DbClient {
   subscribe(listener: (event: DbClientEvent) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** @internal Supply transport behavior without coupling ordinary observers to SSR. */
+  _bindLiveQueryObserver<T extends object, TKey extends string | number>(
+    collection: Collection<T, TKey, any> | null,
+    queryHash: string | undefined,
+    suspendUntilReady: boolean,
+    host: LiveQueryObserverClientHost<T, TKey>,
+  ): LiveQueryObserverClient<T, TKey> {
+    return new LiveQueryObserverClient(
+      this,
+      collection,
+      queryHash,
+      suspendUntilReady,
+      host,
+    )
   }
 
   /** @internal Normalized source transport carries rows, not readiness. */

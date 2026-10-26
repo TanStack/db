@@ -658,6 +658,20 @@ checks that a replacement record reaches the stream after an initial loading
 record. The
 [SSR review audit](oracle-reviews/2026-10-23-ssr-review.md) records RED on unchanged
 production, GREEN, narrow mutants, and exact receiving replays.
+The consumer bundle owner `scripts/ssr-bundle-oracle.mjs` checks the maintainer's
+2026-10-26 SSR isolation decision at the current DbClient import boundary. It
+enumerates ordinary, Suspense, and infinite React hook exports, with and without
+DbClient. Final production bundles must exclude the entire observer transport
+module and its admission/capture operations without DbClient; positive controls
+must retain them. `pnpm test:ssr-bundle` runs after built artifacts in the
+minified-DB CI lane. The original shared observer fails the absence assertion;
+`--calibrate` forces transport into a plain bundle and fails that same assertion.
+This finite build oracle does not establish every bundler, framework entry,
+byte budget, or runtime hydration schedule. A client-only application that uses
+DbClient still ships its transport methods: isolating that case needs an
+explicit SSR API boundary and remains outside this import-level guarantee.
+The [isolation record](oracle-reviews/2026-10-26-ssr-bundle-isolation.md) records
+the size comparison, runtime checks, and calibration.
 The separate `live-query-observer-snapshot-oracle.property.test.ts` owner checks
 unchanged getter identity with and without a completed DbClient query. It runs
 ordered/single-result and attached/detached histories through ordinary and server
