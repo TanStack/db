@@ -34,6 +34,10 @@ export function readOfflineOracleConfig({
 }
 
 /**
+ * A lane that passes fixed `examples` keeps them during a path replay.
+ * fast-check counts the examples in the recorded path, so a replay without
+ * them would select a different value.
+ *
  * The fast-check options for one lane. An `undefined` seed selects the random
  * lane. A number selects the fixed lane, which keeps its ordinary budget.
  */

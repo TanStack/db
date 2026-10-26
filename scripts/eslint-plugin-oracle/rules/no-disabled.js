@@ -40,10 +40,10 @@
  * a fixed seed, not skipped.
  *
  * The rule cannot see a run count lowered to any value above 1, a run count
- * or seed held in a variable that is not a constant bound to a number, a test function renamed before its modifier is
- * read (`const t = it; t.skip(...)`), a call to a local helper that registers
- * tests under a condition, or a condition inside a loop's iterable, as in
- * `cases.filter(() => !process.env.CI)`. Reviewers still check those.
+ * or seed held in a variable that is not a constant bound to a number, a call
+ * to a local helper that registers tests under a condition, or a table built
+ * by a function that returns different items in different runs. Reviewers
+ * still check those.
  */
 
 const testRoots = new Set([`describe`, `fcTest`, `it`, `suite`, `test`])
@@ -188,6 +188,84 @@ function returns(statement) {
   return false
 }
 
+function isEmptyArray(node) {
+  return node?.type === `ArrayExpression` && node.elements.length === 0
+}
+
+/**
+ * The conditions that decide which items a loop's iterable or an `.each()`
+ * table holds, each with the value under which the items register. A branch
+ * that is `[]` registers nothing, a `.filter` callback that reads
+ * `process.env` filters by environment, and a constant is read through to
+ * its initializer.
+ */
+function iterableConditions(node, sourceCode, seen = new Set()) {
+  if (node === null || node === undefined || seen.has(node)) return []
+  seen.add(node)
+  if (node.type === `Identifier`) {
+    const definition = findVariable(sourceCode.getScope(node), node.name)
+      ?.defs[0]
+    return definition?.type === `Variable` && definition.parent.kind === `const`
+      ? iterableConditions(definition.node.init, sourceCode, seen)
+      : []
+  }
+  if (node.type === `ConditionalExpression`) {
+    const conditions = []
+    if (isEmptyArray(node.alternate)) {
+      conditions.push({ test: node.test, registersWhen: true })
+    } else if (isEmptyArray(node.consequent)) {
+      conditions.push({ test: node.test, registersWhen: false })
+    }
+    return [
+      ...conditions,
+      ...iterableConditions(node.consequent, sourceCode, seen),
+      ...iterableConditions(node.alternate, sourceCode, seen),
+    ]
+  }
+  if (node.type === `LogicalExpression`) {
+    return [
+      {
+        test: node.left,
+        registersWhen: node.operator === `&&` ? true : undefined,
+      },
+      ...iterableConditions(node.right, sourceCode, seen),
+    ]
+  }
+  if (
+    node.type === `CallExpression` &&
+    node.callee.type === `MemberExpression` &&
+    node.callee.property.name === `filter`
+  ) {
+    const [callback] = node.arguments
+    const readsEnvironment =
+      callback !== undefined &&
+      /process\.env/.test(sourceCode.getText(callback))
+    return [
+      ...(readsEnvironment
+        ? [{ test: callback, registersWhen: undefined }]
+        : []),
+      ...iterableConditions(node.callee.object, sourceCode, seen),
+    ]
+  }
+  return []
+}
+
+/** The table of an `.each(table)` call in a registration's callee chain. */
+function eachTable(callee) {
+  let node = callee
+  while (node.type === `CallExpression` || node.type === `MemberExpression`) {
+    if (
+      node.type === `CallExpression` &&
+      node.callee.type === `MemberExpression` &&
+      node.callee.property.name === `each`
+    ) {
+      return node.arguments[0]
+    }
+    node = node.type === `CallExpression` ? node.callee : node.object
+  }
+  return undefined
+}
+
 /**
  * The conditions that decide whether `node` runs, each with the value that
  * the condition must have for `node` to run: every enclosing `if`,
@@ -195,10 +273,13 @@ function returns(statement) {
  * block that returns. `registersWhen` is undefined when no single value
  * decides it, as for `??`.
  */
-function guardingConditions(node) {
+function guardingConditions(node, sourceCode) {
   const conditions = []
   let child = node
   for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.type === `ForOfStatement` && child === parent.body) {
+      conditions.push(...iterableConditions(parent.right, sourceCode))
+    }
     if (
       (parent.type === `IfStatement` ||
         parent.type === `ConditionalExpression`) &&
@@ -387,6 +468,43 @@ function isContextSkip(node, sourceCode) {
   )
 }
 
+/**
+ * Whether a test function is passed around as a value: assigned, collected,
+ * returned, or passed to any call except a shared selection helper.
+ */
+function isPassedAsValue(node) {
+  const { parent } = node
+  switch (parent.type) {
+    case `VariableDeclarator`:
+      return parent.init === node
+    case `AssignmentExpression`:
+      return parent.right === node
+    case `ArrayExpression`:
+    case `ReturnStatement`:
+    case `SpreadElement`:
+      return true
+    case `Property`:
+      return parent.value === node && parent.parent.type === `ObjectExpression`
+    case `ConditionalExpression`:
+      return parent.test !== node
+    case `LogicalExpression`:
+      return true
+    case `ArrowFunctionExpression`:
+      return parent.body === node
+    case `CallExpression`:
+      return (
+        parent.arguments.includes(node) &&
+        !(
+          parent.callee.type === `Identifier` &&
+          selectionHelpers.has(parent.callee.name) &&
+          parent.arguments[0] === node
+        )
+      )
+    default:
+      return false
+  }
+}
+
 /** @type {import('eslint').Rule.RuleModule} */
 export default {
   meta: {
@@ -400,6 +518,7 @@ export default {
       skip: `\`.{{name}}\` stops this test from enforcing its law. Remove it. To keep a known gap visible, pin a failing history with \`it.fails\` and a fixed seed.`,
       conditional: `\`.{{name}}\` can switch this test off in ordinary runs. Only \`.skipIf(oracleReplayRequested())\` or \`.skipIf(oracleReplaySkips(property))\` may switch an oracle test off, so that a replay can stand it aside. Remove the condition.`,
       alias: `\`.{{name}}\` is passed around as a value, so the rule cannot see what it switches off. Call it directly, or select a replay with \`oracleReplayTest(test, property)\` from oracle-config.`,
+      aliasTest: `\`{{name}}\` is passed around as a value, so the rule cannot see what it registers or switches off. Call it directly, or select a replay with \`oracleReplayTest({{name}}, property)\` from oracle-config.`,
       guarded: `This test registers only under a condition, so it can stop running in ordinary runs. Register it unconditionally. A replay selection uses \`oracleReplayRequested()\` or \`oracleReplaySkips(property)\` from oracle-config, or \`oracleReplayTest(test, property)\`.`,
       singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions, which also selects a replay. A witness passes a recorded \`path\` or a seed that is a number literal or a constant.`,
       literalRuns: `A literal run count does not scale with TANSTACK_DB_ORACLE_RUNS_MULTIPLIER. Wrap it in oracleRuns, or pass it to oraclePropertyOptions.`,
@@ -449,9 +568,10 @@ export default {
         ) {
           return
         }
-        const unguarded = guardingConditions(node).every((condition) =>
-          keepsOrdinaryRun(condition, sourceCode),
-        )
+        const unguarded = [
+          ...guardingConditions(node, sourceCode),
+          ...iterableConditions(eachTable(node.callee), sourceCode),
+        ].every((condition) => keepsOrdinaryRun(condition, sourceCode))
         if (!unguarded) {
           context.report({ node, messageId: `guarded` })
           return
@@ -475,6 +595,21 @@ export default {
         if (disabled !== undefined && disablesBody(node.arguments)) {
           context.report({ node, messageId: `skip`, data: { name: disabled } })
         }
+      },
+      Identifier(node) {
+        if (!testRoots.has(node.name) || !isPassedAsValue(node)) return
+        // A local variable or parameter that shares a test function's name
+        // is not that function.
+        const definition = findVariable(sourceCode.getScope(node), node.name)
+          ?.defs[0]
+        if (definition !== undefined && definition.type !== `ImportBinding`) {
+          return
+        }
+        context.report({
+          node,
+          messageId: `aliasTest`,
+          data: { name: node.name },
+        })
       },
       MemberExpression(node) {
         // Report a chain such as `fcTest.skip` or `it.skip.prop` once, at its

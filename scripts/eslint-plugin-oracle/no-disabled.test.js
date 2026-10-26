@@ -58,6 +58,17 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     `test('a', async () => { if (rejected) { expect(test.info().project.name).not.toBe('webkit') } })`,
     // A guard that skips a loop item filters data, as \`.filter\` would.
     `for (const c of cases) { if (!c.legal) continue\n it(c.name, () => check(c)) }`,
+    // A loop over a table that a replay helper empties during a replay, and a
+    // data filter, run every item in ordinary runs.
+    ...[
+      `for (const c of oracleReplayRequested() ? [] : cases) { it(c.name, () => check(c)) }`,
+      `it.each(cases.filter((c) => c.legal))('%s', (c) => check(c))`,
+      `const campaigns = oracleReplaySkips('cursor.exact-width') ? [] : cases\nfor (const c of campaigns) { it(c.name, () => check(c)) }`,
+      `const registration = oracleReplayTest(it)\nregistration('a', () => check())`,
+    ].map((code) => ({
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\n${code}`,
+      languageOptions: { sourceType: `module` },
+    })),
     // Registrations in a loop or over a table run in every ordinary run.
     `for (const campaign of campaigns) { it(campaign.name, () => check(campaign)) }`,
     `const fixedRuns = { seed: 1846, numRuns: 40 }`,
@@ -240,7 +251,10 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     },
     {
       code: `const propertyTest = replay.replayPath === undefined ? fcTest : fcTest.skip`,
-      errors: [{ messageId: `alias`, data: { name: `skip` } }],
+      errors: [
+        { messageId: `aliasTest`, data: { name: `fcTest` } },
+        { messageId: `alias`, data: { name: `skip` } },
+      ],
     },
     {
       code: `const run = it.skip\nrun('a', () => check())`,
@@ -324,6 +338,41 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     {
       code: `const base = 1\nfc.assert(property, oraclePropertyOptions(base, 'p'))`,
       errors: [{ messageId: `singleRun` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nconst t = it\nt.skip('a', () => check())`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `aliasTest` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nconst tests = [it, test]\ntests[0]('a', () => check())`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `aliasTest` }, { messageId: `aliasTest` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nfor (const c of process.env.CI ? [] : cases) { it(c.name, () => check(c)) }`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nfor (const c of cases.filter(() => !process.env.CI)) { it(c.name, () => check(c)) }`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nit.each(process.env.CI ? [] : cases)('%s', (c) => check(c))`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nconst campaigns = process.env.CI ? [] : cases\nfor (const c of campaigns) { it(c.name, () => check(c)) }`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
+    },
+    {
+      code: `import { oracleReplayRequested, oracleReplaySkips, oracleReplayTest } from './oracle-config.js'\nfor (const c of oracleReplayRequested() ? cases : []) { it(c.name, () => check(c)) }`,
+      languageOptions: { sourceType: `module` },
+      errors: [{ messageId: `guarded` }],
     },
     {
       // A comment does not grant an exception.
