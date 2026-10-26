@@ -133,7 +133,8 @@ function adapterImports() {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) visit(path)
-      else if (/\.tsx?$/.test(entry.name))
+      // Component files run their imports too.
+      else if (/\.(tsx?|svelte|vue)$/.test(entry.name))
         for (const [, list] of readFileSync(path, `utf8`).matchAll(
           /import\s*\{([^}]*)\}\s*from\s*'@tanstack\/db'/g,
         ))

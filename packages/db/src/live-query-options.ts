@@ -12,6 +12,7 @@ import {
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
 import { codedMessage, devBuild } from './error-message.js'
+import { InvalidPoolOptionError } from './errors.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
@@ -23,6 +24,22 @@ import type {
   LiveQueryHookConfig,
   QueryBuilder,
 } from './query/index.js'
+
+/**
+ * A hook config's pool: `pooledLiveQueries` or nothing. Any other value, such
+ * as the removed boolean form, contradicts the hook contract, so every reader
+ * rejects it the same way, whatever the config's other options.
+ */
+function configPool(config: object): PooledLiveQueries | undefined {
+  const { pool } = config as { pool?: unknown }
+  if (
+    pool !== undefined &&
+    typeof (pool as Partial<PooledLiveQueries> | null)
+      ?.createPooledLiveQuery !== `function`
+  )
+    throw new InvalidPoolOptionError()
+  return pool as PooledLiveQueries | undefined
+}
 
 export type LiveQueryKey = ReadonlyArray<unknown>
 
@@ -174,11 +191,12 @@ export function prepareLiveQueryValue(
     !(value instanceof BaseQueryBuilder) &&
     `query` in value
   ) {
+    const pool = configPool(value)
     const {
       query,
       queryKey: _queryKey,
       client: _client,
-      pool,
+      pool: _pool,
       ...config
     } = value as PreparedLiveQueryConfigInput
 
@@ -245,10 +263,7 @@ export function getPreparedLiveQueryIdentity(
     const config = value as LiveQueryCollectionConfig<any>
     return [
       `config`,
-      getPreparedLiveQueryIdentity(
-        config.query,
-        (config as LiveQueryHookConfig<any>).pool,
-      ),
+      getPreparedLiveQueryIdentity(config.query, configPool(config)),
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
@@ -313,6 +328,9 @@ export function resolveLiveQueryValue(
     startSync?: boolean
   } = {},
 ): Collection<any, any, any> | null {
+  // An adapter that passes the hook's pool here, as Angular does, gets the
+  // same check as a pool in the config.
+  if (pool !== false) configPool({ pool })
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
     value.startSyncImmediate()
@@ -325,8 +343,9 @@ export function resolveLiveQueryValue(
     )
   }
   if (typeof value === `object`) {
-    const { pool: configPool, ...given } = value as LiveQueryHookConfig<any>
-    const pooling = pool === false ? undefined : (configPool ?? pool)
+    const requested = configPool(value)
+    const { pool: _pool, ...given } = value as LiveQueryHookConfig<any>
+    const pooling = pool === false ? undefined : (requested ?? pool)
     // A pooled view needs the built query. Build a query function once and
     // compile the same builder if the partition cannot serve it.
     const built =

@@ -93,5 +93,6 @@
   "SetWindowFindOneLimitError": 244,
   "SourceCollectionIdReuseError": 245,
   "GroupingOperatorRequiredError": 247,
-  "IncludeOperatorRequiredError": 248
+  "IncludeOperatorRequiredError": 248,
+  "InvalidPoolOptionError": 251
 }

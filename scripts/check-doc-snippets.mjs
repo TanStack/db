@@ -28,6 +28,7 @@ import ts from 'typescript'
 import {
   componentScript,
   fingerprint,
+  frameworkOf,
   misspelling,
   parses,
   selfTest,
@@ -194,12 +195,6 @@ const exported = new Map()
 }
 
 // The framework a file documents, for names several adapters export.
-// `preact` comes before `react`, which its name contains.
-const frameworkOf = (file) =>
-  [`angular`, `solid`, `svelte`, `vue`, `preact`, `react`].find((name) =>
-    file.includes(name),
-  ) ?? `react`
-
 function packageFor(name, file) {
   const owners = exported.get(name)
   if (owners.length === 1) return owners[0]

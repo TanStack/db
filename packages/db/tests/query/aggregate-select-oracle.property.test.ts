@@ -9,12 +9,25 @@ import {
   eq,
   groupKeys,
   inArray,
+  include as includeWrap,
+  materialize,
   max,
   sum,
   toArray,
   upper,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
+import { BaseQueryBuilder } from '../../src/query/builder/index.js'
+import { getQueryIR } from '../../src/query/builder/query-ir.js'
+import {
+  Aggregate,
+  ConditionalSelect,
+  Func,
+  IncludesSubquery,
+  QueryRef,
+  UnionAll,
+  UnionFrom,
+} from '../../src/query/ir.js'
 import {
   AggregateFunctionNotInSelectError,
   GroupingOperatorRequiredError,
@@ -98,8 +111,23 @@ import { createOracleReach } from '../oracle-reach.js'
  * a missing operator throws. When several errors apply, the query throws one
  * of them; which one is not part of the law.
  *
- * Each history chooses whether a grouped query passes its keys bare, and
- * where a nested include sits and whether it is wrapped. The property declares
+ * Query IR built by hand must carry the same operator code: the grouping
+ * compiler on each aggregate and on `groupKeys()` keys, and the include
+ * runtime on each include. IR without it throws the coded error for the
+ * missing operator when it compiles, on every path: a grouped query, one
+ * implicit group, HAVING, and an include. Authority: the changeset ("Code that
+ * builds query IR by hand must supply the operator code") and AGENTS.md, which
+ * requires a contract contradiction to fail at the boundary.
+ *
+ * Each history chooses whether a grouped query passes its keys bare, where a
+ * nested include sits and how it is wrapped (`toArray()`, `include()`,
+ * `materialize()`, or not at all), and, in two histories of five, whether the
+ * driver strips one kind of operator code, the grouping compiler or the
+ * include runtime, from the IR it built before compiling it through
+ * `new BaseQueryBuilder(ir)`. Stripping one kind at a time keeps a missing
+ * include runtime from hiding behind a missing grouping compiler. A history
+ * that strips the include runtime gives its include a child query that is
+ * valid on its own, `count()` alone, so only the missing runtime can fail it. The property declares
  * the states these laws need with `createOracleReach` and fails when a
  * campaign does not reach each of them.
  *
@@ -135,7 +163,10 @@ type Shape = {
    * A nested include beside the aggregate: wrapped in `toArray()` or bare, as
    * a field, inside a nested object, or in both branches of a conditional.
    */
-  include?: { wrap: `toArray` | `bare`; at: `field` | `nested` | `case` }
+  include?: {
+    wrap: `toArray` | `include` | `materialize` | `bare`
+    at: `field` | `nested` | `case`
+  }
 }
 
 /**
@@ -238,7 +269,7 @@ function modelThrows(shape: Shape, grouping: Grouping): boolean {
     (shape.having?.selected === undefined &&
       shape.having !== undefined &&
       readsSourceOutsideAggregate(shape.having.part, grouping)) ||
-    shape.include?.wrap === `toArray` ||
+    (shape.include !== undefined && shape.include.wrap !== `bare`) ||
     Object.values(shape.fields).some((part) =>
       readsSourceOutsideAggregate(part, grouping),
     )
@@ -263,17 +294,35 @@ function shapeHasAggregate(shape: Shape): boolean {
 }
 
 /** Every error the model says applies. The query must throw one of them. */
+/** Which operator code a hand-built history leaves out of its IR. */
+type Stripped = `none` | `grouping` | `runtime`
+
 function modelErrors(
   shape: Shape,
   grouping: Grouping,
   bareKeys: boolean,
+  stripped: Stripped,
 ): Set<ModelError> {
   const errors = new Set<ModelError>()
+  // Every shape aggregates or groups, so IR without the grouping compiler
+  // cannot compile.
+  if (stripped === `grouping`) errors.add(`groupingRequired`)
+  // A wrapped include without its runtime cannot compile either.
+  if (
+    stripped === `runtime` &&
+    shape.include !== undefined &&
+    shape.include.wrap !== `bare`
+  )
+    errors.add(`includeRequired`)
   // A bare query builder is no include; the select rejects it when built.
   if (shape.include?.wrap === `bare`) errors.add(`includeRequired`)
   // An include is a top-level select value (db-core skill, "Includes
   // rules"), so one inside a nested object or a conditional branch throws.
-  if (shape.include?.wrap === `toArray` && shape.include.at !== `field`)
+  if (
+    shape.include !== undefined &&
+    shape.include.wrap !== `bare` &&
+    shape.include.at !== `field`
+  )
     errors.add(`nestedInclude`)
   // Bare group keys carry no grouping compiler, and no aggregate brings one.
   if (grouping !== `none` && bareKeys && !shapeHasAggregate(shape))
@@ -512,7 +561,12 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
       ),
       include: fc.option(
         fc.record({
-          wrap: fc.constantFrom(`toArray` as const, `bare` as const),
+          wrap: fc.constantFrom(
+            `toArray` as const,
+            `include` as const,
+            `materialize` as const,
+            `bare` as const,
+          ),
           at: fc.constantFrom(
             `field` as const,
             `nested` as const,
@@ -638,7 +692,13 @@ function buildSelect(
         .from({ i: issueSource })
         .where(({ i }: any) => eq(i.k, c.k))
         .select(({ i }: any) => ({ id: i.id }))
-      return wrap === `toArray` ? toArray(child) : child
+      return wrap === `toArray`
+        ? toArray(child)
+        : wrap === `include`
+          ? includeWrap(child)
+          : wrap === `materialize`
+            ? materialize(child)
+            : child
     }
     // A constant condition, so the conditional reads no source field.
     fields.nestedKids =
@@ -653,6 +713,60 @@ function buildSelect(
   return fields
 }
 
+/**
+ * A copy of query IR without its operator code, as hand-built IR that forgets
+ * it would be: no grouping on the query or its aggregates, no runtime on its
+ * includes. Source refs are kept as they are, because their identity is the
+ * compiled input identity.
+ */
+function withoutOperatorCode<T>(value: T, stripped: Stripped): T {
+  const grouping = stripped === `grouping`
+  const runtime = stripped === `runtime`
+  const copied = (node: any, fields: Record<string, unknown>) =>
+    Object.assign(Object.create(Object.getPrototypeOf(node)), node, fields)
+  const strip = (node: any): any => {
+    if (Array.isArray(node)) return node.map(strip)
+    if (node instanceof Aggregate)
+      return copied(node, {
+        args: strip(node.args),
+        ...(grouping ? { grouping: undefined } : {}),
+      })
+    if (node instanceof IncludesSubquery)
+      return copied(node, {
+        query: strip(node.query),
+        ...(runtime ? { runtime: undefined } : {}),
+      })
+    if (node instanceof QueryRef)
+      return copied(node, { query: strip(node.query) })
+    if (node instanceof UnionFrom || node instanceof UnionAll)
+      return copied(
+        node,
+        Object.fromEntries(
+          Object.entries(node).map(([key, field]) => [key, strip(field)]),
+        ),
+      )
+    if (node instanceof Func) return copied(node, { args: strip(node.args) })
+    if (node instanceof ConditionalSelect)
+      return copied(node, {
+        branches: node.branches.map((branch: any) => ({
+          ...branch,
+          condition: strip(branch.condition),
+          value: strip(branch.value),
+        })),
+        defaultValue: strip(node.defaultValue),
+      })
+    if (node && Object.getPrototypeOf(node) === Object.prototype) {
+      const fields = Object.fromEntries(
+        Object.entries(node).map(([key, field]) => [key, strip(field)]),
+      )
+      if (grouping && `from` in node) fields.grouping = undefined
+      return fields
+    }
+    return node
+  }
+  return strip(value)
+}
+
 async function runHistory(
   top: Shape,
   nested: Shape,
@@ -661,14 +775,26 @@ async function runHistory(
   steps: ReadonlyArray<Step>,
   union = false,
   bareKeys = false,
+  stripped: Stripped = `none`,
 ): Promise<void> {
   const grouped = grouping !== `none`
+  // Most generated shapes throw on their own; a runtime-stripped history
+  // needs an include that only the missing runtime can fail.
+  if (stripped === `runtime`)
+    nested = { fields: { f0: { k: `agg`, fn: `count` } } }
   reach?.beginHistory()
+  if (stripped === `grouping`)
+    reach?.reach(
+      grouped ? `grouping stripped: grouped` : `grouping stripped: one group`,
+    )
+  if (stripped === `runtime`) reach?.reach(`include runtime stripped`)
   for (const s of [top, nested]) {
     if (s.include?.wrap === `bare`)
       reach?.reach(`bare include: ${s.include.at}`)
     if (s.include?.wrap === `toArray` && s.include.at === `case`)
       reach?.reach(`toArray include in a conditional branch`)
+    if (s.include?.wrap === `include` || s.include?.wrap === `materialize`)
+      reach?.reach(`${s.include.wrap}() wrap`)
     if (grouped && bareKeys)
       reach?.reach(
         shapeHasAggregate(s)
@@ -766,37 +892,47 @@ async function runHistory(
         )
       : q.from({ c: commentSource })
   const topAlias = union ? undefined : `c`
+  // The hand-built path compiles a copy of the built IR without its operator
+  // code.
+  const finish = (built: any) =>
+    stripped === `none`
+      ? built
+      : new BaseQueryBuilder(withoutOperatorCode(getQueryIR(built), stripped))
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
-      having(
-        top,
-        group(topSource(q), topAlias).select((refs: any) =>
-          buildSelect(top, rowOf(refs, topAlias), undefined, q, issueSource),
+      finish(
+        having(
+          top,
+          group(topSource(q), topAlias).select((refs: any) =>
+            buildSelect(top, rowOf(refs, topAlias), undefined, q, issueSource),
+          ),
+          topAlias,
         ),
-        topAlias,
       ),
     ),
   )
   const includeQuery = compile(() =>
     createLiveQueryCollection((q) =>
-      q.from({ issue: issueSource }).select(({ issue }) => ({
-        id: issue.id,
-        kids: toArray(
-          having(
-            nested,
-            group(
-              q
-                .from({ [childAlias]: commentSource })
-                .where((refs: any) => eq(refs[childAlias].k, issue.k)),
+      finish(
+        q.from({ issue: issueSource }).select(({ issue }) => ({
+          id: issue.id,
+          kids: toArray(
+            having(
+              nested,
+              group(
+                q
+                  .from({ [childAlias]: commentSource })
+                  .where((refs: any) => eq(refs[childAlias].k, issue.k)),
+                childAlias,
+              ).select((refs: any) =>
+                buildSelect(nested, refs[childAlias], issue, q, issueSource),
+              ),
               childAlias,
-            ).select((refs: any) =>
-              buildSelect(nested, refs[childAlias], issue, q, issueSource),
+              issue,
             ),
-            childAlias,
-            issue,
           ),
-        ),
-      })),
+        })),
+      ),
     ),
   )
   // Compilation: the query throws exactly when the model says no value exists.
@@ -804,7 +940,10 @@ async function runHistory(
     [`top`, topQuery, top],
     [`include`, includeQuery, nested],
   ] as const) {
-    const errors = modelErrors(s, grouping, bareKeys)
+    const errors = modelErrors(s, grouping, bareKeys, stripped)
+    // The include query's `kids` include loses its runtime too.
+    if (stripped === `runtime` && label === `include`)
+      errors.add(`includeRequired`)
     // A nested include cannot correlate with a unionAll row, which has no
     // source alias, so the builder rejects it first.
     const unionInclude = label === `top` && union && s.include !== undefined
@@ -839,7 +978,7 @@ async function runHistory(
       }
       if (includeQuery.ok) {
         for (const issue of issues) {
-          const row = includeQuery.value.get(issue.id) as any
+          const row = includeQuery.value.get(issue.id)
           expect(
             sortRows(
               (row?.kids ?? []).map((kid: any) => stripVirtualProps(kid)),
@@ -907,6 +1046,13 @@ const history = fc
       fc.array(step, { maxLength: 6 }),
       fc.boolean(),
       fc.boolean(),
+      // Two histories in five build their IR by hand without one kind of
+      // operator code.
+      fc.oneof(
+        { weight: 3, arbitrary: fc.constant<Stripped>(`none`) },
+        fc.constant<Stripped>(`grouping`),
+        fc.constant<Stripped>(`runtime`),
+      ),
     ),
   )
 
@@ -918,6 +1064,11 @@ const reachStates = [
   `toArray include in a conditional branch`,
   `bare group keys without an aggregate`,
   `bare group keys beside an aggregate`,
+  `include() wrap`,
+  `materialize() wrap`,
+  `grouping stripped: grouped`,
+  `grouping stripped: one group`,
+  `include runtime stripped`,
 ] as const
 let reach:
   ReturnType<typeof createOracleReach<(typeof reachStates)[number]>> | undefined
@@ -929,8 +1080,17 @@ describe(`aggregate select shapes`, () => {
     await fc.assert(
       fc.asyncProperty(
         history,
-        ([top, nested, grouping, shadow, steps, union, bareKeys]) =>
-          runHistory(top, nested, grouping, shadow, steps, union, bareKeys),
+        ([top, nested, grouping, shadow, steps, union, bareKeys, stripped]) =>
+          runHistory(
+            top,
+            nested,
+            grouping,
+            shadow,
+            steps,
+            union,
+            bareKeys,
+            stripped,
+          ),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
     )
@@ -943,8 +1103,17 @@ describe(`aggregate select shapes`, () => {
     await fc.assert(
       fc.asyncProperty(
         history,
-        ([top, nested, grouping, shadow, steps, union, bareKeys]) =>
-          runHistory(top, nested, grouping, shadow, steps, union, bareKeys),
+        ([top, nested, grouping, shadow, steps, union, bareKeys, stripped]) =>
+          runHistory(
+            top,
+            nested,
+            grouping,
+            shadow,
+            steps,
+            union,
+            bareKeys,
+            stripped,
+          ),
       ),
       oraclePropertyOptions(120, PROPERTY),
     )

@@ -614,7 +614,7 @@ export class IncludeOperatorRequiredError extends QueryBuilderError {
   constructor(field: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `A subquery in select() needs include(), toArray(), or materialize(). Wrap the ${field} field: ${field}: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.`
+        ? `A subquery in select() needs include(), toArray(), or materialize(). Wrap the ${field} field: ${field}: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db. Query IR built by hand passes includesRuntime to each IR.IncludesSubquery.`
         : codedMessage(248, { field }),
     )
   }
@@ -730,7 +730,7 @@ export class GroupingOperatorRequiredError extends QueryCompilationError {
   constructor() {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.`
+        ? `groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra. Query IR built by hand passes groupingCompiler to each IR.Aggregate.`
         : codedMessage(247),
     )
   }
@@ -1212,5 +1212,16 @@ export class SourceCollectionIdReuseError extends TanStackDBError {
         : codedMessage(245, { bindingName, collectionId }),
     )
     this.name = `SourceCollectionIdReuseError`
+  }
+}
+
+export class InvalidPoolOptionError extends TanStackDBError {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A live query's pool option takes pooledLiveQueries from @tanstack/db, or nothing. Pooling is opt-in: pass pool: pooledLiveQueries to share one partition among equality-filtered queries.`
+        : codedMessage(251),
+    )
+    this.name = `InvalidPoolOptionError`
   }
 }

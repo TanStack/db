@@ -93,6 +93,7 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   ],
   IncludeOperatorRequiredError: [['issues']],
   GroupingOperatorRequiredError: [[]],
+  InvalidPoolOptionError: [[]],
   JoinConditionMustBeEqualityError: [[]],
   QueryMustHaveFromClauseError: [[]],
   InvalidWhereExpressionError: [['boolean']],

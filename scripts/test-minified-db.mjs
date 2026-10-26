@@ -108,6 +108,7 @@ const errorGroups = {
   SetWindowReentrancyError: `SetWindowReentrancyError`,
   UnhashableQueryIRError: `UnhashableQueryIRError`,
   SourceCollectionIdReuseError: `SourceCollectionIdReuseError`,
+  InvalidPoolOptionError: `InvalidPoolOptionError`,
 }
 
 function checkErrorNames(db) {

@@ -69,6 +69,7 @@ import {
   expectUnorderedRows,
   selectedRow,
 } from './result-laws'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   DeferredSourceHandle,
   LiveQueryDriver,
@@ -517,7 +518,22 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const shared = driver.features?.pooledEqFilters ? 1 : 2
         expect(source.collection.subscriberCount).toBe(shared)
 
-        await moving.setParam(`b`)
+        // Every value the binding publishes after a switch holds only rows of
+        // the new group, or none while it loads; the old group's rows never
+        // show again. The driver logs the first paint, so the law cannot
+        // pass on an empty log.
+        const switchTo = async (
+          team: string,
+          rows: ReadonlyArray<{ id: string }>,
+        ) => {
+          const before = moving.publications().length
+          await moving.setParam(team)
+          const published = moving.publications().slice(before)
+          expect(published.length).toBeGreaterThan(0)
+          for (const value of published) expectOnlyRowsOf(value, rows)
+        }
+
+        await switchTo(`b`, [SEED[1]!])
         await peer.flush()
         expect([ids(moving), ids(peer)]).toEqual([[`2`], [`1`, `3`]])
         expectKeyedRows(moving.current().state, [SEED[1]!])
@@ -530,7 +546,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [`1`, `3`],
         ])
 
-        await moving.setParam(`a`)
+        await switchTo(`a`, [SEED[0]!, SEED[2]!])
         await peer.flush()
         expect([ids(moving), ids(peer)]).toEqual([
           [`1`, `3`],
@@ -543,6 +559,44 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             timeout: 500,
           })
           .toBe(0)
+      },
+    )
+
+    // `pool` takes `pooledLiveQueries`. Any other value, such as the removed
+    // boolean form, contradicts the hook contract, so the hook rejects it the
+    // same way whatever its other options: beside `gcTime`, which keeps the
+    // pooled path, beside `queryKey`, which compiles its own Collection, and
+    // on a parameterized query. Authority: AGENTS.md, which requires a
+    // contract contradiction to fail at the boundary, not to fall back.
+    scenario(
+      `invalid-pool`,
+      `a hook rejects a pool option that is not pooledLiveQueries`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const query = (q: any, team: string) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const invalid = true as unknown as PooledLiveQueries
+        for (const mount of [
+          () => driver.mountConfig((q) => query(q, `a`), { pool: invalid }),
+          () =>
+            driver.mountConfig((q) => query(q, `a`), {
+              pool: invalid,
+              gcTime: 5,
+            }),
+          () =>
+            driver.mountConfig((q) => query(q, `a`), {
+              pool: invalid,
+              queryKey: [`teams`, `a`],
+            }),
+          () => driver.mountControllable(query, `a`, { pool: invalid }),
+        ])
+          await expectRejection(`InvalidPoolOptionError`, async () => {
+            const h = mount()
+            await h.flush()
+            return h.current()
+          })
       },
     )
 
@@ -1867,7 +1921,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(43)
+      expect(registry.size).toBe(44)
     })
   })
 }

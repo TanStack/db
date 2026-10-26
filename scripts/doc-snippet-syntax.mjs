@@ -143,6 +143,33 @@ export function componentScript(code) {
   return { code: match[1], offset: code[start] === `\n` ? offset + 1 : offset }
 }
 
+const frameworks = new Set([
+  `angular`,
+  `preact`,
+  `react`,
+  `solid`,
+  `svelte`,
+  `vue`,
+])
+
+/**
+ * The framework a doc or skill file documents, from its path segments: a
+ * `docs/framework/<name>/` directory or a `packages/<name>-db/` package. A
+ * name inside a word, such as `solid` in `consolidation`, does not count.
+ * Other files document React.
+ */
+export function frameworkOf(file) {
+  const segments = file.split(`/`)
+  const name = segments.flatMap((segment, index) =>
+    segments[index - 1] === `framework`
+      ? [segment]
+      : segment.endsWith(`-db`)
+        ? [segment.slice(0, -3)]
+        : [],
+  )
+  return name.find((candidate) => frameworks.has(candidate)) ?? `react`
+}
+
 export function selfTest() {
   const imports = [
     `include`,
@@ -196,6 +223,19 @@ export function selfTest() {
     throw new Error(
       `self-test: componentScript missed <script setup lang="ts">`,
     )
+
+  for (const [file, expected] of [
+    [`docs/framework/preact/overview.md`, `preact`],
+    [`docs/framework/react/overview.md`, `react`],
+    [`packages/solid-db/skills/solid-db/SKILL.md`, `solid`],
+    [
+      `docs/contributing/oracle-reviews/code-weight-multiset-consolidation.md`,
+      `react`,
+    ],
+    [`docs/guides/live-queries.md`, `react`],
+  ])
+    if (frameworkOf(file) !== expected)
+      throw new Error(`self-test: frameworkOf(${file}) is ${frameworkOf(file)}`)
 
   const imported = tanstackImports(
     [

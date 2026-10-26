@@ -24,6 +24,7 @@ import {
   FnSelectWithGroupByError,
   GroupingOperatorRequiredError,
   HavingRequiresGroupByError,
+  IncludeOperatorRequiredError,
   LimitOffsetRequireOrderByError,
   NonAggregateExpressionNotInGroupByError,
   QueryCompilationError,
@@ -750,6 +751,10 @@ function compileQueryInternal(
       query = { ...query, select: { ...query.select } }
     }
     for (const { key, path, subquery, guards } of includesEntries) {
+      // Query IR built by hand must carry the runtime its include needs.
+      const runtime = subquery.runtime as Partial<IncludesRuntime> | undefined
+      if (typeof runtime?.materializeCompilation !== `function`)
+        throw new IncludeOperatorRequiredError(key)
       const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns)
       // Branch parent pipeline: map to [correlationValue, parentContext]
       // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
@@ -1117,33 +1122,22 @@ function compileQueryInternal(
       unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
     )
   }
-  // An aggregate value or groupKeys brings the grouping compiler.
-  const grouping =
-    query.grouping ??
-    findAggregate([
-      query.select,
-      query.having,
-      query.orderBy?.map((clause) => clause.expression),
-    ])?.grouping
-  if (query.groupBy && query.groupBy.length > 0) {
-    if (!grouping) throw new GroupingOperatorRequiredError()
+  // An aggregate value or groupKeys brings the grouping compiler. A groupBy,
+  // or an aggregate anywhere, needs it; query IR built by hand may lack it.
+  const aggregate = findAggregate([
+    query.select,
+    query.having,
+    query.orderBy?.map((clause) => clause.expression),
+  ])
+  const grouping = query.grouping ?? aggregate?.grouping
+  const grouped = (query.groupBy?.length ?? 0) > 0
+  if ((grouped || aggregate) && !grouping)
+    throw new GroupingOperatorRequiredError()
+  // SELECT aggregates without GROUP BY make one implicit group.
+  if (grouping && (grouped || selectAggregate)) {
     pipeline = grouping.processGroupBy(
       pipeline,
-      query.groupBy,
-      valueIdentity,
-      isSourceRef,
-      query.having,
-      query.select,
-      query.fnHaving,
-      mainCollectionId,
-      groupByMainSource,
-      sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
-    )
-  } else if (selectAggregate) {
-    // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
-    pipeline = selectAggregate.grouping.processGroupBy(
-      pipeline,
-      [], // Empty group by means single group
+      query.groupBy ?? [],
       valueIdentity,
       isSourceRef,
       query.having,

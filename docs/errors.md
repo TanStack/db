@@ -1007,7 +1007,7 @@ Development builds show the full message. For example:
 Development builds show the full message. For example:
 
 ```text
-groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra.
+groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra. Query IR built by hand passes groupingCompiler to each IR.Aggregate.
 ```
 
 <a id="error-248"></a>
@@ -1017,7 +1017,17 @@ groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ 
 Development builds show the full message. For example:
 
 ```text
-A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db.
+A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db. Query IR built by hand passes includesRuntime to each IR.IncludesSubquery.
+```
+
+<a id="error-251"></a>
+
+## Error 251: `InvalidPoolOptionError`
+
+Development builds show the full message. For example:
+
+```text
+A live query's pool option takes pooledLiveQueries from @tanstack/db, or nothing. Pooling is opt-in: pass pool: pooledLiveQueries to share one partition among equality-filtered queries.
 ```
 
 ## Other errors and log messages
