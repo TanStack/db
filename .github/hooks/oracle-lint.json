@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": "edit|create",
+        "bash": "node scripts/agent-lint-feedback.mjs --format=copilot --event=edit",
+        "timeoutSec": 30
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "node scripts/agent-lint-feedback.mjs --format=copilot --event=stop",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}

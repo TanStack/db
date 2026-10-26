@@ -2637,10 +2637,7 @@ describe(`Ordered windows across truncate replays`, () => {
         ),
         campaign === `fixed`
           ? { seed: 20261021, numRuns: oracleRuns(300) }
-          : {
-              ...oraclePropertyOptions(300, orderedReplayProperty),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(300, orderedReplayProperty),
       )
       // Reach witnesses: releases throw without a truncate, while a replay
       // starts, and while it settles; loads fail and stay held across a

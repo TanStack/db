@@ -14,13 +14,11 @@ export * from './types'
 export * from './proxy'
 export * from './query/index.js'
 export * from './optimistic-action'
+export type { LiveQueryKey, LiveQueryOptions } from './live-query-options'
+/** @internal Unstable layer for the first-party framework adapters. */
 export * from './live-query-adapter'
-export * from './live-query-observer'
 /** @internal First-party persistence adapter capability. */
 export * from './persisted-readiness'
-export * from './live-query-options'
-/** @internal Unstable adapter primitive for RFC #1623. */
-export * from './live-query-window-controller'
 export * from './local-only'
 export * from './local-storage'
 export {

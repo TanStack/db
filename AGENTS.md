@@ -106,6 +106,9 @@ is not ready:
   the owner and the maintainer decision.
 - **Pinned-only coverage:** a named example where the law needs a generator
   dimension.
+- **Unit tests inside oracles:** ordinary examples or concrete type assertions
+  placed in an oracle file. A fixed regression must replay the shared model,
+  production driver, and comparison without its own expected answer.
 - **"Pre-existing" as a dismissal:** a reachable counterexample that an agent
   labels as older than the change, but does not fix, record in the coverage
   map with its trace, or bring to the maintainer for a decision.
@@ -124,6 +127,20 @@ includes this block:
 - **Mutant:** the hostile mutant and how the oracle rejected it.
 - **Limits:** the states, paths, and observations that the evidence does not
   cover.
+
+### Lint feedback while you work
+
+The `oracle/` lint rules in `scripts/eslint-plugin-oracle/` report the
+shortcuts that a syntactic check can see. The repository's agent hooks
+(`.claude/`, `.codex/`, `.gemini/`, and `.github/hooks/`) return the reports
+after each edit and at the end of each turn. A hook sees only the edits that
+the harness's own edit tools make. After an edit through a shell command, or
+in a harness without these hooks, run `pnpm lint:changed` before you finish.
+
+Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
+pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
+true exception needs a maintainer to change the rule in a reviewed pull
+request.
 
 ## Required reading: live-query materialization
 
@@ -679,6 +696,25 @@ behavior. The pull request must identify the relevant coverage-map entry and
 explain why extending its owner, creating a new independent oracle, or adding a
 receiving witness is not practical. Bug fixes cannot use this focused-test-only
 exception. They must provide evidence that closes the entire declared bug class.
+
+### Keep Unit Tests Out of Oracles
+
+Oracle files contain reusable laws, independent models, input or history
+grammars, shared comparisons, and their execution. Do not put ordinary unit
+tests or concrete type assertions in an oracle file. A filename, coverage-map
+entry, contract comment, or table of fixtures does not turn examples into an
+oracle.
+
+Keep a fixed regression as input to the same model, production driver, and
+comparison that the generated campaign uses. It must not carry a separate
+expected answer or its own assertions. Checker calibration may supply a wrong
+observation to that same comparison. Put supplemental unit tests in ordinary
+test files; they do not discharge an oracle-owned coverage obligation.
+
+For compile-time contracts, generate legal TypeScript inputs and check their
+public types against a reusable independent type law. A list of
+`expectTypeOf` calls or `@ts-expect-error` examples is not an oracle. Negative
+checks derived by the shared law from generated inputs are permitted.
 
 ### Name Oracle Files for Discovery
 

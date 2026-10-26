@@ -183,6 +183,7 @@ TanStack DB is a reactive client-side data store that provides normalized collec
 | ------------------------------- | -------------------------------------------------------------------- |
 | `packages/db`                   | collection-setup, live-queries, mutations-optimistic, custom-adapter |
 | `packages/react-db`             | framework-integration (React)                                        |
+| `packages/preact-db`            | framework-integration (Preact)                                       |
 | `packages/vue-db`               | framework-integration (Vue)                                          |
 | `packages/svelte-db`            | framework-integration (Svelte)                                       |
 | `packages/solid-db`             | framework-integration (Solid)                                        |
