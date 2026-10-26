@@ -7,6 +7,7 @@ import {
   persistedCollectionOptions,
 } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
+import { createSerializedNodeSqliteDriver as createDriver } from '../../db-sqlite-persistence-core/tests/helpers/node-sqlite-driver'
 import type { Message, Row } from '@electric-sql/client'
 import type { Collection } from '@tanstack/db'
 import type { SQLiteDriver } from '../../db-sqlite-persistence-core/src'
@@ -52,68 +53,6 @@ vi.mock(`@electric-sql/client`, async () => ({
     lastOffset: `10_0`,
   })),
 }))
-
-function toBinding(value: unknown): string | number | bigint | null {
-  if (value === null || value === undefined) return null
-  if (typeof value === `boolean`) return value ? 1 : 0
-  if (
-    typeof value === `string` ||
-    typeof value === `number` ||
-    typeof value === `bigint`
-  ) {
-    return value
-  }
-  return String(value)
-}
-
-// Work outside a transaction waits behind an active transaction, as the
-// driver contract (`tests/contracts/sqlite-driver-contract.ts`) requires.
-function createDriver(database: DatabaseSync): SQLiteDriver {
-  let tail: Promise<unknown> = Promise.resolve()
-  const serialize = <T>(task: () => Promise<T>): Promise<T> => {
-    const result = tail.then(task, task)
-    tail = result.then(
-      () => undefined,
-      () => undefined,
-    )
-    return result
-  }
-  const direct: SQLiteDriver = {
-    exec: (sql) => {
-      database.exec(sql)
-      return Promise.resolve()
-    },
-    query: (sql, params = []) =>
-      Promise.resolve(
-        database
-          .prepare(sql)
-          .all(...params.map(toBinding))
-          .map((row) => ({ ...row })) as Array<never>,
-      ),
-    run: (sql, params = []) => {
-      database.prepare(sql).run(...params.map(toBinding))
-      return Promise.resolve()
-    },
-    transaction: (transaction) => transaction(direct),
-  }
-  return {
-    exec: (sql) => serialize(() => direct.exec(sql)),
-    query: (sql, params) => serialize(() => direct.query(sql, params)),
-    run: (sql, params) => serialize(() => direct.run(sql, params)),
-    transaction: (transaction) =>
-      serialize(async () => {
-        database.exec(`BEGIN IMMEDIATE`)
-        try {
-          const result = await transaction(direct)
-          database.exec(`COMMIT`)
-          return result
-        } catch (error) {
-          database.exec(`ROLLBACK`)
-          throw error
-        }
-      }),
-  }
-}
 
 const rows: Array<Item> = [
   { id: 1, group: `a` },

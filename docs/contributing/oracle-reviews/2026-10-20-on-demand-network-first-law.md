@@ -228,7 +228,7 @@ Coverage also ends when the restore returns fewer rows than it recorded.
   covered demand's rows is outside this law. Optimistic overlay rules apply as
   usual, and this proposal has no witness for them.
 - **Ordered windows.** A window settles from SQLite only while its restore
-  holds the rows it held when it settled. The tie-boundary load's key comes
+  holds the rows it held when it settled (maintainer decision, 2026-10-26). The tie-boundary load's key comes
   from the restored boundary row, so a window that lost, gained, or replaced
   a row asks for a key that no load covered.
 - **Expired cache claims.** A coverage read under an expired claim proves
