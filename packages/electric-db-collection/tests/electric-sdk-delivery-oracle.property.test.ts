@@ -1027,10 +1027,15 @@ fixedCase(`does not certify an aborted SDK subset snapshot`, async () => {
  * still in flight. The source model has no row for the old predicate and one
  * row for the new predicate. The old provider session loses authority before
  * cache rotation; its late HTTP response cannot publish or persist a row in
- * the new generation. The replacement session must settle both demands from
- * its own snapshots. This receives the controlled provider-restart law through
- * the installed ShapeStream and HTTP path. A Map-backed adapter supplies the
- * generation boundary; real SQLite and native hosts have separate owners.
+ * either generation. The SQLite persistence guide requires immediate retirement
+ * of expired source callbacks. This restriction belongs to this expired session;
+ * a peer with a valid claim may still use a retired generation. Each round
+ * remembers its retired storage target and excludes only the late response's
+ * absent key there, allowing other retained rows. The replacement session must
+ * settle both demands from its own snapshots. This receives the controlled
+ * provider-restart law through the installed ShapeStream and HTTP path. A
+ * Map-backed adapter supplies the generation boundary; real SQLite and native
+ * hosts have separate owners.
  * It also receives the stream-listener release law below for the retired
  * session. The Electric guide requires releasing its owned resources before
  * constructing the replacement ShapeStream. The independent rule is zero
@@ -1057,6 +1062,7 @@ const createRotationReach = () =>
     | `first-session`
     | `replacement-session`
     | `demands-await-replacement`
+    | `retired-target-observed`
   >(`electric.sdk-rotation-release`, [
     `during-rotation`,
     `before-snapshots`,
@@ -1064,6 +1070,7 @@ const createRotationReach = () =>
     `first-session`,
     `replacement-session`,
     `demands-await-replacement`,
+    `retired-target-observed`,
   ])
 let rotationReach: ReturnType<typeof createRotationReach> | undefined
 
@@ -1243,6 +1250,7 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
       rotationRequested = deferred<void>()
       const oldId = round * 2 + 1
       const newId = oldId + 1
+      const retiredStorageId = storageId
       const oldOptions = demand(oldId)
       const newOptions = demand(newId)
       const settlements: Array<`pending` | `fulfilled` | `rejected`> = []
@@ -1285,6 +1293,11 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
         respond(oldSnapshot, { id: oldId, name: `late-old` }, round * 4 + 1)
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         expect(collection.get(oldId)).toBeUndefined()
+        expect(
+          rows.get(retiredStorageId)!.has(oldId),
+          `retired response in retired cache`,
+        ).toBe(false)
+        rotationReach?.reach(`retired-target-observed`)
       }
       if (retiredSnapshotCut === `during-rotation`)
         await deliverRetiredSnapshot()
@@ -1338,6 +1351,10 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
       expect(collection.get(oldId)).toBeUndefined()
       expect(collection.get(newId)?.name).toBe(`fresh`)
       expect([...rows.get(storageId)!.keys()]).toEqual([newId])
+      expect(
+        rows.get(retiredStorageId)!.has(oldId),
+        `retired response in retired cache after replacement`,
+      ).toBe(false)
       expect(listeners.registered()).toBe(round + 2)
       expect(listeners.live(), `live listeners after rotation`).toBe(1)
       // End these demands before the next round; its fresh IDs ensure an old
