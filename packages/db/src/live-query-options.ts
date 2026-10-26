@@ -8,24 +8,40 @@ import {
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
-  createPooledLiveQuery,
-  getPooledQueryIdentity,
-} from './query/pooled-live-query.js'
-import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
 import { codedMessage, devBuild } from './error-message.js'
+import { InvalidPoolOptionError } from './errors.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
+import type { PooledLiveQueries } from './query/pooled-live-query.js'
 import type {
   Context,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   QueryBuilder,
 } from './query/index.js'
+
+/**
+ * A hook config's pool: `pooledLiveQueries` or nothing. Any other value, such
+ * as the removed boolean form, contradicts the hook contract, so every reader
+ * rejects it the same way, whatever the config's other options. An adapter
+ * that reads the pool from its own options, as Angular does, checks it here.
+ */
+export function configPool(config: object): PooledLiveQueries | undefined {
+  const { pool } = config as { pool?: unknown }
+  if (
+    pool !== undefined &&
+    typeof (pool as Partial<PooledLiveQueries> | null)
+      ?.createPooledLiveQuery !== `function`
+  )
+    throw new InvalidPoolOptionError()
+  return pool as PooledLiveQueries | undefined
+}
 
 export type LiveQueryKey = ReadonlyArray<unknown>
 
@@ -121,7 +137,7 @@ export function resumeDeferredLiveQueryCollections(
 }
 
 type PreparedLiveQueryConfigInput = Omit<
-  LiveQueryCollectionConfig<Context>,
+  LiveQueryHookConfig<Context>,
   `query`
 > & {
   query:
@@ -183,10 +199,12 @@ export function prepareLiveQueryValue(
     !(value instanceof BaseQueryBuilder) &&
     `query` in value
   ) {
+    const pool = configPool(value)
     const {
       query,
       queryKey: _queryKey,
       client: _client,
+      pool: _pool,
       ...config
     } = value as PreparedLiveQueryConfigInput
 
@@ -202,6 +220,9 @@ export function prepareLiveQueryValue(
 
     return {
       ...config,
+      // A DbClient query never pools, so its identity must not depend on
+      // pool: a server preload and a client hook must hash alike.
+      ...(pool && !dbClient ? { pool } : {}),
       query: preparedQuery,
     }
   }
@@ -233,12 +254,15 @@ export function getPreparedLiveQuerySources(
   return isCollection(query) ? [query] : []
 }
 
-export function getPreparedLiveQueryIdentity(value: unknown): unknown {
+export function getPreparedLiveQueryIdentity(
+  value: unknown,
+  pool?: PooledLiveQueries,
+): unknown {
   if (isCollection(value)) return [`collection`, value.id]
   if (value instanceof BaseQueryBuilder) {
     // A pooled query's fields and literals identify its rows without
     // canonicalizing its whole IR on every render.
-    const pooled = getPooledQueryIdentity(value)
+    const pooled = pool?.getPooledQueryIdentity(value)
     return pooled === undefined
       ? [`query`, getStableQueryBuilderHash(value)]
       : [`pooled`, pooled]
@@ -247,7 +271,7 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
     const config = value as LiveQueryCollectionConfig<any>
     return [
       `config`,
-      getPreparedLiveQueryIdentity(config.query),
+      getPreparedLiveQueryIdentity(config.query, configPool(config)),
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
@@ -297,6 +321,7 @@ export function getLiveQueryHash(
 function poolConfig(
   config: LiveQueryCollectionConfig<any>,
   gcTime: number | undefined,
+  pool: PooledLiveQueries,
 ): Collection<any, any, any> | undefined {
   if (
     !(config.query instanceof BaseQueryBuilder) ||
@@ -304,7 +329,7 @@ function poolConfig(
   ) {
     return undefined
   }
-  return createPooledLiveQuery(config.query, {
+  return pool.createPooledLiveQuery(config.query, {
     gcTime: config.gcTime ?? gcTime,
   })
 }
@@ -319,9 +344,16 @@ export function resolveLiveQueryValue(
   value: unknown,
   {
     gcTime,
-    pool = true,
+    pool,
     startSync = true,
-  }: { gcTime?: number; pool?: boolean; startSync?: boolean } = {},
+  }: {
+    gcTime?: number
+    // `false` keeps a hook that cannot pool, such as a Suspense or DbClient
+    // query, from pooling even when its config passes `pooledLiveQueries`.
+    // A pool here has passed `configPool`.
+    pool?: PooledLiveQueries | false
+    startSync?: boolean
+  } = {},
 ): Collection<any, any, any> | null {
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
@@ -330,14 +362,24 @@ export function resolveLiveQueryValue(
   }
   if (value instanceof BaseQueryBuilder) {
     return (
-      (pool ? createPooledLiveQuery(value, { gcTime }) : undefined) ??
+      (pool ? pool.createPooledLiveQuery(value, { gcTime }) : undefined) ??
       createLiveQueryCollection({ query: value, startSync, gcTime })
     )
   }
   if (typeof value === `object`) {
-    const config = value as LiveQueryCollectionConfig<any>
+    const requested = configPool(value)
+    const { pool: _pool, ...given } = value as LiveQueryHookConfig<any>
+    const pooling = pool === false ? undefined : (requested ?? pool)
+    // A pooled view needs the built query. Build a query function once and
+    // compile the same builder if the partition cannot serve it.
+    const built =
+      pooling && typeof given.query === `function`
+        ? given.query(createInitialQueryBuilder())
+        : undefined
+    const config =
+      built instanceof BaseQueryBuilder ? { ...given, query: built } : given
     return (
-      (pool ? poolConfig(config, gcTime) : undefined) ??
+      (pooling ? poolConfig(config, gcTime, pooling) : undefined) ??
       createLiveQueryCollection({
         ...config,
         startSync: config.startSync ?? startSync,

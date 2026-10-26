@@ -412,5 +412,9 @@
   "hydratedLiveQueries": "gW",
   "clientBinding": "aO",
   "unregisterResource": "a9",
-  "preloadCollection": "bs"
+  "preloadCollection": "bs",
+  "ssrStreamFailure": "bB",
+  "ssrQueryWaiters": "bL",
+  "includesRuntimeCache": "ch",
+  "failSsrQueryWaiters": "cA"
 }

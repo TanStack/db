@@ -1,6 +1,6 @@
 import { codedMessage, devBuild } from './error-message.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
-import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
+import { getPooledLiveQuerySource } from './query/pooled-source.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type {
@@ -154,7 +154,7 @@ export class LiveQueryObserverClient<
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.`
-          : codedMessage(247),
+          : codedMessage(252),
       )
     }
     // Capture at render, rather than sampling mutable source rows at dehydrate.

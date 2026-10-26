@@ -765,7 +765,7 @@ export class DbClient {
         new Error(
           devBuild() && process.env.NODE_ENV !== `production`
             ? `The DB stream ended before the server-rendered query snapshot arrived.`
-            : codedMessage(248),
+            : codedMessage(253),
         ),
       )
     this.ssrStreamingEnabled = enabled

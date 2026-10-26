@@ -33,6 +33,7 @@
     "size:compare": "node scripts/size-compare.mjs",
     "typecheck:tests": "pnpm --filter @tanstack/db-ivm --filter @tanstack/offline-transactions typecheck",
     "test:docs": "node scripts/verify-links.ts",
+    "test:doc-snippets": "node scripts/check-doc-snippets.mjs",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
     "generate-docs": "node scripts/generate-docs.ts"
   },

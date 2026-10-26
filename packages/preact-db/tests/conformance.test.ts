@@ -24,6 +24,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -38,6 +39,7 @@ import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { renderHook, settle } from './render-probe'
 import type { MountedHook } from './render-probe'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -183,7 +185,11 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; queryKey?: ReadonlyArray<unknown> },
+  opts?: {
+    gcTime?: number
+    pool?: PooledLiveQueries
+    queryKey?: ReadonlyArray<unknown>
+  },
 ) {
   return makeHandle(
     renderHook(() => useLiveQuery({ query: build as any, ...opts })),
@@ -198,19 +204,25 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const published = createPublicationLog()
   const hook = renderHook(
-    ({ param }: { param: P }) => useLiveQuery((q: any) => build(q, param)),
+    ({ param }: { param: P }) =>
+      opts?.pool !== undefined
+        ? // The config form derives identity from the query on each render.
+          useLiveQuery({ query: (q: any) => build(q, param), pool: opts.pool })
+        : useLiveQuery((q: any) => build(q, param)),
     {
       initialProps: { param: initial },
-      onCommit: (result) => published.record(result.data),
+      onCommit: (result) => published.record(result.data, result.state),
     },
   )
   const handle = makeHandle(hook)
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(param: P) {
       hook.rerender({ param })
       await settle()
@@ -234,13 +246,14 @@ function mountKeyedControllable<P>(
       } as any),
     {
       initialProps: { param: initial },
-      onCommit: (result) => published.record(result.data),
+      onCommit: (result) => published.record(result.data, result.state),
     },
   )
   const handle = makeHandle(hook)
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(param: P) {
       hook.rerender({ param })
       await settle()
@@ -253,7 +266,7 @@ const preactDriver: LiveQueryDriver = {
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

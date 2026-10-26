@@ -548,3 +548,53 @@ compiler, TypeScript 5.9.3, both harness typechecks passed with no errors, as di
 all nine existing core persistence type assertions. ESLint for the resolved
 registry and both staged and working-tree whitespace checks passed.
 No subscription or SSR production source changed during this merge.
+
+### Integration with opt-in operators
+
+The next requested merge combines `bb83e42a4a00d0ea772c4a211fd19d83bb7c5a7e`
+with main `6c1ca8f8f9efe437d3cea61b5b9d0a086e2a5e34` (#2232).
+Eight conflicts retained both sets of tests, coverage statements and error sites.
+The SSR helper now imports the pooled-source lookup from main's new lightweight
+module. The mangle-cache writer preserved safe assignments and assigned unique
+names to the combined private members; its 418 entries pass validation.
+
+The existing production-error census caught an integration defect before its
+repair: main allocated class codes 247/248, which this branch used for two SSR
+sites. `never reuses a class code` failed on both sites. Their codes are now
+252/253, with matching fixtures and regenerated documentation. The unchanged
+independent uniqueness check passes for the complete combined census. No model
+rule or assertion was relaxed.
+
+Combined-tree verification passed: **168 core checks**, **780 React checks**,
+**241 Svelte checks**, **10 Router runtime/type checks**, **38 replay checks**,
+and **15 Start/Chromium checks**. Framework typechecks report no errors. All
+affected packages built; six SSR bundle comparisons, minified public API and
+production-message erasure checks passed. The PR diff passes
+`git diff --check origin/main`; a first-parent check also flags trailing spaces
+already present in main's generated reference pages. The local dependency
+patch is unchanged and stays outside the merge commit. Earlier evidence limits
+remain; these runs verify integration with this main commit.
+
+Updated production and receiving-source bindings before the merge commit:
+
+| File | SHA-256 |
+| --- | --- |
+| `packages/db/src/client.ts` | `b8209ae4a18372271a7a6d94e270043adf8aa8499e6c66f3a8ff171d5337c0f8` |
+| `packages/db/src/live-query-observer-client.ts` | `de6a592194f8c6a468b76f2bcae335cde6a466c52a5d7e4b282ffab604f95232` |
+| `packages/db/src/live-query-observer.ts` | `0a29dbc376ced35924c1793be506c087c57ac0b3d61798fc60337f1f9d87d016` |
+| `packages/db/src/query/pooled-live-query.ts` | `20a2998f60289026fbacb291079ebdc86cea5437c63eb04229b8e8eed9c710b8` |
+| `packages/db/tests/query/pooled-live-query-gc-oracle.test.ts` | `38ff3a3805ac0d662a5f4a8fa12e64a28132607723bb7fd04cf14005b1c7b35b` |
+
+The React descriptor receiver remains at its earlier `a399991d…` binding.
+
+`pnpm size:compare --base origin/main --exact-base --files` passed against
+`6c1ca8f8f`. The typical app decreased **412 B gzip / 375 B Brotli**; all eight
+app scenarios decreased. The complete DB package increased **1,457 B gzip /
+1,276 B Brotli**, and React increased **22 B / 17 B**. Other measured packages
+were unchanged, for a package total increase of **1,479 B / 1,293 B**. These
+package totals retain every export. The six bundle comparisons above separately
+verify that ordinary, Suspense and infinite hooks exclude SSR implementation
+without DbClient; the controls retain it. This integration measurement uses the
+earlier SSR extraction and refactoring, without claiming a new size reduction
+from the mechanical merge repairs. Full measurements are in the task scratch
+file `second-main-size.log`.

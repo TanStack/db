@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
+import {
+  createPooledLiveQuery,
+  pooledLiveQueries,
+} from '../../src/query/pooled-live-query.js'
 import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq, not } from '../../src/query/index.js'
-import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { createDeferred } from '../../src/deferred.js'
 import { resolveLiveQueryValue } from '../../src/live-query-options.js'
 import {
@@ -857,7 +860,9 @@ describe(`pooled live query gcTime`, () => {
     // A pooled view and a compiled one, each on its own source.
     const pooledOnOwn = makeSource()
     const pooledObserver = createLiveQueryObserver(
-      resolveLiveQueryValue(query(pooledOnOwn)(new Query())),
+      resolveLiveQueryValue(query(pooledOnOwn)(new Query()), {
+        pool: pooledLiveQueries,
+      }),
       { mode: `wholesale` },
     )
     pooledObserver.subscribe(() => {})()
@@ -881,9 +886,12 @@ describe(`pooled live query gcTime`, () => {
   it(`pools a query config that names only its query`, () => {
     const source = makeSource()
     const observe = (value: unknown) =>
-      createLiveQueryObserver(resolveLiveQueryValue(value, { gcTime: 1 }), {
-        mode: `wholesale`,
-      }).subscribe(() => {})
+      createLiveQueryObserver(
+        resolveLiveQueryValue(value, { pool: pooledLiveQueries, gcTime: 1 }),
+        {
+          mode: `wholesale`,
+        },
+      ).subscribe(() => {})
     const stops = [
       observe({ query: query(source)(new Query()) }),
       observe({ query: query(source)(new Query()), gcTime: 5 }),

@@ -3,7 +3,7 @@ id: InjectLiveQueryResultWithSingleResultCollection
 title: InjectLiveQueryResultWithSingleResultCollection
 ---
 
-Defined in: [index.ts:100](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L100)
+Defined in: [angular-db/src/index.ts:102](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L102)
 
 ## Type Parameters
 
@@ -30,7 +30,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [index.ts:107](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L107)
+Defined in: [angular-db/src/index.ts:109](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L109)
 
 ***
 
@@ -40,7 +40,7 @@ Defined in: [index.ts:107](https://github.com/TanStack/db/blob/main/packages/ang
 data: Signal<TResult | undefined>;
 ```
 
-Defined in: [index.ts:106](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L106)
+Defined in: [angular-db/src/index.ts:108](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L108)
 
 ***
 
@@ -50,7 +50,7 @@ Defined in: [index.ts:106](https://github.com/TanStack/db/blob/main/packages/ang
 isCleanedUp: Signal<boolean>;
 ```
 
-Defined in: [index.ts:116](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L116)
+Defined in: [angular-db/src/index.ts:118](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L118)
 
 ***
 
@@ -60,7 +60,7 @@ Defined in: [index.ts:116](https://github.com/TanStack/db/blob/main/packages/ang
 isError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:115](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L115)
+Defined in: [angular-db/src/index.ts:117](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L117)
 
 ***
 
@@ -70,7 +70,7 @@ Defined in: [index.ts:115](https://github.com/TanStack/db/blob/main/packages/ang
 isIdle: Signal<boolean>;
 ```
 
-Defined in: [index.ts:114](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L114)
+Defined in: [angular-db/src/index.ts:116](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L116)
 
 ***
 
@@ -80,7 +80,7 @@ Defined in: [index.ts:114](https://github.com/TanStack/db/blob/main/packages/ang
 isLoading: Signal<boolean>;
 ```
 
-Defined in: [index.ts:109](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L109)
+Defined in: [angular-db/src/index.ts:111](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L111)
 
 ***
 
@@ -90,7 +90,7 @@ Defined in: [index.ts:109](https://github.com/TanStack/db/blob/main/packages/ang
 isPersistedReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:112](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L112)
+Defined in: [angular-db/src/index.ts:114](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L114)
 
 ***
 
@@ -100,7 +100,7 @@ Defined in: [index.ts:112](https://github.com/TanStack/db/blob/main/packages/ang
 isReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:110](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L110)
+Defined in: [angular-db/src/index.ts:112](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L112)
 
 ***
 
@@ -110,7 +110,7 @@ Defined in: [index.ts:110](https://github.com/TanStack/db/blob/main/packages/ang
 persistedError: Signal<unknown>;
 ```
 
-Defined in: [index.ts:113](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L113)
+Defined in: [angular-db/src/index.ts:115](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L115)
 
 ***
 
@@ -120,7 +120,7 @@ Defined in: [index.ts:113](https://github.com/TanStack/db/blob/main/packages/ang
 persistedStatus: Signal<LiveQueryPersistedStatus>;
 ```
 
-Defined in: [index.ts:111](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L111)
+Defined in: [angular-db/src/index.ts:113](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L113)
 
 ***
 
@@ -130,7 +130,7 @@ Defined in: [index.ts:111](https://github.com/TanStack/db/blob/main/packages/ang
 state: Signal<Map<TKey, TResult>>;
 ```
 
-Defined in: [index.ts:105](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L105)
+Defined in: [angular-db/src/index.ts:107](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L107)
 
 ***
 
@@ -140,4 +140,4 @@ Defined in: [index.ts:105](https://github.com/TanStack/db/blob/main/packages/ang
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [index.ts:108](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L108)
+Defined in: [angular-db/src/index.ts:110](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L110)

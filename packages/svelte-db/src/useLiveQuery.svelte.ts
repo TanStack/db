@@ -29,7 +29,7 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
   LiveQueryPersistedStatus,
@@ -109,7 +109,7 @@ export interface UseLiveQueryReturnWithCollection<
 type MaybeGetter<T> = T | (() => T)
 
 export type UseLiveQueryConfig<TContext extends Context> =
-  LiveQueryCollectionConfig<TContext> & {
+  LiveQueryHookConfig<TContext> & {
     queryKey?: MaybeGetter<LiveQueryKey>
     client?: DbClient
   }
@@ -458,10 +458,11 @@ export function useLiveQuery(
       } else if (isCollection(preparedValue)) {
         collection = preparedValue
       } else {
-        // Hydration keys the live-query Collection by identity.
+        // Hydration keys the live-query Collection by identity, so it never
+        // pools, even when the config passes a pool.
         collection = resolveLiveQueryValue(preparedValue, {
           gcTime: DEFAULT_GC_TIME_MS,
-          pool: !dbClient,
+          pool: dbClient ? false : undefined,
         })
       }
 

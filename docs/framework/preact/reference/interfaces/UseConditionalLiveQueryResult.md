@@ -3,7 +3,7 @@ id: UseConditionalLiveQueryResult
 title: UseConditionalLiveQueryResult
 ---
 
-Defined in: [useLiveQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L91)
+Defined in: [useLiveQuery.ts:97](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L97)
 
 The result of a live query whose callback can disable it.
 
@@ -37,7 +37,7 @@ The result of a live query whose callback can disable it.
 collection: TCollection | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:99](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L99)
+Defined in: [useLiveQuery.ts:105](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L105)
 
 ***
 
@@ -47,7 +47,7 @@ Defined in: [useLiveQuery.ts:99](https://github.com/TanStack/db/blob/main/packag
 data: TData | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:98](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L98)
+Defined in: [useLiveQuery.ts:104](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L104)
 
 ***
 
@@ -57,7 +57,7 @@ Defined in: [useLiveQuery.ts:98](https://github.com/TanStack/db/blob/main/packag
 isCleanedUp: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:73](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L73)
+Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L79)
 
 #### Inherited from
 
@@ -73,7 +73,7 @@ LiveQueryResultFlags.isCleanedUp
 isEnabled: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:101](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L101)
+Defined in: [useLiveQuery.ts:107](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L107)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: [useLiveQuery.ts:101](https://github.com/TanStack/db/blob/main/packa
 isError: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L72)
+Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L78)
 
 #### Inherited from
 
@@ -99,7 +99,7 @@ LiveQueryResultFlags.isError
 isIdle: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:71](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L71)
+Defined in: [useLiveQuery.ts:77](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L77)
 
 #### Inherited from
 
@@ -115,7 +115,7 @@ LiveQueryResultFlags.isIdle
 isLoading: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:66](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L66)
+Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L72)
 
 #### Inherited from
 
@@ -131,7 +131,7 @@ LiveQueryResultFlags.isLoading
 isPersistedReady: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:69](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L69)
+Defined in: [useLiveQuery.ts:75](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L75)
 
 #### Inherited from
 
@@ -147,7 +147,7 @@ LiveQueryResultFlags.isPersistedReady
 isReady: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:67](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L67)
+Defined in: [useLiveQuery.ts:73](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L73)
 
 #### Inherited from
 
@@ -163,7 +163,7 @@ LiveQueryResultFlags.isReady
 persistedError: unknown;
 ```
 
-Defined in: [useLiveQuery.ts:70](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L70)
+Defined in: [useLiveQuery.ts:76](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L76)
 
 #### Inherited from
 
@@ -179,7 +179,7 @@ LiveQueryResultFlags.persistedError
 persistedStatus: LiveQueryPersistedStatus;
 ```
 
-Defined in: [useLiveQuery.ts:68](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L68)
+Defined in: [useLiveQuery.ts:74](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L74)
 
 #### Inherited from
 
@@ -195,7 +195,7 @@ LiveQueryResultFlags.persistedStatus
 state: ReadonlyMap<TKey, TResult> | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:97](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L97)
+Defined in: [useLiveQuery.ts:103](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L103)
 
 ***
 
@@ -205,4 +205,4 @@ Defined in: [useLiveQuery.ts:97](https://github.com/TanStack/db/blob/main/packag
 status: UseLiveQueryStatus;
 ```
 
-Defined in: [useLiveQuery.ts:100](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L100)
+Defined in: [useLiveQuery.ts:106](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L106)

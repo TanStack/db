@@ -10,6 +10,7 @@ import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
 import { buildCompareOptions } from './compiler/order-by.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
+import { registerPooledSource } from './pooled-source.js'
 import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
@@ -509,6 +510,7 @@ class PooledLiveQuery {
     private readonly passes: ((row: Row) => boolean) | undefined,
   ) {
     partition.retain(gcTime)
+    registerPooledSource(this, source)
   }
 
   get status(): CollectionStatus {
@@ -645,13 +647,6 @@ class PooledLiveQuery {
   }
 }
 
-/** The one source of an adapter's pooled view, without materializing it. */
-export function getPooledLiveQuerySource(
-  value: unknown,
-): CollectionImpl<any, any, any, any, any> | undefined {
-  return value instanceof PooledLiveQuery ? value.source : undefined
-}
-
 // The observer reads the view itself; users get the live-query Collection.
 const forwardToCollection: ProxyHandler<PooledLiveQuery> = {
   get(view, property) {
@@ -742,3 +737,15 @@ export function createPooledLiveQuery(
       : undefined,
   ) as unknown as Collection<any, any, any>
 }
+
+/**
+ * Pooled live queries for framework hooks. Pass it as `pool` in a hook's
+ * query config to serve equality-filtered queries of one shape from a shared
+ * partition. Apps that do not pass it do not bundle pooling.
+ */
+export const pooledLiveQueries = {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+}
+
+export type PooledLiveQueries = typeof pooledLiveQueries

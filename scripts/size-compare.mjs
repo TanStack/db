@@ -387,22 +387,32 @@ if (runScenarios) {
   )
   let appGzip
   for (const scenario of scenarios) {
-    const base = await measureScenario(baseDir, scenario)
+    // A scenario written for a new API cannot build against an older base:
+    // it imports a name the base does not export. Any other failure is real.
+    const base = await measureScenario(baseDir, scenario).catch((error) => {
+      if (!String(error?.message).includes(`No matching export`)) throw error
+      return undefined
+    })
     const head = await measureScenario(root, scenario)
-    const baseGzip = base.get(`(bundle)`).gzip
+    const baseGzip = base?.get(`(bundle)`).gzip
     const headGzip = head.get(`(bundle)`).gzip
     appGzip ??= headGzip
     console.log(
       [
         relative(scenarioDir, scenario).replace(/\.js$/, ``),
-        baseGzip,
+        baseGzip ?? `n/a`,
         headGzip,
-        signed(headGzip - baseGzip) + percent(headGzip - baseGzip, baseGzip),
-        signed(head.get(`(bundle)`).brotli - base.get(`(bundle)`).brotli),
+        baseGzip === undefined
+          ? `n/a`
+          : signed(headGzip - baseGzip) +
+            percent(headGzip - baseGzip, baseGzip),
+        base
+          ? signed(head.get(`(bundle)`).brotli - base.get(`(bundle)`).brotli)
+          : `n/a`,
         signed(headGzip - appGzip),
       ].join(`\t`),
     )
-    if (!flag(`files`)) continue
+    if (!flag(`files`) || !base) continue
     const changed = [...new Set([...base.keys(), ...head.keys()])]
       .filter((file) => file !== `(bundle)`)
       .map((file) => [
