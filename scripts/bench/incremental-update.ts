@@ -11,11 +11,18 @@ import {
   eq,
   materialize,
 } from '../../packages/db/src/index.js'
+import * as db from '../../packages/db/src/index.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   Collection,
   SyncConfig,
 } from '../../packages/db/src/index.js'
+
+// Before include(), a bare subquery in select was a Collection include.
+const includeWith = (builder: any): any =>
+  typeof (db as { include?: unknown }).include === `function`
+    ? (db as any).include(builder)
+    : builder
 
 type Issue = {
   id: number
@@ -254,16 +261,18 @@ const queryCases: Array<QueryCase> = [
           .select(({ issue }) => ({
             id: issue.id,
             title: issue.title,
-            recentComments: q
-              .from({ comment: comments })
-              .where(({ comment }) => eq(comment.issueId, issue.id))
-              .orderBy(({ comment }) => comment.createdAt, `desc`)
-              .limit(3)
-              .select(({ comment }) => ({
-                id: comment.id,
-                body: comment.body,
-                createdAt: comment.createdAt,
-              })),
+            recentComments: includeWith(
+              q
+                .from({ comment: comments })
+                .where(({ comment }) => eq(comment.issueId, issue.id))
+                .orderBy(({ comment }) => comment.createdAt, `desc`)
+                .limit(3)
+                .select(({ comment }) => ({
+                  id: comment.id,
+                  body: comment.body,
+                  createdAt: comment.createdAt,
+                })),
+            ),
           })),
       ) as unknown as BenchmarkCollection,
     write: insertVisibleComment,
@@ -279,15 +288,17 @@ const queryCases: Array<QueryCase> = [
           .select(({ issue }) => ({
             id: issue.id,
             title: issue.title,
-            comments: q
-              .from({ comment: comments })
-              .where(({ comment }) => eq(comment.issueId, issue.id))
-              .orderBy(({ comment }) => comment.createdAt, `desc`)
-              .select(({ comment }) => ({
-                id: comment.id,
-                body: comment.body,
-                createdAt: comment.createdAt,
-              })),
+            comments: includeWith(
+              q
+                .from({ comment: comments })
+                .where(({ comment }) => eq(comment.issueId, issue.id))
+                .orderBy(({ comment }) => comment.createdAt, `desc`)
+                .select(({ comment }) => ({
+                  id: comment.id,
+                  body: comment.body,
+                  createdAt: comment.createdAt,
+                })),
+            ),
           })),
       ) as unknown as BenchmarkCollection,
     write: insertSelectedIssueComment,

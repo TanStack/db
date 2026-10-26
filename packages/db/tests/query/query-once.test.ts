@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { eq, queryOnce } from '../../src/query/index.js'
+import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { Query } from '../../src/query/builder/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 

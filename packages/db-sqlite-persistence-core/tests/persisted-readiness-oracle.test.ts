@@ -1,4 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
 import {
   DbClient,
   PERSISTED_READINESS,
@@ -9,6 +8,7 @@ import {
   getPersistedReadinessSource,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'
 

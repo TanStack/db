@@ -3,7 +3,7 @@ id: DuplicateAliasInSubqueryError
 title: DuplicateAliasInSubqueryError
 ---
 
-Defined in: [packages/db/src/errors.ts:798](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L798)
+Defined in: [packages/db/src/errors.ts:818](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L818)
 
 Retained for callers that imported this formerly thrown error.
 
@@ -24,7 +24,7 @@ are rejected only within one lexical scope or union branch namespace.
 new DuplicateAliasInSubqueryError(alias, parentAliases): DuplicateAliasInSubqueryError;
 ```
 
-Defined in: [packages/db/src/errors.ts:799](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L799)
+Defined in: [packages/db/src/errors.ts:819](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L819)
 
 #### Parameters
 

@@ -26,6 +26,8 @@ jobs:
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Check lint
         run: pnpm run lint:check
+      - name: Typecheck doc and skill examples
+        run: pnpm run test:doc-snippets
       - name: Check oracle lint without inline directives
         run: pnpm run lint:oracles
       - name: Test oracle lint rules

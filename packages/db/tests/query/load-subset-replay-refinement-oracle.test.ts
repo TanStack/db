@@ -1,7 +1,5 @@
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
-import { createDeferred } from '../../src/deferred.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -9,6 +7,8 @@ import {
   not,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'

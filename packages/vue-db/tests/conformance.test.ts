@@ -16,6 +16,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -30,6 +31,7 @@ import { createPublicationLog } from '../../db/tests/conformance/publication-log
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -190,7 +192,10 @@ function mountCollection(collection: any) {
   return makeHandle(result, scope)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const { result, scope } = runInScope(() =>
     useLiveQuery({ query: build, ...opts } as any),
   )
@@ -208,18 +213,25 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const param = ref(initial) as { value: P }
   const published = createPublicationLog()
   const { result, scope } = runInScope(() => {
-    const query = useLiveQuery(
-      (q: any) => build(q, param.value),
-      [() => param.value],
-    )
+    const query =
+      opts?.pool !== undefined
+        ? useLiveQuery(
+            {
+              query: (q: any) => build(q, param.value),
+              pool: opts.pool,
+            } as any,
+            [() => param.value],
+          )
+        : useLiveQuery((q: any) => build(q, param.value), [() => param.value])
     // Vue renders the value present at each pre-flush.
     watch(
-      () => query.data.value,
-      (data) => published.record(data),
+      () => [query.data.value, [...query.state.value.values()]],
+      ([data]) => published.record(data, query.state.value),
       { flush: `pre`, immediate: true },
     )
     return query
@@ -228,12 +240,13 @@ function mountControllable<P>(
   return {
     ...handle,
     publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param.value = next
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       await nextTick()
-      published.record(result.data.value)
+      published.record(result.data.value, result.state.value)
       await settle()
     },
   }
@@ -244,7 +257,7 @@ const vueDriver: LiveQueryDriver = {
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

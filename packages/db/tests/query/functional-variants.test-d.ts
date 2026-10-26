@@ -6,6 +6,7 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -171,7 +172,7 @@ describe(`Functional Variants Types`, () => {
     createLiveQueryCollection((q) =>
       q.from({ user: usersCollection }).fn.select((row) => ({
         id: row.user.id,
-        departments: q.from({ department: departmentsCollection }),
+        departments: include(q.from({ department: departmentsCollection })),
       })),
     )
 
