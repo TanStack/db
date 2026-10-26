@@ -9,11 +9,12 @@
  *
  * All registered laws must pass; the driver has no whole-test waivers.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   Component,
   DestroyRef,
   EnvironmentInjector,
+  ErrorHandler,
   createEnvironmentInjector,
   effect,
   inject,
@@ -148,10 +149,53 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 50))
 }
 
+// Angular reports an error that a binding's root effect throws, such as a
+// rejected query input, to the application ErrorHandler. The driver records
+// them, and a handle rethrows the first one reported since it mounted on its
+// next read or flush: that is the rejection the contract observes. Mounts that
+// fail run one at a time, so this attributes each error to its mount. Every
+// recorded error must be claimed by a read before its test ends, so an error
+// that no scenario expects still fails its test.
+const reported: Array<{ error: unknown; claimed: boolean }> = []
+const reportedSince = new WeakMap<object, number>()
+
+beforeEach(() => {
+  reported.length = 0
+  TestBed.resetTestingModule()
+  TestBed.configureTestingModule({
+    rethrowApplicationErrors: false,
+    providers: [
+      {
+        provide: ErrorHandler,
+        useValue: {
+          handleError: (error: unknown) =>
+            reported.push({ error, claimed: false }),
+        },
+      },
+    ],
+  })
+})
+
+afterEach(() => {
+  expect(
+    reported.filter(({ claimed }) => !claimed).map(({ error }) => error),
+    `errors reported to ErrorHandler that no read observed`,
+  ).toEqual([])
+})
+
+function rethrowReported(result: any): void {
+  const entry = reported.slice(reportedSince.get(result) ?? 0)[0]
+  if (entry) {
+    entry.claimed = true
+    throw entry.error
+  }
+}
+
 function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
   return {
     collection: () => result.collection(),
     current(): ConformanceResult {
+      rethrowReported(result)
       return expectResultSurface({
         data: result.data(),
         state: result.state(),
@@ -165,10 +209,14 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
         isEnabled: result.status() !== `disabled`,
       })
     },
-    flush: settle,
+    async flush() {
+      await settle()
+      rethrowReported(result)
+    },
     async apply(fn: () => void) {
       fn()
       await settle()
+      rethrowReported(result)
     },
     unmount() {
       destroy()
@@ -178,6 +226,7 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
 
 function inCtx(fn: () => any): { result: any; destroy: () => void } {
   const parent = TestBed.inject(EnvironmentInjector)
+  const since = reported.length
   const injector = createEnvironmentInjector([], parent)
   let result: any
   withScopeSetup(
@@ -187,6 +236,7 @@ function inCtx(fn: () => any): { result: any; destroy: () => void } {
       }),
     () => injector.destroy(),
   )
+  if (result && typeof result === `object`) reportedSince.set(result, since)
   return { result, destroy: () => injector.destroy() }
 }
 

@@ -3812,7 +3812,10 @@ fails with `TANSTACK_DB_ORACLE_SEED=1023848973` (path
 anti-joined, unindexed, ascending limit-one window with nulls first: upsert
 row 0 as ineligible, then delete the visible row. The check finds two
 full-source requests after a signalling refetch, where it expects none.
-`main` at `5649a07d4` fails the same way. Owner: the ordered-work owner.
+`main` at `5649a07d4` fails the same way. Seed `-436579979` reaches the same
+check through a joined window (`filter: joined`, `via: link`), fails on
+`main` at `5649a07d4` too, and in CI timed out at 5 seconds while it shrank.
+The campaign can fail CI intermittently until the defect is fixed. Owner: the ordered-work owner.
 Needed witness: whether this unindexed window may use full-source recovery,
 which this map allows for unindexed underfilled continuations; if so the
 check is too strict for it, and if not production is wrong.
