@@ -269,9 +269,47 @@ class OracleModule {
           definition.node.init !== null &&
           this.nodeReaches(definition.node.init)
         )
+      case `Parameter`:
+        return this.#parameterReaches(definition)
       default:
         return false
     }
+  }
+
+  /**
+   * A parameter reaches a part when every call of its function passes an
+   * argument that reaches one, as when a helper registers the property that
+   * its caller passes in. A function that the file never calls by name
+   * passes nothing the rule can see.
+   */
+  #parameterReaches(definition) {
+    const fn = definition.node
+    const index = fn.params.indexOf(definition.name)
+    const binding =
+      fn.type === `FunctionDeclaration`
+        ? fn.id
+        : fn.parent.type === `VariableDeclarator`
+          ? fn.parent.id
+          : undefined
+    if (index < 0 || binding?.type !== `Identifier`) return false
+    const variable = this.scopeManager
+      .getDeclaredVariables(fn.type === `FunctionDeclaration` ? fn : fn.parent)
+      .find((declared) => declared.name === binding.name)
+    const calls = (variable?.references ?? [])
+      .map((reference) => reference.identifier.parent)
+      .filter(
+        (call) =>
+          call.type === `CallExpression` &&
+          call.callee.type === `Identifier` &&
+          call.callee.name === binding.name,
+      )
+    return (
+      calls.length > 0 &&
+      calls.every((call) => {
+        const argument = call.arguments[index]
+        return argument !== undefined && this.nodeReaches(argument)
+      })
+    )
   }
 
   #importReaches(source, name) {

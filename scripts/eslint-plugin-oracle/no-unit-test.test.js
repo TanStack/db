@@ -139,6 +139,15 @@ it('checks the page laws', () => checkLaws([]))`,
 it('rejects a retired variable', () => expect(() => readOracleRunConfig({})).toThrow())`,
       filename: join(tests, `oracle-config.test.ts`),
     },
+    // A helper that registers the property its caller passes in.
+    {
+      code: `${header}function serializerProp(name, check) {
+  fcTest.prop([value])(name, check)
+}
+serializerProp('round-trips a value', (v) => checkHistory(v))
+serializerProp('round-trips an array', (v) => checkHistory([v]))`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,
@@ -232,6 +241,22 @@ it('checks a fixed history', () => runHistory([]))
 it('builds a fixture', () => expect(fixture()).toEqual([]))`,
       filename,
       errors: [{ messageId: `unitTest`, line: 3 }],
+    },
+    // One caller that passes a unit test makes the helper's test a unit test.
+    {
+      code: `${header}const serializerProp = (name, check) => {
+  fcTest.prop([value])(name, check)
+}
+serializerProp('round-trips a value', (v) => checkHistory(v))
+serializerProp('encodes a date', () => expect(encode(date)).toBe('x'))`,
+      filename,
+      errors: [{ messageId: `unitTest`, line: 6 }],
+    },
+    // A helper that nothing calls by name passes nothing the rule can see.
+    {
+      code: `${header}export function register(name, check) { it(name, check) }`,
+      filename,
+      errors: [{ messageId: `unitTest` }],
     },
     // A test inside a suite and a test passed a timeout are still tests.
     {
