@@ -20,9 +20,9 @@ import {
  *   declareOracle({ check: [checkHistory], model: [modelHistory] })
  *
  * The check compares production observations with the model, or with a
- * second formulation. The model is optional, because a differential or
- * metamorphic oracle has none. Every test in the file must reach a declared
- * part:
+ * second formulation. Each is optional: a differential or metamorphic oracle
+ * has no model, and a companion module can declare only the model that its
+ * importers compare with. Every test in the file must reach a declared part:
  *
  * - A generated property or a fixed history reaches the check.
  * - A model pin reaches the model. It checks one model rule against its

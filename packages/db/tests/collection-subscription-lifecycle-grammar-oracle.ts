@@ -1,4 +1,5 @@
 import { fc } from '@fast-check/vitest'
+import { declareOracle } from './oracle-config.js'
 
 /**
  * # Which subscription histories are legal?
@@ -966,3 +967,12 @@ export function expectedDeferralBatches(
       ]
     : []
 }
+
+declareOracle({
+  model: [
+    createLifecycleModel,
+    reduceLifecycle,
+    expectedCleanedRestartDemand,
+    expectedDeferralBatches,
+  ],
+})

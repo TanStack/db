@@ -104,6 +104,7 @@
  */
 import fc from 'fast-check'
 import { createCollection, createLiveQueryCollection } from '@tanstack/db'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -1673,3 +1674,5 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
     },
   ],
 ]
+
+declareOracle({ check: [reloadViolations], model: [expectedReload] })

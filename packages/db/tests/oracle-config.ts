@@ -680,16 +680,17 @@ type OraclePart =
   ((...args: never) => unknown) | (abstract new (...args: never) => unknown)
 
 /**
- * Names the parts of this file's oracle: its check, which compares production
- * observations with the model or with a second formulation, and its model,
- * if it has one. Every test in an oracle file must use a declared part,
+ * Names the parts of an oracle that this module defines: its check, which
+ * compares production observations with the model or with a second
+ * formulation, and its model. A differential or metamorphic oracle has no
+ * model, and a companion module can hold only the model. Every test in an oracle file must use a declared part,
  * directly or through a driver. A test that uses neither compares production
  * with a hand-written value: it is a unit test, and belongs in an ordinary
  * test file. The `oracle/no-unit-test` lint rule reads this call. It does
  * nothing at run time.
  */
 export function declareOracle(_parts: {
-  check: ReadonlyArray<OraclePart>
+  check?: ReadonlyArray<OraclePart>
   model?: ReadonlyArray<OraclePart>
 }): void {}
 

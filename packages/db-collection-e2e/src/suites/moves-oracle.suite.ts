@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
+import { declareOracle } from '../../../db/tests/oracle-config.js'
 import { waitFor } from '../utils/helpers'
 import { expectNotificationHistory } from '../utils/notification-laws-oracle'
 import type { E2ETestConfig, Post, User } from '../types'
@@ -1006,3 +1007,5 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
     runTestsForSyncMode('progressive')
   })
 }
+
+declareOracle({ check: [assertOwnedPosts] })

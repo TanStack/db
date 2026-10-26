@@ -1,3 +1,4 @@
+import { declareOracle } from '../../db/tests/oracle-config.js'
 /**
  * # Does an OPFS connection answer requests in order and close after them?
  *
@@ -227,3 +228,8 @@ export const requestOrderExamples: Array<RequestOrderHistory> = (
     ),
   ),
 )
+
+declareOracle({
+  check: [findRequestOrderViolation],
+  model: [expectedRequestOrder],
+})

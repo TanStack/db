@@ -1,3 +1,4 @@
+import { declareOracle } from '../../db/tests/oracle-config.js'
 /**
  * # When does a cold hydrate get a turn on a shared SQLite driver?
  *
@@ -963,3 +964,11 @@ export async function observeSharedDriverFairness(
   }
   return observation
 }
+
+declareOracle({
+  check: [
+    findSharedDriverFairnessViolation,
+    findSharedDriverFairnessLawViolations,
+  ],
+  model: [createFairnessReference],
+})

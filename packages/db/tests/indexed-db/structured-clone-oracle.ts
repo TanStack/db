@@ -1,3 +1,4 @@
+import { declareOracle } from '../oracle-config.js'
 /**
  * Value fidelity is independent of lifecycle ordering. IndexedDB persists
  * structured-clone values; changing a scalar sibling must preserve an untouched
@@ -134,3 +135,5 @@ export async function observeValueRows(rows: Iterable<ValueRow>) {
 export function expectedValueRows(kind: ValueKind, name: string, id = 1) {
   return [{ id, name, nested: { value: expectedValue(kind) } }]
 }
+
+declareOracle({ model: [expectedValue, expectedValueRows] })
