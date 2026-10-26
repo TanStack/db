@@ -53,11 +53,32 @@ const mockStream = {
   lastOffset: `-1` as string,
 }
 
+// Each stream owns its callback release. Prototype inheritance keeps the
+// shared request and resume controls live without sharing callback ownership.
+function createMockStream() {
+  let unsubscribe: (() => void) | undefined
+  let stopped = false
+  return Object.assign(Object.create(mockStream) as typeof mockStream, {
+    subscribe: (...args: Parameters<typeof mockSubscribe>) => {
+      const release: (() => void) | undefined = mockSubscribe(...args)
+      if (stopped) release?.()
+      else unsubscribe = release
+      return release
+    },
+    unsubscribeAll: () => {
+      mockStream.unsubscribeAll()
+      if (stopped) return
+      stopped = true
+      unsubscribe?.()
+    },
+  })
+}
+
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => mockStream),
+    ShapeStream: vi.fn(createMockStream),
   }
 })
 
