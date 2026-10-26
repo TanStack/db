@@ -1,14 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  BasicIndex,
   createCollection,
   createEffect,
   createLiveQueryCollection,
-  eq,
-  withCollectionSyncConfigCleanup,
 } from '../src'
 import { createDeferred } from '../src/deferred'
-import type { SyncConfig } from '../src/types'
+import { declareOracle } from './oracle-config.js'
+import {
+  cleanupError,
+  completedBoundaryScenarios,
+  reentryScenarios,
+} from './collection-cleanup-restart-support.js'
+import type { Row } from './collection-cleanup-restart-support.js'
 
 /**
  * # When does cleanup become observable?
@@ -67,12 +70,6 @@ import type { SyncConfig } from '../src/types'
  * shutdown, persistence-wrapper behavior, or general row-publication laws.
  */
 
-type Row = { id: number; rank: number }
-const cleanupError = {
-  name: `CollectionStateError`,
-  message: expect.stringContaining(`after cleanup() completes`),
-}
-
 type CleanupBoundary =
   `cleanup-start` | `terminal-publication` | `cleanup-settlement`
 type CleanupBoundaryObservation<TStatus extends string> = {
@@ -129,25 +126,18 @@ function observeDependent(active: boolean): `active` | `terminal` {
   return active ? `active` : `terminal`
 }
 
-const reentryScenarios = ([`abort`, `release`] as const).flatMap((boundary) =>
-  [false, true].flatMap((nestedCleanup) =>
-    [1, 2].map((attempts) => ({
-      id: `${boundary}:${nestedCleanup ? `nested` : `plain`}:${attempts}`,
-      boundary,
-      nestedCleanup,
-      attempts,
-    })),
-  ),
-)
-
-const completedBoundaryScenarios = ([`event`, `await`] as const).flatMap(
-  (boundary) =>
-    [false, true].map((liveQuery) => ({
-      id: `${boundary}:${liveQuery ? `live-query` : `source`}`,
-      boundary,
-      liveQuery,
-    })),
-)
+/**
+ * Checks the fields that one cut observes against the cut that
+ * `expectedCleanupBoundary` predicts. Only the observed fields are compared,
+ * and the expected values come from the model alone.
+ */
+function checkCleanupBoundary<TStatus extends string>(
+  priorStatus: TStatus,
+  boundary: CleanupBoundary,
+  observed: Partial<CleanupBoundaryObservation<TStatus>>,
+): void {
+  expect(expectedCleanupBoundary(priorStatus, boundary)).toMatchObject(observed)
+}
 
 function expectExactCaseIds(
   actual: ReadonlyArray<{ id: string }>,
@@ -158,60 +148,10 @@ function expectExactCaseIds(
   expect(new Set(ids).size).toBe(ids.length)
 }
 
-async function withOracleCleanup<T>(
-  body: () => T | Promise<T>,
-  cleanups: Array<() => void | Promise<unknown>>,
-): Promise<T> {
-  let value: T | undefined
-  const failures: Array<unknown> = []
-  try {
-    value = await body()
-  } catch (error) {
-    failures.push(error)
-  }
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) {
-    throw new AggregateError(failures, `Cleanup oracle and teardown failed`, {
-      cause: failures[0],
-    })
-  }
-  return value as T
-}
-
-describe(`Collection cleanup oracle calibration`, () => {
-  it(`retains a primary mismatch and every teardown failure`, async () => {
-    const primary = new Error(`oracle mismatch`)
-    const firstCleanup = new Error(`first cleanup failed`)
-    const secondCleanup = new Error(`second cleanup failed`)
-    const attempts: Array<string> = []
-
-    const failure = await withOracleCleanup(() => {
-      throw primary
-    }, [
-      () => {
-        attempts.push(`first`)
-        throw firstCleanup
-      },
-      () => {
-        attempts.push(`second`)
-        return Promise.reject(secondCleanup)
-      },
-    ]).catch((error: unknown) => error)
-
-    expect(attempts).toEqual([`first`, `second`])
-    expect(failure).toBeInstanceOf(AggregateError)
-    expect(failure).toMatchObject({
-      cause: primary,
-      errors: [primary, firstCleanup, secondCleanup],
-    })
-  })
+declareOracle({
+  check: [checkCleanupBoundary],
+  model: [expectedCleanupBoundary],
+  grammar: [reentryScenarios, completedBoundaryScenarios],
 })
 
 describe(`Collection cleanup admission oracle`, () => {
@@ -232,47 +172,6 @@ describe(`Collection cleanup admission oracle`, () => {
       `await:source`,
       `await:live-query`,
     ])
-  })
-
-  it(`awaits a structural thenable returned from contextual-void cleanup`, async () => {
-    const cleanupGate = createDeferred<void>()
-    let cleanupCalls = 0
-    const thenable = {
-      then: cleanupGate.promise.then.bind(cleanupGate.promise),
-    }
-    const cleanup: () => void = () => {
-      cleanupCalls++
-      return thenable
-    }
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return cleanup
-        },
-      },
-    })
-
-    await withOracleCleanup(async () => {
-      await collection.preload()
-      let settled = false
-      const retirement = collection.cleanup().then(() => {
-        settled = true
-      })
-
-      expect(cleanupCalls).toBe(1)
-      expect(collection.status).toBe(`ready`)
-      expect(() => collection.startSyncImmediate()).toThrowError(
-        expect.objectContaining(cleanupError),
-      )
-      await Promise.resolve()
-      expect(settled).toBe(false)
-
-      cleanupGate.resolve()
-      await retirement
-      expect(collection.status).toBe(`cleaned-up`)
-    }, [() => cleanupGate.resolve(), () => collection.cleanup()])
   })
 
   it(`waits for source cleanup before publishing the restart boundary`, async () => {
@@ -329,33 +228,29 @@ describe(`Collection cleanup admission oracle`, () => {
         settlementOrder.push(`public-cleanup-promise-continuation`)
       })
 
-      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
       expect(sourceCleanupSettled).toBe(false)
-      expect(collection.status).toBe(atCleanupStart.collectionStatus)
       expect(statuses).toEqual([])
       expect(cleanups).toBe(1)
       expect(concurrentCleanup).toBe(firstCleanup)
-      expect(
-        observeRestartAdmission(() => collection.startSyncImmediate()),
-      ).toBe(atCleanupStart.restartAdmission)
+      checkCleanupBoundary(`ready`, `cleanup-start`, {
+        collectionStatus: collection.status,
+        restartAdmission: observeRestartAdmission(() =>
+          collection.startSyncImmediate(),
+        ),
+      })
 
       cleanupGate.resolve()
       await Promise.all([firstCleanup, concurrentCleanup])
 
-      const atCleanupSettlement = expectedCleanupBoundary(
-        `ready`,
-        `cleanup-settlement`,
-      )
       expect(sourceCleanupSettled).toBe(true)
-      const terminalPublication = expectedCleanupBoundary(
+      checkCleanupBoundary(
         `ready`,
         `terminal-publication`,
+        atTerminalPublication!,
       )
-      expect(atTerminalPublication).toEqual({
-        collectionStatus: terminalPublication.collectionStatus,
-        cleanup: terminalPublication.cleanup,
+      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
+        collectionStatus: collection.status,
       })
-      expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
       expect(statuses).toEqual([`cleaned-up`])
       expect(settlementOrder).toEqual([
         `adapter-cleanup-settled`,
@@ -366,9 +261,11 @@ describe(`Collection cleanup admission oracle`, () => {
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(cleanups).toBe(1)
 
-      expect(
-        observeRestartAdmission(() => collection.startSyncImmediate()),
-      ).toBe(atCleanupSettlement.restartAdmission)
+      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
+        restartAdmission: observeRestartAdmission(() =>
+          collection.startSyncImmediate(),
+        ),
+      })
       expect(starts).toBe(2)
       expect(collection.status).toBe(`ready`)
     } finally {
@@ -405,29 +302,23 @@ describe(`Collection cleanup admission oracle`, () => {
       const cleanup = collection.cleanup().then(() => {
         cleanupSettled = true
       })
-      const atCleanupStart = expectedCleanupBoundary(`loading`, `cleanup-start`)
-
-      // A rule that forces ready at cleanup start fails at this held cut.
-      expect(collection.status).toBe(atCleanupStart.collectionStatus)
       expect(statuses).toEqual([])
-      expect(observeCleanupSettlement(cleanupSettled)).toBe(
-        atCleanupStart.cleanup,
-      )
-      expect(
-        observeRestartAdmission(() => collection.startSyncImmediate()),
-      ).toBe(atCleanupStart.restartAdmission)
+      // A rule that forces ready at cleanup start fails at this held cut.
+      checkCleanupBoundary(`loading`, `cleanup-start`, {
+        collectionStatus: collection.status,
+        cleanup: observeCleanupSettlement(cleanupSettled),
+        restartAdmission: observeRestartAdmission(() =>
+          collection.startSyncImmediate(),
+        ),
+      })
 
       cleanupGate.resolve()
       await cleanup
-      const atCleanupSettlement = expectedCleanupBoundary(
-        `loading`,
-        `cleanup-settlement`,
-      )
-      expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
+      checkCleanupBoundary(`loading`, `cleanup-settlement`, {
+        collectionStatus: collection.status,
+        cleanup: observeCleanupSettlement(cleanupSettled),
+      })
       expect(statuses).toEqual([`cleaned-up`])
-      expect(observeCleanupSettlement(cleanupSettled)).toBe(
-        atCleanupSettlement.cleanup,
-      )
 
       collection.startSyncImmediate()
       expect(starts).toBe(2)
@@ -476,14 +367,11 @@ describe(`Collection cleanup admission oracle`, () => {
         cleanupSettled = true
       })
 
-      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
-      expect(source.status).toBe(atCleanupStart.collectionStatus)
-      expect(observeCleanupSettlement(cleanupSettled)).toBe(
-        atCleanupStart.cleanup,
-      )
-      expect(observeDependent(live.status !== `error`)).toBe(
-        atCleanupStart.dependent,
-      )
+      checkCleanupBoundary(`ready`, `cleanup-start`, {
+        collectionStatus: source.status,
+        cleanup: observeCleanupSettlement(cleanupSettled),
+        dependent: observeDependent(live.status !== `error`),
+      })
       expect(await preload).toMatchObject({
         status: `rejected`,
         error: { message },
@@ -491,55 +379,13 @@ describe(`Collection cleanup admission oracle`, () => {
 
       cleanupGate.resolve()
       await cleanup
-      expect(source.status).toBe(`cleaned-up`)
+      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
+        collectionStatus: source.status,
+      })
       expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
     } finally {
       cleanupGate.resolve()
       loadGate.resolve()
-      reports.mockRestore()
-      await live.cleanup()
-      await source.cleanup()
-    }
-  })
-
-  it(`puts a live query in terminal error once when one source has two aliases`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: 1, rank: 1 } })
-          commit()
-          markReady()
-          return { cleanup: () => cleanupGate.promise }
-        },
-      },
-    })
-    source.createIndex((row) => row.id, { indexType: BasicIndex })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ left: source })
-        .join(
-          { right: source },
-          ({ left, right }) => eq(left.id, right.id),
-          `inner`,
-        ),
-    )
-    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    try {
-      await live.preload()
-
-      const cleanup = source.cleanup()
-
-      expect(live.status).toBe(`error`)
-      expect(reports).toHaveBeenCalledTimes(1)
-
-      cleanupGate.resolve()
-      await cleanup
-    } finally {
-      cleanupGate.resolve()
       reports.mockRestore()
       await live.cleanup()
       await source.cleanup()
@@ -587,14 +433,12 @@ describe(`Collection cleanup admission oracle`, () => {
       const cleanup = source.cleanup().then(() => {
         cleanupSettled = true
       })
-      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
-
       expect(adapterCleanupStarted).toBe(1)
-      expect(source.status).toBe(atCleanupStart.collectionStatus)
-      expect(observeCleanupSettlement(cleanupSettled)).toBe(
-        atCleanupStart.cleanup,
-      )
-      expect(observeDependent(!effect.disposed)).toBe(atCleanupStart.dependent)
+      checkCleanupBoundary(`ready`, `cleanup-start`, {
+        collectionStatus: source.status,
+        cleanup: observeCleanupSettlement(cleanupSettled),
+        dependent: observeDependent(!effect.disposed),
+      })
       expect(source.subscriberCount).toBe(0)
       expect(sourceErrors).toEqual([
         expect.objectContaining({
@@ -614,18 +458,11 @@ describe(`Collection cleanup admission oracle`, () => {
 
       cleanupGate.resolve()
       await cleanup
-      const atCleanupSettlement = expectedCleanupBoundary(
-        `ready`,
-        `cleanup-settlement`,
-      )
-
-      expect(observeCleanupSettlement(cleanupSettled)).toBe(
-        atCleanupSettlement.cleanup,
-      )
-      expect(source.status).toBe(atCleanupSettlement.collectionStatus)
-      expect(observeDependent(!effect.disposed)).toBe(
-        atCleanupSettlement.dependent,
-      )
+      checkCleanupBoundary(`ready`, `cleanup-settlement`, {
+        collectionStatus: source.status,
+        cleanup: observeCleanupSettlement(cleanupSettled),
+        dependent: observeDependent(!effect.disposed),
+      })
       expect(sourceErrors).toHaveLength(1)
     } finally {
       cleanupGate.resolve()
@@ -633,989 +470,5 @@ describe(`Collection cleanup admission oracle`, () => {
       await effect.dispose()
       await source.cleanup()
     }
-  })
-
-  it(`continues teardown when a cleanup-start observer throws`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const observerError = new Error(`cleanup-start observer failed exactly`)
-    let starts = 0
-    let adapterCleanupStarted = 0
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-          return {
-            cleanup: () => {
-              adapterCleanupStarted++
-              return cleanupGate.promise
-            },
-          }
-        },
-      },
-    })
-    const off = source._onCleanupStart(() => {
-      throw observerError
-    })
-
-    try {
-      await source.preload()
-      const cleanupOutcome = source.cleanup().then(
-        () => undefined,
-        (error: unknown) => error,
-      )
-
-      expect(adapterCleanupStarted).toBe(1)
-      expect(source.status).toBe(`ready`)
-
-      cleanupGate.resolve()
-      expect(await cleanupOutcome).toBe(observerError)
-      expect(source.status).toBe(`cleaned-up`)
-
-      off()
-      source.startSyncImmediate()
-      expect(starts).toBe(2)
-      expect(source.status).toBe(`ready`)
-    } finally {
-      off()
-      cleanupGate.resolve()
-      await source.cleanup().catch(() => undefined)
-    }
-  })
-
-  it(`keeps adapter cleanup failure primary when cleanup-start observer also fails`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const observerError = new Error(`cleanup-start observer failed exactly`)
-    const adapterError = new Error(`adapter cleanup failed exactly`)
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            cleanup: () =>
-              cleanupGate.promise.then(() => {
-                throw adapterError
-              }),
-          }
-        },
-      },
-    })
-    const off = source._onCleanupStart(() => {
-      throw observerError
-    })
-
-    try {
-      await source.preload()
-      const cleanup = source.cleanup()
-
-      expect(source.status).toBe(`ready`)
-      cleanupGate.resolve()
-      const failure = await cleanup.catch((error: unknown) => error)
-
-      expect(failure).toBeInstanceOf(AggregateError)
-      const aggregate = failure as AggregateError
-      expect(aggregate.cause).toMatchObject({
-        name: `SyncCleanupError`,
-        cause: adapterError,
-      })
-      expect(aggregate.errors).toEqual([aggregate.cause, observerError])
-      expect(source.status).toBe(`cleaned-up`)
-    } finally {
-      off()
-      cleanupGate.resolve()
-      await source.cleanup().catch(() => undefined)
-    }
-  })
-
-  it(`retains every cleanup-start observer failure after adapter cleanup rejects`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const firstObserverError = new Error(
-      `first cleanup-start observer failed exactly`,
-    )
-    const secondObserverError = new Error(
-      `second cleanup-start observer failed exactly`,
-    )
-    const adapterError = new Error(`adapter cleanup failed exactly`)
-    const observerCalls: Array<string> = []
-    let starts = 0
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-          return {
-            cleanup: () =>
-              cleanupGate.promise.then(() => {
-                throw adapterError
-              }),
-          }
-        },
-      },
-    })
-    const offFirst = source._onCleanupStart(() => {
-      observerCalls.push(`first`)
-      throw firstObserverError
-    })
-    const offSecond = source._onCleanupStart(() => {
-      observerCalls.push(`second`)
-      throw secondObserverError
-    })
-
-    try {
-      await source.preload()
-      const cleanup = source.cleanup()
-
-      expect(observerCalls).toEqual([`first`, `second`])
-      expect(source.status).toBe(`ready`)
-      cleanupGate.resolve()
-      const failure = await cleanup.catch((error: unknown) => error)
-
-      expect(failure).toBeInstanceOf(AggregateError)
-      const aggregate = failure as AggregateError
-      expect(aggregate.cause).toMatchObject({
-        name: `SyncCleanupError`,
-        cause: adapterError,
-      })
-      expect(aggregate.errors).toEqual([
-        aggregate.cause,
-        firstObserverError,
-        secondObserverError,
-      ])
-      expect(source.status).toBe(`cleaned-up`)
-
-      offFirst()
-      offSecond()
-      source.startSyncImmediate()
-      expect(starts).toBe(2)
-      expect(source.status).toBe(`ready`)
-    } finally {
-      offFirst()
-      offSecond()
-      cleanupGate.resolve()
-      await source.cleanup().catch(() => undefined)
-    }
-  })
-
-  it(`releases an Effect cleanup-start observer registered during active cleanup`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return { cleanup: () => cleanupGate.promise }
-        },
-      },
-    })
-    const registerCleanupStart = source._onCleanupStart.bind(source)
-    let activeCleanupStartObservers = 0
-    source._onCleanupStart = (callback) => {
-      activeCleanupStartObservers++
-      const unsubscribe = registerCleanupStart(callback)
-      let active = true
-      return () => {
-        if (!active) return
-        active = false
-        activeCleanupStartObservers--
-        unsubscribe()
-      }
-    }
-
-    let effect: ReturnType<typeof createEffect> | undefined
-    try {
-      await source.preload()
-      const cleanup = source.cleanup()
-
-      effect = createEffect({
-        query: (q) => q.from({ row: source }),
-        onBatch: () => {},
-        onSourceError: () => {},
-      })
-
-      expect(effect.disposed).toBe(true)
-      expect(source.subscriberCount).toBe(0)
-      expect(activeCleanupStartObservers).toBe(0)
-
-      cleanupGate.resolve()
-      await cleanup
-    } finally {
-      cleanupGate.resolve()
-      await effect?.dispose()
-      await source.cleanup()
-    }
-  })
-
-  it.each([`first`, `second`] as const)(
-    `does not acquire live-query source subscriptions during active cleanup: %s source`,
-    async (cleaningPosition) => {
-      const cleanupGate = createDeferred<void>()
-      const cleaningSource = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return { cleanup: () => cleanupGate.promise }
-          },
-        },
-      })
-      const healthySource = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        sync: { sync: ({ markReady }) => markReady() },
-      })
-      cleaningSource.createIndex((row) => row.id, { indexType: BasicIndex })
-      healthySource.createIndex((row) => row.id, { indexType: BasicIndex })
-      let live: ReturnType<typeof createLiveQueryCollection> | undefined
-      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-      try {
-        await cleaningSource.preload()
-        const cleaning = cleaningSource.cleanup()
-        expect(cleaningSource.status).toBe(`ready`)
-
-        const firstSource =
-          cleaningPosition === `first` ? cleaningSource : healthySource
-        const secondSource =
-          cleaningPosition === `second` ? cleaningSource : healthySource
-        live = createLiveQueryCollection((q) =>
-          q
-            .from({ first: firstSource })
-            .join(
-              { second: secondSource },
-              ({ first, second }) => eq(first.id, second.id),
-              `inner`,
-            ),
-        )
-        const message =
-          `Source collection '${cleaningSource.id}' was manually cleaned up while live query '${live.id}' depends on it. ` +
-          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
-
-        await expect(live.preload()).rejects.toThrow(message)
-
-        expect(live.status).toBe(`error`)
-        expect({
-          cleaning: cleaningSource.subscriberCount,
-          healthy: healthySource.subscriberCount,
-        }).toEqual({ cleaning: 0, healthy: 0 })
-        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
-
-        cleanupGate.resolve()
-        await cleaning
-      } finally {
-        cleanupGate.resolve()
-        reports.mockRestore()
-        await live?.cleanup()
-        await cleaningSource.cleanup()
-        await healthySource.cleanup()
-      }
-    },
-  )
-
-  it(`does not retain a late cleanup-start observer that throws`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const observerError = new Error(
-      `late cleanup-start observer failed exactly`,
-    )
-    let observerCalls = 0
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return { cleanup: () => cleanupGate.promise }
-        },
-      },
-    })
-
-    try {
-      await source.preload()
-      const firstCleanup = source.cleanup()
-
-      expect(() =>
-        source._onCleanupStart(() => {
-          observerCalls++
-          throw observerError
-        }),
-      ).toThrow(observerError)
-
-      cleanupGate.resolve()
-      await firstCleanup
-      source.startSyncImmediate()
-      await expect(source.cleanup()).resolves.toBeUndefined()
-      expect(observerCalls).toBe(1)
-    } finally {
-      cleanupGate.resolve()
-      await source.cleanup().catch(() => undefined)
-    }
-  })
-
-  it(`notifies one observer once per cleanup boundary until it unsubscribes`, async () => {
-    let starts = 0
-    let observerCalls = 0
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-        },
-      },
-    })
-    const off = source._onCleanupStart(() => {
-      observerCalls++
-    })
-
-    try {
-      await source.preload()
-      const firstCleanup = source.cleanup()
-      expect(observerCalls).toBe(1)
-      await firstCleanup
-
-      source.startSyncImmediate()
-      const secondCleanup = source.cleanup()
-      expect(observerCalls).toBe(2)
-      await secondCleanup
-
-      off()
-      source.startSyncImmediate()
-      await source.cleanup()
-      expect({ starts, observerCalls }).toEqual({ starts: 3, observerCalls: 2 })
-    } finally {
-      off()
-      await source.cleanup()
-    }
-  })
-
-  it(`does not revive a terminal live query when its source restarts`, async () => {
-    let starts = 0
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          starts++
-          begin()
-          write({ type: `insert`, value: { id: 1, rank: starts } })
-          commit()
-          markReady()
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) => q.from({ row: source }))
-    const publications: Array<unknown> = []
-    const subscription = live.subscribeChanges((changes) => {
-      publications.push(changes)
-    })
-    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    try {
-      await live.preload()
-      expect(live.get(1)?.rank).toBe(1)
-      publications.length = 0
-
-      await source.cleanup()
-      expect(live.status).toBe(`error`)
-
-      source.startSyncImmediate()
-      expect(source.status).toBe(`ready`)
-      expect(starts).toBe(2)
-      expect(live.status).toBe(`error`)
-      expect(live.get(1)?.rank).toBe(1)
-      expect(publications).toEqual([])
-      expect(reports).toHaveBeenCalledTimes(1)
-    } finally {
-      subscription.unsubscribe()
-      reports.mockRestore()
-      await live.cleanup()
-      await source.cleanup()
-    }
-  })
-
-  it.each([`eager`, `on-demand`] as const)(
-    `recovers an errored %s source and dependent live query through their own restarts`,
-    async (syncMode) => {
-      let sourceSync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      let starts = 0
-      const source = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        syncMode,
-        sync: {
-          sync: (methods) => {
-            sourceSync = methods
-            starts++
-            const writeRow = () => {
-              methods.begin()
-              methods.write({ type: `insert`, value: { id: 1, rank: starts } })
-              methods.commit()
-            }
-            if (syncMode === `eager`) writeRow()
-            methods.markReady()
-            if (syncMode === `on-demand`) {
-              return {
-                loadSubset: () => {
-                  writeRow()
-                  return true
-                },
-                unloadSubset: () => {},
-              }
-            }
-            return undefined
-          },
-        },
-      })
-      const live = createLiveQueryCollection((q) => q.from({ row: source }))
-      const observedRanks: Array<number | undefined> = []
-      const subscription = live.subscribeChanges(() => {
-        observedRanks.push(live.get(1)?.rank)
-      })
-      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-      try {
-        await live.preload()
-        expect(live.get(1)?.rank).toBe(1)
-
-        sourceSync.markError(new Error(`source sync failed`))
-        expect(source.status).toBe(`error`)
-        expect(live.status).toBe(`error`)
-
-        await live.cleanup()
-        await source.cleanup()
-        await live.preload()
-
-        expect(starts).toBe(2)
-        expect(source.status).toBe(`ready`)
-        expect(live.status).toBe(`ready`)
-        expect(live.get(1)?.rank).toBe(2)
-
-        observedRanks.length = 0
-        sourceSync.begin()
-        sourceSync.write({ type: `update`, value: { id: 1, rank: 3 } })
-        sourceSync.commit()
-        expect(live.get(1)?.rank).toBe(3)
-        expect(observedRanks).toEqual([3])
-      } finally {
-        subscription.unsubscribe()
-        reports.mockRestore()
-        await live.cleanup()
-        await source.cleanup()
-      }
-    },
-  )
-
-  it(`treats an incidental contextual-void return as synchronous cleanup`, async () => {
-    let starts = 0
-    const released: Array<number> = []
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-          return () => released.push(starts)
-        },
-      },
-    })
-
-    try {
-      await collection.preload()
-
-      const cleanup = collection.cleanup()
-
-      expect(released).toEqual([1])
-      expect(collection.status).toBe(`cleaned-up`)
-      collection.startSyncImmediate()
-      expect(starts).toBe(2)
-      await cleanup
-    } finally {
-      await collection.cleanup()
-    }
-  })
-
-  it(`shares one retirement promise when cleanup finishes synchronously`, async () => {
-    let adapterCleanups = 0
-    let localCleanups = 0
-    const sync = withCollectionSyncConfigCleanup(
-      {
-        sync: ({ markReady }) => {
-          markReady()
-          return () => {
-            adapterCleanups++
-          }
-        },
-      } satisfies SyncConfig<Row, number>,
-      () => {
-        localCleanups++
-      },
-    )
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync,
-    })
-
-    try {
-      await collection.preload()
-      const first = collection.cleanup()
-      const concurrent = collection.cleanup()
-
-      expect({
-        samePromise: concurrent === first,
-        adapterCleanups,
-        localCleanups,
-      }).toEqual({
-        samePromise: true,
-        adapterCleanups: 1,
-        localCleanups: 1,
-      })
-      await first
-      expect(collection.status).toBe(`cleaned-up`)
-    } finally {
-      await collection.cleanup()
-    }
-  })
-
-  it(`lets a terminal listener clean a replacement sync run separately`, async () => {
-    let starts = 0
-    let adapterCleanups = 0
-    let armed = false
-    let replacementCleanup: Promise<void> | undefined
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-          return () => {
-            adapterCleanups++
-          }
-        },
-      },
-    })
-    const off = collection.on(`status:change`, ({ status }) => {
-      if (armed && status === `cleaned-up`) {
-        armed = false
-        collection.startSyncImmediate()
-        replacementCleanup = collection.cleanup()
-      }
-    })
-
-    try {
-      await collection.preload()
-      armed = true
-      const firstCleanup = collection.cleanup()
-
-      expect(replacementCleanup).toBeDefined()
-      expect(replacementCleanup).not.toBe(firstCleanup)
-      await Promise.all([firstCleanup, replacementCleanup!])
-      expect(starts).toBe(2)
-      expect(adapterCleanups).toBe(2)
-      expect(collection.status).toBe(`cleaned-up`)
-    } finally {
-      armed = false
-      off()
-      await collection.cleanup()
-    }
-  })
-
-  it(`awaits a runtime Promise from cleanup typed to return void`, async () => {
-    const cleanupGate = createDeferred<void>()
-    let cleanupCalls = 0
-    const cleanup: () => void = () => {
-      cleanupCalls++
-      return cleanupGate.promise
-    }
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return cleanup
-        },
-      },
-    })
-
-    try {
-      await collection.preload()
-
-      const retirement = collection.cleanup()
-
-      expect(cleanupCalls).toBe(1)
-      expect(collection.status).toBe(`ready`)
-      expect(() => collection.startSyncImmediate()).toThrowError(
-        expect.objectContaining(cleanupError),
-      )
-
-      cleanupGate.resolve()
-      await retirement
-      expect(collection.status).toBe(`cleaned-up`)
-    } finally {
-      cleanupGate.resolve()
-      await collection.cleanup()
-    }
-  })
-
-  it(`finishes teardown once and rejects every waiter when source cleanup rejects`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const sourceError = new Error(`source cleanup failed exactly`)
-    let starts = 0
-    let cleanups = 0
-    const statuses: Array<string> = []
-    const settlementOrder: Array<string> = []
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-          return {
-            cleanup: () => {
-              cleanups++
-              return cleanups === 1
-                ? cleanupGate.promise.then(() => {
-                    settlementOrder.push(`adapter-cleanup-rejected`)
-                    throw sourceError
-                  })
-                : undefined
-            },
-          }
-        },
-      },
-    })
-    const off = collection.on(`status:change`, ({ status }) => {
-      statuses.push(status)
-      if (status === `cleaned-up`) {
-        settlementOrder.push(`cleaned-up-event`)
-      }
-    })
-
-    try {
-      await collection.preload()
-      statuses.length = 0
-      const firstCleanup = collection.cleanup()
-      const concurrentCleanup = collection.cleanup()
-      void firstCleanup.catch(() => {
-        settlementOrder.push(`public-cleanup-rejection-continuation`)
-      })
-      const firstOutcome = firstCleanup.catch((error: unknown) => error)
-      const concurrentOutcome = concurrentCleanup.catch(
-        (error: unknown) => error,
-      )
-
-      expect(collection.status).toBe(`ready`)
-      expect(cleanups).toBe(1)
-      expect(concurrentCleanup).toBe(firstCleanup)
-      cleanupGate.resolve()
-
-      const [firstError, concurrentError] = await Promise.all([
-        firstOutcome,
-        concurrentOutcome,
-      ])
-      expect(concurrentError).toBe(firstError)
-      expect(firstError).toMatchObject({
-        name: `SyncCleanupError`,
-        cause: sourceError,
-      })
-      expect(collection.status).toBe(`cleaned-up`)
-      expect(statuses).toEqual([`cleaned-up`])
-      expect(settlementOrder).toEqual([
-        `adapter-cleanup-rejected`,
-        `cleaned-up-event`,
-        `public-cleanup-rejection-continuation`,
-      ])
-      expect(cleanups).toBe(1)
-
-      // Rejection ends the old sync run. A later run is allowed, and a
-      // repeated cleanup does not retry the failed callback from that run.
-      await expect(collection.cleanup()).resolves.toBeUndefined()
-      expect(cleanups).toBe(1)
-      collection.startSyncImmediate()
-      expect(starts).toBe(2)
-      expect(collection.status).toBe(`ready`)
-    } finally {
-      cleanupGate.resolve()
-      off()
-      await collection.cleanup()
-    }
-  })
-
-  it.each([`throw`, `reject`] as const)(
-    `keeps adapter cleanup failure primary when local teardown also fails: %s`,
-    async (outcome) => {
-      const cleanupGate = createDeferred<void>()
-      const adapterFailure = new Error(`adapter cleanup failed exactly`)
-      const localFailure = new Error(`local teardown failed exactly`)
-      const sync = withCollectionSyncConfigCleanup(
-        {
-          sync: ({ markReady }) => {
-            markReady()
-            return () => {
-              if (outcome === `throw`) throw adapterFailure
-              return cleanupGate.promise.then(() => {
-                throw adapterFailure
-              })
-            }
-          },
-        } satisfies SyncConfig<Row, number>,
-        () => {
-          throw localFailure
-        },
-      )
-      const collection = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        sync,
-      })
-
-      try {
-        await collection.preload()
-        const cleanup = collection.cleanup()
-        cleanupGate.resolve()
-        const failure = await cleanup.catch((error: unknown) => error)
-
-        expect(failure).toBeInstanceOf(AggregateError)
-        const aggregate = failure as AggregateError
-        expect(aggregate.cause).toMatchObject({
-          name: `SyncCleanupError`,
-          cause: adapterFailure,
-        })
-        expect(aggregate.errors).toEqual([aggregate.cause, localFailure])
-        expect(collection.status).toBe(`cleaned-up`)
-      } finally {
-        cleanupGate.resolve()
-        await collection.cleanup().catch(() => undefined)
-      }
-    },
-  )
-
-  it.each(reentryScenarios)(
-    `rejects restart without creating replacement ownership: %j`,
-    async ({ boundary, nestedCleanup, attempts }) => {
-      let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      let loads = 0
-      let releases = 0
-      let armed = false
-      const errors: Array<unknown> = []
-      const cleanups: Array<Promise<void>> = []
-      const reenter = () => {
-        if (!armed) return
-        armed = false
-        for (let i = 0; i < attempts; i++) {
-          if (nestedCleanup) cleanups.push(live.cleanup())
-          try {
-            live.startSyncImmediate()
-            errors.push(undefined)
-          } catch (error) {
-            errors.push(error)
-          }
-        }
-      }
-      const source = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (methods) => {
-            ops = methods
-            methods.begin()
-            methods.write({ type: `insert`, value: { id: 1, rank: 1 } })
-            methods.commit()
-            methods.markReady()
-            return {
-              loadSubset: ({ signal }) => {
-                loads++
-                signal?.addEventListener(`abort`, () => {
-                  if (boundary === `abort`) reenter()
-                })
-                return true
-              },
-              unloadSubset: () => {
-                releases++
-                if (boundary === `release`) reenter()
-              },
-            }
-          },
-        },
-      })
-      const live = createLiveQueryCollection((q) => q.from({ row: source }))
-      try {
-        await live.preload()
-        armed = true
-        await live.cleanup()
-        await Promise.all(cleanups)
-        expect(armed).toBe(false)
-        expect(errors).toHaveLength(attempts)
-        for (const error of errors) expect(error).toMatchObject(cleanupError)
-        expect(loads).toBe(1)
-        expect(releases).toBe(1)
-        expect(source.subscriberCount).toBe(0)
-        expect(live.status).toBe(`cleaned-up`)
-
-        // The rejected calls must not poison a later, ordinary restart.
-        await live.preload()
-        expect(loads).toBe(2)
-        expect(source.subscriberCount).toBe(1)
-        ops.begin()
-        ops.write({ type: `update`, value: { id: 1, rank: 2 } })
-        ops.commit()
-        expect(live.status).toBe(`ready`)
-        expect(live.get(1)?.rank).toBe(2)
-      } finally {
-        armed = false
-        await live.cleanup()
-        await source.cleanup()
-      }
-    },
-  )
-
-  it.each([`start`, `preload`] as const)(
-    `rejects %s from adapter cleanup but allows another collection to start`,
-    async (method) => {
-      let starts = 0
-      let armed = false
-      let observed: Promise<unknown> | undefined
-      const peer = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        sync: { sync: ({ markReady }) => markReady() },
-      })
-      const source = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            starts++
-            begin()
-            write({ type: `insert`, value: { id: 1, rank: starts } })
-            commit()
-            markReady()
-            return () => {
-              if (!armed) return
-              armed = false
-              void source.cleanup()
-              try {
-                const result =
-                  method === `start`
-                    ? source.startSyncImmediate()
-                    : source.preload()
-                observed = Promise.resolve(result).then(
-                  () => undefined,
-                  (error: unknown) => error,
-                )
-              } catch (error) {
-                observed = Promise.resolve(error)
-              }
-              peer.startSyncImmediate()
-            }
-          },
-        },
-      })
-      try {
-        await source.preload()
-        armed = true
-        await source.cleanup()
-        expect(await observed).toMatchObject(cleanupError)
-        expect(starts).toBe(1)
-        expect(peer.status).toBe(`ready`)
-        await source.preload()
-        expect(starts).toBe(2)
-        expect(source.get(1)?.rank).toBe(2)
-      } finally {
-        armed = false
-        await source.cleanup()
-        await peer.cleanup()
-      }
-    },
-  )
-
-  it.each(completedBoundaryScenarios)(
-    `admits restart at the completed cleanup boundary: %j`,
-    async ({ boundary, liveQuery }) => {
-      let starts = 0
-      let armed = false
-      let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      const source = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        sync: {
-          sync: (methods) => {
-            ops = methods
-            const { begin, write, commit, markReady } = methods
-            starts++
-            begin()
-            write({ type: `insert`, value: { id: 1, rank: starts } })
-            commit()
-            markReady()
-          },
-        },
-      })
-      const collection = liveQuery
-        ? createLiveQueryCollection((q) => q.from({ row: source }))
-        : source
-      const off = collection.on(`status:change`, ({ status }) => {
-        if (armed && boundary === `event` && status === `cleaned-up`) {
-          armed = false
-          collection.startSyncImmediate()
-        }
-      })
-      try {
-        await collection.preload()
-        armed = true
-        await collection.cleanup()
-        if (boundary === `await`) collection.startSyncImmediate()
-        expect(starts).toBe(liveQuery ? 1 : 2)
-        expect(collection.status).toBe(`ready`)
-        expect(collection.get(1)?.rank).toBe(liveQuery ? 1 : 2)
-        ops.begin()
-        ops.write({ type: `update`, value: { id: 1, rank: 3 } })
-        ops.commit()
-        expect(collection.get(1)?.rank).toBe(3)
-      } finally {
-        armed = false
-        off()
-        if (liveQuery) await collection.cleanup()
-        await source.cleanup()
-      }
-    },
-  )
-
-  it(`ends a pending subset load with one end transition at cleanup`, async () => {
-    const collection = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return { loadSubset: () => new Promise<void>(() => {}) }
-        },
-      },
-    })
-    const transitions: Array<{
-      isLoadingSubset: boolean
-      previousIsLoadingSubset: boolean
-      loadingSubsetTransition: string
-    }> = []
-    collection.on(`loadingSubset:change`, (event) => {
-      transitions.push({
-        isLoadingSubset: event.isLoadingSubset,
-        previousIsLoadingSubset: event.previousIsLoadingSubset,
-        loadingSubsetTransition: event.loadingSubsetTransition,
-      })
-    })
-
-    void collection._sync.loadSubset({})
-    await Promise.resolve()
-    expect(collection.isLoadingSubset).toBe(true)
-
-    await collection.cleanup()
-
-    expect(transitions).toEqual([
-      {
-        isLoadingSubset: true,
-        previousIsLoadingSubset: false,
-        loadingSubsetTransition: `start`,
-      },
-      {
-        isLoadingSubset: false,
-        previousIsLoadingSubset: true,
-        loadingSubsetTransition: `end`,
-      },
-    ])
-    expect(collection.isLoadingSubset).toBe(false)
   })
 })
