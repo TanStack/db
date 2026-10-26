@@ -36,8 +36,13 @@
  * asynchronously. Over eager source Collections that resumption is
  * synchronous.
  *
+ * A committed subscriber, including one that resumes deferred acquisition,
+ * owns its demand independently of an abandoned render's sync-start deferral.
+ * Its admission releases that deferral. A failed sync start remains an error
+ * in that run; releasing the old render handle does not implicitly retry it.
+ *
  * Limits: source Collections load synchronously, so every checkpoint is
- * settled. The grammar crosses five source states, two query shapes, and one or
+ * settled. The grammar crosses seven source states, two query shapes, and one or
  * two live-query levels, with one peer consumer and one truncate before the
  * first subscriber. It does not generate source failure, asynchronous loads,
  * or several live-query consumers; the subscription lifecycle oracle owns
@@ -46,6 +51,8 @@
  * that wait for readiness.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js'
 import {
   BTreeIndex,
   DbClient,
@@ -59,6 +66,9 @@ import {
 } from '../src'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
+import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
+import { createOracleReach } from './oracle-reach.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import type { Collection, LiveQueryObserver } from '../src'
 
 type Row = { id: string; rank: number; group: string }
@@ -78,20 +88,26 @@ const ROWS: Array<Row> = [
  * `on-demand-holding` already holds every row, as it would after another
  * consumer's acquisition. Each fixture counts sync-run starts and acquisition
  * attempts: those are its provider work.
+ * `-render-deferred` sources are idle behind an abandoned render's start gate.
+ * They expose the same demand law through a different production start path.
  */
 type SourceState =
   | `eager-idle`
   | `eager-running`
+  | `eager-render-deferred`
   | `on-demand-idle`
   | `on-demand-running`
   | `on-demand-holding`
+  | `on-demand-render-deferred`
 
 const SOURCE_STATES: Array<SourceState> = [
   `eager-idle`,
   `eager-running`,
+  `eager-render-deferred`,
   `on-demand-idle`,
   `on-demand-running`,
   `on-demand-holding`,
+  `on-demand-render-deferred`,
 ]
 
 /**
@@ -113,6 +129,8 @@ const EXPECTED_IDS: Record<QueryShape, Array<string>> = {
  * Commands act on the outermost live-query Collection, which is the only
  * public Collection in the history. `start` starts its sync run, as a
  * framework render or `startSync: true` does. `subscribe` adds a subscriber.
+ * `defer-subscribe` adds logical demand without acquisition; `resume` makes
+ * that subscription ask for data independently of an earlier render.
  * `preload` asks for its data. `cleanup` ends its sync run. Two commands act
  * on the source Collection instead, and neither is a subscriber or a preload
  * of the live-query Collection: `peer` adds another consumer that subscribes
@@ -124,6 +142,8 @@ type Command =
   | `start`
   | `read`
   | `subscribe`
+  | `defer-subscribe`
+  | `resume`
   | `unsubscribe`
   | `preload`
   | `cleanup`
@@ -135,6 +155,19 @@ const HISTORIES: Record<string, Array<Command>> = {
   'subscribe after start': [`start`, `read`, `subscribe`],
   'preload after start': [`start`, `preload`],
   'subscribe without a prior start': [`subscribe`],
+  'resume deferred acquisition after start': [
+    `start`,
+    `defer-subscribe`,
+    `read`,
+    `resume`,
+    `read`,
+  ],
+  'resume deferred acquisition without a prior start': [
+    `defer-subscribe`,
+    `read`,
+    `resume`,
+    `read`,
+  ],
   'preload without a prior start': [`preload`],
   'cleanup before a subscriber, then subscribe': [
     `start`,
@@ -227,6 +260,7 @@ function applyModel(
   const next = { ...model }
   switch (command) {
     case `start`:
+    case `defer-subscribe`:
       next.syncRunning = true
       break
     case `read`:
@@ -235,6 +269,7 @@ function applyModel(
       // subscription, so unsubscribing does not defer acquisition again.
       break
     case `subscribe`:
+    case `resume`:
     case `preload`:
       next.syncRunning = true
       next.subscriberOrPreload = true
@@ -320,7 +355,7 @@ function makeSource(state: SourceState) {
     id: `deferred-acquisition-${sequence++}`,
     getKey: (row) => row.id,
     syncMode: onDemand ? `on-demand` : `eager`,
-    startSync: state !== `eager-idle` && state !== `on-demand-idle`,
+    startSync: state.endsWith(`running`) || state.endsWith(`holding`),
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     gcTime: 0,
@@ -356,6 +391,7 @@ function makeSource(state: SourceState) {
       },
     },
   })
+  if (state.endsWith(`render-deferred`)) collection._deferSyncStart()
   return { collection, counts, truncate: () => truncateRows?.() }
 }
 
@@ -409,7 +445,8 @@ describe(`live-query deferred acquisition`, () => {
             const { outer, collections } = makeLiveQuery(source, shape, depth)
             let peer: { unsubscribe: () => void } | undefined
             let model = initialModel(state)
-            let subscription: { unsubscribe: () => void } | undefined
+            let subscription:
+              ReturnType<typeof outer.subscribeChanges> | undefined
             try {
               for (const [step, command] of commands.entries()) {
                 const before = { ...counts }
@@ -424,6 +461,15 @@ describe(`live-query deferred acquisition`, () => {
                     subscription = outer.subscribeChanges(() => {}, {
                       includeInitialState: true,
                     })
+                    break
+                  case `defer-subscribe`:
+                    subscription = outer.subscribeChanges(() => {}, {
+                      includeInitialState: true,
+                      deferAcquisition: true,
+                    })
+                    break
+                  case `resume`:
+                    subscription!.resumeDeferredAcquisition()
                     break
                   case `unsubscribe`:
                     subscription?.unsubscribe()
@@ -647,12 +693,25 @@ describe(`pooled live-query deferred acquisition`, () => {
  * stream for a query. The observer's preload then returns that stream instead
  * of preloading the live-query Collection. It is still a request for the
  * Collection's data, so it counts as a preload: deferred acquisition resumes
- * and the idle source Collection starts its sync run.
+ * and the idle source Collection starts its sync run. This includes a source
+ * left deferred by a render: that render does not own the preload's demand.
  */
 describe(`preload answered by a DbClient stream`, () => {
-  for (const stream of [`pending`, `success`] as const) {
-    it(`a ${stream} stream still resumes deferred acquisition`, async () => {
-      const { collection: source, counts } = makeSource(`eager-idle`)
+  it.each(
+    ([`pending`, `success`] as const).flatMap((stream) =>
+      (
+        [
+          `eager-idle`,
+          `eager-render-deferred`,
+          `on-demand-idle`,
+          `on-demand-render-deferred`,
+        ] as const
+      ).map((state) => ({ stream, state })),
+    ),
+  )(
+    `a $stream stream still resumes $state acquisition`,
+    async ({ stream, state }) => {
+      const { collection: source, counts } = makeSource(state)
       const { outer } = makeLiveQuery(source, `all`, 1)
       const client = new DbClient()
       const queryHash = `deferred-acquisition-stream-${stream}`
@@ -671,14 +730,15 @@ describe(`preload answered by a DbClient stream`, () => {
         void observer.preload()
         await settle()
         expect(counts.starts, `after the preload`).toBe(1)
+        expect(counts.acquisitions > 0).toBe(state.startsWith(`on-demand`))
         expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
       } finally {
         observer.dispose()
         await outer.cleanup()
         await source.cleanup()
       }
-    })
-  }
+    },
+  )
 })
 
 /**
@@ -1043,11 +1103,123 @@ describe(`DbClient preload releases independent source starts`, () => {
  * Cleanup ends a live-query Collection's sync run but keeps its subscriptions.
  * A subscriber that survives is still a subscriber in the next sync run, so a
  * restarted live-query Collection acquires for it at once instead of
- * deferring until another subscriber or preload arrives. The generated grammar
- * unsubscribes before cleanup, so this block pins the history: subscribe,
+ * deferring until another subscriber or preload arrives. The finite command
+ * histories above unsubscribe before cleanup. This block pins the history: subscribe,
  * clean up while subscribed, restart, then settle.
  */
 describe(`a subscriber that outlives cleanup`, () => {
+  // Admission may still be transferring ownership when a source status callback
+  // cleans up the live-query Collection. Cleanup retires that start, not the
+  // surviving logical subscription. It must not restart before an explicit restart request.
+  // The model counts a returned acquiring handle as demand for the next run;
+  // a still-deferred handle contributes none. This extends the settled-cleanup
+  // histories below with the construction boundary, both shapes and depths.
+  it.each(
+    ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
+      QUERY_SHAPES.flatMap((shape) =>
+        ([1, 2] as const).flatMap((depth) =>
+          ([`ordinary`, `resumed`, `deferred`] as const).flatMap((reader) =>
+            [false, true].flatMap((renderGate) =>
+              ([`loading`, `ready`] as const).flatMap((cleanupAt) =>
+                [false, true].map((restartFromCleanup) => ({
+                  state,
+                  shape,
+                  depth,
+                  reader,
+                  renderGate,
+                  cleanupAt,
+                  restartFromCleanup,
+                })),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  )(
+    `$state $shape depth=$depth $reader gate=$renderGate survives $cleanupAt cleanup during admission (restart=$restartFromCleanup)`,
+    async ({
+      state,
+      shape,
+      depth,
+      reader,
+      renderGate,
+      cleanupAt,
+      restartFromCleanup,
+    }) => {
+      const expected = {
+        acquiring: reader === `deferred` ? 0 : 1,
+        ready: reader !== `deferred` || state === `eager-idle`,
+        acquires: reader !== `deferred` && state === `on-demand-idle`,
+      }
+      const { collection: source, counts } = makeSource(state)
+      const { outer, collections } = makeLiveQuery(source, shape, depth)
+      if (renderGate) expect(outer._deferSyncStart()).toBe(true)
+      let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
+      if (reader !== `ordinary`) {
+        subscription = outer.subscribeChanges(() => {}, {
+          deferAcquisition: true,
+        })
+      }
+      let pending: Promise<void> | undefined
+      let reached = false
+      const retiredStatuses: Array<string> = []
+      const stopTarget = outer.on(`status:change`, ({ status }) => {
+        if (reached) {
+          retiredStatuses.push(status)
+          if (restartFromCleanup && status === `cleaned-up`)
+            outer.startSyncImmediate()
+        }
+      })
+      const stopSource = source.on(`status:change`, ({ status }) => {
+        if (status === cleanupAt && !reached) {
+          reached = true
+          pending = outer.cleanup()
+        }
+      })
+      try {
+        if (reader === `ordinary`)
+          subscription = outer.subscribeChanges(() => {})
+        else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
+        else source.startSyncImmediate()
+        expect(reached, `source startup reached cleanup`).toBe(true)
+        await pending
+        if (!restartFromCleanup) {
+          expect(outer.status, `cleanup must not retry admission`).toBe(
+            `cleaned-up`,
+          )
+          expect(retiredStatuses).toEqual([`cleaned-up`])
+        } else {
+          expect(retiredStatuses[0]).toBe(`cleaned-up`)
+          expect(
+            retiredStatuses.filter((status) => status === `loading`),
+          ).toHaveLength(1)
+        }
+        expect(outer.subscriberCount).toBe(expected.acquiring)
+        stopSource()
+        stopTarget()
+        outer.startSyncImmediate()
+        await settle()
+        expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
+          expected.acquires,
+        )
+        expect(outer.status === `ready`, `replacement readiness`).toBe(
+          expected.ready,
+        )
+        expect(outer.toArray.map((row) => row.id)).toEqual(
+          expected.ready ? EXPECTED_IDS[shape] : [],
+        )
+        expect(outer.subscriberCount).toBe(expected.acquiring)
+      } finally {
+        stopSource()
+        stopTarget()
+        subscription?.unsubscribe()
+        for (const collection of collections) await collection.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   for (const state of [
     `eager-idle`,
     `on-demand-idle`,
@@ -1333,6 +1505,108 @@ describe(`a request that arrives while a source subscription is created`, () => 
         for (const collection of collections) await collection.cleanup()
         await source.cleanup()
       }
+    })
+  }
+})
+
+/**
+ * Source errors remain readable through a handoff that did not throw. This
+ * extends the primary demand oracle at its previously omitted failure cut.
+ * The grammar crosses callback return/throw, independent/owned start, and an
+ * optional error cause. Removing timing confuses another reader's failure
+ * with ours; removing outcome confuses markError with throw. No second start
+ * without cleanup is legal. The shared judgment also feeds the React driver.
+ */
+describe(`render sync-start handoff error provenance`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`reports only its own thrown starts (${campaign})`, async () => {
+      const reach = createOracleReach(`start-handoff`, [
+        `prior-error`,
+        `marked-error`,
+        `own-throw`,
+        `undefined-cause`,
+        `healthy`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            outcome: fc.constantFrom(
+              `ready` as const,
+              `mark-error` as const,
+              `throw` as const,
+            ),
+            timing: fc.constantFrom(
+              `before-release` as const,
+              `during-release` as const,
+            ),
+            cause: fc.constantFrom(`error` as const, `undefined` as const),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const expected = expectedStartHandoff(history)
+            const failure =
+              history.cause === `error`
+                ? new Error(`source failure`)
+                : undefined
+            let starts = 0
+            const source = createCollection<{ id: string }>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              sync: {
+                sync: ({ markReady, markError }) => {
+                  starts++
+                  if (history.outcome === `throw`) throw failure
+                  if (history.outcome === `mark-error`) markError(failure)
+                  else markReady()
+                },
+              },
+            })
+            source._deferSyncStart()
+            source.startSyncImmediate()
+            try {
+              if (history.timing === `before-release`) {
+                try {
+                  source._resumeSyncStart()
+                } catch {
+                  /* Independent reader owns this error. */
+                }
+              }
+              if (source.status === `error`) reach.reach(`prior-error`)
+              if (history.outcome === `mark-error`) reach.reach(`marked-error`)
+              if (expected.throws) reach.reach(`own-throw`)
+              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
+              if (history.outcome === `ready`) reach.reach(`healthy`)
+              const pending = new Set([source])
+              let result: { threw: boolean; error?: unknown } = { threw: false }
+              try {
+                resumeDeferredLiveQueryCollections(pending)
+              } catch (error) {
+                result = { threw: true, error }
+              }
+              expect(result.threw, JSON.stringify(history)).toBe(
+                expected.throws,
+              )
+              if (expected.throws) expect(result.error).toBe(failure)
+              expect(source.status).toBe(expected.status)
+              expect(starts).toBe(expected.starts)
+              expect(pending.size).toBe(0)
+              resumeDeferredLiveQueryCollections(pending)
+              source._resumeSyncStart()
+              expect(starts, `old render handles never retry`).toBe(1)
+            } finally {
+              await source.cleanup()
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(100), seed: 2229 }
+          : oraclePropertyOptions(100, `live-query.start-handoff`),
+      )
+      reach.assertReached()
+      console.info(
+        `start-handoff ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
     })
   }
 })

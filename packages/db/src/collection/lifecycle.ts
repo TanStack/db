@@ -135,6 +135,9 @@ export class CollectionLifecycleManager<
       )
     }
     this.validateStatusTransition(this.status, newStatus)
+    // Only an actual replacement run transfers later cleanup to a new run.
+    // Validation, deferred requests and failed admission retain the old promise.
+    if (newStatus === `loading`) this.cleanupPromise = null
     const revision = ++this.statusRevision
     const previousStatus = this.status
     this.status = newStatus
@@ -258,9 +261,10 @@ export class CollectionLifecycleManager<
           : codedMessage(209, { id: this.id }),
       )
     }
-    // A synchronously finished retirement retains its public promise until
-    // settlement. Starting a new sync run assigns later cleanup to that run.
-    this.cleanupPromise = null
+  }
+
+  public isCleaningUp(): boolean {
+    return this.cleaningUp
   }
 
   /**

@@ -2539,3 +2539,23 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 include() must wrap a subquery builder
 ```
+
+<a id="error-252"></a>
+
+## Error 252: `live-query-observer-client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.
+```
+
+<a id="error-253"></a>
+
+## Error 253: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+The DB stream ended before the server-rendered query snapshot arrived.
+```
