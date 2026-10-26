@@ -36,6 +36,13 @@ Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
 and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).
 Follow the subsystem reading requirements in AGENTS.md.
 
+Keep unit tests and standalone concrete type assertions out of oracle files
+(ORC-016). Fixed regressions are inputs to the same model, driver, and
+comparison as the broader campaign, without their own expected answers.
+Compile-time oracles generate legal TypeScript inputs and compare public
+types with a reusable independent law; a matrix of fixed assertions does not
+satisfy this requirement. Supplemental examples belong in ordinary test files.
+
 Use the [instrument library](../../../docs/contributing/instruments/index.md)
 when there is a material uncertainty. Select cards within the authorized task;
 there is no required sequence or instrument quota.

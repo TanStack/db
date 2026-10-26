@@ -123,9 +123,31 @@ of all four public virtual fields directly after implicit, expression, and
 functional root publication. Its fixed controlled-Collection cases do not
 establish every nested projection shape or framework receiving boundary.
 
-Three type-only owners check compile-time boundaries:
-`packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.test-d.ts`
-checks local and synced persisted option input/output and key types;
+The generated compile-time persistence owner is
+`packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`.
+It generates row shapes (1–4 scalar, nullable, array, or nested fields), six
+key domains, field optionality, and utility signatures. Every generated shape
+crosses local/synced, schema-free/transforming schema, typed-spread/inline
+arguments, and inferred/partial/full explicit type arguments. Six additional
+inline schema forms infer the unannotated `getKey` callback's row, preserving
+all 24 annotated construction forms. One independent
+type law compares insert input, complete published row types (including the
+documented virtual fields), exact keys, and supplied
+utility signatures at TypeScript compilation. Contextual callbacks also compare
+their parameter with the independent output row. Partial explicit arguments use
+TypeScript's utility default rather than promising inference of unspecified
+generic arguments. The core `persisted-options.test.ts` runner and the browser
+`persisted-options.test.ts` receiving runner share that judgment; browser also
+passes real Query Collection options through it and compares adapter utilities
+before/after wrapping. Both run 12 histories with seed 2259 and 12 with a fresh
+seed, measure per-path reach, and accept the shared seed/path/property replay
+interface (`persisted-options.types.core` / `.browser`). This owner does not
+execute runtime parsing, adapter I/O, sync, or publication, and does not check
+built declarations, npm resolution, other host packages, or every TS version.
+The [type-preservation audit](oracle-reviews/pr-2259-persisted-option-types.md)
+records parent RED, GREEN, legacy-suite survival, and hostile-mutant evidence.
+
+Other existing fixed type checks cover adjacent compile-time boundaries:
 `packages/db/tests/mutation-handler-type-oracle.test-d.ts` checks sibling
 Collection/key/utilities in mutation handlers; and
 `packages/db/tests/query/virtual-row-fields-oracle.test-d.ts` checks all four
