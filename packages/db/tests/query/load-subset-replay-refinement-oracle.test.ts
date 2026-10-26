@@ -2938,10 +2938,7 @@ describe(`Ordered windows across truncate replays`, () => {
         // dies in about half of 200-run seeds.
         campaign === `fixed`
           ? { seed: 20261027, numRuns: oracleRuns(300) }
-          : {
-              ...oraclePropertyOptions(300, preloadProperty),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(300, preloadProperty),
       )
       reach.assertReached()
     },
@@ -2990,10 +2987,7 @@ describe(`Ordered windows across truncate replays`, () => {
         }),
         campaign === `fixed`
           ? { seed: 20261023, numRuns: oracleRuns(200) }
-          : {
-              ...oraclePropertyOptions(200, failedReplayProperty),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(200, failedReplayProperty),
       )
       reach.assertReached()
     },

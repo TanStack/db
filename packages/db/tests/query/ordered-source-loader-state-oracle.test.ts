@@ -3944,10 +3944,7 @@ describe(`Ordered source request authority`, () => {
         }),
         campaign === `fixed`
           ? { seed: 20261023, numRuns: oracleRuns(300) }
-          : {
-              ...oraclePropertyOptions(300, unprovenReportProperty),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+          : oraclePropertyOptions(300, unprovenReportProperty),
       )
       reach.assertReached()
     },
