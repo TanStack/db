@@ -300,7 +300,7 @@ hashes above describe earlier experiments, rather than a mutable current file.
 | E4 | Whole-program work repeats; timeout ignores multiplier; check only generated file and share compiler. | Timeout confirmed. Repeated dependency checking is avoidable. Generated-only diagnostics would hide source errors. | fixed-now: semantic builder shared across campaigns, scaled timeout, retained source/declaration diagnostics. | Deterministic affected-file telemetry and budget/source controls. |
 | E5 | Fixed refetch/nonexistent-method examples violate law-only policy. | Confirmed standalone concrete expressions in Query driver. | fixed-now: reusable closed capability model replaces them. | Model parameterized by generated rows/keys, not fixed call examples. |
 | E6 | Expected Query utils derive from production; shared erasure can pass. | Independent judgment gap confirmed by isLoading:any survivor. Whole-namespace any was overstated: old negative writes already detect some erasure. | fixed-now: independent model plus supplemental transparency relation. | State, namespace and refetch corruption controls. |
-| E7 | Named campaigns omit runners; tests can only get12 runs. | Registration omission confirmed. Hardcoded12 claim refuted: multiplier3 helper experiment executes36 fixed and36 random checks; normal package test globs already include runners. | fixed-now: package/root test:oracles registration. | Distinguish selection, count, reach and completion. |
+| E7 | Named campaigns omit runners; tests can only get 12 runs. | Registration omission confirmed. Hardcoded 12 claim refuted: multiplier 3 helper experiment executes 36 fixed and 36 random checks; normal package test globs already include runners. | fixed-now: package/root test:oracles registration. | Distinguish selection, count, reach and completion. |
 | E8 | Browser uses core tsconfig, invalidating browser witness. | Config selection confirmed; current semantic compiler settings match. Both configs compile the same consumer and resolve the same browser/Query source modules. | fixed-now: select receiving package config to prevent drift. | Preserve accurate source-only browser scope. |
 | E9 | Any unrelated error can satisfy bare sync directive. | Checker fragility confirmed with the two-factor control above; original admission-only mutant was already detected. | fixed-now: exact unsuppressed property diagnostic and legal same-candidate neighbor. | Reusable admission observation rejects collateral corruption. |
 | E10 | Audit depends on inaccessible scratch, mutable hashes, personnel verdicts. | Mixed: versioned record already contains authority, commands, outcomes and limits, and historical hashes match. Exact overlay recipes and stale wording needed improvement. | fixed-now: versioned runnable calibration command, historical-hash clarification, technical-only reviewer assessment. | Others can reproduce decisive results without prior scratch files. |
@@ -424,3 +424,29 @@ invalid sync with a same-candidate legal neighbor. ORC-014 retains the real
 browser/Query receiving source paths, with no runtime provider claim.
 ORC-015 measures every new declared state. ORC-016 contains no standalone fixed
 API examples; fixed regressions remain shared model inputs.
+
+### Calibration portability follow-up
+
+CodeRabbit review5656171283 of892bf55b8 identified four Minor items, preserved
+as C2-1 through C2-4 in source order. C2-1 corrected missing spaces in E7's
+numbers. C2-2 removed eager parent-history loading from unrelated calibrations.
+C2-3 restricted transform/target validation to the selected mutation. C2-4 added
+the missing changed-source guard for the two Collection getter controls.
+
+The law here is reproduction integrity: selecting one control must require
+only that control's inputs, and a requested semantic edit must actually apply.
+Executing the helper's actual setup prefix with filesystem/process overlays
+reproduced three failures: `none` attempted unavailable parent history; `none`
+failed an unrelated changed overload target; and a selected getter control
+constructed an unchanged overlay after both its signature and return-helper
+targets disappeared. The same probes now avoid all historical reads for `none`
+and report `Missing mutation target: missing-undefined` for the no-op control.
+Real commands then confirm `none` registers normally, `parent` rejects TS2769,
+and `missing-undefined` rejects the public-read equality with TS2344.
+No production, grammar, model, observation or compiler-gate edit was needed.
+
+All four items are fixed-now. The script's lazy parent getter and selected-only
+transform loops preserve the intended overlays and make independent controls
+usable when unrelated historical sources drift. The review accurately found
+portable-calibration weaknesses; no production claim follows from those setup
+failures. The previous owner hash and oracle evidence remain unchanged.

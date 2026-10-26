@@ -14,9 +14,19 @@ let source = ownerRef
   : readFileSync(ownerPath, `utf8`)
 const mutations = {
   none: ``,
-  parent: `if (name === resolve(packageRoot, 'src/persisted.ts')) {
-    source = ts.createSourceFile(name, ${JSON.stringify(execFileSync(`git`, [`show`, `d2935d0fcac164163adc231c6a796b8a4c234d9b:packages/db-sqlite-persistence-core/src/persisted.ts`], { encoding: `utf8` }))}, languageVersion, true);
-  }`,
+  get parent() {
+    const parent = execFileSync(
+      `git`,
+      [
+        `show`,
+        `d2935d0fcac164163adc231c6a796b8a4c234d9b:packages/db-sqlite-persistence-core/src/persisted.ts`,
+      ],
+      { encoding: `utf8` },
+    )
+    return `if (name === resolve(packageRoot, 'src/persisted.ts')) {
+      source = ts.createSourceFile(name, ${JSON.stringify(parent)}, languageVersion, true);
+    }`
+  },
   'local-utils': `if (name === resolve(packageRoot, 'src/persisted.ts')) {
     const start = source.text.indexOf('type PersistedLocalOnlyOptionsResult<');
     const end = source.text.indexOf('const REQUIRED_COORDINATOR_METHODS', start);
@@ -91,6 +101,7 @@ for (const [name, transform] of Object.entries({
       `schema: TSchema\n    getKey: (row: any) => TKey\n  },`,
     ),
 })) {
+  if (name !== mutation) continue
   const original = readFileSync(
     resolve(packageRoot, `src/persisted.ts`),
     `utf8`,
@@ -122,12 +133,15 @@ for (const [name, transform] of Object.entries({
         `return this._state.getWithVirtualProps(key) as (WithVirtualProps<TOutput, TKey> & { leaked: boolean }) | undefined`,
       ),
 })) {
+  if (name !== mutation) continue
   const original = readFileSync(
     resolve(root, `packages/db/src/collection/index.ts`),
     `utf8`,
   )
+  const altered = transform(original)
+  if (original === altered) throw new Error(`Missing mutation target: ${name}`)
   mutations[name] =
-    `if (name.endsWith('/db/src/collection/index.ts')) { source = ts.createSourceFile(name, ${JSON.stringify(transform(original))}, languageVersion, true); }`
+    `if (name.endsWith('/db/src/collection/index.ts')) { source = ts.createSourceFile(name, ${JSON.stringify(altered)}, languageVersion, true); }`
 }
 const admission = `if (name === resolve(packageRoot, 'src/persisted.ts')) {
   source = ts.createSourceFile(name, source.text.replace('export function persistedCollectionOptions<', ${JSON.stringify(`export function persistedCollectionOptions<
