@@ -53,9 +53,11 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * drain. The wrapper hands rows to core after its durable step, so consumers
  * see them a turn or more later even with no hold.
  *
- * Lanes: `persisted-flat`, `persisted-nested`, `persisted-seeds`, and
- * `persisted-nested-seeds`, which crosses seeds with nested transactions.
- * Seeds use a `DbClient` that owns the persisted Collection. The adapter ignores
+ * Lanes: `persisted-flat`, `persisted-nested`, `persisted-seeds`,
+ * `persisted-cached` (row 1 is in storage when the run starts),
+ * `persisted-conflicts` (inner writes that land ahead of enclosing ones), and
+ * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
+ * row. Seeds use a `DbClient` that owns the persisted Collection. The adapter ignores
  * stored metadata, so restart and resume reads are outside these lanes.
  */
 

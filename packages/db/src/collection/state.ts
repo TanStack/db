@@ -1062,11 +1062,14 @@ export class CollectionStateManager<
 
     for (const transaction of this.pendingSyncedTransactions) {
       if (transaction.invalidationError !== undefined) continue
-      const before = {
-        states: new Map(projection.states),
-        truncated: projection.truncated,
-        sourceKeys: new Set(projection.sourceKeys),
-      }
+      // Only an open transaction can become invalid and need this rollback.
+      const before = transaction.committed
+        ? undefined
+        : {
+            states: new Map(projection.states),
+            truncated: projection.truncated,
+            sourceKeys: new Set(projection.sourceKeys),
+          }
       if (transaction.truncate) {
         projection.states = new Map()
         projection.truncated = true
