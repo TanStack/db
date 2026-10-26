@@ -312,7 +312,10 @@ function controlledHttp() {
   }
 }
 
-// Records the `visibilitychange` listeners that code registers on `document`.
+// EventTarget registration identity is callback plus capture. Replay native
+// add/remove calls in order: a removal cannot erase a later registration, and
+// repeated additions of one identity retain one listener. The installed SDK
+// uses no once or signal options, which would need automatic-removal tracking.
 function recordVisibilityListeners() {
   const add = vi.spyOn(document, `addEventListener`)
   const remove = vi.spyOn(document, `removeEventListener`)
@@ -323,10 +326,39 @@ function recordVisibilityListeners() {
   return {
     registered: () => visibility(add.mock.calls).length,
     live: () => {
-      const removed = new Set(visibility(remove.mock.calls))
-      return visibility(add.mock.calls).filter(
-        (listener) => !removed.has(listener),
-      ).length
+      const calls = [
+        ...add.mock.calls.map((call, index) => ({
+          call,
+          adding: true,
+          order: add.mock.invocationCallOrder[index]!,
+        })),
+        ...remove.mock.calls.map((call, index) => ({
+          call,
+          adding: false,
+          order: remove.mock.invocationCallOrder[index]!,
+        })),
+      ].sort((left, right) => left.order - right.order)
+      const listeners = new Map<
+        EventListenerOrEventListenerObject,
+        Set<boolean>
+      >()
+      for (const {
+        call: [type, listener, options],
+        adding,
+      } of calls) {
+        if (type !== `visibilitychange` || listener === null) continue
+        const capture =
+          typeof options === `boolean` ? options : Boolean(options?.capture)
+        if (adding) {
+          const captures = listeners.get(listener) ?? new Set<boolean>()
+          captures.add(capture)
+          listeners.set(listener, captures)
+        } else listeners.get(listener)?.delete(capture)
+      }
+      return [...listeners.values()].reduce(
+        (count, captures) => count + captures.size,
+        0,
+      )
     },
     restore: () => {
       // The comparison has already run. Release even a failed subject's
@@ -342,6 +374,81 @@ function recordVisibilityListeners() {
     },
   }
 }
+
+// EventTarget identifies a listener by callback and capture, coalesces duplicate
+// additions, and applies removals in order (DOM Standard, "EventTarget"). This
+// bounded calibration sends every sequence of up to three add/remove calls
+// through the real EventTarget, then compares dispatch with the recorder before
+// teardown. Two callbacks and both capture modes distinguish wrong identities;
+// omitted, boolean, and object options distinguish equivalent capture spellings.
+// Three calls reach add/remove/re-add. Once and signal options are outside this
+// recorder's installed-SDK domain.
+fixedCase(
+  `records EventTarget ownership across bounded listener histories`,
+  () => {
+    type Step = {
+      add: boolean
+      callback: number
+      options: boolean | { capture: boolean } | undefined
+    }
+    const options = [
+      undefined,
+      false,
+      true,
+      { capture: false },
+      { capture: true },
+    ]
+    const steps: Array<Step> = [false, true].flatMap((add) =>
+      [0, 1].flatMap((callback) =>
+        options.map((capture) => ({ add, callback, options: capture })),
+      ),
+    )
+    function* histories(prefix: Array<Step> = []): Generator<Array<Step>> {
+      yield prefix
+      if (prefix.length < 3)
+        for (const step of steps) yield* histories([...prefix, step])
+    }
+    let checked = 0
+    for (const history of histories()) {
+      const listeners = recordVisibilityListeners()
+      const callbacks = [vi.fn(), vi.fn()]
+      try {
+        for (const step of history) {
+          const callback = callbacks[step.callback]!
+          if (step.add)
+            document.addEventListener(
+              `visibilitychange`,
+              callback,
+              step.options,
+            )
+          else
+            document.removeEventListener(
+              `visibilitychange`,
+              callback,
+              step.options,
+            )
+        }
+        document.dispatchEvent(new Event(`visibilitychange`))
+        // Native dispatch supplies the independent count, including both capture
+        // identities of one callback. Teardown cannot change this observation.
+        const dispatched = callbacks.reduce(
+          (count, callback) => count + callback.mock.calls.length,
+          0,
+        )
+        expect(listeners.live(), JSON.stringify(history)).toBe(dispatched)
+        checked++
+      } finally {
+        listeners.restore()
+        for (const callback of callbacks) {
+          document.removeEventListener(`visibilitychange`, callback, false)
+          document.removeEventListener(`visibilitychange`, callback, true)
+        }
+      }
+    }
+    expect(checked).toBe(8421)
+  },
+  60_000,
+)
 
 // Teardown must preserve a failed comparison and release its registrations.
 // Enumerate every retained subset of three fresh callbacks. Dispatch observes
@@ -2272,9 +2379,13 @@ fixedCase.each(clientRetryCells)(
  * zero to three requests: a row-only batch, a row with an up-to-date, an HTTP
  * 409 reset, or a 503 that `onError` retries. Rows and resets may remain
  * incomplete when cleanup starts; neither needs a later up-to-date first.
- * The run then stays open, gives up on one more 503
- * because `onError` returns no retry, or aborts the external signal. Cleanup
- * ends the run. The signal stays aborted, so a run that starts after an abort
+ * The run then stays open, gives up on one more 503, aborts the external
+ * signal, or receives a 503 whose asynchronous `onError` decision stays
+ * pending through cleanup. That held decision can later retry or give up;
+ * neither future outcome may postpone the run's resource release. Held
+ * decisions settle only in fixture teardown, so later runs can start while
+ * an old decision is still pending. Cleanup ends the run. The signal stays
+ * aborted, so a run that starts after an abort
  * starts with an aborted signal and sends no request. The provider answers
  * only a request the client sent. The grammar does not answer a request after
  * a give-up or an abort, because the client sends none.
@@ -2283,9 +2394,12 @@ fixedCase.each(clientRetryCells)(
  * installed ShapeStream, and controlled HTTP. The recorder wraps
  * `document.addEventListener` and `document.removeEventListener` and counts
  * the `visibilitychange` listeners still registered. The comparison runs after
- * each provider answer, give-up, abort, and cleanup, once the client has sent
- * its next request or decided to send none. A calibration check at the end
- * shows that the recorder saw one listener for each run.
+ * each ordinary provider answer, give-up, abort, and cleanup. Ordinary answers
+ * wait for the next request; a held decision instead positively observes
+ * `onError` entry before cleanup, without awaiting that decision. The model
+ * still requires zero listeners after completed cleanup. The active upper
+ * bound and one-registration-per-run calibration describe this installed SDK
+ * and the driver's one-stream topology, rather than a universal SDK policy.
  *
  * Limits: the lane observes the browser listener in jsdom. Client versions
  * that observe React Native's AppState instead register through a runtime
@@ -2296,7 +2410,7 @@ fixedCase.each(clientRetryCells)(
  */
 type ReleaseRun = {
   answers: Array<`row` | `up-to-date` | `reset` | `retry`>
-  end: `open` | `give-up` | `abort`
+  end: `open` | `give-up` | `abort` | `deciding-retry` | `deciding-give-up`
 }
 type ReleaseHistory = {
   mode: `eager` | `on-demand` | `progressive`
@@ -2310,6 +2424,7 @@ type ReleaseState =
   | `cleanup-of-restarted-run`
   | `cleanup-after-partial-delivery`
   | `cleanup-during-reset`
+  | `cleanup-during-retry-decision`
 
 const createReleaseReach = () =>
   createOracleReach<ReleaseState>(`electric.sdk-source-release`, [
@@ -2320,6 +2435,7 @@ const createReleaseReach = () =>
     `cleanup-of-restarted-run`,
     `cleanup-after-partial-delivery`,
     `cleanup-during-reset`,
+    `cleanup-during-retry-decision`,
   ])
 // Each campaign declares its own reach.
 let releaseReach = createReleaseReach()
@@ -2331,6 +2447,9 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
   const external = new AbortController()
   let retries = true
   let onErrorCalls = 0
+  let heldDecision:
+    ReturnType<typeof deferred<Record<string, never> | void>> | undefined
+  const settleDecisions: Array<() => void> = []
   const collection = createCollection(
     electricCollectionOptions<Item>({
       id: `sdk-release-${++sequence}`,
@@ -2347,7 +2466,7 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
         },
         onError: () => {
           onErrorCalls++
-          return retries ? {} : undefined
+          return heldDecision?.promise ?? (retries ? {} : undefined)
         },
       },
       syncMode: history.mode,
@@ -2429,7 +2548,21 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
         request = await next(`run ${index} ${answer}`)
         check(`run ${index} ${answer}`)
       }
-      if (request && run.end === `give-up`) {
+      if (
+        request &&
+        (run.end === `deciding-retry` || run.end === `deciding-give-up`)
+      ) {
+        const calls = onErrorCalls
+        const decision = deferred<Record<string, never> | void>()
+        heldDecision = decision
+        settleDecisions.push(() =>
+          decision.resolve(run.end === `deciding-retry` ? {} : undefined),
+        )
+        request.respond(new Response(`transient`, { status: 503 }))
+        await vi.waitFor(() => expect(onErrorCalls).toBe(calls + 1))
+        releaseReach.reach(`cleanup-during-retry-decision`)
+        check(`run ${index} pending decision`)
+      } else if (request && run.end === `give-up`) {
         const calls = onErrorCalls
         retries = false
         request.respond(new Response(`transient`, { status: 503 }))
@@ -2460,11 +2593,14 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
       await collection.cleanup()
       activeRuns = 0
       check(`run ${index} cleanup`)
+      // A later run has its own decision; the old promise remains unresolved.
+      heldDecision = undefined
     }
     // Calibration: the recorder observed the listener of every run's stream.
     expect(listeners.registered()).toBe(runsStarted)
   }, [
     () => collection.cleanup(),
+    () => settleDecisions.forEach((settle) => settle()),
     () => http.close(),
     () => listeners.restore(),
     () => consoleError.mockRestore(),
@@ -2478,7 +2614,13 @@ fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `releases listeners after incomplete delivery in %s mode`,
   async (mode) => {
     for (const answer of [`row`, `reset`] as const)
-      for (const end of [`open`, `give-up`, `abort`] as const)
+      for (const end of [
+        `open`,
+        `give-up`,
+        `abort`,
+        `deciding-retry`,
+        `deciding-give-up`,
+      ] as const)
         await checkSourceRelease({ mode, runs: [{ answers: [answer], end }] })
   },
 )
@@ -2506,6 +2648,8 @@ const releaseProperty = fc.asyncProperty(
           `open` as const,
           `give-up` as const,
           `abort` as const,
+          `deciding-retry` as const,
+          `deciding-give-up` as const,
         ),
       }),
       { minLength: 1, maxLength: 3 },
