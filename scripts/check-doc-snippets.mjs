@@ -77,8 +77,10 @@ for (const pkg of readdirSync(join(root, `packages`))) {
   } = JSON.parse(readFileSync(manifest, `utf8`))
   // Examples document published packages only.
   if (unpublished) continue
-  for (const subpath of Object.keys(exports)) {
-    if (subpath === `./package.json`) continue
+  for (const [subpath, target] of Object.entries(exports)) {
+    // A plain string export, such as package.json or a WASM asset, has no
+    // types condition for a snippet to import.
+    if (typeof target === `string`) continue
     // `.` is src/index; `./x` is src/x.ts or src/x/index.ts.
     const stem = subpath === `.` ? `index` : subpath.slice(2)
     const entry = [`${stem}.ts`, `${stem}.tsx`, `${stem}/index.ts`]
