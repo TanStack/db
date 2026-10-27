@@ -3,7 +3,7 @@ id: UnsupportedFromTypeError
 title: UnsupportedFromTypeError
 ---
 
-Defined in: [packages/db/src/errors.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L811)
+Defined in: [packages/db/src/errors.ts:831](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L831)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:811](https://github.com/TanStack/db/blob/
 new UnsupportedFromTypeError(type): UnsupportedFromTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:812](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L812)
+Defined in: [packages/db/src/errors.ts:832](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L832)
 
 #### Parameters
 

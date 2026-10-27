@@ -19,6 +19,10 @@ production queues, caches, or semantic helpers merely to share their names.
 | Collection | The public keyed data container. Capitalize it when referring to the TanStack DB type. | Relation, table, or query result. |
 | source Collection | A Collection read by a query or adapter. | Source relation when the value is a public Collection. |
 | live-query Collection | A Collection whose rows are produced by a live query. | Query, observer, or result set. |
+| framework binding | What one mounted framework hook or injector keeps between updates: its compiled live query or window binding, its observer or controller, and its source Collection ID claims. | Subscription, observer, or live-query Collection. |
+| query identity | The value that decides whether a framework binding compiles its query input again: a nonempty `queryKey`, or the identity derived from the query IR. A `DbClient` matches preloaded and hydrated queries by its hash. React and Preact compare it on every render; reactive adapters compile again when their reads change and compare none. | Query hash when the value is not hashed, or dependency list. |
+| source Collection ID claim | A framework binding's record of which source Collection object each Collection ID named, per `DbClient` scope, kept while the binding is mounted. A binding that compares query identity rejects a different object under a claimed ID. | Collection registry or source identity. |
+| window binding | The infinite-query state a framework binding keeps between updates: the input, its identity dependencies, the page shape, the window collection, and its controller. `bindLiveQueryWindow` decides whether to keep it, replace its controller, or bind a new window collection. | Window controller or live-query Collection. |
 | pooled live query | A live query on one source Collection whose `where` has at least one `eq(field, literal)` conjunct and otherwise reads only the row, optionally ordered by the row's own fields without a limit, served from an equality partition; its live-query Collection is built only when read. | Cached query or shared live-query Collection. |
 | equality partition | Source rows grouped by the `eq`-normalized values of one set of fields, shared by pooled live queries on the same source Collection with the same equality fields and order terms, including resolved comparison options. | Index or bucket relation. |
 | partition group | The rows of an equality partition whose fields equal one tuple of literals. | Bucket or active bucket. |
@@ -206,6 +210,8 @@ Use nouns for state and verbs for transitions:
 - A sync transaction **applies** when its writes and events become visible.
 - A replay or repair **publishes** one coherent public snapshot.
 - Cleanup start **invalidates** a sync run and **closes** restart admission.
+  Ordinary subscription admission and deferred acquisition resumption **throw**
+  during active cleanup without changing subscriber ownership.
   Cleanup **settles** after adapter cleanup settles and the Collection publishes
   `cleaned-up`. Restart then **starts** a new sync run.
 - Truncate replay **replaces** source state inside the current sync run and

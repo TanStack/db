@@ -1,9 +1,12 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient, collectionOptions } from '../src/client.js'
+import { getLiveQueryHash } from '../src/live-query-options.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import { createLiveQueryCollection } from '../src/query/index.js'
+import { Query, createLiveQueryCollection } from '../src/query/index.js'
+import { createOracleReach } from './oracle-reach.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 
 /**
@@ -18,6 +21,12 @@ import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
  * the first, and reading another snapshot never changes a map that an earlier
  * read returned. A single-result query keeps only the first such row: `state`
  * holds that row, and `data` is that row or `undefined`.
+ *
+ * Without a DbClient, server and ordinary getters expose the same revision.
+ * Reading either getter must retain that revision's cached object identity.
+ * A completed client query also shares readiness on both views. Reading its
+ * server view must not invalidate the ordinary getter's cached object. The
+ * SSR-specific transport policy has its own descriptor receiving owner.
  *
  * The model is a sorted map from key to version. Each history step changes the
  * model and the source Collection the same way, and a `capture` step records
@@ -36,7 +45,8 @@ import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 | attached and detached reads | a subscriber is present or absent | publication cache vs refreshDetachedState | the same observations | this generated oracle; listener delivery belongs to `live-query-observer-history-oracle.property.test.ts` |
 
  * The source is a local-only Collection behind an `orderBy` live query, so
- * visible order is key order. Hydration seeds, persisted status, and framework
+ * visible order is key order. Prepared client seeds are checked only for getter
+ * identity. Hydration replacement, persisted status, and framework
  * wiring have other owners. The calibration test feeds the checker a snapshot
  * whose `data` and `state` read the live Collection on first access, the design
  * #1542 proposed, and requires the checker to reject it.
@@ -86,15 +96,11 @@ function setup(shape: Shape) {
       getKey: (row) => row.id,
     }),
   )
-  const query = createLiveQueryCollection({
-    startSync: true,
-    query: (q) => {
-      const ordered = q.from({ row: source }).orderBy(({ row }) => row.id)
-      return shape === `single` ? ordered.findOne() : ordered
-    },
-  })
+  const ordered = new Query().from({ row: source }).orderBy(({ row }) => row.id)
+  const builder = shape === `single` ? ordered.findOne() : ordered
+  const query = createLiveQueryCollection({ startSync: true, query: builder })
   const observer = createLiveQueryObserver(query)
-  return { source, query, observer }
+  return { source, query, observer, builder }
 }
 
 /** Apply a history, retaining every captured snapshot unread. */
@@ -104,10 +110,13 @@ function run(
   commands: ReadonlyArray<Command>,
 ): {
   captured: Array<Captured>
+  observer: ReturnType<typeof setup>[`observer`]
+  query: ReturnType<typeof setup>[`query`]
+  builder: ReturnType<typeof setup>[`builder`]
   cleanup: () => Promise<void>
   source: ReturnType<typeof setup>[`source`]
 } {
-  const { source, query, observer } = setup(shape)
+  const { source, query, observer, builder } = setup(shape)
   const unsubscribe = attached ? observer.subscribe(() => {}) : undefined
   const model = new Map<string, number>()
   const captured: Array<Captured> = [
@@ -136,6 +145,9 @@ function run(
   captured.push({ snapshot: observer.getSnapshot(), rows: modelRows(model) })
   return {
     captured,
+    observer,
+    query,
+    builder,
     source,
     cleanup: async () => {
       unsubscribe?.()
@@ -192,9 +204,45 @@ async function checkHistory(
   attached: boolean,
   commands: ReadonlyArray<Command>,
   reads: ReadonlyArray<Read>,
+  reach?: ReturnType<
+    typeof createOracleReach<`server-getter` | `client-getter`>
+  >,
 ): Promise<void> {
-  const { captured, cleanup } = run(shape, attached, commands)
+  const { captured, observer, query, builder, cleanup } = run(
+    shape,
+    attached,
+    commands,
+  )
+  const client = new DbClient()
+  let clientObserver: typeof observer | undefined
   try {
+    // No write occurs between the final capture and either getter. The model's
+    // revision is unchanged, so both public getter paths retain its identity.
+    const current = captured.at(-1)!.snapshot
+    reach?.reach(`server-getter`)
+    expect(
+      observer.getServerSnapshot(),
+      `server getter preserves an unchanged revision`,
+    ).toBe(current)
+    expect(
+      observer.getSnapshot(),
+      `ordinary getter preserves the same revision`,
+    ).toBe(current)
+    await client.preloadLiveQuery({ query: builder })
+    clientObserver = createLiveQueryObserver(query, {
+      client,
+      queryHash: getLiveQueryHash({ query: builder }),
+    })
+    const clientSnapshot = clientObserver.getSnapshot()
+    reach?.reach(`client-getter`)
+    expect(
+      clientObserver.getServerSnapshot(),
+      `a prepared client server read keeps the shared revision`,
+    ).toBe(clientSnapshot)
+    expect(
+      clientObserver.getSnapshot(),
+      `a server read cannot invalidate the ordinary snapshot cache`,
+    ).toBe(clientSnapshot)
     const order =
       reads.length > 0
         ? reads
@@ -233,6 +281,8 @@ async function checkHistory(
       }
     }
   } finally {
+    clientObserver?.dispose()
+    await client.cleanup()
     await cleanup()
   }
 }
@@ -244,21 +294,41 @@ const reads = fc.array(
 )
 
 describe(`retained live-query snapshots are point-in-time`, () => {
-  it.each([
-    [`ordered`, true],
-    [`ordered`, false],
-    [`single`, true],
-    [`single`, false],
-  ] as const)(
-    `first reads match the capture-time rows (%s, attached=%s)`,
-    async (shape, attached) => {
-      const property = fc.asyncProperty(history, reads, (commands, order) =>
-        checkHistory(shape, attached, commands, order),
+  it.each(
+    (
+      [
+        [`ordered`, true],
+        [`ordered`, false],
+        [`single`, true],
+        [`single`, false],
+      ] as const
+    ).flatMap(([shape, attached]) =>
+      ([`fixed`, `random`] as const).map(
+        (campaign) => [shape, attached, campaign] as const,
+      ),
+    ),
+  )(
+    `first reads match the capture-time rows (%s, attached=%s, %s)`,
+    async (shape, attached, campaign) => {
+      const reach = createOracleReach(
+        `snapshot-${shape}-${attached}-${campaign}`,
+        [`server-getter`, `client-getter`],
       )
-      // Fixed campaign: a repeatable baseline. Seed 2043 is arbitrary.
-      await fc.assert(property, { numRuns: oracleRuns(40), seed: 2043 })
-      // Random campaign, or a replay of a reported seed and path.
-      await fc.assert(property, oraclePropertyOptions(40, PROPERTY))
+      const property = fc.asyncProperty(history, reads, (commands, order) => {
+        reach.beginHistory()
+        return checkHistory(shape, attached, commands, order, reach)
+      })
+      await fc.assert(
+        property,
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(40), seed: 2043 }
+          : oraclePropertyOptions(40, PROPERTY),
+      )
+      reach.assertReached()
+      console.info(
+        `snapshot-getter ${shape} ${attached} ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
     },
   )
 
@@ -313,3 +383,182 @@ describe(`retained live-query snapshots are point-in-time`, () => {
     }
   })
 })
+
+// Work probe: an unchanged prepared server revision needs one admission walk,
+// and checking row presence must not materialize its lazy keyed view.
+it(`reuses server admission without building the lazy state Map`, async () => {
+  const client = new DbClient()
+  const source = client.collection(
+    collectionOptions(`server-work`, () =>
+      localOnlyCollectionOptions<Row, string>({
+        id: `server-work`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `a`, version: 1 }],
+      }),
+    ),
+  )
+  await source.preload()
+  const query = new Query().from({ row: source }).orderBy(({ row }) => row.id)
+  const collection = createLiveQueryCollection({ query })
+  await collection.preload()
+  const observer = createLiveQueryObserver(collection, {
+    client,
+    queryHash: getLiveQueryHash({ query }),
+  })
+  const walk = vi.spyOn(client, `_hasSsrCollectionSnapshot`)
+  const snapshot = observer.getSnapshot()
+  const state = vi.spyOn(snapshot, `state`, `get`)
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    const first = observer.getServerSnapshot()
+    for (let i = 0; i < 10; i++)
+      expect(observer.getServerSnapshot()).toBe(first)
+    expect(
+      walk.mock.calls.length,
+      `admit an unchanged revision once`,
+    ).toBeLessThanOrEqual(1)
+    expect(
+      state,
+      `row-presence check keeps keyed materialization lazy`,
+    ).not.toHaveBeenCalled()
+  } finally {
+    vi.stubGlobal(`window`, browserWindow)
+    observer.dispose()
+    await collection.cleanup()
+    await client.cleanup()
+  }
+})
+
+// Capturing a loading SSR view must not answer a later explicit data preload.
+// The real source controls readiness; server capture owns only the initial view.
+it(`keeps explicit preload pending after a loading server capture`, async () => {
+  let ready = () => {}
+  const client = new DbClient()
+  const descriptor = collectionOptions(`capture-preload`, () => ({
+    id: `capture-preload`,
+    getKey: (row: Row) => row.id,
+    sync: {
+      sync: ({ markReady }) => {
+        ready = markReady
+      },
+    },
+  }))
+  const source = client.collection(descriptor)
+  const query = new Query().from({ row: source })
+  const collection = createLiveQueryCollection({ query })
+  const observer = createLiveQueryObserver(collection, {
+    client,
+    queryHash: getLiveQueryHash({ query }),
+  })
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    expect(observer.getServerSnapshot().isReady).toBe(false)
+    let settled = false
+    const preload = client.preloadLiveQuery({ query }).then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(settled, `an initial view is not completed data demand`).toBe(false)
+    ready()
+    await preload
+    expect(settled).toBe(true)
+  } finally {
+    vi.stubGlobal(`window`, browserWindow)
+    observer.dispose()
+    await collection.cleanup()
+    await client.cleanup()
+  }
+})
+
+// A pending stream owns one result promise. Capturing its initial loading view
+// must not replace that promise when another preload requests the same data.
+it(`retains a pending stream after capturing its loading view`, async () => {
+  let ready = () => {}
+  const client = new DbClient()
+  const descriptor = collectionOptions(`pending-capture`, () => ({
+    id: `pending-capture`,
+    getKey: (row: Row) => row.id,
+    sync: {
+      sync: ({ markReady }) => {
+        ready = markReady
+      },
+    },
+  }))
+  const query = new Query().from({ row: descriptor })
+  const hash = getLiveQueryHash({ query })
+  const preload = client.preloadLiveQuery({ query })
+  const original = client.dehydrate({ shouldDehydrateLiveQuery: () => true })
+    .liveQueries![0]!.promise
+  const source = client.collection(descriptor)
+  const collection = createLiveQueryCollection({
+    query: new Query().from({ row: source }),
+  })
+  const observer = createLiveQueryObserver(collection, {
+    client,
+    queryHash: hash,
+  })
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    expect(observer.getServerSnapshot().isReady).toBe(false)
+    const peer = client.preloadLiveQuery({ query })
+    expect(
+      client.dehydrate({ shouldDehydrateLiveQuery: () => true })
+        .liveQueries![0]!.promise,
+      `initial capture cannot replace the established stream`,
+    ).toBe(original)
+    ready()
+    await Promise.all([preload, peer])
+  } finally {
+    ready()
+    vi.stubGlobal(`window`, browserWindow)
+    observer.dispose()
+    await collection.cleanup()
+    await client.cleanup()
+  }
+})
+
+// Non-streaming transport remains JSON-compatible. Capturing an initial view
+// does not opt its route into promise streaming; opted-in streaming still keeps
+// the pending result promise beside the initial snapshot.
+it.each([false, true])(
+  `captures a pending initial view with streaming=%s`,
+  async (streaming) => {
+    const client = new DbClient()
+    client._setSsrStreamingEnabled(streaming)
+    const descriptor = collectionOptions(`pending-json`, () => ({
+      id: `pending-json`,
+      getKey: (row: Row) => row.id,
+      sync: { sync: () => {} },
+    }))
+    const query = new Query().from({ row: descriptor })
+    void client.preloadLiveQuery({ query }).catch(() => {})
+    const source = client.collection(descriptor)
+    const collection = createLiveQueryCollection({
+      query: new Query().from({ row: source }),
+    })
+    const observer = createLiveQueryObserver(collection, {
+      client,
+      queryHash: getLiveQueryHash({ query }),
+    })
+    const browserWindow = globalThis.window
+    vi.stubGlobal(`window`, undefined)
+    try {
+      observer.getServerSnapshot()
+      const transported = client.dehydrate().liveQueries![0]!
+      expect(transported.snapshot?.status).toBe(`loading`)
+      expect(
+        transported.promise instanceof Promise,
+        `only requested streaming carries a promise`,
+      ).toBe(streaming)
+    } finally {
+      vi.stubGlobal(`window`, browserWindow)
+      observer.dispose()
+      await collection.cleanup()
+      await client.cleanup()
+    }
+  },
+)

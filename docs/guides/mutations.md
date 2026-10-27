@@ -902,6 +902,13 @@ triggers Save, `tx.commit()` fires the `mutationFn` to persist all accumulated
 mutations in a single batch. If the user cancels instead, `tx.rollback()`
 discards the optimistic changes and reverts the UI.
 
+A pending manual transaction does not retain its Collections against garbage
+collection. Keep a subscription while you need the draft's optimistic rows,
+until commit or rollback. Once GC clears those rows, restarting sync does not
+guarantee that the draft's previous optimistic view is restored. After commit,
+the persisting transaction retains every Collection it touches until its handler
+settles. Explicit `cleanup()` still clears rows even while a handler persists.
+
 ### Multi-Step Workflows
 
 Manual transactions excel at complex workflows:

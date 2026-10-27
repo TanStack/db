@@ -1,5 +1,12 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  materialize,
+  queryOnce,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -9,13 +16,6 @@ import { SubsetDemandController } from '../../src/query/live/subset-demand-contr
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createEffect } from '../../src/query/effect.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  materialize,
-  queryOnce,
-  toArray,
-} from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import {
   oraclePropertyOptions,

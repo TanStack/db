@@ -260,5 +260,17 @@
   ],
   "SetWindowFindOneLimitError": [
     "setWindow() cannot change the limit of a findOne() query."
+  ],
+  "SourceCollectionIdReuseError": [
+    "[useLiveQuery] Collection ID \"todos\" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID."
+  ],
+  "GroupingOperatorRequiredError": [
+    "groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra. Query IR built by hand passes groupingCompiler to each IR.Aggregate."
+  ],
+  "IncludeOperatorRequiredError": [
+    "A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db. Query IR built by hand passes includesRuntime to each IR.IncludesSubquery."
+  ],
+  "InvalidPoolOptionError": [
+    "A live query's pool option takes pooledLiveQueries from @tanstack/db, or nothing. Pooling is opt-in: pass pool: pooledLiveQueries to share one partition among equality-filtered queries."
   ]
 }

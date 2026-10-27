@@ -73,10 +73,11 @@ function FilteredTodos({ minPriority }: { minPriority: number }) {
 }
 ```
 
-For derived-identity queries in one mounted hook and `DbClient` scope, a source
-Collection ID must keep referring to the same Collection object. If a render
-supplies a different source object with a previously used ID, the hook throws
-instead of returning rows from the old source. To reuse an ID within that hook,
+For queries without `queryKey` in one mounted hook and `DbClient` scope, a
+source Collection ID must keep referring to the same Collection object. If a
+render supplies a different source object with a previously used ID, the hook
+throws `SourceCollectionIdReuseError` instead of returning rows from the old
+source. To reuse an ID within that hook,
 unmount it, clean up its source and client scope, then mount the replacement.
 Separate hooks and independent client scopes can use the same ID.
 
@@ -112,10 +113,10 @@ An explicit `queryKey` is the caller's identity contract. If its source object
 changes, change the key too, even when the source ID stays the same. Use a
 primitive scope token in the key; Collection objects cannot be hashed there.
 
-Before 1.0, an unhashable query warns in development and keeps its legacy
-mount-stable identity. The query still runs, but captured values inside opaque
-logic only become reactive when they are represented in `queryKey`. In 1.0, an
-unhashable query without `queryKey` will throw. If deriving identity becomes
+An unhashable query without `queryKey` throws `UnhashableQueryIRError`, so
+represent the values that opaque logic captures in the key. An empty
+`queryKey` counts as none, as it does for a `DbClient` preload. A dependency
+array does not replace `queryKey` for such a query. If deriving identity becomes
 expensive across renders, the hook warns once and suggests adding a `queryKey`
 as a performance escape hatch.
 

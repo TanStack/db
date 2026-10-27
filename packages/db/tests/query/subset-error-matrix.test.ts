@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { captureMicrotaskErrors, mockSyncCollectionOptions } from '../utils.js'
 

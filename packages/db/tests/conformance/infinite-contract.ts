@@ -30,6 +30,13 @@
  * framework's own publication cut. Pre-commit work, such as a React render that
  * never commits, belongs to the drivers: Vue's setup is its commit, so that cut
  * has no shared form.
+ *
+ * The query-identity laws in `contract.ts` apply to infinite bindings too. A
+ * binding that compares query identity needs `queryKey` for an unhashable
+ * query and rejects a different source object under a Collection ID it
+ * already read; rejection surfaces as a throw from the mount, `setParamSync`,
+ * the next `flush`, or `current()`. A reactive binding compiles either input
+ * and publishes the current source's pages.
  */
 import type { Collection, LiveQueryWindowController } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'
@@ -37,6 +44,8 @@ import type { QueryBuild, SourceHandle } from './contract'
 export interface InfiniteQueryConfig {
   pageSize?: number
   initialPageParam?: number
+  /** Explicit identity for a query whose IR has no stable hash. */
+  queryKey?: ReadonlyArray<unknown>
 }
 
 export interface InfiniteQueryResult {
@@ -99,9 +108,14 @@ export interface InfiniteQueryInputHandle extends InfiniteQueryHandle {
 
 export interface InfiniteQueryDriver {
   name: string
+  /** Whether the binding compares query identity; see `contract.ts`. */
+  comparesQueryIdentity: boolean
   gt: (a: any, b: any) => any
+  eq: (a: any, b: any) => any
+  /** Pass `collectionId` to create another source object under an existing ID. */
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
+    collectionId?: string,
   ) => SourceHandle<T>
   makeOnDemandSource: <T extends { id: string; rank: number }>(
     data: ReadonlyArray<T>,
@@ -135,6 +149,17 @@ export interface InfiniteQueryDriver {
   ) => InfiniteQueryHandle
   mountControllable: <P>(
     build: (q: any, param: P) => any,
+    initial: P,
+    config?: InfiniteQueryConfig,
+  ) => InfiniteQueryControllableHandle<P>
+  /**
+   * Mount a controllable query whose config names `key(param)` as its
+   * `queryKey`, or none when that returns `undefined`. Every driver that
+   * compares query identity supplies it; a reactive binding has no keys.
+   */
+  mountKeyedControllable?: <P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
     initial: P,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryControllableHandle<P>

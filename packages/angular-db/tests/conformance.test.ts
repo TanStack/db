@@ -9,12 +9,14 @@
  *
  * All registered laws must pass; the driver has no whole-test waivers.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   Component,
   DestroyRef,
   EnvironmentInjector,
+  ErrorHandler,
   createEnvironmentInjector,
+  effect,
   inject,
   input,
   runInInjectionContext,
@@ -28,6 +30,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -37,9 +40,11 @@ import {
 } from '../../db/tests/utils'
 import { injectLiveQuery } from '../src/index'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -62,10 +67,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-angular-${sourceSeq++}`,
+      id: collectionId ?? `conformance-angular-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -144,10 +150,53 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 50))
 }
 
+// Angular reports an error that a binding's root effect throws, such as a
+// rejected query input, to the application ErrorHandler. The driver records
+// them, and a handle rethrows the first one reported since it mounted on its
+// next read or flush: that is the rejection the contract observes. Mounts that
+// fail run one at a time, so this attributes each error to its mount. Every
+// recorded error must be claimed by a read before its test ends, so an error
+// that no scenario expects still fails its test.
+const reported: Array<{ error: unknown; claimed: boolean }> = []
+const reportedSince = new WeakMap<object, number>()
+
+beforeEach(() => {
+  reported.length = 0
+  TestBed.resetTestingModule()
+  TestBed.configureTestingModule({
+    rethrowApplicationErrors: false,
+    providers: [
+      {
+        provide: ErrorHandler,
+        useValue: {
+          handleError: (error: unknown) =>
+            reported.push({ error, claimed: false }),
+        },
+      },
+    ],
+  })
+})
+
+afterEach(() => {
+  expect(
+    reported.filter(({ claimed }) => !claimed).map(({ error }) => error),
+    `errors reported to ErrorHandler that no read observed`,
+  ).toEqual([])
+})
+
+function rethrowReported(result: any): void {
+  const entry = reported.slice(reportedSince.get(result) ?? 0)[0]
+  if (entry) {
+    entry.claimed = true
+    throw entry.error
+  }
+}
+
 function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
   return {
     collection: () => result.collection(),
     current(): ConformanceResult {
+      rethrowReported(result)
       return expectResultSurface({
         data: result.data(),
         state: result.state(),
@@ -161,10 +210,14 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
         isEnabled: result.status() !== `disabled`,
       })
     },
-    flush: settle,
+    async flush() {
+      await settle()
+      rethrowReported(result)
+    },
     async apply(fn: () => void) {
       fn()
       await settle()
+      rethrowReported(result)
     },
     unmount() {
       destroy()
@@ -174,6 +227,7 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
 
 function inCtx(fn: () => any): { result: any; destroy: () => void } {
   const parent = TestBed.inject(EnvironmentInjector)
+  const since = reported.length
   const injector = createEnvironmentInjector([], parent)
   let result: any
   withScopeSetup(
@@ -183,6 +237,7 @@ function inCtx(fn: () => any): { result: any; destroy: () => void } {
       }),
     () => injector.destroy(),
   )
+  if (result && typeof result === `object`) reportedSince.set(result, since)
   return { result, destroy: () => injector.destroy() }
 }
 
@@ -196,7 +251,10 @@ function mountCollection(collection: any) {
   return makeHandle(result, destroy)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const { result, destroy } = inCtx(() =>
     injectLiveQuery({ query: build, ...opts }),
   )
@@ -211,19 +269,33 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const param = signal<P>(initial)
-  const { result, destroy } = inCtx(() =>
-    injectLiveQuery({
+  const published = createPublicationLog()
+  const { result, destroy } = inCtx(() => {
+    const query = injectLiveQuery({
       params: () => ({ value: param() }),
       query: ({ params, q }: any) => build(q, params.value),
-    }),
-  )
+      pool: opts?.pool,
+    })
+    // Angular renders the value each effect run reads.
+    effect(() => {
+      published.record(query.data(), query.state())
+    })
+    return query
+  })
   const handle = makeHandle(result, destroy)
   return {
     ...handle,
+    publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param.set(next)
+      // The first paint after the change: the framework has flushed its
+      // reactive work, but no later task has run.
+      TestBed.tick()
+      published.record(result.data(), result.state())
       await settle()
     },
   }
@@ -231,8 +303,10 @@ function mountControllable<P>(
 
 const angularDriver: LiveQueryDriver = {
   name: `angular`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

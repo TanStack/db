@@ -11,4 +11,4 @@ type From =
   | UnionAll;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L39)
+Defined in: [packages/db/src/query/ir.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L44)

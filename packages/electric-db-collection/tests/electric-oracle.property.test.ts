@@ -20,6 +20,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { createMockStream } from './electric-stream-mock'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import {
   applyRetryModel,
@@ -110,6 +111,7 @@ const mockSubscribe = vi.fn()
 const shapeId = `{"params":{"table":"test_table"},"url":"http://test-url"}`
 const mockStream = {
   subscribe: mockSubscribe,
+  unsubscribeAll: vi.fn(),
   requestSnapshot: vi.fn().mockResolvedValue(undefined),
   fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
   forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
@@ -136,7 +138,9 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => mockStream),
+    // Full SDK release clears this stream's callback, including when another
+    // Collection has a separate stream using these shared request mocks.
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
 })
 
@@ -2753,7 +2757,9 @@ async function runSchedulerPermutation(
   } finally {
     await collection.cleanup()
     vi.mocked(ShapeStream).mockReset()
-    vi.mocked(ShapeStream).mockImplementation(() => mockStream as never)
+    vi.mocked(ShapeStream).mockImplementation(
+      () => createMockStream(mockStream) as never,
+    )
   }
 }
 

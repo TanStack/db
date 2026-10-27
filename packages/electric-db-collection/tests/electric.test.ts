@@ -10,6 +10,7 @@ import {
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
+import { createMockStream } from './electric-stream-mock'
 import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
@@ -44,6 +45,7 @@ const mockFetchSnapshot = vi.fn()
 const mockForceDisconnectAndRefresh = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
+  unsubscribeAll: vi.fn(),
   requestSnapshot: mockRequestSnapshot,
   fetchSnapshot: mockFetchSnapshot,
   forceDisconnectAndRefresh: mockForceDisconnectAndRefresh,
@@ -56,8 +58,27 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => mockStream),
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
+})
+
+describe(`Electric stream mock`, () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it.each([false, true])(
+    `retires its mock callback when release occurs during subscribe: %s`,
+    (duringSubscribe) => {
+      const stream = createMockStream(mockStream)
+      const release = vi.fn()
+      mockSubscribe.mockImplementationOnce(() => {
+        if (duringSubscribe) stream.unsubscribeAll()
+        return release
+      })
+      stream.subscribe(() => {})
+      if (!duringSubscribe) stream.unsubscribeAll()
+      expect(release).toHaveBeenCalledOnce()
+    },
+  )
 })
 
 describe(`Electric Integration`, () => {

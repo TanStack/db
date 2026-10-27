@@ -1159,6 +1159,8 @@ export class CollectionImpl<
 
   /**
    * Subscribe to changes in the collection
+   * Ordinary subscriptions throw during active cleanup. Wait for cleanup()
+   * to settle before subscribing or resuming deferred acquisition.
    * Changes to the same key retain their causal order within a callback.
    * Changes to different keys have no promised order within a callback.
    * @param callback - Function called when items change

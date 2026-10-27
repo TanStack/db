@@ -308,6 +308,26 @@ presence of a preferred heading, class, comment template, or helper.
 - **Not required:** A declared state for every modeled transition. Declare the
   states that the cited laws need, so that reach stays honest about scope.
 
+### ORC-016: Law-only oracle files
+
+- **Trigger:** A file defines an oracle, its input grammar, or a generated
+  campaign, including a compile-time type oracle.
+- **Obligation:** The file MUST NOT contain ordinary example-based unit tests
+  or standalone concrete type assertions. Fixed regressions MUST be inputs to
+  the same independent model, production driver, and comparison used by the
+  broader campaign. They MUST NOT restate their expected answers. A type
+  oracle MUST apply a reusable independent type law to generated legal inputs.
+- **Acceptance evidence:** A reviewer can vary the input without adding an
+  expectation. Every retained regression and receiving driver uses the shared
+  judgment. Checker calibration supplies deliberately wrong observations to
+  that judgment.
+- **Does not satisfy:** Renaming a unit test, adding contract prose, enumerating
+  fixtures with separate assertions, or wrapping fixed expectations in a
+  property runner.
+- **Not required:** Removing supplemental unit tests from ordinary test files,
+  randomizing a deliberately exhaustive finite grammar, or executing runtime
+  behavior to establish a source-level type law.
+
 ## A quick start
 
 One way to supply that judgment is a small reference model. For a simple stateful test, choose a legal action, apply it to production and the reference, and compare the promised result at the agreed point. “After the action returns” may be the right point for one API; a callback during that action may matter for another.
@@ -369,9 +389,10 @@ Two small examples show the form:
 Use `oracle` in filenames that own an independent expected-result computation,
 state model, differential or metamorphic comparison, or reusable law checker.
 A separate module that defines that model, checker, or its history grammar also
-qualifies. Identify the mechanism in the code before applying the name. A mixed
-test file can qualify through a specific oracle inside it; its other tests do
-not thereby become separate oracles.
+qualifies. Identify the mechanism in the code before applying the name.
+ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
+files. Fixed regressions replay the shared law; supplemental examples live in
+ordinary test files.
 
 An ordinary example or regression does not need this suffix merely because it
 asserts a contract. The same applies to concrete type assertions, fixtures,

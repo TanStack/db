@@ -1,7 +1,11 @@
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 
 type RootRow = { id: string }
@@ -98,22 +102,28 @@ export async function createNestedCollectionFixture(
       const live = createLiveQueryCollection((q) =>
         q.from({ root: sources.roots }).select(({ root }) => ({
           id: root.id,
-          branches: q
-            .from({ branch: sources.branches })
-            .where(({ branch }) => eq(branch.rootId, root.id))
-            .select(({ branch }) => ({
-              id: branch.id,
-              twigs: q
-                .from({ twig: sources.twigs })
-                .where(({ twig }) => eq(twig.branchId, branch.id))
-                .select(({ twig }) => ({
-                  id: twig.id,
-                  leaves: q
-                    .from({ leaf: sources.leaves })
-                    .where(({ leaf }) => eq(leaf.twigId, twig.id))
-                    .select(({ leaf }) => ({ id: leaf.id })),
-                })),
-            })),
+          branches: include(
+            q
+              .from({ branch: sources.branches })
+              .where(({ branch }) => eq(branch.rootId, root.id))
+              .select(({ branch }) => ({
+                id: branch.id,
+                twigs: include(
+                  q
+                    .from({ twig: sources.twigs })
+                    .where(({ twig }) => eq(twig.branchId, branch.id))
+                    .select(({ twig }) => ({
+                      id: twig.id,
+                      leaves: include(
+                        q
+                          .from({ leaf: sources.leaves })
+                          .where(({ leaf }) => eq(leaf.twigId, twig.id))
+                          .select(({ leaf }) => ({ id: leaf.id })),
+                      ),
+                    })),
+                ),
+              })),
+          ),
         })),
       )
 
