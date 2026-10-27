@@ -770,9 +770,15 @@ storage never held.
   without a hold pass in under 120 ms. Refuted: a Node timer firing before
   the entry's wall-clock deadline (a timer set after a 50 ms busy task fired
   12 ms later), and a wait on a held receipt (no step of the expiry awaits
-  one). Next witness: drive these witnesses with fake timers, so `vi.waitFor`
-  advances time itself, and record which step of the expiry is skipped when
-  it fails. Owner: this pull request.
+  one). The witnesses now trace each timer Query DB sets during the test
+  (where it was set, whether it fired, what cleared it) and each Query
+  fetch, and a failed retention wait prints that trace. With it, the
+  witnesses passed on CI at `543d29066` and in four local runs of CI's
+  collections command. Deferred by the maintainer on 2026-10-27: the pull
+  request merges with the race open ("it'll eventually fail at which point
+  we can fix it"). Resume when a failure reports its trace; the trace
+  names the step to fix, in production if a valid expiry was cancelled, or
+  in the witness if only its timing raced.
 
 Nothing else in this bug class is known to be open. The limits in the
 evidence block still apply.

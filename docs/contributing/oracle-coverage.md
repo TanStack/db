@@ -3064,8 +3064,9 @@ causes is a storage read too: its truncate replaces rows without
 truncating source authority, so rows no source wrote keep their seed status
 (decisions 9, 11, and 15). The persisted oracle's receiving witnesses cover peer writes and
 those reload routes; no grammar dimension generates a peer. Two held-cleanup
-Query retention witnesses race on CI; the review record's "Open" section
-holds the evidence and the next witness. Restart and resume reads belong to the
+Query retention witnesses race on CI; the maintainer deferred the race until
+a failure reports the timer trace these witnesses now print, and the review
+record's "Open" section holds the evidence. Restart and resume reads belong to the
 SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
 with one sync run.
 ## Deferred contracts and evidence
