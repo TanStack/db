@@ -53,7 +53,7 @@ class ControlledWorker {
   private readonly listeners = new Set<
     (event: MessageEvent<BrowserOPFSWorkerResponse>) => void
   >()
-  private readonly errorListeners = new Set<(event: Event) => void>()
+  private readonly errorListeners = new Set<(event: MessageEvent) => void>()
 
   constructor() {
     ControlledWorker.constructorCalls++
@@ -64,7 +64,9 @@ class ControlledWorker {
     if (ControlledWorker.history.workerStart === `fails to load`) {
       // The browser reports a script that fails to load after construction.
       queueMicrotask(() => {
-        for (const listener of this.errorListeners) listener(new Event(`error`))
+        for (const listener of this.errorListeners) {
+          listener(new Event(`error`) as MessageEvent)
+        }
       })
     }
   }
