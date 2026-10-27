@@ -6,8 +6,8 @@ import { DuplicateKeySyncError } from '../src/errors.js'
 import { createOracleReach } from './oracle-reach.js'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
 import {
   absentMarker,
@@ -799,8 +799,6 @@ describe(`sync metadata session oracle`, () => {
 // Campaigns
 // ---------------------------------------------------------------------------
 
-const requestedReplayProperty = readOracleRunConfig().replayProperty
-
 /**
  * Grammar ablation: each generated axis exists for a regime. Removing the
  * axis must remove its regime from the fixed campaign, or the axis adds
@@ -987,29 +985,23 @@ describe(`sync metadata session hold invariance`, () => {
       )
       if (mismatch) throw new Error(describeMismatch(history, mismatch))
     }
-    if (requestedReplayProperty === undefined) {
-      fcTest.prop([sessionHistoryArbitrary(lane)], {
-        numRuns: oracleRuns(50),
-        seed: seed + 100,
-      })(
-        `keeps ${lane.name} source reads independent of holds (fixed)`,
-        run,
-        60_000,
-      )
-      fcTest.prop(
-        [sessionHistoryArbitrary(lane)],
-        oraclePropertyOptions(50, invariance),
-      )(
-        `keeps ${lane.name} source reads independent of holds (random)`,
-        run,
-        60_000,
-      )
-    } else if (requestedReplayProperty === invariance) {
-      fcTest.prop(
-        [sessionHistoryArbitrary(lane)],
-        oraclePropertyOptions(50, invariance),
-      )(`replays ${lane.name} hold invariance`, run, 60_000)
-    }
+    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(lane)], {
+      numRuns: oracleRuns(50),
+      seed: seed + 100,
+    })(
+      `keeps ${lane.name} source reads independent of holds (fixed)`,
+      run,
+      60_000,
+    )
+    // A path replay of this property runs here.
+    oracleReplayTest(fcTest, invariance).prop(
+      [sessionHistoryArbitrary(lane)],
+      oraclePropertyOptions(50, invariance),
+    )(
+      `keeps ${lane.name} source reads independent of holds (random)`,
+      run,
+      60_000,
+    )
   }
 })
 
@@ -1042,29 +1034,15 @@ describe(`sync metadata session paired formulations`, () => {
         )
         if (mismatch) throw new Error(describeMismatch(history, mismatch))
       }
-      if (requestedReplayProperty === undefined) {
-        fcTest.prop([sessionHistoryArbitrary(lane)], {
-          numRuns: oracleRuns(50),
-          seed: seed + 200,
-        })(
-          `${formulation.title} on ${lane.name} histories (fixed)`,
-          run,
-          60_000,
-        )
-        fcTest.prop(
-          [sessionHistoryArbitrary(lane)],
-          oraclePropertyOptions(50, name),
-        )(
-          `${formulation.title} on ${lane.name} histories (random)`,
-          run,
-          60_000,
-        )
-      } else if (requestedReplayProperty === name) {
-        fcTest.prop(
-          [sessionHistoryArbitrary(lane)],
-          oraclePropertyOptions(50, name),
-        )(`replays ${lane.name} ${formulation.suffix}`, run, 60_000)
-      }
+      oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(lane)], {
+        numRuns: oracleRuns(50),
+        seed: seed + 200,
+      })(`${formulation.title} on ${lane.name} histories (fixed)`, run, 60_000)
+      // A path replay of this property runs here.
+      oracleReplayTest(fcTest, name).prop(
+        [sessionHistoryArbitrary(lane)],
+        oraclePropertyOptions(50, name),
+      )(`${formulation.title} on ${lane.name} histories (random)`, run, 60_000)
     }
 })
 
@@ -1073,30 +1051,26 @@ describe(`sync metadata session campaigns`, () => {
     const { lane, property, seed } = entry
     const run = (history: Array<SessionAction>) =>
       assertSessionHistory(lane, history)
-    if (requestedReplayProperty === undefined) {
-      const reach = createLaneReach(lane, property)
-      fcTest.prop([sessionHistoryArbitrary(lane)], {
-        numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
-        seed,
-      })(
-        `keeps the session law on ${lane.name} histories (fixed)`,
-        (history) => {
-          reach.record(history)
-          return run(history)
-        },
-        120_000,
-      )
-      it(`reaches the declared states in the ${lane.name} fixed campaign`, () =>
-        reach.assertReached())
-      fcTest.prop(
-        [sessionHistoryArbitrary(lane)],
-        oraclePropertyOptions(100, property),
-      )(`keeps the session law on ${lane.name} histories (random)`, run, 60_000)
-    } else if (requestedReplayProperty === property) {
-      fcTest.prop(
-        [sessionHistoryArbitrary(lane)],
-        oraclePropertyOptions(100, property),
-      )(`replays ${lane.name} session histories`, run, 60_000)
-    }
+    const reach = createLaneReach(lane, property)
+    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(lane)], {
+      numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
+      seed,
+    })(
+      `keeps the session law on ${lane.name} histories (fixed)`,
+      (history) => {
+        reach.record(history)
+        return run(history)
+      },
+      120_000,
+    )
+    oracleReplayTest(it)(
+      `reaches the declared states in the ${lane.name} fixed campaign`,
+      () => reach.assertReached(),
+    )
+    // A path replay of this property runs here.
+    oracleReplayTest(fcTest, property).prop(
+      [sessionHistoryArbitrary(lane)],
+      oraclePropertyOptions(100, property),
+    )(`keeps the session law on ${lane.name} histories (random)`, run, 60_000)
   }
 })
