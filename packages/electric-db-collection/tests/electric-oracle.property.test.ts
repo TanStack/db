@@ -4637,8 +4637,6 @@ declareOracle({
     runRejectedDurablePrefixWitness,
     runPublicationBeforePersistenceWitness,
     runPersistenceFailureCrashOnlyWitness,
-    runPersistedTrace,
-    runQueryTrace,
     assertPublicationEpochHistory,
     runSchedulerPermutation,
     runPersistenceInterleavingCampaign,
