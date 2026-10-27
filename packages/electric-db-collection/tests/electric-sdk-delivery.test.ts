@@ -270,205 +270,200 @@ it(`does not certify an aborted SDK subset snapshot`, async () => {
  * the installed ShapeStream and HTTP path. A Map-backed adapter supplies the
  * generation boundary; real SQLite and native hosts have separate owners.
  */
-// prettier-ignore
-it(
-  `discards an old SDK snapshot after managed cache rotation`,
-  async () => {
-    const http = controlledHttp()
-    const rows = new Map<string, Map<number, Item>>([
-      [`old-generation`, new Map()],
-    ])
-    const metadata = new Map<string, Map<string, unknown>>([
-      [`old-generation`, new Map()],
-    ])
-    let storageId = `old-generation`
-    let claimExpired = false
-    let rotations = 0
-    const claimId = `managed-sdk-claim`
-    const adapter: PersistenceAdapter = {
-      claimCacheGeneration: () =>
-        Promise.resolve({
-          storageCollectionId: storageId,
-          claimId,
-          expiresAtMs: Date.now() + 10_000,
-        }),
-      renewCacheGenerationClaim: () =>
-        Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
-      rotateCacheGeneration: (
-        _collectionId,
-        _claimId,
-        resetMetadata,
-        expectedStorageId,
-      ) => {
-        expect(expectedStorageId).toBe(storageId)
-        rotations++
-        storageId = `new-generation`
-        rows.set(storageId, new Map())
-        metadata.set(
-          storageId,
-          new Map(
-            resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
-          ),
-        )
-        claimExpired = false
-        return Promise.resolve({
-          storageCollectionId: storageId,
-          claimId,
-          expiresAtMs: Date.now() + 10_000,
-        })
-      },
-      releaseCacheGenerationClaim: async () => {},
-      loadSubset: (id) =>
-        Promise.resolve(
-          Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
+it(`discards an old SDK snapshot after managed cache rotation`, async () => {
+  const http = controlledHttp()
+  const rows = new Map<string, Map<number, Item>>([
+    [`old-generation`, new Map()],
+  ])
+  const metadata = new Map<string, Map<string, unknown>>([
+    [`old-generation`, new Map()],
+  ])
+  let storageId = `old-generation`
+  let claimExpired = false
+  let rotations = 0
+  const claimId = `managed-sdk-claim`
+  const adapter: PersistenceAdapter = {
+    claimCacheGeneration: () =>
+      Promise.resolve({
+        storageCollectionId: storageId,
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
+      }),
+    renewCacheGenerationClaim: () =>
+      Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
+    rotateCacheGeneration: (
+      _collectionId,
+      _claimId,
+      resetMetadata,
+      expectedStorageId,
+    ) => {
+      expect(expectedStorageId).toBe(storageId)
+      rotations++
+      storageId = `new-generation`
+      rows.set(storageId, new Map())
+      metadata.set(
+        storageId,
+        new Map(
+          resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
+        ),
+      )
+      claimExpired = false
+      return Promise.resolve({
+        storageCollectionId: storageId,
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
+      })
+    },
+    releaseCacheGenerationClaim: async () => {},
+    loadSubset: (id) =>
+      Promise.resolve(
+        Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
+          key,
+          value,
+        })),
+      ),
+    loadResumeSnapshot: (id) =>
+      Promise.resolve({
+        rows: Array.from(
+          rows.get(storageTargetId(id)) ?? [],
+          ([key, value]) => ({
             key,
             value,
-          })),
-        ),
-      loadResumeSnapshot: (id) =>
-        Promise.resolve({
-          rows: Array.from(
-            rows.get(storageTargetId(id)) ?? [],
-            ([key, value]) => ({
-              key,
-              value,
-            }),
-          ),
-          keySet: {
-            status:
-              storageTargetId(id) === `old-generation`
-                ? `consistent`
-                : `incompatible`,
-          },
-          collectionMetadata: Array.from(
-            metadata.get(storageTargetId(id)) ?? [],
-            ([key, value]) => ({ key, value }),
-          ),
-          latestTerm: 0,
-          latestSeq: 0,
-          latestRowVersion: 0,
-          resetEpoch: 0,
-        }),
-      applyCommittedTx: (id, tx) => {
-        expect(tx.cacheGenerationClaimId).toBe(claimId)
-        const generationRows = rows.get(storageTargetId(id))!
-        if (tx.truncate) generationRows.clear()
-        for (const mutation of tx.mutations) {
-          if (mutation.type === `delete`) {
-            generationRows.delete(Number(mutation.key))
-          } else {
-            generationRows.set(Number(mutation.key), mutation.value as Item)
-          }
-        }
-        const generationMetadata = metadata.get(storageTargetId(id))!
-        for (const mutation of tx.collectionMetadataMutations ?? []) {
-          if (mutation.type === `delete`)
-            generationMetadata.delete(mutation.key)
-          else generationMetadata.set(mutation.key, mutation.value)
-        }
-        return Promise.resolve()
-      },
-      ensureIndex: async () => {},
-    }
-    const electric = electricCollectionOptions<Item>({
-      id: `sdk-managed-restart-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/managed-restart-${sequence}`,
-        params: { table: `rows` },
-        // A provider can finish an HTTP request after stream retirement.
-        fetchClient: (input, init) =>
-          http.fetchClient(input, { ...init, signal: undefined }),
-      },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        Item,
-        string | number,
-        never,
-        ElectricCollectionUtils<Item>
-      >({
-        ...electric,
-        persistence: { adapter },
-      }),
-    )
-    const demand = (id: number) => ({
-      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
-    })
-    const respond = (request: Request, row: Item | undefined, offset: number) =>
-      request.respond(
-        new Response(
-          JSON.stringify({
-            metadata: {
-              xmin: `10`,
-              xmax: `20`,
-              xip_list: [],
-              database_lsn: `10`,
-              snapshot_mark: offset,
-            },
-            data: row
-              ? [
-                  {
-                    key: String(row.id),
-                    value: { ...row, id: String(row.id) },
-                    headers: { operation: `insert` },
-                  },
-                ]
-              : [],
           }),
-          { headers: headers(offset) },
         ),
-      )
+        keySet: {
+          status:
+            storageTargetId(id) === `old-generation`
+              ? `consistent`
+              : `incompatible`,
+        },
+        collectionMetadata: Array.from(
+          metadata.get(storageTargetId(id)) ?? [],
+          ([key, value]) => ({ key, value }),
+        ),
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+    applyCommittedTx: (id, tx) => {
+      expect(tx.cacheGenerationClaimId).toBe(claimId)
+      const generationRows = rows.get(storageTargetId(id))!
+      if (tx.truncate) generationRows.clear()
+      for (const mutation of tx.mutations) {
+        if (mutation.type === `delete`) {
+          generationRows.delete(Number(mutation.key))
+        } else {
+          generationRows.set(Number(mutation.key), mutation.value as Item)
+        }
+      }
+      const generationMetadata = metadata.get(storageTargetId(id))!
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`) generationMetadata.delete(mutation.key)
+        else generationMetadata.set(mutation.key, mutation.value)
+      }
+      return Promise.resolve()
+    },
+    ensureIndex: async () => {},
+  }
+  const electric = electricCollectionOptions<Item>({
+    id: `sdk-managed-restart-${++sequence}`,
+    shapeOptions: {
+      url: `http://test-url/managed-restart-${sequence}`,
+      params: { table: `rows` },
+      // A provider can finish an HTTP request after stream retirement.
+      fetchClient: (input, init) =>
+        http.fetchClient(input, { ...init, signal: undefined }),
+    },
+    syncMode: `on-demand`,
+    startSync: true,
+    getKey: (row) => row.id,
+  })
+  const collection = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      ElectricCollectionUtils<Item>
+    >({
+      ...electric,
+      persistence: { adapter },
+    }),
+  )
+  const demand = (id: number) => ({
+    where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+  })
+  const respond = (request: Request, row: Item | undefined, offset: number) =>
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: offset,
+          },
+          data: row
+            ? [
+                {
+                  key: String(row.id),
+                  value: { ...row, id: String(row.id) },
+                  headers: { operation: `insert` },
+                },
+              ]
+            : [],
+        }),
+        { headers: headers(offset) },
+      ),
+    )
 
-    await withElectricCleanup(async () => {
-      await atCheckpoint(http.take(), `old managed stream`)
-      const oldDemand = Promise.resolve(collection._sync.loadSubset(demand(1)))
-      void oldDemand.catch(() => undefined)
-      const oldSnapshot = await atCheckpoint(
-        http.take(true),
-        `old managed subset snapshot`,
-      )
+  await withElectricCleanup(async () => {
+    await atCheckpoint(http.take(), `old managed stream`)
+    const oldDemand = Promise.resolve(collection._sync.loadSubset(demand(1)))
+    void oldDemand.catch(() => undefined)
+    const oldSnapshot = await atCheckpoint(
+      http.take(true),
+      `old managed subset snapshot`,
+    )
 
-      claimExpired = true
-      const newDemand = Promise.resolve(collection._sync.loadSubset(demand(2)))
-      void newDemand.catch(() => undefined)
-      await vi.waitFor(() => expect(rotations).toBe(1))
-      expect(storageId).toBe(`new-generation`)
+    claimExpired = true
+    const newDemand = Promise.resolve(collection._sync.loadSubset(demand(2)))
+    void newDemand.catch(() => undefined)
+    await vi.waitFor(() => expect(rotations).toBe(1))
+    expect(storageId).toBe(`new-generation`)
 
-      // The replacement SDK first reacquires the old demand, then the new one.
-      // Empty source snapshots for id 1 distinguish source authority from the
-      // old request's late row; the id 2 snapshot establishes the new row.
-      respond(
-        await atCheckpoint(http.take(true), `first replacement snapshot`),
-        undefined,
-        2,
-      )
-      respond(
-        await atCheckpoint(http.take(true), `replayed old demand`),
-        undefined,
-        3,
-      )
-      respond(
-        await atCheckpoint(http.take(true), `new demand snapshot`),
-        { id: 2, name: `fresh` },
-        4,
-      )
-      await atCheckpoint(
-        Promise.all([oldDemand, newDemand]),
-        `replacement demand settlement`,
-      )
-      expect(collection.get(2)?.name).toBe(`fresh`)
+    // The replacement SDK first reacquires the old demand, then the new one.
+    // Empty source snapshots for id 1 distinguish source authority from the
+    // old request's late row; the id 2 snapshot establishes the new row.
+    respond(
+      await atCheckpoint(http.take(true), `first replacement snapshot`),
+      undefined,
+      2,
+    )
+    respond(
+      await atCheckpoint(http.take(true), `replayed old demand`),
+      undefined,
+      3,
+    )
+    respond(
+      await atCheckpoint(http.take(true), `new demand snapshot`),
+      { id: 2, name: `fresh` },
+      4,
+    )
+    await atCheckpoint(
+      Promise.all([oldDemand, newDemand]),
+      `replacement demand settlement`,
+    )
+    expect(collection.get(2)?.name).toBe(`fresh`)
 
-      respond(oldSnapshot, { id: 1, name: `late-old` }, 1)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(collection.get(1)).toBeUndefined()
-      expect(collection.get(2)?.name).toBe(`fresh`)
-      expect([...rows.get(`new-generation`)!.keys()]).toEqual([2])
-    }, [() => collection.cleanup(), () => http.close()])
-  },
-)
+    respond(oldSnapshot, { id: 1, name: `late-old` }, 1)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(collection.get(1)).toBeUndefined()
+    expect(collection.get(2)?.name).toBe(`fresh`)
+    expect([...rows.get(`new-generation`)!.keys()]).toEqual([2])
+  }, [() => collection.cleanup(), () => http.close()])
+})
 
 /**
  * An expired run can rotate without Electric reset metadata, then persist one
@@ -609,84 +604,80 @@ it.each([
  * overwrite a later row and regress that cursor. The SDK method invocation is
  * the checkpoint, while public rows verify both acquisitions still apply.
  */
-// prettier-ignore
-it(
-  `serializes concurrent subset snapshots on one SDK stream`,
-  async () => {
-    const http = controlledHttp()
-    const requestSnapshot = vi.spyOn(ShapeStream.prototype, `requestSnapshot`)
-    const collection = createCollection(
-      electricCollectionOptions<Item>({
-        id: `sdk-ordered-snapshots-${++sequence}`,
-        shapeOptions: {
-          url: `http://test-url/ordered-snapshots-${sequence}`,
-          params: { table: `rows` },
-          fetchClient: http.fetchClient,
-        },
-        syncMode: `on-demand`,
-        startSync: true,
-        getKey: (row) => row.id,
-      }),
-    )
-    const demand = (id: number) => ({
-      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
-    })
-    const respond = (request: Request, id: number) =>
-      request.respond(
-        new Response(
-          JSON.stringify({
-            metadata: {
-              xmin: `10`,
-              xmax: `20`,
-              xip_list: [],
-              database_lsn: `10`,
-              snapshot_mark: id,
+it(`serializes concurrent subset snapshots on one SDK stream`, async () => {
+  const http = controlledHttp()
+  const requestSnapshot = vi.spyOn(ShapeStream.prototype, `requestSnapshot`)
+  const collection = createCollection(
+    electricCollectionOptions<Item>({
+      id: `sdk-ordered-snapshots-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/ordered-snapshots-${sequence}`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    }),
+  )
+  const demand = (id: number) => ({
+    where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+  })
+  const respond = (request: Request, id: number) =>
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: id,
+          },
+          data: [
+            {
+              key: String(id),
+              value: { id: String(id), name: `row-${id}` },
+              headers: { operation: `insert` },
             },
-            data: [
-              {
-                key: String(id),
-                value: { id: String(id), name: `row-${id}` },
-                headers: { operation: `insert` },
-              },
-            ],
-          }),
-          { headers: headers(id + 1) },
-        ),
-      )
-    await withElectricCleanup(async () => {
-      await atCheckpoint(http.take(), `initial ordered-snapshot transport`)
-      const first = Promise.resolve(collection._sync.loadSubset(demand(1)))
-      const second = Promise.resolve(collection._sync.loadSubset(demand(2)))
-      const firstRequest = await atCheckpoint(
-        http.take(true),
-        `first ordered snapshot`,
-      )
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(
-        requestSnapshot,
-        `second snapshot waits for first`,
-      ).toHaveBeenCalledTimes(1)
-      respond(firstRequest, 1)
-      await atCheckpoint(first, `first ordered snapshot applied`)
-      const secondRequest = await atCheckpoint(
-        http.take(true),
-        `second ordered snapshot`,
-      )
-      expect(requestSnapshot).toHaveBeenCalledTimes(2)
-      respond(secondRequest, 2)
-      await atCheckpoint(second, `second ordered snapshot applied`)
-      expect(collection.toArray.map(({ id, name }) => ({ id, name }))).toEqual([
-        { id: 1, name: `row-1` },
-        { id: 2, name: `row-2` },
-      ])
-    }, [
-      () => collection.cleanup(),
-      () => http.close(),
-      () => requestSnapshot.mockRestore(),
-      () => expect(http.activeCount()).toBe(0),
+          ],
+        }),
+        { headers: headers(id + 1) },
+      ),
+    )
+  await withElectricCleanup(async () => {
+    await atCheckpoint(http.take(), `initial ordered-snapshot transport`)
+    const first = Promise.resolve(collection._sync.loadSubset(demand(1)))
+    const second = Promise.resolve(collection._sync.loadSubset(demand(2)))
+    const firstRequest = await atCheckpoint(
+      http.take(true),
+      `first ordered snapshot`,
+    )
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(
+      requestSnapshot,
+      `second snapshot waits for first`,
+    ).toHaveBeenCalledTimes(1)
+    respond(firstRequest, 1)
+    await atCheckpoint(first, `first ordered snapshot applied`)
+    const secondRequest = await atCheckpoint(
+      http.take(true),
+      `second ordered snapshot`,
+    )
+    expect(requestSnapshot).toHaveBeenCalledTimes(2)
+    respond(secondRequest, 2)
+    await atCheckpoint(second, `second ordered snapshot applied`)
+    expect(collection.toArray.map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: 1, name: `row-1` },
+      { id: 2, name: `row-2` },
     ])
-  },
-)
+  }, [
+    () => collection.cleanup(),
+    () => http.close(),
+    () => requestSnapshot.mockRestore(),
+    () => expect(http.activeCount()).toBe(0),
+  ])
+})
 
 /**
  * Restart demand must remain legal when recovery changes provider capability.
