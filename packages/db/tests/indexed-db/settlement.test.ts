@@ -1,5 +1,7 @@
 /**
- * Persistence boundary oracle.
+ * Persistence boundary tests. This file declares no check or model. Each cell
+ * compares with authored before and after snapshots and a literal decision, and
+ * generates no histories, so it is supplemental coverage rather than an oracle.
  *
  * Authority: Collection handlers determine optimistic success/failure;
  * acceptMutations accepts only its Collection's mutations; IndexedDB transactions
