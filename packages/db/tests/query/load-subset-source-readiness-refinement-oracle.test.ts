@@ -8,7 +8,9 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
+import { declareOracle } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
+import { finishCleanup } from './load-subset-source-readiness-support.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
 /**
@@ -45,35 +47,7 @@ function expectedRows(
   ]
 }
 
-async function finishCleanup(
-  primaryFailure: { error: unknown } | undefined,
-  phases: ReadonlyArray<
-    ReadonlyArray<{ name: string; run: () => Promise<unknown> }>
-  >,
-): Promise<void> {
-  const cleanupErrors: Array<Error> = []
-  for (const phase of phases) {
-    const results = await Promise.allSettled(
-      phase.map(({ run }) => Promise.resolve().then(run)),
-    )
-    for (const [index, result] of results.entries()) {
-      if (result.status === `rejected`) {
-        cleanupErrors.push(
-          new Error(`${phase[index]!.name} cleanup failed`, {
-            cause: result.reason,
-          }),
-        )
-      }
-    }
-  }
-  if (cleanupErrors.length > 0) {
-    throw new AggregateError(
-      cleanupErrors,
-      `Oracle cleanup failed`,
-      primaryFailure && { cause: primaryFailure.error },
-    )
-  }
-}
+declareOracle({ model: [expectedRows] })
 
 it.each([
   { oldOutcome: `resolve`, settlementOrder: `old-first` },
@@ -355,121 +329,3 @@ it.each([
  * right source then either completes the join, fails preload, or is abandoned
  * by cleanup. The controlled adapters hold only delivery, not a real provider.
  */
-it.each([`resolve`, `reject`, `cleanup`] as const)(
-  `matches cross-source initial readiness through %s`,
-  async (secondOutcome) => {
-    const leftId = `readiness-left-${secondOutcome}`
-    const rightId = `readiness-right-${secondOutcome}`
-    const leftDelivery = createDeferred<void>()
-    const rightDelivery = createDeferred<void>()
-    const createSource = (
-      id: string,
-      row: Row,
-      delivery: ReturnType<typeof createDeferred<void>>,
-    ) =>
-      createCollection<Row>({
-        id,
-        getKey: (value) => value.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: () =>
-                delivery.promise.then(async () => {
-                  begin()
-                  write({ type: `insert`, value: row })
-                  const applied = commit()
-                  if (applied !== true) await applied
-                  return
-                }),
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-    const left = createSource(
-      leftId,
-      { id: `left`, group: `shared` },
-      leftDelivery,
-    )
-    const right = createSource(
-      rightId,
-      { id: `right`, group: `shared` },
-      rightDelivery,
-    )
-    const live = createLiveQueryCollection({
-      id: `readiness-live-${secondOutcome}`,
-      query: (q) =>
-        q
-          .from({ left })
-          .innerJoin({ right }, ({ left: leftRow, right: rightRow }) =>
-            eq(leftRow.group, rightRow.group),
-          )
-          .select(({ left: leftRow, right: rightRow }) => ({
-            leftId: leftRow.id,
-            rightId: rightRow.id,
-          })),
-      startSync: true,
-    })
-    const preload = live.preload()
-    void preload.catch(() => undefined)
-    let primaryFailure: { error: unknown } | undefined
-
-    try {
-      expect(live.status).toBe(`loading`)
-
-      leftDelivery.resolve()
-      await flushPromises()
-
-      expect(live.status).toBe(`loading`)
-      expect(live.toArray).toEqual([])
-
-      if (secondOutcome === `cleanup`) {
-        await live.cleanup()
-        expect(live.status).toBe(`cleaned-up`)
-        await expect(preload).rejects.toMatchObject({ name: `AbortError` })
-
-        // This late write probes terminal query status with a nonconforming
-        // source; a conforming request-scoped loader stops after cancellation.
-        rightDelivery.resolve()
-        await flushPromises()
-
-        expect(live.status).toBe(`cleaned-up`)
-        expect(live.toArray).toEqual([])
-        return
-      } else if (secondOutcome === `resolve`) {
-        rightDelivery.resolve()
-      } else {
-        rightDelivery.reject(new Error(`right source failed`))
-      }
-      await flushPromises()
-
-      expect(live.status).toBe(secondOutcome === `resolve` ? `ready` : `error`)
-      if (secondOutcome === `resolve`) {
-        await expect(preload).resolves.toBeUndefined()
-        expect(live.toArray).toEqual([
-          expect.objectContaining({ leftId: `left`, rightId: `right` }),
-        ])
-      } else {
-        await expect(preload).rejects.toThrow(`right source failed`)
-      }
-    } catch (error) {
-      primaryFailure = { error }
-      throw error
-    } finally {
-      leftDelivery.resolve()
-      rightDelivery.resolve()
-      await finishCleanup(primaryFailure, [
-        [{ name: `live query`, run: () => live.cleanup() }],
-        [
-          { name: `left source`, run: () => left.cleanup() },
-          { name: `right source`, run: () => right.cleanup() },
-        ],
-      ])
-    }
-  },
-)
