@@ -22,7 +22,7 @@
     "lint:changed": "node scripts/agent-lint-feedback.mjs",
     "lint:oracles": "node scripts/agent-lint-feedback.mjs --all",
     "lint:run-budgets": "node scripts/check-oracle-run-counts.mjs",
-    "test:lint-rules": "node --test \"scripts/eslint-plugin-oracle/*.test.js\"",
+    "test:lint-rules": "vitest run --config scripts/eslint-plugin-oracle/vitest.config.mjs",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test && pnpm --filter @tanstack/db test:indexed-db:package",

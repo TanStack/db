@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { RuleTester } from 'eslint'
 import tsParser from '@typescript-eslint/parser'
 import noUnitTest from './rules/no-unit-test.js'

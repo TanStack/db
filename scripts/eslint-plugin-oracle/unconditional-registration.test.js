@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { RuleTester } from 'eslint'
 import tsParser from '@typescript-eslint/parser'
 import noDisabled from './rules/no-disabled.js'
