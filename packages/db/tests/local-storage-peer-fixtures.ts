@@ -1,6 +1,6 @@
 // Shared fixtures for the LocalStorage peer tests: a fake same-origin Storage
-// host with its event bus, and Collections that share one key. The law that
-// peers converge is owned by local-storage-peer-oracle.test.ts.
+// host with its event bus, and Collections that share one key. The fixed peer
+// histories are in local-storage-peer-history.test.ts.
 import { createCollection } from '../src/collection/index'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import type { StorageApi, StorageEventApi } from '../src/local-storage'

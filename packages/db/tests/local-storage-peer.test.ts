@@ -1,7 +1,8 @@
 // Ordinary regression tests for LocalStorage same-tab peers, typed keys, and
 // adapter construction. Each test runs one fixed scenario and compares with
-// hand-written rows, reads, or Storage bytes. The peer convergence law and its
-// legal histories are owned by local-storage-peer-oracle.test.ts.
+// hand-written rows, reads, or Storage bytes. The peer convergence law has no
+// oracle owner yet (TanStack/db#2264); its fixed histories are in
+// local-storage-peer-history.test.ts.
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { LocalStorageCollectionError } from '../src/errors'

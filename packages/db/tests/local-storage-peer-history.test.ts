@@ -1,4 +1,8 @@
 /**
+ * Fixed LocalStorage peer histories. These tests state their expected rows by
+ * hand; `expectedRows` only copies and sorts them. They are not an oracle: the
+ * models described below are not yet executable (tracked in TanStack/db#2264).
+ *
  * A LocalStorage Collection stores whole snapshots under one key and receives
  * peer changes through storage events and same-tab publication. Active
  * Collections with fresh options that share one Storage object and key must
@@ -48,7 +52,6 @@ import { BasicIndex } from '../src/indexes/basic-index'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import { withHistoryCleanup } from './optimistic-history-oracle'
-import { declareOracle } from './oracle-config'
 import { createHost, makeCollection } from './local-storage-peer-fixtures'
 import type { StorageApi } from '../src/local-storage'
 import type { Row } from './local-storage-peer-fixtures'
@@ -61,8 +64,6 @@ function expectedRows(authored: ReadonlyArray<Row>): Array<Row> {
       `${typeof a.id}:${a.id}`.localeCompare(`${typeof b.id}:${b.id}`),
     )
 }
-
-declareOracle({ model: [expectedRows] })
 
 function publicRows(collection: ReturnType<typeof makeCollection>): Array<Row> {
   return expectedRows(
