@@ -945,6 +945,17 @@ function isPlaceholder(body) {
   )
 }
 
+/**
+ * The test module that a relative specifier names in `fromFile`, as this rule
+ * resolves it: undefined for production source, a package, or a missing file.
+ * The lint selection in scripts/agent-lint-feedback.mjs follows these edges, so
+ * an edit reaches the oracle files that this rule reads.
+ */
+const selectionSession = new LintSession()
+export function resolveImportedTestModule(fromFile, specifier) {
+  return resolveTestModule(fromFile, specifier, selectionSession)
+}
+
 export default {
   meta: {
     type: `problem`,

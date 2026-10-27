@@ -10,7 +10,8 @@
  * adapter per harness reads its hook input and writes its response format.
  *
  *   --format=claude|codex|gemini|copilot   the harness that runs the hook
- *   --event=edit   after an edit: lint the edited files
+ *   --event=edit   after an edit: lint the edited files' oracle files, and the
+ *                  oracle files that reach them through test-module imports
  *   --event=stop   at the end of a turn: lint every file the branch changed
  *   --format=text  print the reports and exit 1: `pnpm lint:changed` lints
  *                  the changed files, `pnpm lint:oracles` (`--all`) every
@@ -34,12 +35,13 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
 import oraclePlugin from './eslint-plugin-oracle/index.js'
+import { resolveImportedTestModule } from './eslint-plugin-oracle/rules/no-unit-test.js'
 import {
   describeLoweredRunBudget,
   loweredRunBudgets,
@@ -83,6 +85,63 @@ function repositoryFiles(...outputs) {
  */
 function trackedOracleFiles() {
   return repositoryFiles(git(`ls-files`, `*oracle*.ts`, `*oracle*.tsx`))
+}
+
+const isOracleFile = (file) => /oracle.*\.tsx?$/.test(basename(file))
+
+// A relative import or re-export. Reading too much is harmless: a specifier
+// that names no test module resolves to nothing.
+const relativeSpecifier =
+  /\b(?:from|import|require)\s*\(?\s*['"](\.{1,2}\/[^'"\n]*)['"]/g
+const dependencies = new Map()
+
+/** The test modules that a file imports or re-exports, as the rule resolves them. */
+function testModuleDependencies(file) {
+  if (!dependencies.has(file)) {
+    const found = existsSync(file)
+      ? [...readFileSync(file, `utf8`).matchAll(relativeSpecifier)]
+          .map(([, specifier]) => resolveImportedTestModule(file, specifier))
+          .filter((dependency) => dependency !== undefined)
+      : []
+    dependencies.set(file, found)
+  }
+  return dependencies.get(file)
+}
+
+/** Whether an oracle file is edited, or reaches an edited file through test modules. */
+function reachesEdited(oracle, edited) {
+  const seen = new Set([oracle])
+  const pending = [oracle]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (edited.has(current)) return true
+    for (const dependency of testModuleDependencies(current)) {
+      if (!seen.has(dependency)) {
+        seen.add(dependency)
+        pending.push(dependency)
+      }
+    }
+  }
+  return false
+}
+
+const pluginSources = join(root, `scripts`, `eslint-plugin-oracle`) + sep
+
+/**
+ * The oracle files that a lint of `files` must cover. The rule reads relative
+ * imports of test modules, so an oracle file is covered when it is named, or
+ * when it reaches a named file through test modules. Production files select
+ * nothing, because the rule does not follow them. A change to the rule's own
+ * sources changes every oracle result, so it selects every oracle file.
+ */
+function affectedOracleFiles(files) {
+  const edited = new Set(files)
+  const oracles = new Set(
+    [...trackedOracleFiles(), ...files].filter(isOracleFile),
+  )
+  if ([...edited].some((file) => file.startsWith(pluginSources)))
+    return [...oracles]
+  return [...oracles].filter((oracle) => reachesEdited(oracle, edited))
 }
 
 /**
@@ -159,7 +218,7 @@ async function lint(eslint, files) {
   const lintable = []
   for (const file of new Set(files)) {
     if (!existsSync(file) || relative(root, file).startsWith(`..`)) continue
-    if (!/oracle.*\.tsx?$/.test(basename(file))) continue
+    if (!isOracleFile(file)) continue
     if (await eslint.isPathIgnored(file)) continue
     lintable.push(file)
   }
@@ -207,7 +266,7 @@ function respond(report, input, scope) {
   }
   const header =
     scope === `edited`
-      ? `Oracle lint reports in the file you edited:`
+      ? `Oracle lint reports for the file you edited, and the oracle files that depend on it:`
       : `Oracle lint reports in this branch's changed files. Fix them before finishing:`
   const reason = `${header}\n${report}\nSee "How oracle work is scored" in AGENTS.md.`
   if (report === `` || (event === `stop` && input.stop_hook_active === true)) {
@@ -242,16 +301,22 @@ function respond(report, input, scope) {
   process.stdout.write(`${JSON.stringify(output)}\n`)
 }
 
-/** The files to lint: named on the command line, edited, or changed. */
+/**
+ * The oracle files to lint: every oracle file, or those that the named, edited,
+ * or changed files affect.
+ */
 function selectFiles(input) {
   if (options.all) return { scope: `all`, files: trackedOracleFiles() }
   if (positionals.length > 0) {
-    return { scope: `named`, files: positionals.map((file) => resolve(file)) }
+    return {
+      scope: `named`,
+      files: affectedOracleFiles(positionals.map((file) => resolve(file))),
+    }
   }
   const edited = options.event === `edit` && isHook ? editedFiles(input) : []
   return edited.length > 0
-    ? { scope: `edited`, files: edited }
-    : { scope: `changed`, files: changedFiles() }
+    ? { scope: `edited`, files: affectedOracleFiles(edited) }
+    : { scope: `changed`, files: affectedOracleFiles(changedFiles()) }
 }
 
 /**
