@@ -4,8 +4,12 @@
 // The generated request-authority laws are owned by
 // ordered-source-loader-state-oracle.test.ts.
 import { describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   createDeferred,
@@ -1266,6 +1270,305 @@ describe(`Ordered source request ownership`, () => {
     expect(requests[0]!.options.offset).toBe(0)
     expect(requests[0]!.options.minValues).toBeUndefined()
     loader.dispose()
+  })
+
+  // An order change while a tie request is in flight starts a bounded prefix
+  // repair at once; the tie's later result is ignored for the boundary. When
+  // that repair fails, the window move rejects with its error and the last
+  // public window stays, whatever the older tie request does. An explicit
+  // retry then recovers under today's failure law, from the full source, and
+  // publishes once.
+  it.each([`success`, `failure`] as const)(
+    `keeps a failed public window private when its older tie request ends in %s`,
+    async (olderOutcome) => {
+      type Row = { id: number; rank: number }
+      const truth: Array<Row> = [1, 2, 3].map((id) => ({ id, rank: id }))
+      const requests: Array<{
+        kind: `page` | `boundary` | `full`
+        options: LoadSubsetOptions
+        gate: ReturnType<typeof createDeferred>
+      }> = []
+      const releases: Array<LoadSubsetOptions> = []
+      let hold = false
+      let holdRepair = false
+      let update!: (row: Row) => void
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (sync) => {
+            const installed = new Map<number, Row>()
+            update = (row) => {
+              installed.set(row.id, row)
+              sync.begin()
+              sync.write({ type: `update`, value: row })
+              sync.commit()
+            }
+            sync.markReady()
+            return {
+              loadSubset: async (options) => {
+                const kind = options.orderBy
+                  ? `page`
+                  : options.where
+                    ? `boundary`
+                    : `full`
+                const gate = createDeferred()
+                requests.push({ kind, options, gate })
+                if (!hold || (kind === `page` && !holdRepair)) gate.resolve()
+                await gate.promise
+                if (options.signal?.aborted) return
+                const rows = truth
+                  .filter(
+                    (row) =>
+                      (!options.where ||
+                        evaluateReferenceExpression(options.where, row) ===
+                          true) &&
+                      (!options.cursor ||
+                        evaluateReferenceExpression(
+                          options.cursor.whereFrom,
+                          row,
+                        ) === true),
+                  )
+                  .sort((a, b) => a.rank - b.rank)
+                const offset = options.cursor ? 0 : (options.offset ?? 0)
+                const selected = rows.slice(
+                  offset,
+                  options.limit === undefined
+                    ? undefined
+                    : offset + options.limit,
+                )
+                sync.begin()
+                for (const row of selected) {
+                  if (installed.get(row.id) === row) continue
+                  sync.write({
+                    type: installed.has(row.id) ? `update` : `insert`,
+                    value: row,
+                  })
+                  installed.set(row.id, row)
+                }
+                await sync.commit()
+              },
+              unloadSubset: (options) => {
+                releases.push(options)
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1)
+          .select(({ row }) => ({ id: row.id, rank: row.rank })),
+      )
+      const visibleRows = () =>
+        live.toArray.map(({ id, rank }) => ({ id, rank }))
+      const publications: Array<Array<Row>> = []
+      live.subscribeChanges(
+        (batch) => {
+          if (batch.length) publications.push(visibleRows())
+        },
+        { includeInitialState: false },
+      )
+      try {
+        await live.preload()
+        expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
+        publications.length = 0
+        hold = true
+        const move = Promise.resolve(live.utils.setWindow({ limit: 2 })).then(
+          () => ({ status: `fulfilled` as const }),
+          (error) => ({ status: `rejected` as const, error }),
+        )
+        await flushPromises()
+        const boundary = requests.at(-1)!
+        expect(boundary.kind).toBe(`boundary`)
+        holdRepair = true
+        truth[0] = { id: 1, rank: 10 }
+        update(truth[0])
+        await flushPromises()
+        const repair = requests.at(-1)!
+        expect(repair.kind).toBe(`page`)
+        expect(repair.options.limit).toBe(2)
+        expect(repair.options.cursor).toBeUndefined()
+        const count = requests.length
+        const failure = new Error(`authoritative repair failed`)
+        repair.gate.reject(failure)
+        // The window still waits for its older publication participant to settle.
+        await flushPromises()
+        if (olderOutcome === `failure`)
+          boundary.gate.reject(new Error(`older tie failed`))
+        else boundary.gate.resolve()
+        await flushPromises()
+        expect(requests).toHaveLength(count)
+        expect(await move).toEqual({ status: `rejected`, error: failure })
+        expect(releases).toEqual([])
+        expect(publications).toEqual([])
+        expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+
+        hold = false
+        holdRepair = false
+        await live.utils.setWindow({ limit: 2 })
+        expect(requests).toHaveLength(count + 1)
+        expect(requests.at(-1)!.kind).toBe(`full`)
+        expect(releases).toHaveLength(count)
+        expect(new Set(releases)).toEqual(
+          new Set(requests.slice(0, count).map(({ options }) => options)),
+        )
+        expect(visibleRows()).toEqual([
+          { id: 2, rank: 2 },
+          { id: 3, rank: 3 },
+        ])
+        expect(publications).toEqual([
+          [
+            { id: 2, rank: 2 },
+            { id: 3, rank: 3 },
+          ],
+        ])
+      } finally {
+        await live.cleanup()
+        for (const request of requests) request.gate.resolve()
+        await source.cleanup()
+      }
+    },
+  )
+  it(`a failed window move keeps the snapshot; the retry loads the source once`, async () => {
+    type Row = { id: number; rank: number }
+    const truth: Array<Row> = [1, 2, 3, 4, 5, 6].map((id) => ({ id, rank: id }))
+    const failure = new Error(`page rejected`)
+    const requests: Array<{ kind: string; options: LoadSubsetOptions }> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let failNextCursor = false
+    const kindOf = (options: LoadSubsetOptions) =>
+      options.orderBy !== undefined
+        ? options.cursor
+          ? `cursor-page`
+          : `page`
+        : options.where !== undefined
+          ? `boundary`
+          : `full`
+    const source = createCollection<Row, number>({
+      id: `cut-c-probe-source`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (sync) => {
+          const installed = new Set<number>()
+          sync.markReady()
+          return {
+            loadSubset: (options) => {
+              requests.push({ kind: kindOf(options), options })
+              if (options.cursor && failNextCursor) {
+                failNextCursor = false
+                return Promise.reject(failure)
+              }
+              let rows = truth.filter(
+                (row) =>
+                  !options.where ||
+                  evaluateReferenceExpression(options.where, row) === true,
+              )
+              if (options.cursor)
+                rows = rows.filter(
+                  (row) =>
+                    evaluateReferenceExpression(
+                      options.cursor!.whereFrom,
+                      row,
+                    ) === true,
+                )
+              const offset = options.cursor ? 0 : (options.offset ?? 0)
+              rows = rows.slice(
+                offset,
+                options.limit === undefined
+                  ? undefined
+                  : offset + options.limit,
+              )
+              return (async () => {
+                await Promise.resolve()
+                const fresh = rows.filter(({ id }) => !installed.has(id))
+                if (fresh.length === 0) return
+                sync.begin()
+                for (const value of fresh) {
+                  installed.add(value.id)
+                  sync.write({ type: `insert`, value })
+                }
+                const receipt = sync.commit()
+                if (receipt !== true) await receipt
+              })()
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2)
+        .select(({ row }) => ({ id: row.id, rank: row.rank })),
+    )
+    const publications: Array<Array<number>> = []
+    live.subscribeChanges(
+      (batch) => {
+        if (batch.length > 0)
+          publications.push(live.toArray.map(({ id }) => id))
+      },
+      { includeInitialState: false },
+    )
+    try {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+      expect(requests.map(({ kind }) => kind)).toEqual([`page`, `boundary`])
+      expect(unloads).toEqual([])
+      const initialRequests = requests.length
+      publications.length = 0
+
+      failNextCursor = true
+      const move = live.utils.setWindow({ limit: 4 })
+      expect(move).not.toBe(true)
+      await expect(move).rejects.toBe(failure)
+      await flushPromises()
+      // Rows: last settled snapshot; events: none; wait: rejected; requests: one.
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+      expect(publications).toEqual([])
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+      expect(requests.slice(initialRequests).map(({ kind }) => kind)).toEqual([
+        `cursor-page`,
+      ])
+      expect(unloads).toEqual([])
+      expect(live.status).not.toBe(`error`)
+
+      const retry = live.utils.setWindow({ limit: 4 })
+      expect(retry).not.toBe(true)
+      await retry
+      await flushPromises()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3, 4])
+      expect(publications).toEqual([[1, 2, 3, 4]])
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+      expect(requests.slice(initialRequests).map(({ kind }) => kind)).toEqual([
+        `cursor-page`,
+        `full`,
+      ])
+      // Retry retires the failed page; successful repair then retires earlier
+      // finite demands while keeping the new authoritative demand.
+      expect(unloads).toEqual([
+        requests[initialRequests]!.options,
+        ...requests.slice(0, initialRequests).map(({ options }) => options),
+      ])
+
+      await flushPromises()
+      expect(requests).toHaveLength(initialRequests + 2)
+    } finally {
+      await live.cleanup()
+      await source.cleanup()
+    }
   })
 })
 
