@@ -256,7 +256,10 @@ describe(`on-demand sources match useLiveQuery`, () => {
             .orderBy(({ items }: any) => items.rank, `desc`)
         const result: any =
           hook === `live`
-            ? useLiveQuery((q: any) => query(q).limit(PAGE_SIZE + 1), [fail])
+            ? useLiveQuery({
+                queryKey: [`startup-error`, fail],
+                query: (q: any) => query(q).limit(PAGE_SIZE + 1),
+              })
             : useLiveInfiniteQuery(query, {
                 pageSize: PAGE_SIZE,
                 queryKey: [`startup-error`, fail],

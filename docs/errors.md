@@ -107,9 +107,9 @@ Development builds show the full message. For example:
 Cannot perform operation on collection "collection-1" - collection is in error state. Try calling cleanup() and restarting the collection.
 ```
 
-<a id="error-249"></a>
+<a id="error-254"></a>
 
-## Error 249: `CollectionHasSubscribersError`
+## Error 254: `CollectionHasSubscribersError`
 
 Development builds show the full message. For example:
 
@@ -117,9 +117,9 @@ Development builds show the full message. For example:
 Cannot clean up collection "collection-1" while 2 live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them.
 ```
 
-<a id="error-250"></a>
+<a id="error-255"></a>
 
-## Error 250: `CollectionReloadCrashedError`
+## Error 255: `CollectionReloadCrashedError`
 
 Development builds show the full message. For example:
 
@@ -127,9 +127,9 @@ Development builds show the full message. For example:
 Cannot reload collection "collection-1" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again.
 ```
 
-<a id="error-251"></a>
+<a id="error-256"></a>
 
-## Error 251: `CollectionReloadDuringSyncEntryError`
+## Error 256: `CollectionReloadDuringSyncEntryError`
 
 Development builds show the full message. For example:
 
@@ -1020,6 +1020,46 @@ Development builds show the full message. For example:
 setWindow() cannot change the limit of a findOne() query.
 ```
 
+<a id="error-245"></a>
+
+## Error 245: `SourceCollectionIdReuseError`
+
+Development builds show the full message. For example:
+
+```text
+[useLiveQuery] Collection ID "todos" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.
+```
+
+<a id="error-247"></a>
+
+## Error 247: `GroupingOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra. Query IR built by hand passes groupingCompiler to each IR.Aggregate.
+```
+
+<a id="error-248"></a>
+
+## Error 248: `IncludeOperatorRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+A subquery in select() needs include(), toArray(), or materialize(). Wrap the issues field: issues: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db. Query IR built by hand passes includesRuntime to each IR.IncludesSubquery.
+```
+
+<a id="error-251"></a>
+
+## Error 251: `InvalidPoolOptionError`
+
+Development builds show the full message. For example:
+
+```text
+A live query's pool option takes pooledLiveQueries from @tanstack/db, or nothing. Pooling is opt-in: pass pool: pooledLiveQueries to share one partition among equality-filtered queries.
+```
+
 ## Other errors and log messages
 
 These are plain `Error`, `TypeError`, `RangeError`, or
@@ -1688,7 +1728,7 @@ Query '${this.id}' has no collection sources. This should not happen; please rep
 
 <a id="error-154"></a>
 
-## Error 154: `query/live/materialized-pipeline.ts`
+## Error 154: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -1698,7 +1738,7 @@ Canonical query row has negative multiplicity
 
 <a id="error-155"></a>
 
-## Error 155: `query/live/materialized-pipeline.ts`
+## Error 155: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -1708,7 +1748,7 @@ Canonical query row has no positive contributor
 
 <a id="error-156"></a>
 
-## Error 156: `query/live/materialized-pipeline.ts`
+## Error 156: `query/live/public-key-reduction.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2500,9 +2540,59 @@ Development builds show this message, with `${...}` replaced by values:
 A windowed or findOne result row has no include route
 ```
 
-<a id="error-245"></a>
+<a id="error-246"></a>
 
-## Error 245: `collection/lifecycle.ts`
+## Error 246: `live-query-window-binding.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.
+```
+
+<a id="error-249"></a>
+
+## Error 249: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+include() must wrap a subquery builder
+```
+
+<a id="error-250"></a>
+
+## Error 250: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+include() must wrap a subquery builder
+```
+
+<a id="error-252"></a>
+
+## Error 252: `live-query-observer-client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.
+```
+
+<a id="error-253"></a>
+
+## Error 253: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+The DB stream ended before the server-rendered query snapshot arrived.
+```
+
+<a id="error-257"></a>
+
+## Error 257: `collection/lifecycle.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2510,9 +2600,9 @@ Development builds show this message, with `${...}` replaced by values:
 ${operation}() reports on sync after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.
 ```
 
-<a id="error-246"></a>
+<a id="error-258"></a>
 
-## Error 246: `query/pooled-live-query.ts`
+## Error 258: `query/pooled-live-query.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2520,9 +2610,9 @@ Development builds show this message, with `${...}` replaced by values:
 The pooled live query's source ended
 ```
 
-<a id="error-247"></a>
+<a id="error-259"></a>
 
-## Error 247: `collection/lifecycle.ts`
+## Error 259: `collection/lifecycle.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2530,9 +2620,9 @@ Development builds show this message, with `${...}` replaced by values:
 ${operation}() was called after fail() in the same sync run of Collection "${this.id}". fail() means the sync adapter stopped; a reload starts a new sync run.
 ```
 
-<a id="error-248"></a>
+<a id="error-260"></a>
 
-## Error 248: `query/live/collection-config-builder.ts`
+## Error 260: `query/live/collection-config-builder.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 

@@ -3,7 +3,7 @@ id: CollectionErrorInfo
 title: CollectionErrorInfo
 ---
 
-Defined in: [packages/db/src/types.ts:789](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L789)
+Defined in: [packages/db/src/types.ts:794](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L794)
 
 Detail about a Collection problem. Every field except `cause` is plain data,
 so the value can be logged or sent as JSON; `cause` keeps the original value
@@ -17,7 +17,7 @@ and is omitted from JSON.
 readonly at: number;
 ```
 
-Defined in: [packages/db/src/types.ts:794](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L794)
+Defined in: [packages/db/src/types.ts:799](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L799)
 
 Epoch milliseconds when the problem was reported.
 
@@ -29,7 +29,7 @@ Epoch milliseconds when the problem was reported.
 readonly cause: unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:795](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L795)
+Defined in: [packages/db/src/types.ts:800](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L800)
 
 ***
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/types.ts:795](https://github.com/TanStack/db/blob/m
 readonly optional code: string;
 ```
 
-Defined in: [packages/db/src/types.ts:792](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L792)
+Defined in: [packages/db/src/types.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L797)
 
 ***
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/types.ts:792](https://github.com/TanStack/db/blob/m
 readonly message: string;
 ```
 
-Defined in: [packages/db/src/types.ts:791](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L791)
+Defined in: [packages/db/src/types.ts:796](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L796)
 
 ***
 
@@ -59,4 +59,4 @@ Defined in: [packages/db/src/types.ts:791](https://github.com/TanStack/db/blob/m
 readonly name: string;
 ```
 
-Defined in: [packages/db/src/types.ts:790](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L790)
+Defined in: [packages/db/src/types.ts:795](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L795)

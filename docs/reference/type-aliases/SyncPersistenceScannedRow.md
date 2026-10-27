@@ -7,7 +7,7 @@ title: SyncPersistenceScannedRow
 type SyncPersistenceScannedRow<TKey> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:574](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L574)
+Defined in: [packages/db/src/types.ts:579](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L579)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:574](https://github.com/TanStack/db/blob/m
 key: TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:577](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L577)
+Defined in: [packages/db/src/types.ts:582](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L582)
 
 ***
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/types.ts:577](https://github.com/TanStack/db/blob/m
 optional metadata: unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:579](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L579)
+Defined in: [packages/db/src/types.ts:584](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L584)
 
 ***
 
@@ -43,4 +43,4 @@ Defined in: [packages/db/src/types.ts:579](https://github.com/TanStack/db/blob/m
 value: object;
 ```
 
-Defined in: [packages/db/src/types.ts:578](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L578)
+Defined in: [packages/db/src/types.ts:583](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L583)

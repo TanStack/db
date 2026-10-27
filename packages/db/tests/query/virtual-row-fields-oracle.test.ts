@@ -33,13 +33,13 @@
  * when Collection cleanup also fails and attempts every cleanup.
  */
 import { describe, expect, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 

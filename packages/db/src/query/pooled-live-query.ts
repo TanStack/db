@@ -7,13 +7,14 @@ import {
 } from '../collection/lifecycle.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { makeComparator } from '../utils/comparison.js'
-import { reportUncaught } from '../utils/callbacks.js'
+import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getWhereExpression } from './ir.js'
 import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
 import { buildCompareOptions } from './compiler/order-by.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
+import { registerPooledSource } from './pooled-source.js'
 import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
@@ -185,34 +186,65 @@ class Partition {
     if (!this.terminated && !this.subscription) {
       // A released partition that subscribes again serves new mounts too.
       this.registry.add()
-      this.subscription = this.source.subscribeChanges(
-        (changes) =>
-          this.apply(changes as Array<ChangeMessage<Row, string | number>>),
-        { includeInitialState: true, deferAcquisition, owner: this.dependent },
-      )
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)
       })
+      this.stopStatusEvents = stopStatus
       // Like a live query, a pooled view crashes when its source starts
       // cleanup, before the adapter's cleanup settles; queries mounted later
       // get a new partition.
+      // A cleanup already under way ends the partition inside this
+      // registration, so a listener's throw fails the caller's attachment.
+      let registering = true
       const stopCleanupStart = this.source._onCleanupStart(() =>
-        this.end(`crashed`),
+        this.end(`crashed`, registering),
       )
+      registering = false
+      // Late registration can terminate before either release handle exists.
+      if (this.terminated as Partition[`terminated`]) {
+        stopCleanupStart()
+        return
+      }
       this.stopStatusEvents = () => {
         stopStatus()
         stopCleanupStart()
       }
+      try {
+        const subscription = this.source.subscribeChanges(
+          (changes) =>
+            this.apply(changes as Array<ChangeMessage<Row, string | number>>),
+          {
+            includeInitialState: true,
+            deferAcquisition,
+            owner: this.dependent,
+          },
+        )
+        // Cleanup can re-enter while source sync starts, before assignment.
+        if (this.terminated as Partition[`terminated`])
+          subscription.unsubscribe()
+        else this.subscription = subscription
+      } catch (error) {
+        // Failed admission transfers no ownership; the partition is over.
+        this.terminate(`crashed`)
+        throw error
+      }
     }
   }
 
-  /** End the partition for good and tell its views. */
-  private end(status: `crashed` | `cleaned-up` = `cleaned-up`): void {
-    if (this.terminated) return
-    const previousStatus = this.source.status
+  private terminate(status: `crashed` | `cleaned-up`): void {
     this.terminated = status
     CleanupQueue.getInstance().cancel(this)
     this.release()
+  }
+
+  /** End the partition for good and tell its views. */
+  private end(
+    status: `crashed` | `cleaned-up` = `cleaned-up`,
+    rethrow = false,
+  ): void {
+    if (this.terminated) return
+    const previousStatus = this.source.status
+    this.terminate(status)
     if (status === `cleaned-up`) {
       // Emptying is a state change, as a live-query Collection's cleanup
       // advances its revision, so a detached reader re-reads the rows.
@@ -221,30 +253,39 @@ class Partition {
         group.revision = group.layoutRevision = ++this.clock
       }
     }
-    this.deliverStatus({
-      type: `status:change`,
-      collection: this.source as unknown as Collection,
-      previousStatus,
-      status,
-    })
+    this.deliverStatus(
+      {
+        type: `status:change`,
+        collection: this.source as unknown as Collection,
+        previousStatus,
+        status,
+      },
+      rethrow,
+    )
   }
 
-  private deliverStatus(event: CollectionStatusChangeEvent): void {
+  private deliverStatus(
+    event: CollectionStatusChangeEvent,
+    rethrow = false,
+  ): void {
     const delivered = this.terminated
       ? { ...event, status: this.terminated }
       : event
-    // As a Collection's emitter does, each listener gets its own call, and a
-    // throw is reported uncaught.
-    for (const listener of [...this.statusListeners])
-      try {
-        listener(delivered)
-      } catch (error) {
-        reportUncaught(error)
-      }
-    if (this.terminated) {
-      this.stopStatusEvents?.()
-      this.stopStatusEvents = undefined
-    }
+    // Each listener gets its own call. During a source event, as from a
+    // Collection's emitter, a throw is reported uncaught; during the
+    // caller's own registration it is rethrown after every call. `release()`
+    // already stopped source events for a terminated partition.
+    const calls = [...this.statusListeners].map(
+      (listener) => () => listener(delivered),
+    )
+    if (rethrow) runAllCallbacks(calls)
+    else
+      for (const call of calls)
+        try {
+          call()
+        } catch (error) {
+          reportUncaught(error)
+        }
   }
 
   addListener(group: PartitionGroup, listener: Listener): void {
@@ -261,6 +302,8 @@ class Partition {
   }
 
   private release(): void {
+    this.stopStatusEvents?.()
+    this.stopStatusEvents = undefined
     this.subscription?.unsubscribe()
     this.subscription = undefined
     this.registry.remove()
@@ -288,8 +331,6 @@ class Partition {
 
   private readonly releaseIfUnused = (): void => {
     if (this.listenerCount > 0) return
-    this.stopStatusEvents?.()
-    this.stopStatusEvents = undefined
     // Views read groups by key, so a later subscription refills new ones.
     this.groups.clear()
     this.release()
@@ -559,6 +600,7 @@ class PooledLiveQuery {
     private readonly alias: string,
   ) {
     partition.retain(gcTime)
+    registerPooledSource(this, source)
   }
 
   get status(): CollectionStatus {
@@ -584,7 +626,7 @@ class PooledLiveQuery {
             new Error(
               devBuild() && process.env.NODE_ENV !== `production`
                 ? `The pooled live query's source ended`
-                : codedMessage(246),
+                : codedMessage(258),
             ),
           ))
         : null)
@@ -629,28 +671,33 @@ class PooledLiveQuery {
     const group = this.partition.group(this.groupKey)
     this.partition.addListener(group, listener)
     this.listenerCount++
-    this.holdCollection()
-    if (options.includeInitialState) {
-      callback(
-        Array.from(this.entries(), ([key, value]) => ({
-          type: `insert`,
-          key,
-          value,
-        })),
-      )
-    }
     let subscribed = true
-    return {
-      unsubscribe: () => {
-        if (!subscribed) return
-        subscribed = false
-        this.partition.removeListener(group, listener)
-        if (--this.listenerCount === 0) {
-          this.collectionHold?.unsubscribe()
-          this.collectionHold = undefined
-        }
-      },
+    const unsubscribe = () => {
+      if (!subscribed) return
+      subscribed = false
+      this.partition.removeListener(group, listener)
+      if (--this.listenerCount === 0) {
+        this.collectionHold?.unsubscribe()
+        this.collectionHold = undefined
+      }
     }
+    try {
+      this.holdCollection()
+      if (options.includeInitialState) {
+        callback(
+          Array.from(this.entries(), ([key, value]) => ({
+            type: `insert`,
+            key,
+            value,
+          })),
+        )
+      }
+    } catch (error) {
+      // A failed bootstrap returned no handle; retire its listener now.
+      unsubscribe()
+      throw error
+    }
+    return { unsubscribe }
   }
 
   // While the view is observed, its built Collection stays subscribed, as
@@ -688,6 +735,12 @@ class PooledLiveQuery {
 
   on(...args: Parameters<CollectionImpl[`on`]>): () => void {
     const [event, listener] = args
+    // A partition that ended stops following its source, as a cleaned-up or
+    // crashed live-query Collection does: its views announce no later change.
+    if (event === `health:change`)
+      return this.source.on(event, (change) => {
+        if (!this.partition.terminated) listener(change as never)
+      })
     if (event !== `status:change`) return this.source.on(...args)
     const listeners = this.partition.statusListeners
     listeners.add(listener as StatusListener)
@@ -728,13 +781,6 @@ class PooledLiveQuery {
     }
     return this.collection
   }
-}
-
-/** The one source of an adapter's pooled view, without materializing it. */
-export function getPooledLiveQuerySource(
-  value: unknown,
-): CollectionImpl<any, any, any, any, any> | undefined {
-  return value instanceof PooledLiveQuery ? value.source : undefined
 }
 
 // The observer reads the view itself; users get the live-query Collection.
@@ -823,3 +869,15 @@ export function createPooledLiveQuery(
     ir.from.alias,
   ) as unknown as Collection<any, any, any>
 }
+
+/**
+ * Pooled live queries for framework hooks. Pass it as `pool` in a hook's
+ * query config to serve equality-filtered queries of one shape from a shared
+ * partition. Apps that do not pass it do not bundle pooling.
+ */
+export const pooledLiveQueries = {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+}
+
+export type PooledLiveQueries = typeof pooledLiveQueries

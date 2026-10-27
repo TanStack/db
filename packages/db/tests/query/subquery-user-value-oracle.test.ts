@@ -1,14 +1,14 @@
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
-import { buildQuery } from '../../src/query/builder/index.js'
-import { compileQuery } from '../../src/query/compiler/index.js'
-import { collectCollectionSources } from '../../src/query/ir.js'
 import {
   count,
   createLiveQueryCollection,
   eq,
   materialize,
 } from '../../src/query/index.js'
+import { buildQuery } from '../../src/query/builder/index.js'
+import { compileQuery } from '../../src/query/compiler/index.js'
+import { collectCollectionSources } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'

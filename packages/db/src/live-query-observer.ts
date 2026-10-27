@@ -1,17 +1,15 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
+import { runAllCallbacks } from './utils/callbacks.js'
 import {
   getLiveQueryStatusFlags,
   getPublicCollection,
   isSingleResultCollection,
-} from './live-query-adapter.js'
+} from './live-query-primitives.js'
 import { describeProblem } from './collection/lifecycle.js'
-import { getBuilderFromConfig } from './query/live/collection-registry.js'
-import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import type { Collection } from './collection/index.js'
+import type { LiveQueryObserverClient } from './live-query-observer-client.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
-
-const noop = () => {}
 
 /** `error` and `crashed` end a sync run before it can serve its result. */
 const isFailure = (status: CollectionStatus): boolean =>
@@ -98,8 +96,8 @@ export interface LiveQueryObserver<
 > {
   /** Stable per-revision snapshot for wholesale materialization. */
   getSnapshot: () => LiveQuerySnapshot<T, TKey>
-  /** Stable server snapshot used by useSyncExternalStore-style adapters. */
-  getServerSnapshot: () => LiveQuerySnapshot<T, TKey>
+  /** Server snapshot. preloadRequested marks an explicit streaming Suspense load. */
+  getServerSnapshot: (preloadRequested?: boolean) => LiveQuerySnapshot<T, TKey>
   /**
    * Subscribe to changes. The listener receives the change set (or `undefined`
    * for the synthetic notify a ready collection emits on attach). Granular
@@ -160,8 +158,7 @@ class LiveQueryObserverImpl<
 > implements LiveQueryObserver<T, TKey> {
   private readonly collection: Collection<T, TKey, any> | null
   private readonly wholesale: boolean
-  private readonly client: DbClient | undefined
-  private readonly queryHash: string | undefined
+  private readonly clientBinding: LiveQueryObserverClient<T, TKey> | undefined
   private readonly onPreload: (() => void) | undefined
   private visibleStatus: CollectionStatus | undefined
   private cachedEntries: Array<[TKey, T]> | undefined
@@ -171,6 +168,8 @@ class LiveQueryObserverImpl<
   // While attached, the tree from the last status or health change. Every
   // tree change is announced, so a snapshot reuses it instead of rebuilding.
   private publishedHealth: { tree: HealthNode | undefined } | undefined
+  // Whether the cached snapshot was built for the hydration read.
+  private cachedServerView = false
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
   private layoutRevision = 0
   private lastLayoutKeys: Array<TKey> | undefined
@@ -184,17 +183,6 @@ class LiveQueryObserverImpl<
   private blockDelivery = false
   private attached = false
   private collectionUnsub: (() => void) | null = null
-  private unregisterClientResource: (() => void) | undefined
-  private hydrationSeed:
-    | {
-        dehydratedAt: number
-        entries: Array<[TKey, T]>
-      }
-    | undefined
-  private hydrationError: unknown
-  private hasHydrationError = false
-  private liveResultIsAuthoritative = false
-  private handoffScheduled = false
   private preloadPromise: Promise<void> | undefined
   private disposed = false
 
@@ -208,34 +196,83 @@ class LiveQueryObserverImpl<
     client: DbClient | undefined,
     queryHash: string | undefined,
     onPreload: (() => void) | undefined,
+    suspendUntilReady: boolean,
   ) {
     this.collection = collection
     this.wholesale = wholesale
-    this.client = client
-    this.queryHash = queryHash
     this.onPreload = onPreload
-    this.registerClientResource()
+    this.clientBinding = client?._bindLiveQueryObserver(
+      collection,
+      queryHash,
+      suspendUntilReady,
+      {
+        observer: this,
+        read: (server) => this.getSnapshot(server),
+        entries: () => (collection ? this.getVisibleEntries(collection) : []),
+        isAttached: () => this.attached,
+        isDisposed: () => this.disposed,
+        dirty: () => {
+          this.snapshotDirty = true
+        },
+        publish: (changes, entries) => {
+          const revision =
+            entries && collection
+              ? this.getCollectionRevision(collection)
+              : undefined
+          if (entries) {
+            this.updateCachedEntries(entries, revision)
+            this.snapshotDirty = true
+          }
+          this.emit(
+            this.wholesale ? undefined : changes,
+            undefined,
+            entries,
+            collection?.status,
+            revision,
+            entries && collection
+              ? this.getCollectionLayoutRevision(collection)
+              : undefined,
+            entries !== undefined,
+          )
+        },
+        preload: () => this.preloadCollection(),
+      },
+    )
+    this.clientBinding?.registerResource()
   }
 
-  getSnapshot(): LiveQuerySnapshot<T, TKey> {
+  getSnapshot(forServerSnapshot = false): LiveQuerySnapshot<T, TKey> {
     const collection = this.collection
     if (!collection) return DISABLED_SNAPSHOT
 
-    this.syncHydrationState()
+    this.clientBinding?.sync(forServerSnapshot)
     if (!this.attached) this.refreshDetachedState(collection)
+
+    // The hydration read and an ordinary read differ only while a seed
+    // stands in front of a failure.
+    if (
+      this.cachedServerView !== forServerSnapshot &&
+      this.clientBinding?.seed &&
+      isFailure(this.visibleStatus ?? collection.status)
+    ) {
+      this.snapshotDirty = true
+    }
 
     if (this.snapshotDirty) {
       const entries = this.getVisibleEntries(collection)
       const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
-      // The seed stands in only for a result that is still coming; a failure
-      // is never hidden behind it.
-      const status = this.hasHydrationError
+      // The seed stands in only for a result that is still coming, so an
+      // ordinary read never hides a failure behind it. The hydration read
+      // keeps the server's view: it must reproduce what the server rendered.
+      const status = this.clientBinding?.failed
         ? (`error` as const)
-        : this.hasHydrationSeed() && !isFailure(liveStatus)
-          ? (`ready` as const)
+        : this.clientBinding?.seed &&
+            (forServerSnapshot || !isFailure(liveStatus))
+          ? (this.clientBinding.seed.snapshot.status ?? `ready`)
           : liveStatus
+      this.cachedServerView = forServerSnapshot
 
       // Bump the layout revision when the ordered key sequence changes
       // (membership, ordering, or an order-only move). Compare the key sequence
@@ -283,22 +320,27 @@ class LiveQueryObserverImpl<
     return this.cachedSnapshot
   }
 
-  getServerSnapshot(): LiveQuerySnapshot<T, TKey> {
-    return this.getSnapshot()
+  getServerSnapshot(preloadRequested = false): LiveQuerySnapshot<T, TKey> {
+    return (
+      this.clientBinding?.getServerSnapshot(preloadRequested) ??
+      this.getSnapshot()
+    )
   }
 
   getError(): unknown {
-    this.syncHydrationState()
-    return this.hasHydrationError ? this.hydrationError : undefined
+    this.clientBinding?.sync()
+    return this.clientBinding?.error
   }
 
   dehydrate(): DehydratedLiveQueryResult<T, TKey> {
     const collection = this.collection
     if (!collection) return { rows: [] }
 
-    const entries = this.hasHydrationSeed()
-      ? this.hydrationSeed!.entries
-      : this.readEntries(collection).entries
+    const entries =
+      this.clientBinding?.seed &&
+      this.clientBinding.seed.snapshot.status === undefined
+        ? this.clientBinding.seed.entries
+        : this.readEntries(collection).entries
 
     return {
       rows: entries.map(([key, value]) => ({
@@ -308,157 +350,11 @@ class LiveQueryObserverImpl<
     }
   }
 
-  private hasHydrationSeed(): boolean {
-    return this.hydrationSeed !== undefined && !this.liveResultIsAuthoritative
-  }
-
   private getVisibleEntries(
     collection: Collection<T, TKey, any>,
   ): Array<[TKey, T]> {
-    if (this.hasHydrationSeed()) return this.hydrationSeed!.entries
+    if (this.clientBinding?.seed) return this.clientBinding.seed.entries
     return this.cachedEntries ?? this.captureEntries(collection).entries
-  }
-
-  private syncHydrationState(): boolean {
-    if (!this.client || !this.queryHash || this.liveResultIsAuthoritative) {
-      return false
-    }
-
-    const query = this.client._getLiveQuery(this.queryHash)
-    if (!query) return false
-
-    if (
-      this.attached &&
-      !this.hydrationSeed &&
-      this.collection?.status === `ready` &&
-      !this.collection.isLoadingSubset
-    ) {
-      return this.markLiveResultAuthoritative(query.dehydratedAt)
-    }
-
-    if (query.status === `error`) {
-      const changed =
-        !this.hasHydrationError || this.hydrationError !== query.error
-      this.hydrationError = query.error
-      this.hasHydrationError = true
-      if (changed) this.snapshotDirty = true
-      return changed
-    }
-
-    if (
-      query.status !== `success` ||
-      !query.snapshot ||
-      (this.hydrationSeed &&
-        this.hydrationSeed.dehydratedAt >= query.dehydratedAt)
-    ) {
-      return false
-    }
-
-    this.hydrationSeed = {
-      dehydratedAt: query.dehydratedAt,
-      entries: query.snapshot.rows.map((row) => [
-        row.key as TKey,
-        row.value as T,
-      ]),
-    }
-    this.hydrationError = undefined
-    this.hasHydrationError = false
-    this.snapshotDirty = true
-    return true
-  }
-
-  private diffEntries(
-    previous: Array<[TKey, T]>,
-    next: Array<[TKey, T]>,
-  ): Array<ChangeMessage<T, TKey>> {
-    const previousByKey = new Map(previous)
-    const nextByKey = new Map(next)
-    const changes: Array<ChangeMessage<T, TKey>> = []
-
-    for (const [key, value] of previous) {
-      if (!nextByKey.has(key)) changes.push({ type: `delete`, key, value })
-    }
-    for (const [key, value] of next) {
-      const previousValue = previousByKey.get(key)
-      if (previousValue === undefined) {
-        changes.push({ type: `insert`, key, value })
-      } else if (previousValue !== value) {
-        changes.push({
-          type: `update`,
-          key,
-          value,
-          previousValue,
-        })
-      }
-    }
-
-    return changes
-  }
-
-  private handoffHydrationSeed(collection: Collection<T, TKey, any>): {
-    changes: Array<ChangeMessage<T, TKey>>
-    entries: Array<[TKey, T]>
-    revision?: number
-  } {
-    const previous = this.hydrationSeed?.entries ?? []
-    const dehydratedAt = this.hydrationSeed?.dehydratedAt
-    const { entries, revision } = this.readEntries(collection)
-    this.hydrationSeed = undefined
-    this.markLiveResultAuthoritative(dehydratedAt)
-    this.updateCachedEntries(entries, revision)
-    this.snapshotDirty = true
-    return {
-      changes: this.diffEntries(previous, entries),
-      entries,
-      revision,
-    }
-  }
-
-  private markLiveResultAuthoritative(dehydratedAt?: number): boolean {
-    const changed = this.hasHydrationError
-    this.hydrationError = undefined
-    this.hasHydrationError = false
-    this.liveResultIsAuthoritative = true
-    if (dehydratedAt !== undefined && this.queryHash) {
-      this.client?._consumeLiveQueryResult(this.queryHash, dehydratedAt)
-    }
-    if (changed) this.snapshotDirty = true
-    return changed
-  }
-
-  private scheduleHydrationHandoff(): void {
-    if (this.handoffScheduled) return
-    this.handoffScheduled = true
-
-    queueMicrotask(() => {
-      this.handoffScheduled = false
-      const collection = this.collection
-      if (
-        this.disposed ||
-        !this.attached ||
-        !collection ||
-        !this.hasHydrationSeed() ||
-        collection.status !== `ready` ||
-        collection.isLoadingSubset
-      ) {
-        return
-      }
-
-      this.publishHydrationHandoff(collection)
-    })
-  }
-
-  private publishHydrationHandoff(collection: Collection<T, TKey, any>): void {
-    const handoff = this.handoffHydrationSeed(collection)
-    this.emit(
-      this.wholesale ? undefined : handoff.changes,
-      undefined,
-      handoff.entries,
-      collection.status,
-      handoff.revision,
-      this.getCollectionLayoutRevision(collection),
-      true,
-    )
   }
 
   private getCollectionRevision(
@@ -559,30 +455,33 @@ class LiveQueryObserverImpl<
 
   subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
     if (this.disposed) throw new LiveQueryObserverDisposedError()
-    if (this.subscriptions.size === 0 && this.client && this.queryHash) {
-      const { sources } = this.getSourceInfo()
-      if (sources) this.client._assertLiveQuerySources(this.queryHash, sources)
-    }
+    if (this.subscriptions.size === 0) this.clientBinding?.assertSources()
 
     const record: SubscriptionRecord<T, TKey> = { listener, active: true }
-    this.subscriptions.add(record)
-    if (this.subscriptions.size === 1) {
-      this.attach()
-    } else {
-      // The initial-state replay only happens on attach, so a granular
-      // subscriber that arrives while already attached is seeded with the
-      // current rows — delivered to this subscription alone, without advancing
-      // the observer's revision (the collection state did not change).
-      // Wholesale consumers read getSnapshot() instead and need no seed.
-      if (!this.wholesale) this.seed(record)
-    }
-
-    return () => {
+    const release = () => {
       if (!record.active) return
       record.active = false
       this.subscriptions.delete(record)
       if (this.subscriptions.size === 0) this.detach()
     }
+    this.subscriptions.add(record)
+    const attaching = !this.attached
+    try {
+      if (attaching) {
+        this.attach()
+      } else {
+        // Seed only this late granular listener; a failed seed releases its
+        // record without detaching peers that already own subscriptions.
+        if (!this.wholesale) this.seed(record)
+      }
+    } catch (error) {
+      // Setup returned no ownership handle. Release every acquired channel
+      // and the logical record, so a later explicit subscription can attach.
+      if (attaching) this.detach()
+      release()
+      throw error
+    }
+    return release
   }
 
   /** Deliver the collection's current rows to one late subscription as inserts. */
@@ -602,16 +501,21 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
-    this.registerClientResource()
-    this.syncHydrationState()
-    this.refreshDetachedState(collection)
-    if (this.hasHydrationSeed() && isFailure(collection.status)) {
-      this.handoffHydrationSeed(collection)
+    // Install ownership before any registration can call back or throw.
+    const releases: Array<() => void> = []
+    const release = () => runAllCallbacks(releases.splice(0))
+    this.collectionUnsub = release
+    const ownRelease = (unsubscribe: () => void) => {
+      if (this.collectionUnsub === release) releases.push(unsubscribe)
+      else unsubscribe()
     }
+    this.clientBinding?.registerResource()
+    this.clientBinding?.sync()
+    this.refreshDetachedState(collection)
     this.attached = true
     this.visibleStatus ??= collection.status
     this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection)
-    const attachedWithHydrationSeed = this.hasHydrationSeed()
+    const attachedWithHydrationSeed = !!this.clientBinding?.seed
     this.blockDelivery = this.wholesale || attachedWithHydrationSeed
 
     // Sync activation happens inside subscribeChanges (addSubscriber starts
@@ -634,22 +538,19 @@ class LiveQueryObserverImpl<
     ) => {
       if (this.disposed || this.subscriptions.size === 0) return
 
-      if (this.hasHydrationSeed()) {
-        if (status === `ready`) this.scheduleHydrationHandoff()
-        // A failure ends the sync run whose result the seed stood in for.
-        if (isFailure(status)) this.publishHydrationHandoff(collection)
+      if (this.clientBinding?.seed) {
+        // Startup remains behind the hydration cut. A later failure ends the
+        // sync run whose result the seed stood in for, and is already an
+        // owned publication, so it must be visible synchronously.
+        if (isFailure(status) && !this.blockDelivery)
+          this.clientBinding.handoff()
+        else if (status === `ready` || isFailure(status))
+          this.clientBinding.scheduleHandoff()
         return
       }
 
-      if (
-        status === `ready` &&
-        !collection.isLoadingSubset &&
-        !this.liveResultIsAuthoritative &&
-        this.client &&
-        this.queryHash
-      ) {
-        const query = this.client._getLiveQuery(this.queryHash)
-        this.markLiveResultAuthoritative(query?.dehydratedAt)
+      if (status === `ready` && !collection.isLoadingSubset) {
+        this.clientBinding?.markAuthoritative()
       }
 
       const layoutRevision = this.getCollectionLayoutRevision(collection)
@@ -700,74 +601,50 @@ class LiveQueryObserverImpl<
     // tells whether the health change has anything left to publish.
     const healthOf = () => (collection as { health?: HealthNode }).health
     this.publishedHealth = { tree: healthOf() }
-    const statusUnsub = collection.on(`status:change`, ({ status }) => {
-      this.publishedHealth = { tree: healthOf() }
-      notify(undefined, status)
+    ownRelease(() => {
+      this.publishedHealth = undefined
     })
-    const healthUnsub = collection.on(`health:change`, () => {
-      const health = healthOf()
-      if (health === this.publishedHealth?.tree) return
-      this.publishedHealth = { tree: health }
-      // No rows or status changed, so only this marks the snapshot stale.
-      this.snapshotDirty = true
-      notify(undefined, collection.status)
-    })
+    ownRelease(
+      collection.on(`status:change`, ({ status }) => {
+        this.publishedHealth = { tree: healthOf() }
+        notify(undefined, status)
+      }),
+    )
+    ownRelease(
+      collection.on(`health:change`, () => {
+        const health = healthOf()
+        if (health === this.publishedHealth?.tree) return
+        this.publishedHealth = { tree: health }
+        // No rows or status changed, so only this marks the snapshot stale.
+        this.snapshotDirty = true
+        notify(undefined, collection.status)
+      }),
+    )
     const subscribeLayoutChanges = (
       collection as Collection<T, TKey, any> & {
         _subscribeLayoutChanges?: (listener: () => void) => () => void
       }
     )._subscribeLayoutChanges
-    const layoutUnsub =
-      typeof subscribeLayoutChanges === `function`
-        ? subscribeLayoutChanges.call(collection, () =>
-            notify([], collection.status, true),
-          )
-        : noop
-
+    if (typeof subscribeLayoutChanges === `function`) {
+      ownRelease(
+        subscribeLayoutChanges.call(collection, () =>
+          notify([], collection.status, true),
+        ),
+      )
+    }
     // `subscribeChanges` delivers the initial state synchronously, so a
     // listener can dispose the observer while the collection subscription is
     // still being created. Register the release hook up front; if detach()
     // ran during that replay (collectionUnsub no longer points at our hook),
     // undo the subscription as soon as the call returns.
-    let subscription: { unsubscribe: () => void } | null = null
-    const clientUnsub =
-      this.client && this.queryHash
-        ? this.client.subscribe((event) => {
-            if (
-              event.type === `liveQueryStreamError` ||
-              event.query.queryHash !== this.queryHash
-            ) {
-              return
-            }
-
-            const previousEntries = this.getVisibleEntries(collection)
-            if (!this.syncHydrationState()) return
-            const nextEntries = this.getVisibleEntries(collection)
-            this.emit(
-              this.wholesale
-                ? undefined
-                : this.diffEntries(previousEntries, nextEntries),
-            )
-          })
-        : noop
-    const release = () => {
-      this.publishedHealth = undefined
-      clientUnsub()
-      statusUnsub()
-      healthUnsub()
-      layoutUnsub()
-      subscription?.unsubscribe()
-    }
-    this.collectionUnsub = release
-    subscription = collection.subscribeChanges(
+    if (this.clientBinding) ownRelease(this.clientBinding.subscribe())
+    const subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
       { includeInitialState: !this.wholesale && !attachedWithHydrationSeed },
     )
+    ownRelease(() => subscription.unsubscribe())
     this.blockDelivery = false
-    if (this.collectionUnsub !== release) {
-      subscription.unsubscribe()
-      return
-    }
+    if (this.collectionUnsub !== release) return
     if (this.wholesale || attachedWithHydrationSeed) {
       // Publications raised while subscribeChanges starts sync are part of the
       // subscribe handshake. Apply their final snapshot state now, but suppress
@@ -788,41 +665,22 @@ class LiveQueryObserverImpl<
         this.cachedCollectionLayoutRevision = layoutRevision
       }
     }
-    if (this.hasHydrationSeed()) {
+    if (this.clientBinding?.seed) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
-      if (collection.status === `ready`) this.scheduleHydrationHandoff()
+      if (collection.status === `ready` || isFailure(collection.status)) {
+        this.clientBinding.scheduleHandoff()
+      }
     }
   }
 
   private detach(): void {
-    this.collectionUnsub?.()
+    const release = this.collectionUnsub
+    const unregister = this.clientBinding?.takeResourceRelease()
     this.collectionUnsub = null
     this.attached = false
     this.blockDelivery = false
     this.publicationQueue.length = 0
-    this.unregisterClientResource?.()
-    this.unregisterClientResource = undefined
-  }
-
-  private registerClientResource(): void {
-    const config: object | undefined = this.collection?.config
-    if (
-      this.unregisterClientResource ||
-      !this.client?._isSsrServerCleanupEnabled() ||
-      !config ||
-      !getBuilderFromConfig(config)
-    ) {
-      return
-    }
-
-    this.unregisterClientResource = this.client._registerLiveQueryResource(
-      this,
-      async () => {
-        const collection = this.collection
-        this.dispose()
-        await collection?.cleanup({ dependents: true })
-      },
-    )
+    runAllCallbacks([() => release?.(), () => unregister?.()])
   }
 
   private emit(
@@ -894,65 +752,20 @@ class LiveQueryObserverImpl<
     if (failure) throw failure.error
   }
 
-  private getSourceInfo(): {
-    sources: ReadonlyArray<Collection<any, any, any>> | undefined
-    pooledSource: Collection<any, any, any> | undefined
-  } {
-    const collection = this.collection
-    const config = collection?.config
-    const pooledSource = collection && getPooledLiveQuerySource(collection)
-    const sources = config
-      ? getBuilderFromConfig(config)?.getSourceCollections()
-      : pooledSource
-        ? [pooledSource]
-        : undefined
-    return { sources, pooledSource: pooledSource || undefined }
+  preload(): Promise<void> {
+    return this.clientBinding?.preload() ?? this.preloadCollection()
   }
 
-  preload(): Promise<void> {
+  private preloadCollection(): Promise<void> {
     if (this.preloadPromise) return this.preloadPromise
-
-    const { sources, pooledSource } = this.getSourceInfo()
-    if (this.client && this.queryHash) {
-      const query = this.client._getLiveQuery(this.queryHash)
-      if (query?.status === `pending` || query?.status === `success`) {
-        try {
-          if (sources)
-            this.client._assertLiveQuerySources(this.queryHash, sources)
-          if (pooledSource && this.collection) {
-            return Promise.all([query.promise, this.collection.preload()]).then(
-              () => {},
-            )
-          }
-          // The client stream answers this preload, but it is still a request
-          // for this Collection's data, so its deferred acquisition may resume.
-          this.collection?._markPreload()
-        } catch (error) {
-          return Promise.reject(error)
-        }
-        return query.status === `pending` ? query.promise : Promise.resolve()
-      }
-    }
-
-    this.registerClientResource()
     this.onPreload?.()
-    const collectionPromise = this.collection?.preload() ?? Promise.resolve()
-    const preloadPromise =
-      this.client?._isSsrStreamingEnabled() && this.queryHash
-        ? this.client._registerLiveQuery(
-            this.queryHash,
-            collectionPromise.then(() => this.dehydrate()),
-            sources,
-          )
-        : collectionPromise
-    this.preloadPromise = preloadPromise
-    const clearPreload = () => {
-      if (this.preloadPromise === preloadPromise) {
-        this.preloadPromise = undefined
-      }
+    const promise = this.collection?.preload() ?? Promise.resolve()
+    this.preloadPromise = promise
+    const clear = () => {
+      if (this.preloadPromise === promise) this.preloadPromise = undefined
     }
-    void preloadPromise.then(clearPreload, clearPreload)
-    return preloadPromise
+    void promise.then(clear, clear)
+    return promise
   }
 
   dispose(): void {
@@ -987,6 +800,8 @@ export interface CreateLiveQueryObserverOptions {
   queryHash?: string
   /** Resume framework-deferred query sources before a server preload. */
   onPreload?: () => void
+  /** Read the completed stream rather than an earlier ordinary loading view. */
+  suspendUntilReady?: boolean
 }
 
 /**
@@ -1024,5 +839,6 @@ export function createLiveQueryObserver<
     options.client,
     options.queryHash,
     options.onPreload,
+    options.suspendUntilReady === true,
   )
 }

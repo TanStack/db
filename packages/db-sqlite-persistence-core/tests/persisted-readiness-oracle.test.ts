@@ -1,3 +1,4 @@
+import { createCollection, createLiveQueryCollection } from '@tanstack/db'
 import {
   afterAll,
   afterEach,
@@ -7,7 +8,6 @@ import {
   it,
   vi,
 } from 'vitest'
-import { createCollection, createLiveQueryCollection } from '@tanstack/db'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'

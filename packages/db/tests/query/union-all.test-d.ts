@@ -1,5 +1,4 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   coalesce,
   count,
@@ -7,6 +6,7 @@ import {
   eq,
   gt,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
 import type {

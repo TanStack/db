@@ -1,5 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
   count,
@@ -8,8 +6,11 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  include,
   toArray,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
+import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   For,
   Suspense,
@@ -3353,14 +3354,16 @@ describe(`includes subqueries`, () => {
       useLiveQuery((q) =>
         q.from({ project: projects }).select(({ project }) => ({
           id: project.id,
-          issues: q
-            .from({ issue: issues })
-            .where(({ issue }) => eq(issue.projectId, project.id))
-            .select(({ issue }) => ({
-              id: issue.id,
-              projectId: issue.projectId,
-              title: issue.title,
-            })),
+          issues: include(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                projectId: issue.projectId,
+                title: issue.title,
+              })),
+          ),
         })),
       ),
     )

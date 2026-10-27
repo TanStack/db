@@ -77,6 +77,14 @@ This Collection has no `sync` option. Its normal insert, update, and delete hand
 
 ### Manual transactions on a local Collection
 
+Local persistence reserves the utility names `acceptMutations`,
+`getLeadershipState`, and `forceReloadSubset`. If caller-supplied `utils`
+contains one of these properties, `persistedCollectionOptions` throws
+`InvalidPersistedCollectionConfigError` before it resolves persistence.
+This also applies to inherited properties and properties whose value is
+`undefined`. Other custom utility names remain available. Collections with a
+`sync` option retain their adapter utilities without this local-only restriction.
+
 For a Collection without a `sync` option, normal Collection mutations persist automatically. A manual transaction must call `acceptMutations` in its mutation function:
 
 ```ts

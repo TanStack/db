@@ -39,7 +39,7 @@ The type of the key returned by `getKey`
 optional autoIndex: "eager" | "off";
 ```
 
-Defined in: [packages/db/src/types.ts:881](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L881)
+Defined in: [packages/db/src/types.ts:886](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L886)
 
 Auto-indexing mode for the collection.
 When enabled, indexes will be automatically created for simple where expressions.
@@ -68,7 +68,7 @@ When enabled, indexes will be automatically created for simple where expressions
 optional compare: (x, y) => number;
 ```
 
-Defined in: [packages/db/src/types.ts:906](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L906)
+Defined in: [packages/db/src/types.ts:911](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L911)
 
 Optional function to compare two items.
 This is used to order the items in the collection.
@@ -114,7 +114,7 @@ Omit.compare
 optional defaultIndexType: IndexConstructor<TKey>;
 ```
 
-Defined in: [packages/db/src/types.ts:895](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L895)
+Defined in: [packages/db/src/types.ts:900](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L900)
 
 Default index type to use when creating indexes without an explicit type.
 Required for auto-indexing. Import from '@tanstack/db'.
@@ -144,7 +144,7 @@ Omit.defaultIndexType
 optional defaultStringCollation: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/types.ts:1101](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1101)
+Defined in: [packages/db/src/types.ts:1106](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1106)
 
 Specifies how to compare data in the collection.
 This should be configured to match data ordering on the backend.
@@ -165,7 +165,7 @@ Omit.defaultStringCollation
 getKey: (item) => TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:851](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L851)
+Defined in: [packages/db/src/types.ts:856](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L856)
 
 Function to extract the ID from an object
 This is required for update/delete operations which now only accept IDs
@@ -205,7 +205,7 @@ Omit.getKey
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:840](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L840)
+Defined in: [packages/db/src/types.ts:845](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L845)
 
 #### Inherited from
 
@@ -234,7 +234,7 @@ optional onDelete:
 | DeleteMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:1090](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1090)
+Defined in: [packages/db/src/types.ts:1095](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1095)
 
 Optional asynchronous handler function called before a delete operation
 Returning a value is deprecated; coordinate synchronization through collection utilities instead.
@@ -313,7 +313,7 @@ optional onInsert:
 | InsertMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:969](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L969)
+Defined in: [packages/db/src/types.ts:974](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L974)
 
 Optional asynchronous handler function called before an insert operation
 Returning a value is deprecated; coordinate synchronization through collection utilities instead.
@@ -390,7 +390,7 @@ optional onUpdate:
 | UpdateMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:1031](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1031)
+Defined in: [packages/db/src/types.ts:1036](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1036)
 
 Optional asynchronous handler function called before an update operation
 Returning a value is deprecated; coordinate synchronization through collection utilities instead.
@@ -469,7 +469,7 @@ Omit.onUpdate
 optional schema: TSchema;
 ```
 
-Defined in: [packages/db/src/types.ts:841](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L841)
+Defined in: [packages/db/src/types.ts:846](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L846)
 
 #### Inherited from
 
@@ -485,7 +485,7 @@ Omit.schema
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/db/src/types.ts:915](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L915)
+Defined in: [packages/db/src/types.ts:920](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L920)
 
 The mode of sync to use for the collection.
 
@@ -511,7 +511,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 optional utils: LocalOnlyCollectionUtils;
 ```
 
-Defined in: [packages/db/src/types.ts:1103](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1103)
+Defined in: [packages/db/src/types.ts:1108](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1108)
 
 #### Inherited from
 

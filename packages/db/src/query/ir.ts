@@ -10,12 +10,17 @@ import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
+import type { Grouping } from './compiler/grouping.js'
+import type { IncludesRuntime } from './live/includes-runtime.js'
+
 export interface QueryIR {
   from: From
   select?: Select
   join?: Join
   where?: Array<Where>
   groupBy?: GroupBy
+  // groupKeys supplies the grouping compiler when no aggregate does.
+  grouping?: Grouping
   having?: Array<Having>
   orderBy?: OrderBy
   limit?: Limit
@@ -262,6 +267,8 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   constructor(
     public name: string, // such as count, avg, sum, min, max, etc.
     public args: Array<BasicExpression>,
+    // The aggregate function brings the grouping compiler with it.
+    public grouping: Grouping,
   ) {
     super()
   }
@@ -284,6 +291,8 @@ export class IncludesSubquery extends BaseExpression {
     public correlationField: PropRef, // Parent-side ref (e.g., project.id)
     public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
     public fieldName: string, // Result field name (e.g., "issues")
+    // The include value brings the materializer that publishes it.
+    public runtime: IncludesRuntime,
     public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
     public parentProjection?: Array<PropRef>, // Parent field refs used anywhere in the child plan
     public materialization: IncludesMaterialization = `collection`,

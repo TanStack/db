@@ -432,7 +432,7 @@ query that has no subscriber or preload of its own does not count.
 get subscribers(): readonly CollectionDependent[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1322](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1322)
+Defined in: [packages/db/src/collection/index.ts:1324](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1324)
 
 Live queries, Effects, and direct subscriptions that read this
 Collection. `cleanup()` refuses while a live query or Effect reads it.
@@ -885,7 +885,7 @@ Get all entries (virtual derived state)
 cleanup(options?): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1356](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1356)
+Defined in: [packages/db/src/collection/index.ts:1358](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1358)
 
 Clean up the collection by stopping sync and clearing data
 This can be called manually or automatically by garbage collection
@@ -1411,7 +1411,7 @@ Create a new array with the results of calling a function for each entry in the 
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1282](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1282)
+Defined in: [packages/db/src/collection/index.ts:1284](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1284)
 
 Unsubscribe from a collection event
 
@@ -1461,7 +1461,7 @@ Unsubscribe from a collection event
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1262](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1262)
+Defined in: [packages/db/src/collection/index.ts:1264](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1264)
 
 Subscribe to a collection event
 
@@ -1517,7 +1517,7 @@ Subscribe to a collection event
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1272](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1272)
+Defined in: [packages/db/src/collection/index.ts:1274](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1274)
 
 Subscribe to a collection event once
 
@@ -1643,7 +1643,7 @@ Multiple concurrent calls will share the same promise
 reload(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1313](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1313)
+Defined in: [packages/db/src/collection/index.ts:1315](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1315)
 
 Start a new sync run while everything visible stays: the rows, the
 status, and the current error, with `reloading` on this Collection's
@@ -1753,9 +1753,11 @@ Promise that resolves to a Map containing all items in the collection
 subscribeChanges(callback, options?): CollectionSubscription;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1225](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1225)
+Defined in: [packages/db/src/collection/index.ts:1227](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1227)
 
 Subscribe to changes in the collection
+Ordinary subscriptions throw during active cleanup. Wait for cleanup()
+to settle before subscribing or resuming deferred acquisition.
 Changes to the same key retain their causal order within a callback.
 Changes to different keys have no promised order within a callback.
 
@@ -1832,9 +1834,11 @@ const subscription = collection.subscribeChanges((changes) => {
 subscribeChanges(callback, options?): CollectionSubscription;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1233](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1233)
+Defined in: [packages/db/src/collection/index.ts:1235](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1235)
 
 Subscribe to changes in the collection
+Ordinary subscriptions throw during active cleanup. Wait for cleanup()
+to settle before subscribing or resuming deferred acquisition.
 Changes to the same key retain their causal order within a callback.
 Changes to different keys have no promised order within a callback.
 
@@ -2302,7 +2306,7 @@ Get all values (virtual derived state)
 waitFor<T>(event, timeout?): Promise<AllCollectionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:1292](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1292)
+Defined in: [packages/db/src/collection/index.ts:1294](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L1294)
 
 Wait for a collection event
 

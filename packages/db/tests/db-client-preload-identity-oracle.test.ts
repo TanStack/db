@@ -56,6 +56,7 @@
  * claims or arbitrary hydration orders.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { pooledLiveQueries } from '../src/query/pooled-live-query.js'
 import {
   DbClient,
   Query,
@@ -155,7 +156,9 @@ describe(`DbClient preload source identity`, () => {
           /different source Collections/,
         )
         if (streamState === `pending`) {
-          conflictingView = resolveLiveQueryValue(otherQuery)
+          conflictingView = resolveLiveQueryValue(otherQuery, {
+            pool: pooledLiveQueries,
+          })
           expect(conflictingView).not.toBeNull()
           conflictingObserver = createLiveQueryObserver(conflictingView, {
             client: browser,
@@ -278,7 +281,9 @@ describe(`DbClient preload source identity`, () => {
         if (streamState === `settled`)
           expect(rows(client)).toEqual([{ id: `one`, value: `server` }])
 
-        view = resolveLiveQueryValue(replacementQuery)
+        view = resolveLiveQueryValue(replacementQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(view).not.toBeNull()
         observer = createLiveQueryObserver(view, { client, queryHash })
         expect(() => {
@@ -449,7 +454,9 @@ describe(`DbClient preload source identity`, () => {
         await client.preloadLiveQuery({ query: firstQuery })
         const queryHash = getLiveQueryHash({ query: firstQuery })
         expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
-        view = resolveLiveQueryValue(candidateQuery)
+        view = resolveLiveQueryValue(candidateQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(view).not.toBeNull()
         observer = createLiveQueryObserver(view, { client, queryHash })
 
@@ -518,7 +525,9 @@ describe(`DbClient preload source identity`, () => {
         expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
         expect(rows(client)).toEqual([{ id: `one`, value: `first` }])
 
-        firstView = resolveLiveQueryValue(firstQuery)
+        firstView = resolveLiveQueryValue(firstQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(firstView).not.toBeNull()
         firstObserver = createLiveQueryObserver(firstView, {
           client,
@@ -535,7 +544,9 @@ describe(`DbClient preload source identity`, () => {
           ),
         ).toEqual([`first`])
 
-        nextView = resolveLiveQueryValue(candidateQuery)
+        nextView = resolveLiveQueryValue(candidateQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(nextView).not.toBeNull()
         nextObserver = createLiveQueryObserver(nextView, { client, queryHash })
         expect(() => {
@@ -584,7 +595,9 @@ describe(`DbClient preload source identity`, () => {
         await client.preloadLiveQuery({ query: firstQuery })
         expect(rows(client)?.[0]?.value).toBe(`first`)
 
-        const view = resolveLiveQueryValue(candidateQuery)
+        const view = resolveLiveQueryValue(candidateQuery, {
+          pool: pooledLiveQueries,
+        })
         expect(view).not.toBeNull()
         expect(view?.config, `the receiving view is pooled`).toBeUndefined()
         observer = createLiveQueryObserver(view, { client, queryHash })
@@ -628,7 +641,7 @@ describe(`DbClient preload source identity`, () => {
       await client.preloadLiveQuery({ query: firstQuery })
       const queryHash = getLiveQueryHash({ query: firstQuery })
       expect(getLiveQueryHash({ query: secondQuery })).toBe(queryHash)
-      view = resolveLiveQueryValue(secondQuery)
+      view = resolveLiveQueryValue(secondQuery, { pool: pooledLiveQueries })
       expect(view).not.toBeNull()
       observer = createLiveQueryObserver(view, { client, queryHash })
       let preload: Promise<void> | undefined
@@ -689,4 +702,49 @@ describe(`DbClient preload source identity`, () => {
       await second.cleanup()
     }
   })
+})
+
+// The same source-identity judgment applies to a captured loading view. That
+// view is not a completed preload, but its declared source claim still belongs
+// to the result. A conflicting preload must reject before starting its adapter.
+it(`keeps a loading server view's source claim before preload startup`, async () => {
+  const client = new DbClient()
+  const first = createCollection<Row>({
+    id: `provisional-identity`,
+    getKey: (row) => row.id,
+    sync: { sync: () => {} },
+  })
+  let starts = 0
+  const other = createCollection<Row>({
+    id: first.id,
+    getKey: (row) => row.id,
+    sync: {
+      sync: ({ markReady }) => {
+        starts++
+        markReady()
+      },
+    },
+  })
+  const query = new Query().from({ row: first })
+  const collection = resolveLiveQueryValue({ query })!
+  const observer = createLiveQueryObserver(collection, {
+    client,
+    queryHash: getLiveQueryHash({ query }),
+  })
+  const browserWindow = globalThis.window
+  vi.stubGlobal(`window`, undefined)
+  try {
+    expect(observer.getServerSnapshot().status).toBe(`loading`)
+    expect(() =>
+      client.preloadLiveQuery({ query: new Query().from({ row: other }) }),
+    ).toThrow(/different source Collections/)
+    expect(starts, `source contradiction fails before acquisition`).toBe(0)
+  } finally {
+    vi.stubGlobal(`window`, browserWindow)
+    observer.dispose()
+    await collection.cleanup()
+    await client.cleanup()
+    await first.cleanup()
+    await other.cleanup()
+  }
 })

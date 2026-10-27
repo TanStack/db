@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:515](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L515)
+Defined in: [packages/db/src/types.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L520)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:509](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L509)
+Defined in: [packages/db/src/types.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L514)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L520)
+Defined in: [packages/db/src/types.ts:525](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L525)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:525](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L525)
+Defined in: [packages/db/src/types.ts:530](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L530)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:534](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L534)
+Defined in: [packages/db/src/types.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L539)
 
 The row update mode used to sync to the collection.
 
@@ -138,9 +138,12 @@ Defined in: [packages/db/src/types.ts:449](https://github.com/TanStack/db/blob/m
 
 ###### begin
 
-() => `void`
+(`options?`) => `void`
 
-Begin a new sync transaction.
+Begin a new sync transaction. `direct: true` marks a direct write: an
+edit of the rows on screen, not part of the sync run's snapshot. During
+a reload it applies to the kept rows, and the reload's replacement of
+every row waits for the run's next transaction.
 
 ###### collection
 
@@ -166,7 +169,7 @@ named `AbortError`. Aborting after acceptance has no effect.
 The sync adapter stopped. Before the first ready the status becomes
 `error` and `preload()` rejects with `error`. After it, the rows stay, the
 status stays `ready`, and the node's `error` holds the cause until a
-reload. Throws after an earlier `fail()`.
+reload. A second `fail()` in the same sync run does nothing.
 While the sync adapter retries, call nothing or `reportError()`.
 
 ###### invalidateLoadedSubsets

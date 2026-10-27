@@ -7,6 +7,7 @@
 '@tanstack/rxdb-db-collection': minor
 '@tanstack/trailbase-db-collection': minor
 '@tanstack/react-db': minor
+'@tanstack/preact-db': minor
 '@tanstack/vue-db': minor
 '@tanstack/solid-db': minor
 '@tanstack/svelte-db': minor
@@ -33,6 +34,6 @@ Breaking changes and migration:
 | `cleanup()` while live queries or Effects read the Collection                                               | rejects; unmount first or pass `{ dependents: true }`                                            |
 | `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()`, `PERSISTED_READINESS` | `status` and `health`                                                                            |
 | query-db `utils.lastError`, `utils.isError`, `utils.errorCount`, `utils.clearError()`                       | `collection.health`, `reload()`                                                                  |
-| infinite-query hooks' `error` (React, Vue, Svelte)                                                          | the root node's `error` in `health`; `fetchNextPage()` still resolves                            |
+| infinite-query hooks' `error` (React, Preact, Vue, Svelte)                                                  | the root node's `error` in `health`; `fetchNextPage()` still resolves                            |
 
 Custom sync adapters: keep the run's readiness in your `sync` function. A reload calls `sync` again while `collection.status` still shows the previous run's status, and a reload replaces every row at the new run's first commit, so write a full snapshot then. `reportError()` and `reportHealthy()` throw before the first `markReady()`. `markReady()` after a failed first load throws. A second `fail()` in the same sync run does nothing. Begin a direct write, which edits the rows on screen and is not part of the run's snapshot, with `begin({ direct: true })`: during a reload it applies to the kept rows, and the reload's replacement waits for the run's next transaction. `reload()` called from inside `sync` or a `loadSubset` call rejects, unless a reload is already in flight, whose promise it returns. Calls after a crash do nothing. For an on-demand Collection, a reload aborts the retired run's `loadSubset` calls and asks the new run's `loadSubset` for the current demand as soon as `sync` returns. Honor the `signal`: a load that ignores the abort holds a query's first load until it settles. `useLiveSuspenseQuery` now throws an Error for a failed first load or a crash: the cause itself when it is an Error, otherwise an Error with the problem's message whose `cause` holds the reported value.

@@ -9,7 +9,7 @@ title: injectLiveQuery
 function injectLiveQuery<TContext, TParams>(options): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:110](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L110)
+Defined in: [angular-db/src/index.ts:112](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L112)
 
 ### Type Parameters
 
@@ -28,6 +28,13 @@ Defined in: [index.ts:110](https://github.com/TanStack/db/blob/main/packages/ang
 ##### params
 
 () => `TParams`
+
+##### pool?
+
+\{
+\}
+
+Pass `pooledLiveQueries` to share one partition among equal-shape queries.
 
 ##### query
 
@@ -43,7 +50,7 @@ Defined in: [index.ts:110](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TContext, TParams>(options): InjectConditionalLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:120](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L120)
+Defined in: [angular-db/src/index.ts:124](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L124)
 
 ### Type Parameters
 
@@ -63,6 +70,13 @@ Defined in: [index.ts:120](https://github.com/TanStack/db/blob/main/packages/ang
 
 () => `TParams`
 
+##### pool?
+
+\{
+\}
+
+Pass `pooledLiveQueries` to share one partition among equal-shape queries.
+
 ##### query
 
 (`args`) => `QueryBuilder`\<`TContext`\> \| `null` \| `undefined`
@@ -77,7 +91,7 @@ Defined in: [index.ts:120](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TContext>(queryFn): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:130](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L130)
+Defined in: [angular-db/src/index.ts:136](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L136)
 
 ### Type Parameters
 
@@ -101,7 +115,7 @@ Defined in: [index.ts:130](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TContext>(queryFn): InjectConditionalLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:133](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L133)
+Defined in: [angular-db/src/index.ts:139](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L139)
 
 ### Type Parameters
 
@@ -125,7 +139,7 @@ Defined in: [index.ts:133](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TContext>(config): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:138](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L138)
+Defined in: [angular-db/src/index.ts:144](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L144)
 
 ### Type Parameters
 
@@ -137,7 +151,7 @@ Defined in: [index.ts:138](https://github.com/TanStack/db/blob/main/packages/ang
 
 #### config
 
-`LiveQueryCollectionConfig`\<`TContext`\>
+`LiveQueryHookConfig`\<`TContext`\>
 
 ### Returns
 
@@ -149,7 +163,7 @@ Defined in: [index.ts:138](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResultWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [index.ts:142](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L142)
+Defined in: [angular-db/src/index.ts:148](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L148)
 
 ### Type Parameters
 
@@ -181,7 +195,7 @@ Defined in: [index.ts:142](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [index.ts:150](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L150)
+Defined in: [angular-db/src/index.ts:156](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L156)
 
 ### Type Parameters
 

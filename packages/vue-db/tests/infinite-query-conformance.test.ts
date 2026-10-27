@@ -10,6 +10,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import {
@@ -42,11 +43,12 @@ let sourceSequence = 0
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
-      id: `infinite-conformance-vue-${sourceSequence++}`,
+      id: collectionId ?? `infinite-conformance-vue-${sourceSequence++}`,
       getKey: (row) => row.id,
       initialData: [...initialData],
     }),
@@ -253,7 +255,10 @@ function mountInputControllable(
 
 const vueInfiniteDriver: InfiniteQueryDriver = {
   name: `vue`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),

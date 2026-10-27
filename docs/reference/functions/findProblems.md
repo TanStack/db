@@ -7,7 +7,7 @@ title: findProblems
 function findProblems(health): HealthNode[];
 ```
 
-Defined in: packages/db/src/collection/health-tree.ts:77
+Defined in: [packages/db/src/collection/health-tree.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/collection/health-tree.ts#L77)
 
 Every node in a health tree that shows a problem of its own, in tree order:
 a `failureReason` or an `error`. A node whose only problems are below it is

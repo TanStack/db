@@ -614,6 +614,28 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
+      const handleSourceCleanup = () => {
+        if (this.disposed) return
+        this.onSourceError(
+          new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Source collection '${collectionId}' was cleaned up while effect depends on it`
+              : codedMessage(134, { collectionId }),
+          ),
+        )
+      }
+      // Observe cleanup before subscription admission, which rejects while
+      // cleanup is active. A late Effect still returns its disposed handle.
+      const cleanupStartUnsubscribe =
+        collection._onCleanupStart(handleSourceCleanup)
+      // Registration can dispose the runner before its handle is available.
+      if (this.isDisposed()) {
+        cleanupStartUnsubscribe()
+        this.starting = false
+        return
+      }
+      this.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
+
       this.sentToD2RowsBySource.set(sourceId, new Map())
 
       // Discover dependencies: if source collection is itself a live query
@@ -763,17 +785,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         )
       }
 
-      const handleSourceCleanup = () => {
-        if (this.disposed) return
-        this.onSourceError(
-          new Error(
-            devBuild() && process.env.NODE_ENV !== `production`
-              ? `Source collection '${collectionId}' was cleaned up while effect depends on it`
-              : codedMessage(134, { collectionId }),
-          ),
-        )
-      }
-
       // Listen for status changes on source collections
       const handleSourceStatus = (status: CollectionStatus) => {
         if (this.disposed) return
@@ -812,16 +823,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.unsubscribeCallbacks.add(
         collection.on(`health:change`, () => this.reportHealth()),
       )
-      const cleanupStartUnsubscribe =
-        collection._onCleanupStart(handleSourceCleanup)
-      // Registration reports an already-active cleanup synchronously. That
-      // callback can dispose this runner before the unsubscribe handle exists.
-      if (this.isDisposed()) {
-        cleanupStartUnsubscribe()
-        this.starting = false
-        return
-      }
-      this.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
     }
 
     // Mark as subscribed so the graph can start running

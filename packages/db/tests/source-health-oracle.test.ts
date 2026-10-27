@@ -167,6 +167,7 @@ import { createEffect } from '../src/query/effect.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { Query } from '../src/query/builder/index.js'
 import { eq, isUndefined, not } from '../src/query/builder/functions.js'
+import { include } from '../src/query/builder/include-functions.js'
 import {
   CollectionReloadDuringSyncEntryError,
   InvalidCollectionStatusTransitionError,
@@ -1345,12 +1346,14 @@ function buildQuery(
       )
     }
     case `include`:
-      // A plain subquery materializes one child Collection per parent row.
+      // An included subquery materializes one child Collection per parent row.
       return liveQuery(
         createLiveQueryCollection((q) =>
           q.from({ b: B }).select(({ b }) => ({
             id: b.id,
-            items: q.from({ a: A }).where(({ a }) => eq(a.parentId, b.id)),
+            items: include(
+              q.from({ a: A }).where(({ a }) => eq(a.parentId, b.id)),
+            ),
           })),
         ),
       )
@@ -7222,10 +7225,12 @@ describe(`include nodes`, () => {
     const query = createLiveQueryCollection((q) =>
       q.from({ b: B.collection }).select(({ b }) => ({
         id: b.id,
-        items: q
-          .from({ a: A.collection })
-          .where(({ a }) => eq(a.parentId, b.id)),
-        same: q.from({ a: A.collection }).where(({ a }) => eq(a.id, b.id)),
+        items: include(
+          q.from({ a: A.collection }).where(({ a }) => eq(a.parentId, b.id)),
+        ),
+        same: include(
+          q.from({ a: A.collection }).where(({ a }) => eq(a.id, b.id)),
+        ),
       })),
     )
     const consoleError = console.error

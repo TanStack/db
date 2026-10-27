@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/query-core'
 import {
   BasicIndex,
   IR,
@@ -7,6 +6,7 @@ import {
   eq,
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
 import { describe, expect, it, vi } from 'vitest'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { createDeferred } from '../../db/src/deferred.js'

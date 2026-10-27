@@ -376,7 +376,7 @@ describe(`DbClient`, () => {
     expect(collection.status).toBe(`ready`)
   })
 
-  it(`defers adapter sync and replays subset loads after hydrated rows render`, () => {
+  it(`defers adapter sync and replays subset loads after hydrated rows render`, async () => {
     const lifecycleOrder: Array<string> = []
     const descriptor = collectionOptions(`people`, () => ({
       id: `people`,
@@ -415,12 +415,17 @@ describe(`DbClient`, () => {
     const collection = client._materializeCollectionForRender(descriptor)
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: true,
+      deferAcquisition: true,
     })
+    // Exercise a render-owned queued load. Resuming this subscription would
+    // itself be independent demand and must release the render gate immediately.
+    const queuedLoad = collection._sync.loadSubset({})
 
     expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `stale` })
     expect(lifecycleOrder).toEqual([])
 
     collection._resumeSyncStart()
+    await queuedLoad
 
     expect(lifecycleOrder).toEqual([`sync`, `load`])
     expect(collection.get(`1`)).toMatchObject({ id: `1`, name: `fresh` })

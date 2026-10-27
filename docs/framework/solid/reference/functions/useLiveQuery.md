@@ -6,10 +6,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object & UseLiveQueryFlags;
+function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:129](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L129)
+Defined in: [useLiveQuery.ts:123](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L123)
 
 Create a live query using a query function
 
@@ -106,10 +106,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object & UseLiveQueryFlags;
+function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:143](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L143)
+Defined in: [useLiveQuery.ts:137](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L137)
 
 Create a live query using a query function
 
@@ -206,10 +206,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object & UseLiveQueryFlags;
+function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:199](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L199)
+Defined in: [useLiveQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L193)
 
 Create a live query using configuration object
 
@@ -223,7 +223,7 @@ Create a live query using configuration object
 
 #### config
 
-`Accessor`\<`LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>\>
+`Accessor`\<`LiveQueryHookConfig`\<`TContext`\>\>
 
 Configuration object with query and options
 
@@ -275,10 +275,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object & UseLiveQueryFlags;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:248](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L248)
+Defined in: [useLiveQuery.ts:242](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L242)
 
 Subscribe to an existing live query collection
 
@@ -347,10 +347,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object & UseLiveQueryFlags;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:268](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L268)
+Defined in: [useLiveQuery.ts:262](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L262)
 
 Create a live query using a query function
 

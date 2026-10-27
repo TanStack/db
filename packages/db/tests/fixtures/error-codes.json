@@ -6,9 +6,9 @@
   "InvalidSchemaError": 6,
   "SchemaMustBeSynchronousError": 7,
   "CollectionInErrorStateError": 8,
-  "CollectionHasSubscribersError": 249,
-  "CollectionReloadCrashedError": 250,
-  "CollectionReloadDuringSyncEntryError": 251,
+  "CollectionHasSubscribersError": 254,
+  "CollectionReloadCrashedError": 255,
+  "CollectionReloadDuringSyncEntryError": 256,
   "InvalidCollectionStatusTransitionError": 9,
   "CollectionIsInErrorStateError": 10,
   "NegativeActiveSubscribersError": 11,
@@ -93,5 +93,9 @@
   "NameRequiredError": 177,
   "GetKeyRequiredError": 178,
   "DuplicateTransactionIdError": 233,
-  "SetWindowFindOneLimitError": 244
+  "SetWindowFindOneLimitError": 244,
+  "SourceCollectionIdReuseError": 245,
+  "GroupingOperatorRequiredError": 247,
+  "IncludeOperatorRequiredError": 248,
+  "InvalidPoolOptionError": 251
 }

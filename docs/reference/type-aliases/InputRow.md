@@ -7,6 +7,6 @@ title: InputRow
 type InputRow = [unknown, Record<string, unknown>];
 ```
 
-Defined in: [packages/db/src/types.ts:1146](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1146)
+Defined in: [packages/db/src/types.ts:1151](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1151)
 
 An input row from a collection

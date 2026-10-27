@@ -3,7 +3,7 @@ id: SubscribeChangesSnapshotOptions
 title: SubscribeChangesSnapshotOptions
 ---
 
-Defined in: [packages/db/src/types.ts:1273](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1273)
+Defined in: [packages/db/src/types.ts:1280](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1280)
 
 ## Extends
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/types.ts:1273](https://github.com/TanStack/db/blob/
 optional deferAcquisition: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:1233](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1233)
+Defined in: [packages/db/src/types.ts:1238](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1238)
 
 **`Internal`**
 
@@ -49,7 +49,7 @@ subscriber or a preload in its current sync run.
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:1278](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1278)
+Defined in: [packages/db/src/types.ts:1285](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1285)
 
 **`Internal`**
 
@@ -67,7 +67,7 @@ Optional limit to include in loadSubset for query-specific cache keys.
 optional onLoadSubsetError: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1263](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1263)
+Defined in: [packages/db/src/types.ts:1268](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1268)
 
 **`Internal`**
 
@@ -97,7 +97,7 @@ Omit.onLoadSubsetError
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1261](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1261)
+Defined in: [packages/db/src/types.ts:1266](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1266)
 
 **`Internal`**
 
@@ -128,7 +128,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1245](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1245)
+Defined in: [packages/db/src/types.ts:1250](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1250)
 
 **`Internal`**
 
@@ -159,7 +159,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:1277](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1277)
+Defined in: [packages/db/src/types.ts:1284](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1284)
 
 **`Internal`**
 
@@ -177,7 +177,7 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 optional owner: CollectionDependent;
 ```
 
-Defined in: [packages/db/src/types.ts:1239](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1239)
+Defined in: [packages/db/src/types.ts:1244](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1244)
 
 **`Internal`**
 
@@ -196,7 +196,7 @@ The live query or Effect this subscription reads for, so
 optional truncateReplayPublication: object;
 ```
 
-Defined in: [packages/db/src/types.ts:1265](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1265)
+Defined in: [packages/db/src/types.ts:1270](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1270)
 
 **`Internal`**
 
@@ -219,6 +219,18 @@ The replay could not load every active demand again.
 ##### Returns
 
 `void`
+
+#### holdsDemand()?
+
+```ts
+readonly optional holdsDemand: () => boolean;
+```
+
+The live query still holds logical demand.
+
+##### Returns
+
+`boolean`
 
 #### start()
 
@@ -254,7 +266,7 @@ Omit.truncateReplayPublication
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:1222](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1222)
+Defined in: [packages/db/src/types.ts:1227](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1227)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -294,7 +306,7 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:1224](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1224)
+Defined in: [packages/db/src/types.ts:1229](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1229)
 
 Pre-compiled expression for filtering changes
 

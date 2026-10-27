@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { Suspense } from 'react'
 import {
@@ -34,7 +34,46 @@ function createMockPosts(count: number): Array<Post> {
 }
 
 describe(`useLiveInfiniteQuery`, () => {
+  afterEach(() => vi.useRealTimers())
+
+  // The hook compares a queryKey with the one it compiled. It must compare a
+  // snapshot: a caller that changes its key array in place still changes the
+  // query, as it did before the shared window binding.
+  it(`recompiles when a queryKey array changes in place`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `mutated-query-key`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(6),
+      }),
+    )
+    const queryKey: Array<unknown> = [`category`, `life`]
+    const { result, rerender } = renderHook(() =>
+      useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ post: source })
+            .fn.where(({ post }) => post.category === queryKey[1])
+            .orderBy(({ post }) => post.createdAt, `desc`),
+        { pageSize: 10, queryKey },
+      ),
+    )
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    expect(result.current.data.map((post) => post.id)).toEqual([`1`, `3`, `5`])
+
+    queryKey[1] = `tech`
+    rerender()
+    await waitFor(() =>
+      expect(result.current.data.map((post) => post.id)).toEqual([
+        `2`,
+        `4`,
+        `6`,
+      ]),
+    )
+  })
+
   it(`reclaims a query-function collection abandoned before it commits`, async () => {
+    vi.useFakeTimers()
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `abandoned-infinite-query`,
@@ -66,13 +105,17 @@ describe(`useLiveInfiniteQuery`, () => {
     // Like useLiveQuery, the hook starts sync during render. The render asks
     // for no data, but its collection holds the source until GC reclaims it.
     expect(source.subscriberCount).toBe(0)
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    // Advance the clock explicitly: an overloaded worker can overshoot a real
+    // ten-millisecond wait and run collection GC before this observation.
+    await act(() => vi.advanceTimersByTimeAsync(10))
     expect(source.status).not.toBe(`cleaned-up`)
-    await waitFor(() => expect(source.status).toBe(`cleaned-up`))
+    await act(() => vi.runAllTimersAsync())
+    expect(source.status).toBe(`cleaned-up`)
     rendered.unmount()
   })
 
   it(`reclaims a supplied collection that an abandoned render started`, async () => {
+    vi.useFakeTimers()
     // Like useLiveQuery, the hook starts a supplied collection with eager
     // sources during render, so its first paint is ready. The supplied
     // collection's own gcTime reclaims a render that never commits. #1675 kept
@@ -109,9 +152,10 @@ describe(`useLiveInfiniteQuery`, () => {
     )
 
     expect(source.subscriberCount).toBe(0)
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await act(() => vi.advanceTimersByTimeAsync(10))
     expect(source.status).not.toBe(`cleaned-up`)
-    await waitFor(() => expect(source.status).toBe(`cleaned-up`))
+    await act(() => vi.runAllTimersAsync())
+    expect(source.status).toBe(`cleaned-up`)
     rendered.unmount()
   })
 

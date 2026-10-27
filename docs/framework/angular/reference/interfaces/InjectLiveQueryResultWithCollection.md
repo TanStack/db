@@ -3,7 +3,7 @@ id: InjectLiveQueryResultWithCollection
 title: InjectLiveQueryResultWithCollection
 ---
 
-Defined in: [index.ts:90](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L90)
+Defined in: [angular-db/src/index.ts:92](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L92)
 
 Status, persistence, and health signals every `injectLiveQuery` result has.
 
@@ -36,7 +36,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [index.ts:97](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L97)
+Defined in: [angular-db/src/index.ts:99](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L99)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: [index.ts:97](https://github.com/TanStack/db/blob/main/packages/angu
 data: Signal<TResult[]>;
 ```
 
-Defined in: [index.ts:96](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L96)
+Defined in: [angular-db/src/index.ts:98](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L98)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: [index.ts:96](https://github.com/TanStack/db/blob/main/packages/angu
 health: Signal<HealthNode | undefined>;
 ```
 
-Defined in: [index.ts:60](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L60)
+Defined in: [angular-db/src/index.ts:62](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L62)
 
 A signal containing the health tree for the query and its dependencies
 
@@ -72,7 +72,7 @@ A signal containing the health tree for the query and its dependencies
 isCleanedUp: Signal<boolean>;
 ```
 
-Defined in: [index.ts:56](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L56)
+Defined in: [angular-db/src/index.ts:58](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L58)
 
 A signal indicating whether the collection has been cleaned up
 
@@ -88,7 +88,7 @@ A signal indicating whether the collection has been cleaned up
 isCrashed: Signal<boolean>;
 ```
 
-Defined in: [index.ts:54](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L54)
+Defined in: [angular-db/src/index.ts:56](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L56)
 
 Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover.
 
@@ -104,7 +104,7 @@ Local storage or an invariant broke. Only a cascade cleanup and a fresh start re
 isIdle: Signal<boolean>;
 ```
 
-Defined in: [index.ts:50](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L50)
+Defined in: [angular-db/src/index.ts:52](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L52)
 
 A signal indicating whether the collection is idle
 
@@ -120,7 +120,7 @@ A signal indicating whether the collection is idle
 isLoading: Signal<boolean>;
 ```
 
-Defined in: [index.ts:46](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L46)
+Defined in: [angular-db/src/index.ts:48](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L48)
 
 A signal indicating whether the collection is currently loading
 
@@ -136,7 +136,7 @@ A signal indicating whether the collection is currently loading
 isLoadingError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:52](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L52)
+Defined in: [angular-db/src/index.ts:54](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L54)
 
 The first load failed: there is nothing to show.
 
@@ -152,7 +152,7 @@ The first load failed: there is nothing to show.
 isReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:48](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L48)
+Defined in: [angular-db/src/index.ts:50](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L50)
 
 A signal indicating whether the collection is ready
 
@@ -168,7 +168,7 @@ A signal indicating whether the collection is ready
 isSyncError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:58](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L58)
+Defined in: [angular-db/src/index.ts:60](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L60)
 
 The data is shown, and a sync problem or failed request is in `health`.
 
@@ -184,7 +184,7 @@ The data is shown, and a sync problem or failed request is in `health`.
 state: Signal<Map<TKey, TResult>>;
 ```
 
-Defined in: [index.ts:95](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L95)
+Defined in: [angular-db/src/index.ts:97](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L97)
 
 ***
 
@@ -194,7 +194,7 @@ Defined in: [index.ts:95](https://github.com/TanStack/db/blob/main/packages/angu
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [index.ts:44](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L44)
+Defined in: [angular-db/src/index.ts:46](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L46)
 
 A signal containing the current status of the collection
 

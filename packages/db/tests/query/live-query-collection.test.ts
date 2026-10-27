@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { createCollection } from '../../src/collection/index.js'
 import {
   and,
   coalesce,
@@ -9,6 +8,7 @@ import {
   ilike,
   liveQueryCollectionOptions,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { Query } from '../../src/query/builder/index.js'
 import {
   flushPromises,

@@ -3,7 +3,7 @@ id: QueryMustHaveFromClauseError
 title: QueryMustHaveFromClauseError
 ---
 
-Defined in: [packages/db/src/errors.ts:681](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L681)
+Defined in: [packages/db/src/errors.ts:691](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L691)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:681](https://github.com/TanStack/db/blob/
 new QueryMustHaveFromClauseError(): QueryMustHaveFromClauseError;
 ```
 
-Defined in: [packages/db/src/errors.ts:682](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L682)
+Defined in: [packages/db/src/errors.ts:692](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L692)
 
 #### Returns
 

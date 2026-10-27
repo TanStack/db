@@ -7,7 +7,7 @@ title: DeleteKeyMessage
 type DeleteKeyMessage<TKey> = Omit<ChangeMessage<any, TKey>, "value" | "previousValue" | "type"> & object;
 ```
 
-Defined in: [packages/db/src/types.ts:626](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L626)
+Defined in: [packages/db/src/types.ts:631](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L631)
 
 ## Type Declaration
 

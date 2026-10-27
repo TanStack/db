@@ -99,17 +99,27 @@ operators and a few boundary adapters:
 | Architectural role                         | Concrete implementation                                                                                |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | Compile relation IDs and demand plans      | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
-| Reduce public keys and build routes        | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Reduce public keys                         | `packages/db/src/query/live/public-key-reduction.ts`                                                   |
+| Build include routes                       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
 | Run the graph and publish root rows        | `packages/db/src/query/live/collection-config-builder.ts`                                              |
 | Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                        |
 | Publish Collection-valued buckets          | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
 | Start and release asynchronous demand      | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
 | Ordered provider loading and continuation  | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
 
+Operator values carry their compilers, so an app bundles only the operators it
+imports. `include()`, `toArray()`, and `materialize()` carry the materializer
+and the Collection-facade adapter (`includes-runtime.ts`); aggregates and
+`groupKeys()` carry the grouping compiler. A query that uses an operator always
+holds the value that carries it, so compilation stays synchronous. Joins are
+core: the join compiler and public-key reduction (`public-key-reduction.ts`)
+ship with every live query, without the include materializer.
+
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
 function: its possible duplicate contributors still pass through the keyed
-reduction that enforces public-key congruence and multiplicity.
+reduction that enforces public-key congruence and multiplicity. The include
+materializer uses the same reduction for its root rows.
 
 ### Loading handoffs
 
@@ -628,8 +638,9 @@ tie-breaker, normally the child public key. An order-only change is a
 bucket-value change for arrays, singletons, concatenation, and Collection
 layout.
 
-A bare child query is a Collection-valued include. It exposes one stable public
-Collection facade per active bucket in that edge:
+`include(childQuery)` is a Collection-valued include. A bare child query in a
+select throws `IncludeOperatorRequiredError`. The include exposes one stable
+public Collection facade per active bucket in that edge:
 
 ```text
 ActiveBucket + BucketRow -> ActiveBucketRow -> BucketFacade(bucket, Collection)

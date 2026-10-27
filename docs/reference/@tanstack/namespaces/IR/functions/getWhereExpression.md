@@ -7,7 +7,7 @@ title: getWhereExpression
 function getWhereExpression(where): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:405](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L405)
+Defined in: [packages/db/src/query/ir.ts:414](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L414)
 
 Extract the expression from a Where clause
 
