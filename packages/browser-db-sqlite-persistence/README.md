@@ -173,11 +173,16 @@ duplicates inside that horizon remain idempotent.
   `wa-sqlite.wasm` asset. Vite includes both automatically, with no asset
   copying or WASM URL configuration required.
 - In Vite development, a pre-bundled copy of this package asks the dev server
-  for its assets by package name. If the app root cannot resolve that name,
-  the open rejects with `PersistenceUnavailableError`. This happens when the
-  app reaches the package only through another library, through an npm alias,
-  or with more than one installed version. Exclude the package from
-  pre-bundling in that case, so Vite serves it beside its assets:
+  for its assets by package name, from the app root:
+  - If the app reaches the package only through another library or through an
+    npm alias, the root cannot resolve that name. The open rejects with
+    `PersistenceUnavailableError`.
+  - If more than one copy is installed, the pre-bundled copy loads the assets
+    of the copy that the root resolves, which can be another version.
+
+  In those cases, exclude the package from pre-bundling so Vite serves it
+  beside its own assets. List the name that the importing code uses, which is
+  the alias name for an npm alias:
 
   ```ts
   // vite.config.ts

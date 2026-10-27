@@ -1928,41 +1928,52 @@ the lock. This controlled lock holder does not
 reproduce a frozen tab or establish behavior in other browsers.
 The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
 preserves the exact-head unit and Chromium evidence and the queued-lock mutant.
-The jsdom open cases start after asset resolution. Under a Vite dev server, the
-built package first asks Vite for the asset URLs that the dependency optimizer
-did not move. The packaged-consumer
-[receiving witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
-holds that WASM lookup in Chromium. It expects the fixed open outcomes: the
-deadline rejects with `TimeoutError`, an abort rejects with its reason, neither
-creates a worker after the lookup completes, and a later open succeeds. The
-earlier opener, which started the deadline after asset resolution, left both
-opens pending. The witness restates those outcomes because the lifecycle open
-cases are fixed examples without a shared model module. The same file fails
-the WASM or the worker lookup and expects `PersistenceUnavailableError` with no
-worker, which the README requires for capability failures. It also opens from
-an `about:srcdoc` frame, whose URL cannot resolve Vite's asset paths. The
-earlier lookup rejected with a raw `TypeError` in both cases; classifying only
-the WASM lookup fails the worker history. A missing WASM file, which the
-worker loads itself, also expects that error after one worker starts; the
-earlier worker reported it as an internal `OPFSWorkerRequestError`. A page
-served from another origin
-than Vite, as in a backend integration, makes the Worker constructor throw a
-`SecurityError`; the witness expects `PersistenceUnavailableError` there as
-well. The
-[install-layout witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-install-layouts.e2e.test.ts)
-adds a transitive install, whose package name the Vite root cannot resolve. A
-pre-bundled transitive install gets this classified error. Excluded from
-pre-bundling, as the README directs, it opens because the package is served
-beside its assets; the earlier lookup ran anyway and failed. A pre-bundled
-direct install whose Vite cache directory is named `dist` still opens. The
-package treats its code as moved when the worker and WASM URLs no longer share
-a directory; an earlier check of the `dist/assets/` path name skipped the
-needed lookup there. The consumer
-witness also checks that the built package starts a classic worker in
-development and production; the earlier opener started a module worker. No
-available browser lacks module workers, so the witness observes the requested
-worker type rather than such a browser. These witnesses cover Vite development only, not webpack, Turbopack,
-an open from a worker, or a Vite client injected without a script `src`.
+The jsdom open cases start after asset resolution. The
+[OPFS open outcome oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.ts)
+owns how an open settles across its four steps: the Vite asset lookup, worker
+start, WASM load, and initialization. One module holds the law, the history
+grammar, the model, and the comparison; neither driver states expected
+results. A history fixes each step (the lookup resolves, is held, or fails;
+the worker starts or is refused; the WASM loads or fails; initialization
+answers or stays silent) and pairs every pending step with a deadline or an
+abort. The model predicts the settlement, started and terminated workers, and
+a later open after an interruption. The
+[jsdom driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts)
+reaches worker start, initialization, and the worker's WASM failure response.
+The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
+reaches the lookup, the real worker's WASM fetch, and worker start against a
+Vite dev server that pre-bundles the built package. It pauses the page clock
+and advances it for the deadline, interrupts only after the server holds the
+lookup, and reads the settlement and worker counts one task after each event,
+so no observation depends on elapsed time. Each driver fails when its product
+reaches fewer outcomes than it declares. Mutants that leave the lookup outside
+the deadline and abort, start a worker after a late lookup, report a WASM
+failure as an internal error, or let a refused Worker constructor's error
+escape each fail the driver that reaches that step. The grammar does not
+interrupt an open in the same turn as a failing step, because no law orders
+those causes yet.
+
+The
+[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-install-layouts.e2e.test.ts)
+models which installs open in Vite development and production: direct,
+hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
+directories, and exclusion by import name or package name. A pre-bundled copy
+opens when the app root resolves the package name and otherwise reports
+`PersistenceUnavailableError`; with two copies it loads the copy that the root
+resolves. Excluding the specifier that the importer uses serves the copy in
+place with its own worker. The README states these rules. A mutant that always
+runs the lookup fails the three excluded transitive, alias, and two-copy
+cases. Its dev servers do not watch files, because a late watcher event
+reloaded pages during an open.
+
+The packaged-consumer
+[checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
+cover the build output and export map, a classic worker in development and
+production, an `about:srcdoc` frame, and a page on another origin than the
+Vite server, where the Worker constructor throws `SecurityError` and the open
+reports `PersistenceUnavailableError`. These owners cover Vite only, not
+webpack or Turbopack development, an open from inside a worker, a Vite client
+injected without a script `src`, or browsers other than Chromium.
 
 The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how

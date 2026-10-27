@@ -42,8 +42,9 @@ import type {
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
  * locking, real bfcache admission, or browser process teardown. The open
- * histories begin after asset resolution; the packaged-consumer e2e test holds
- * the built package's Vite asset lookup for the same deadline and abort.
+ * histories begin after asset resolution. The OPFS open outcome oracle in
+ * opfs-open-outcome-oracle.ts owns how an open settles across asset lookup,
+ * worker start, WASM load, and initialization, with jsdom and Chromium drivers.
  */
 
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
