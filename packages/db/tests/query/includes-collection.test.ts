@@ -18,6 +18,7 @@ import {
   sum,
   toArray,
 } from '../../src/query/index.js'
+import { runTrace } from '../trace-runner.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
   assertDeleteIdentityEvents,
@@ -26,6 +27,9 @@ import {
   createControlledCollection,
   expectedMaterializations,
 } from './includes-collection-support.js'
+import { createCollectionDriver } from './includes-collection-driver-oracle.js'
+import type { TraceProjection } from '../trace-runner.js'
+import type { CollectionContext } from './includes-collection-driver-oracle.js'
 import type {
   ChildRow,
   DeleteIdentityObservation,
@@ -1346,5 +1350,30 @@ describe(`Collection-valued includes oracle`, () => {
         tags.collection.cleanup(),
       ])
     }
+  })
+
+  fcTest(`facade public keys survive row cloning`, async () => {
+    const driver = createCollectionDriver(
+      [{ id: 1, group: 1 }],
+      [{ id: 10, parentGroup: 1, value: 1 }],
+    )
+    const projection: TraceProjection<
+      CollectionContext,
+      { clonedKey: unknown },
+      { clonedKey: number }
+    > = {
+      observe(context) {
+        const facade = context.live.get(1)!.children
+        const row = facade.get(10)!
+        return { clonedKey: facade.getKeyFromItem({ ...row }) }
+      },
+      recompute: () => ({ clonedKey: 10 }),
+      assertEqual(observed, expected) {
+        expect(observed).toEqual(expected)
+        return undefined
+      },
+    }
+
+    await runTrace({ steps: [], driver, projection })
   })
 })

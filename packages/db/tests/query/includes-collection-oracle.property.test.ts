@@ -25,9 +25,21 @@ import {
   createControlledCollection,
   expectedMaterializations,
 } from './includes-collection-support.js'
+import {
+  createCollectionDriver,
+  projectEventValue,
+  projectLive,
+  recompute,
+} from './includes-collection-driver-oracle.js'
+import type {
+  CollectionAction,
+  CollectionContext,
+  IncludedChildCollection,
+  ParentEvent,
+  ProjectedParent,
+} from './includes-collection-driver-oracle.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
-import type { ControlledCollection } from './includes-oracle-helpers.js'
 import type { SyncConfig } from '../../src/types.js'
 import type {
   ChildRow,
@@ -96,48 +108,10 @@ import type {
 
 type SampleOf<T> = T extends fc.Arbitrary<infer TValue> ? TValue : never
 
-type CollectionAction =
-  | { type: `putParent`; row: ParentRow }
-  | { type: `deleteParent`; id: number }
-  | { type: `putChild`; row: ChildRow }
-  | { type: `deleteChild`; id: number }
-
-type ProjectedParent = {
-  id: number
-  group: number
-  childrenReady: boolean
-  children: Array<ChildRow>
-  arrayChildren: Array<ChildRow>
-  materializedChildren: Array<ChildRow>
-}
-
 type CollectionObservation = {
   rows: Array<ProjectedParent>
   publications: Array<Array<ProjectedParent>>
   events: Array<ParentEvent>
-}
-
-type EventValue = Pick<
-  ProjectedParent,
-  `id` | `group` | `arrayChildren` | `materializedChildren`
->
-
-type ParentEvent = {
-  type: `insert` | `update` | `delete`
-  key: number | string
-  value: EventValue
-  previousValue?: EventValue
-}
-
-function projectEventValue(row: EventValue): EventValue {
-  const children = (rows: Array<ChildRow>) =>
-    rows.map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
-  return {
-    id: row.id,
-    group: row.group,
-    arrayChildren: children(row.arrayChildren),
-    materializedChildren: children(row.materializedChildren),
-  }
 }
 
 function diffParents(
@@ -156,203 +130,6 @@ function diffParents(
       result.push({ type: `update`, key, value, previousValue: oldValue })
   }
   return result.sort((a, b) => Number(a.key) - Number(b.key))
-}
-
-type CollectionContext = {
-  parents: ControlledCollection<ParentRow>
-  children: ControlledCollection<ChildRow>
-  live: ReturnType<typeof createCollectionQuery>
-  model: {
-    parents: Map<number, ParentRow>
-    children: Map<number, ChildRow>
-  }
-  publications: Array<Array<ProjectedParent>>
-  events: Array<ParentEvent>
-  before: Array<ProjectedParent>
-  subscription?: { unsubscribe: () => void }
-}
-
-function createCollectionQuery(
-  parents: Collection<ParentRow>,
-  children: Collection<ChildRow>,
-  reuseChildRelation = true,
-) {
-  return createLiveQueryCollection((q) =>
-    q
-      .from({ parent: parents })
-      .orderBy(({ parent }) => parent.id)
-      .select(({ parent }) => {
-        const createChildRows = () =>
-          q
-            .from({ child: children })
-            .where(({ child }) => eq(child.parentGroup, parent.group))
-            .orderBy(({ child }) => child.id)
-            .select(({ child }) => ({
-              id: child.id,
-              parentGroup: child.parentGroup,
-              value: child.value,
-            }))
-        const childRows = createChildRows()
-
-        return {
-          id: parent.id,
-          group: parent.group,
-          children: childRows,
-          arrayChildren: toArray(
-            reuseChildRelation ? childRows : createChildRows(),
-          ),
-          materializedChildren: materialize(
-            reuseChildRelation ? childRows : createChildRows(),
-          ),
-        }
-      }),
-  )
-}
-
-type IncludedChildCollection = ReturnType<
-  typeof createCollectionQuery
->[`toArray`][number][`children`]
-
-function projectLive(
-  live: ReturnType<typeof createCollectionQuery>,
-): Array<ProjectedParent> {
-  return [...live.values()].map((parent) => {
-    const projectChildren = (rows: Iterable<ChildRow>) =>
-      [...rows].map(({ id, parentGroup, value }) => ({
-        id,
-        parentGroup,
-        value,
-      }))
-
-    return {
-      id: parent.id,
-      group: parent.group,
-      childrenReady: parent.children.isReady(),
-      children: projectChildren(parent.children.values()),
-      arrayChildren: projectChildren(parent.arrayChildren),
-      materializedChildren: projectChildren(parent.materializedChildren),
-    }
-  })
-}
-
-// This value model uses only current source Maps and the declared relation and
-// child order. Facade identity has separate focused models below.
-function recompute(context: CollectionContext): Array<ProjectedParent> {
-  return [...context.model.parents.values()]
-    .sort((left, right) => left.id - right.id)
-    .map((parent) => {
-      const children = [...context.model.children.values()]
-        .filter((child) => child.parentGroup === parent.group)
-        .sort((left, right) => left.id - right.id)
-        .map((child) => ({ ...child }))
-
-      return {
-        ...parent,
-        childrenReady: true,
-        children,
-        arrayChildren: children,
-        materializedChildren: children,
-      }
-    })
-}
-
-function createCollectionDriver(
-  initialParents: ReadonlyArray<ParentRow>,
-  initialChildren: ReadonlyArray<ChildRow>,
-  reuseChildRelation = true,
-): TraceDriver<CollectionAction, CollectionContext> {
-  return {
-    setup() {
-      const parents = createControlledCollection(
-        `collection-oracle-parents`,
-        initialParents,
-      )
-      const children = createControlledCollection(
-        `collection-oracle-children`,
-        initialChildren,
-      )
-      return {
-        parents,
-        children,
-        live: createCollectionQuery(
-          parents.collection,
-          children.collection,
-          reuseChildRelation,
-        ),
-        model: {
-          parents: new Map(initialParents.map((row) => [row.id, { ...row }])),
-          children: new Map(initialChildren.map((row) => [row.id, { ...row }])),
-        },
-        publications: [],
-        events: [],
-        before: [],
-      }
-    },
-    async start(context) {
-      await context.live.preload()
-      context.before = recompute(context)
-      context.subscription = context.live.subscribeChanges(
-        (changes) => {
-          context.publications.push(projectLive(context.live))
-          context.events.push(
-            ...changes.map((change) => ({
-              type: change.type,
-              key: change.key,
-              value: projectEventValue(change.value),
-              ...(change.previousValue
-                ? { previousValue: projectEventValue(change.previousValue) }
-                : {}),
-            })),
-          )
-        },
-        { includeInitialState: false },
-      )
-    },
-    apply(action, context) {
-      context.publications = []
-      context.events = []
-      context.before = recompute(context)
-      switch (action.type) {
-        case `putParent`: {
-          const type = context.model.parents.has(action.row.id)
-            ? `update`
-            : `insert`
-          context.model.parents.set(action.row.id, { ...action.row })
-          context.parents.write(type, action.row)
-          return
-        }
-        case `deleteParent`: {
-          const previous = context.model.parents.get(action.id)
-          if (!previous) return
-          context.model.parents.delete(action.id)
-          context.parents.write(`delete`, previous)
-          return
-        }
-        case `putChild`: {
-          const type = context.model.children.has(action.row.id)
-            ? `update`
-            : `insert`
-          context.model.children.set(action.row.id, { ...action.row })
-          context.children.write(type, action.row)
-          return
-        }
-        case `deleteChild`: {
-          const previous = context.model.children.get(action.id)
-          if (!previous) return
-          context.model.children.delete(action.id)
-          context.children.write(`delete`, previous)
-        }
-      }
-    },
-    async cleanup(context) {
-      context.subscription?.unsubscribe()
-      await Promise.all([
-        context.live.cleanup(),
-        context.parents.collection.cleanup(),
-        context.children.collection.cleanup(),
-      ])
-    },
-  }
 }
 
 type OptimisticAction =
@@ -990,31 +767,6 @@ describe(`Collection-valued includes oracle`, () => {
     expect(eventSnapshots).toHaveLength(2)
     assertDeleteIdentityEvents(eventSnapshots[0]!, false)
     assertDeleteIdentityEvents(eventSnapshots[1]!, true)
-  })
-
-  fcTest(`facade public keys survive row cloning`, async () => {
-    const driver = createCollectionDriver(
-      [{ id: 1, group: 1 }],
-      [{ id: 10, parentGroup: 1, value: 1 }],
-    )
-    const projection: TraceProjection<
-      CollectionContext,
-      { clonedKey: unknown },
-      { clonedKey: number }
-    > = {
-      observe(context) {
-        const facade = context.live.get(1)!.children
-        const row = facade.get(10)!
-        return { clonedKey: facade.getKeyFromItem({ ...row }) }
-      },
-      recompute: () => ({ clonedKey: 10 }),
-      assertEqual(observed, expected) {
-        expect(observed).toEqual(expected)
-        return undefined
-      },
-    }
-
-    await runTrace({ steps: [], driver, projection })
   })
 
   fcTest(`reactivating a retired route restores its current snapshot`, () =>
