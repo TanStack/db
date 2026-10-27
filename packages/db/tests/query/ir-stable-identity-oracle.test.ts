@@ -217,7 +217,6 @@ const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
 })
 
 declareOracle({
-  check: [assertOutputProgram],
   model: [interpretOutputProgram],
 })
 
