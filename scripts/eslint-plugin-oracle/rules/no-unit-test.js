@@ -354,11 +354,34 @@ class OracleModule {
     if (known !== undefined) return known
     // A binding that uses itself does not reach a part through that use.
     cache.set(variable, false)
-    const reaches = variable.defs.some((definition) =>
-      this.#definitionReaches(definition, local),
-    )
+    const reaches =
+      variable.defs.some((definition) =>
+        this.#definitionReaches(definition, local),
+      ) ||
+      (local && this.#fedByReachingValue(variable, local))
     cache.set(variable, reaches)
     return reaches
+  }
+
+  /**
+   * A collection that code fills with values from a declared part, such as a
+   * coverage Set that grammar-driven tests add the model's predictions to,
+   * carries those values. A test that reads it uses the part.
+   */
+  #fedByReachingValue(variable, local) {
+    return variable.references.some((reference) => {
+      const member = reference.identifier.parent
+      const call = member?.parent
+      return (
+        member?.type === `MemberExpression` &&
+        member.object === reference.identifier &&
+        !member.computed &&
+        accumulatorMethods.has(member.property.name) &&
+        call?.type === `CallExpression` &&
+        call.callee === member &&
+        call.arguments.some((argument) => this.nodeReaches(argument, local))
+      )
+    })
   }
 
   #definitionReaches(definition, local) {
@@ -566,6 +589,9 @@ class OracleModule {
 }
 
 const fastCheckModules = new Set([`fast-check`, `@fast-check/vitest`])
+
+// Methods that put a value into a collection.
+const accumulatorMethods = new Set([`add`, `set`, `push`, `unshift`])
 
 /** `fc.constant(x)` or `fc.constantFrom(...)`: an arbitrary of written values. */
 function isConstant(node) {

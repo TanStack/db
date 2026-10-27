@@ -14,6 +14,7 @@ import {
 import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
 import { withAcceptedReceipt } from '../sync-receipt'
+import { assertCollectionKey } from '../utils'
 import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import { automaticRowMetadataWrite } from './state'
@@ -242,6 +243,8 @@ export class CollectionSyncManager<
               `key` in messageWithOptionalKey
                 ? messageWithOptionalKey.key
                 : this.config.getKey(messageWithOptionalKey.value)
+            // Ordered Collection state needs keys of the declared key type.
+            assertCollectionKey(key, messageWithOptionalKey)
 
             let messageType = messageWithOptionalKey.type
 

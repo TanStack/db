@@ -107,7 +107,7 @@ import type {
  * While a hold settles after a failed flush, a restoring sync update can
  * still publish the value the facade already shows; that permitted false
  * positive is the only event a failed flush may publish.
- * The work counter wraps the iteration, `forEach`, `get` and `has` methods of
+ * The work counter wraps the iteration, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
  * flush read. A pinned case covers nested facades across two edges: the child
  * edge commits, then the parent edge throws. Pinned cases also cover a

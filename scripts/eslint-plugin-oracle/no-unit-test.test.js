@@ -235,6 +235,14 @@ declareOracle({ check: [checkHistory] })
 it('checks a fixed history', () => checkHistory([]))`,
       filename,
     },
+    // A coverage calibration reads a Set that grammar-driven tests fill with
+    // the model's predictions.
+    {
+      code: `${header}const covered = new Set()
+it.each(cases)('runs %s', (c) => { covered.add(modelHistory(c)); checkHistory(c) })
+it('covers every outcome', () => expect([...covered]).toEqual(['a', 'b']))`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,
@@ -426,6 +434,17 @@ test('keeps a number', () => {
       filename,
       errors: [
         { messageId: `unknownTypeModel`, line: 3 },
+        { messageId: `unitTest`, line: 7 },
+      ],
+    },
+    // A Set filled with written values carries no declared part.
+    {
+      code: `${header}const seen = new Set()
+it('records', () => { seen.add('a') })
+it('reads', () => expect([...seen]).toEqual(['a']))`,
+      filename,
+      errors: [
+        { messageId: `unitTest`, line: 6 },
         { messageId: `unitTest`, line: 7 },
       ],
     },

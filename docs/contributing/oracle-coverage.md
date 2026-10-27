@@ -68,6 +68,7 @@ that test identifiers must copy production's private data structures.
 | Indexed predicate filtering | Complete for bounded dotted-path collision | An independent row filter checks direct predicates and public callback predicates for a dotted scalar field beside a nested path, with and without an index. Selected-field ordering checks the same distinction through `$selected`. |
 | WHERE predicate publication | Complete for bounded predicate and sync-transaction grammar | The contract, Kleene reference evaluator, snapshot and change-history grammar, three subscriber consumers plus direct snapshot, and per-commit key-set refinement check are literate. A fixed same-key update checks live-row and direct-subscriber payloads; a focused descriptor boundary checks stored-row prefilter safety. Generated cleanup and restart histories for filtered subscribers remain open. |
 | Joined result keys | Complete for bounded two-source key grammar | The contract, nested-loop pair model, delimiter-, number-like, infinite, and `NaN` key grammar, public join driver, and per-checkpoint pair and key-count check are literate. Joins over subqueries, more than two sources, custom `getKey`, and optimistic mutations remain outside this owner. |
+| Grouped result keys | [Grouped result key oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/group-result-key-oracle.property.test.ts) | A grouped live-query Collection gives each group one key of the Collection key type, a string or a number, whatever the group value. Maintainer decision (2026-10-27): grouped keys match the declared key type rather than widening it to nullish keys. Group values come from strings, numbers, `NaN`, `null`, `undefined`, booleans, a bigint, strings that print like those values, and strings in the reserved `\u0000tanstack-db:` namespace; histories move, delete, and insert rows. After preload and each synced change, the (group value, count) pairs equal an independent partition by type and value, every key is a string or number, no two groups share a key, and a group that survives a change keeps its key. Reach (minimum 5, per campaign of 80): a nullish group published (32 to 38), a group value published beside a string that prints like it (18 to 21), and a key kept across a change (49 to 53). RED on the parent commit: keys `undefined`, `null`, `false`, and `10n`. Mutants that encode with `String(value)` (lookalike keys collide) or that encode only nullish values (boolean keys) fail. Encoding only the internal D2 key is equivalent in this domain, because the Collection keys rows by the public group key. A focused witness in `collection.test.ts` checks that `sync.write` rejects `undefined`, `null`, boolean, and bigint keys before staging them, and that a later valid write commits alone. A sync adapter that writes such a key breaks its contract, so this is a fail-fast invariant witness under AGENTS.md ("Separate Valid Edge Cases from Contract Contradictions"), not a generated owner; SortedMap never receives these keys. Not covered: Dates, `-0`, objects, and multi-field groups, whose values the aggregate select oracle owns; real sync adapters, since the source is a controlled mock. |
 | D2 Index storage | Complete for bounded prefix grammar | The contract, plain-`Map` multiset model, prefixed and unprefixed value grammar, `Index` driver, and per-addition `get`/`has` check are literate. Compaction, presence tracking, and structural payloads remain outside this owner. |
 | Pooled live queries | Complete for bounded eq-filter grammar | The contract, independent `eq` model, live-query Collection second formulation, sync/optimistic/mount/cleanup-restart grammar, observer driver, and per-step refinement check are literate. On-demand and persisted sources, `DbClient`, Suspense, and every clause beyond `eq` conjuncts keep the live-query Collection. |
 | Live-query deferred acquisition | Complete for bounded synchronous grammar | The law, independent model, history grammar over source states, shapes, and depth, real-Collection driver, and per-step refinement check are literate. Pooled views and DbClient stream preloads have their own blocks. The grammar also adds a peer consumer starting the source and a source truncate before the first subscriber; pinned blocks cover a subscriber that outlives cleanup, reads that wait for readiness, and release of two independent descriptor sources when one start fails. Asynchronous sources, several live-query consumers, and general failure histories stay open. |
@@ -1064,7 +1065,7 @@ generic visitor behavior outside the named collectors.
 | Index suggestions | [index suggestion oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/index-suggestion-oracle.test.ts) | A public filtered live-query Collection checks manual/default, eager, threshold, matching-index, and unrelated-index cases against the documented collection-size suggestion policy. A bounded ordered-query decision table separately classifies no field index, a null-placement mismatch, matching but order-ineligible indexes, and usable candidates in either registration order. It compares the development warning after preload; the matching-index selection owner below checks the chosen reader and ordered request. Two cyclic locale-options cells require the diagnostic to preserve valid query construction with or without a field index, and a custom-collation cell requires remediation to preserve comparator reference identity. The original manual-silence/eager-noise implementation failed two expected observations. The issue #2190 baseline failed four diagnostic cells, including a first-unusable/second-usable candidate order; the first formatter draft failed all three non-JSON-safe remediation cells. The owner does not judge repeated-query warning volume, slow-query timing, production-build suppression, every comparison-option mismatch, or every query shape. It runs in `@tanstack/db`'s `test:oracles` campaign. |
 | Minified DB public API | [consumer bundle check](https://github.com/TanStack/db/blob/main/scripts/test-minified-db.mjs) | CI builds `@tanstack/db`, then bundles its built `dist` entry with db-ivm inlined through esbuild `minify: true`. The build renames TypeScript-private members from `packages/db/mangle-cache.json`, so this lane runs against the renamed output that consumers install. It rejects a `dist` that is older than `src`, the cache, or the package's build configuration. `pnpm --filter @tanstack/db test:dist` also runs five db test files against the built `dist`, chosen for coverage of the modules with the most renamed members. `pnpm check:mangle` fails when a cached name is used other than as a private member in db src, is read by another package, appears as a string, or has a short name that collides with a source identifier ([private-member mangling review](oracle-reviews/code-weight-private-member-mangling.md)). It checks every exported error class's current public `name`, the built-in `BasicIndex` resolver name in index metadata and its event, complete query rows (after removing the four documented virtual fields) against an independent array filter/sort/projection, and one live update. The `new.target.name`, public-member mangle, and extra-output-field calibration modes fail at the intended observations. This fixed slice does not replace the unminified generated oracles, exercise framework adapters, or establish stable names for custom index resolvers. |
 | Boundary refinements | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [idle cleanup](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-idle-cleanup.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [row metadata composition](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts), [nested-begin metadata rebuild review](oracle-reviews/2026-10-06-nested-begin-metadata-rebuild.md), [state mutation round 4](oracle-reviews/2026-10-06-state-mutation-round-4.md), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-cells.test.ts) (fixed tests; no oracle owner (tracked in #2264)), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
-| Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap-oracle.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue-oracle.property.test.ts), [live-query GC clock](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-clock.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and elapsed appointment-list models with executed target/seed/path checks. SortedMap also checks deferred bulk writes, array-movement work, scan reuse, live iterators, runtime `undefined` keys, and public single-transaction and queued-transaction Collection sync paths. It does not settle the contract for comparator-observed values mutated after publication or every legal iterator/mutation interleaving. Wall-clock steps do not move due times, and a focused public witness checks source subscription release. Callback-reentrant scheduling, OS suspend/resume, environments without `performance.now()`, and fake/real Performance clock replacement while GC is pending remain outside this coverage. Tests must drain or reset pending GC before switching timer providers. |
+| Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap-oracle.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue-oracle.property.test.ts), [live-query GC clock](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-clock.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and elapsed appointment-list models with executed target/seed/path checks. SortedMap promises what Collection state uses, not full Map parity (maintainer decision). Keys are strings or numbers: `sync.write` and mutations throw `InvalidKeyError` or `UndefinedKeyError` for any other key, and grouped live queries key nullish, boolean, and bigint group values with strings (maintainer decision, 2026-10-27). The model is a Map of numbers plus a full sort; production stores row objects so the driver can change one in place. Keys include `NaN`, which a grouped live query uses for a `NaN` group; it is one key that key order places after every other number. Generated histories mix deferred and immediate sets and deletes, clear, deferred bursts of 17 to 41 keys, prunes that delete entries with deferOrder while iterating, and in-place changes of a deferred or a placed row. A prune must yield the order it began with. A row changed before restore sorts by its current value; once a placed row changes in place, comparator order downgrades to membership (each key once, current value) for the rest of the history, and a later write or delete affects only its own key. At each ordered read with a comparator, restoring k deferred keys among n others makes at most k * (ceil(log2 k) + ceil(log2 (n + 1)) + 2) comparator calls, and none with nothing deferred. Declared reach (minimum 5, per campaign of 100): burst restorations, an entry yielded after a prune deleted one, a placed `NaN` key written without deferral (7 to 16), a restore whose bound is below n (19 to 30), a changed placed row later written (11 to 20), and a deferred row changed before restore (11 to 19). Mutants that re-sort every key (108 calls against a bound of 7), re-sort the kept keys with the dirty keys appended (34 against 7), re-sort clean scans, drop the scan fallback for a changed row, match slots by `===` (a placed `NaN` key then removes the last key), keep dirty slots, apply deferred deletes immediately, or place a deferred row by its value at the write each fail. Supplemental examples in `SortedMap.test.ts` pin splice movement at scale, a key iterator opened before a deferred restore, scan reuse, and public single-transaction and queued-transaction Collection sync paths. Not promised: other mutation during iteration (immediate writes, clear), the order of rows once a placed row changed in place, keys outside the key type, `-0` keys, a comparator that throws, and the work of key order without a comparator, which the public API cannot observe. `forEach` was removed; SortedMap is not exported. Wall-clock steps do not move due times, and a focused public witness checks source subscription release. Callback-reentrant scheduling, OS suspend/resume, environments without `performance.now()`, and fake/real Performance clock replacement while GC is pending remain outside this coverage. Tests must drain or reset pending GC before switching timer providers. |
 
 The index-suggestion oracle's PR #2196 extension checks a matching local
 custom-collation index against the full-source request and retained warning,
@@ -1932,6 +1933,13 @@ drivers; the same seam rejects a statement above 100 bindings. The original
 transaction driver exceeded the cap at 101. This Node SQLite seam does not
 execute in Workers or prove native JSON-function support.
 
+The [worker diagnostics oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts)
+drives the real worker module and also classifies a refused OPFS storage
+root, as in a private window or a browser without OPFS storage: the worker
+answers `PERSISTENCE_UNAVAILABLE` with the browser's error name and message
+before SQLite opens, and a `PersistenceUnavailableError` response carries only
+its details, which the opener prefixes once.
+
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,
 ignores a late response, and releases the deadline and abort listener after a
@@ -1943,6 +1951,73 @@ the lock. This controlled lock holder does not
 reproduce a frozen tab or establish behavior in other browsers.
 The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
 preserves the exact-head unit and Chromium evidence and the queued-lock mutant.
+The jsdom open cases start after asset resolution. The
+[OPFS open outcome oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.ts)
+owns how an open settles across its four steps: the Vite asset lookup, worker
+start, WASM load, and initialization. One module holds the law, the history
+grammar, the model, and the comparison; neither driver states expected
+results. A history fixes each step (the lookup resolves, is held, or fails;
+the worker starts or is refused; the WASM loads or fails; initialization
+answers or stays silent; the worker script can also fail to load) and pairs
+every pending step with a deadline or an abort. The model predicts the
+settlement, started and terminated workers, the steps that production reached,
+and a later open after an interruption. The
+[jsdom driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts)
+reaches worker start, initialization, and the worker's WASM failure response.
+The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
+reaches the lookup, the real worker's WASM fetch, and worker start against a
+Vite dev server that pre-bundles the built package. It holds back only the
+opener's deadline timer and fires it explicitly, interrupts only after the
+server holds the lookup, and reads the settlement and worker counts one task
+after each event, so no observation depends on elapsed time. Each driver checks that its
+history product covers the outcomes it declares; the `reached` observation is
+the production reach witness. Mutants that leave the lookup outside
+the deadline and abort, start a worker after a late lookup, report a WASM
+failure as an internal error, or let a refused Worker constructor's error
+escape each fail the driver that reaches that step, and a mutant that rejects
+before making the lookup fails only on `reached`. The grammar does not
+interrupt an open in the same turn as a failing step, because no law orders
+those causes yet.
+
+The
+[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
+models which installs open in Vite development and production: direct,
+hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
+directories, and exclusion by import name or package name. It reads the
+importer's specifier and the Node resolution of the package name from each
+installed tree rather than from a table per layout. A pre-bundled copy
+opens when the app root resolves the package name and otherwise reports
+`PersistenceUnavailableError`; with two copies it loads the copy that the root
+resolves, and when that copy is another version its worker refuses the opener
+and the open reports `PersistenceUnavailableError` after one worker starts. The
+two-version layout rewrites the nested copy's built version marker, so the
+opener and the root copy's worker really come from different builds. Excluding the specifier that the importer uses serves the copy in
+place with its own worker. The README states these rules. A mutant that always
+runs the lookup fails the three excluded transitive, alias, and two-copy
+cases. Its dev servers do not watch files, because a late watcher event
+reloaded pages during an open.
+
+The packaged-consumer
+[checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
+cover the build output and export map, a classic worker in development and
+production, an `about:srcdoc` frame, and a page on another origin than the
+Vite server, where the Worker constructor throws `SecurityError` and the open
+reports `PersistenceUnavailableError`. The
+[bundler consumer checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/bundler-consumers.e2e.test.ts)
+install the built workspace packages as published packages in a webpack 5 app
+(production and development builds) and a Next.js app (Turbopack and webpack,
+each under `next build` with `next start` and under `next dev`). Each opens and
+queries SQLite in Chromium, starts one classic worker, loads one
+`200 application/wasm` response, and makes no Vite lookup request. Each
+production build, and the Vite consumer's production build, ships none of the
+lookup's code. A module
+worker fails all six; a lookup that runs without a Vite client fails the four
+Next.js cases and is equivalent under webpack, which emits the worker and WASM
+in one directory. These owners do not cover webpack-dev-server, Rspack, Parcel,
+esbuild, an open from inside a worker, a Vite client injected without a script
+`src`, or browsers other than Chromium. The
+[PR #2103 review record](oracle-reviews/pr-2103-separate-wasm.md) classifies
+each calibration control and records every applicable requirement.
 
 The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how

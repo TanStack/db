@@ -9,7 +9,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { SortedMap } from '../src/SortedMap'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
+import { expectMap, expectView } from './sorted-map-support'
 import type { SyncConfig } from '../src/types.js'
+import type { ModelKey, Row } from './sorted-map-support'
+
+// Supplemental examples for SortedMap. The generated law lives in
+// SortedMap-oracle.test.ts; these pin scale, scan reuse, and public
+// Collection sync paths that its small histories do not reach.
 
 async function countDisplacedSlots(
   action: () => void | Promise<void>,
@@ -57,6 +63,34 @@ describe(`SortedMap`, () => {
     )
   })
 
+  it.each([`key`, `ascending`, `descending`] as const)(
+    `keeps exact order after deferred %s inserts, reorders, and deletes`,
+    (order) => {
+      const map = new SortedMap<number, number>(
+        order === `key`
+          ? undefined
+          : order === `ascending`
+            ? (a, b) => a - b
+            : (a, b) => b - a,
+      )
+      const model = new Map<number, number>()
+      for (let key = 255; key >= 0; key--) {
+        map.set(key, key % 17, true)
+        model.set(key, key % 17)
+      }
+      expectMap(map, model, order)
+      for (let key = 0; key < 256; key += 5) {
+        map.set(key, -key, true)
+        model.set(key, -key)
+      }
+      expectMap(map, model, order)
+      for (let key = 0; key < 256; key += 7) {
+        expect(map.delete(key, true)).toBe(model.delete(key))
+      }
+      expectMap(map, model, order)
+    },
+  )
+
   it(`keeps a default-order key iterator live across set and delete`, () => {
     const map = new SortedMap<number, number>()
     map.set(1, 1).set(3, 3)
@@ -91,36 +125,58 @@ describe(`SortedMap`, () => {
     expect(map.get(Number.NaN)).toBe(2)
   })
 
-  it(`retains runtime undefined keys and does not resort clean scans`, () => {
-    const compare = vi.fn((left: number, right: number) => left - right)
-    const map = new SortedMap<string, number>(compare)
-    const absent = undefined as unknown as string
-    map.set(`a`, 2, true)
-    map.set(absent, 1, true)
+  it(`keeps ordered-key movement bounded during deferred bulk deletes and reorders`, async () => {
+    // A bulk commit can remove or reorder many existing keys, not only add
+    // new ones. Moving every later key once per removed or reordered key is
+    // quadratic; the bound allows a constant number of passes.
+    const size = 2048
+    const map = new SortedMap<number, number>((a, b) => a - b)
+    for (let key = 0; key < size; key++) map.set(key, key, true)
     map.restoreOrder()
-    expect([...map.keys()]).toEqual([absent, `a`])
-    compare.mockClear()
-    for (let scan = 0; scan < 20; scan++) {
-      expect([...map.keys()]).toEqual([absent, `a`])
-    }
-    expect(compare).not.toHaveBeenCalled()
-    expect(map.delete(absent, true)).toBe(true)
-    map.restoreOrder()
-    expect([...map.keys()]).toEqual([`a`])
+    const deleted = await countDisplacedSlots(() => {
+      for (let key = 0; key < size; key += 2) map.delete(key, true)
+      map.restoreOrder()
+    })
+    expect(deleted).toBeLessThan(size * 64)
+    const reordered = await countDisplacedSlots(() => {
+      for (let key = 1; key < size; key += 4) map.set(key, -key, true)
+      map.restoreOrder()
+    })
+    expect(reordered).toBeLessThan(size * 64)
+    const expected = Array.from(
+      { length: size / 2 },
+      (_, index) => 2 * index + 1,
+    )
+      .map((key) => [key, key % 4 === 1 ? -key : key] as const)
+      .sort(([, a], [, b]) => a - b)
+      .map(([key]) => key)
+    expect([...map.keys()]).toEqual(expected)
   })
 
-  it(`preserves insertion behavior around transient nullish numeric keys`, () => {
-    const map = new SortedMap<number, number>()
-    const absent = undefined as unknown as number
-    map.set(absent, 0, true)
-    map.set(1, 0, true)
-    expect([...map.keys()]).toEqual([absent, 1])
-    expect(map.delete(absent, true)).toBe(true)
-    for (let key = 128; key > 1; key--) map.set(key, 0, true)
-    map.restoreOrder()
-    expect([...map.keys()]).toEqual(
-      Array.from({ length: 128 }, (_, i) => i + 1),
-    )
+  it(`keeps Map ownership when a placed comparator value was mutated in place`, () => {
+    // A sync source may reuse a row object it already wrote. Where the mutated
+    // row sorts is not promised, but deleting or rewriting it must affect only
+    // its own key: a binary search guided by the stale order would otherwise
+    // remove a neighbor.
+    for (const deferOrder of [false, true]) {
+      const map = new SortedMap<string, { rank: number }>(
+        (left, right) => left.rank - right.rank,
+      )
+      const rows = [`a`, `b`, `c`, `d`, `e`].map((key, rank) => {
+        const row = { rank }
+        map.set(key, row)
+        return row
+      })
+      rows[1]!.rank = 10
+      expect(map.delete(`b`, deferOrder)).toBe(true)
+      map.restoreOrder()
+      expect([...map.keys()]).toEqual([`a`, `c`, `d`, `e`])
+      rows[3]!.rank = -10
+      map.set(`d`, { rank: 1.5 }, deferOrder)
+      map.restoreOrder()
+      expect([...map.keys()]).toEqual([`a`, `d`, `c`, `e`])
+      expect(map.size).toBe(4)
+    }
   })
 
   it(`orders mutable comparator values at the batch checkpoint`, () => {
@@ -327,7 +383,6 @@ describe(`SortedMap`, () => {
       await collection.cleanup()
     }
   })
-
   it(`sorts by key by default, even when values have the opposite order`, () => {
     const map = new SortedMap<string, number>()
     map.set(`c`, 1)
@@ -390,11 +445,6 @@ describe(`SortedMap`, () => {
     // Test values()
     const values = Array.from(map.values())
     expect(values).toEqual([1, 2, 3])
-
-    // Test forEach
-    const forEachResults: Array<number> = []
-    map.forEach((value) => forEachResults.push(value))
-    expect(forEachResults).toEqual([1, 2, 3])
   })
 
   it(`orders string keys when no custom comparator is provided`, () => {
@@ -456,4 +506,61 @@ describe(`SortedMap`, () => {
     expect(map.size).toBe(0)
     expect(Array.from(map.entries())).toEqual([])
   })
+})
+
+it(`rejects wrong default ordering, missing tied entries, stale overwrites, and lost keys`, () => {
+  const byValue = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
+  byValue.set(1, { rank: 3 }).set(-1, { rank: 4 })
+  expect(() =>
+    expectMap(
+      byValue,
+      new Map([
+        [1, 3],
+        [-1, 4],
+      ]),
+      `key`,
+    ),
+  ).toThrow()
+  const missingTie = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
+  missingTie.set(1, { rank: 3 })
+  expect(() =>
+    expectMap(
+      missingTie,
+      new Map([
+        [1, 3],
+        [-1, 3],
+      ]),
+      `ascending`,
+    ),
+  ).toThrow()
+  const stale = new SortedMap<number, Row>()
+  stale.set(1, { rank: 3 })
+  expect(() => expectMap(stale, new Map([[1, 2]]), `key`)).toThrow()
+  // Without the order promise, a view may reorder keys but must hold each
+  // key once with its current value.
+  const expected: Array<[ModelKey, number]> = [
+    [1, 3],
+    [2, 3],
+  ]
+  expect(() =>
+    expectView(
+      [
+        [2, 3],
+        [1, 3],
+      ],
+      expected,
+      false,
+    ),
+  ).not.toThrow()
+  expect(() =>
+    expectView(
+      [
+        [1, 3],
+        [1, 3],
+      ],
+      expected,
+      false,
+    ),
+  ).toThrow()
+  expect(() => expectView([[1, 3]], expected, false)).toThrow()
 })

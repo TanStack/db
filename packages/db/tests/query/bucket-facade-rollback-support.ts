@@ -322,13 +322,12 @@ export class Driver {
           return original(...args)
         }
       }
-      // Every read path of the stored rows: iteration, forEach, and lookups.
+      // Every read path of the stored rows: iteration and lookups.
       for (const method of [
         Symbol.iterator,
         `entries`,
         `keys`,
         `values`,
-        `forEach`,
         `get`,
         `has`,
       ]) {

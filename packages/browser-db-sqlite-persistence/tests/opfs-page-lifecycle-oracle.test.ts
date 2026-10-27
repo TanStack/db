@@ -57,7 +57,10 @@ import type { BrowserOPFSWorkerErrorCode } from '../src/opfs-worker-protocol'
  * plus caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
- * locking, real bfcache admission, or browser process teardown.
+ * locking, real bfcache admission, or browser process teardown. The open
+ * histories begin after asset resolution. The OPFS open outcome oracle in
+ * opfs-open-outcome-oracle.ts owns how an open settles across asset lookup,
+ * worker start, WASM load, and initialization, with jsdom and Chromium drivers.
  */
 
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
