@@ -133,12 +133,15 @@ const FORMS = [
   `options-last`,
   `each`,
   `for`,
+  `helper-plain`,
+  `helper-prop`,
 ]
 
 // The form index is taken modulo the forms that the feature set enables, so
 // each enabled form gets an equal share of the registrations.
 const registrationSkeleton = fc.record({
   formIndex: fc.nat({ max: FORMS.length - 1 }),
+  constantArb: fc.boolean(),
   refs: fc.array(refSkeleton, { maxLength: REFS }),
   callee: fc.nat({ max: 9 }),
   literalOptions: fc.boolean(),
@@ -302,6 +305,27 @@ function buildProgram(skeleton, features) {
   const calls = []
   if (registrarFile !== undefined) {
     calls.push({ alias: `regAll`, file: registrarFile })
+  }
+  // An imported helper that registers the body its caller passes. The oracle
+  // file imports it, and the helper's own module is not an oracle.
+  if (tests.some((test) => test.helper !== undefined)) {
+    const helperFile = `reg-helper.ts`
+    oracle.imports.set(`regPlain`, { from: helperFile, imported: `regPlain` })
+    oracle.imports.set(`regProp`, { from: helperFile, imported: `regProp` })
+    modules.set(helperFile, {
+      file: helperFile,
+      role: `helper`,
+      bindings: new Map(),
+      exportEntries: [],
+      stars: [],
+      imports: new Map(),
+      types: new Set(),
+      typeNames: [],
+      parts: new Map(),
+      missing: [],
+      declares: false,
+      stringKeys: false,
+    })
   }
   for (const test of tests) {
     const { body } = test
@@ -472,7 +496,13 @@ function buildRegistration(skeleton, index, oracle, features) {
   if (form === `identifier` && functionNames.length === 0) form = `plain`
   const refs = skeleton.refs.map(resolve).filter((ref) => ref !== undefined)
   const test = { title, form, wrapped: skeleton.wrapped, refs }
-  if (form === `identifier`) {
+  if (form === `helper-plain` || form === `helper-prop`) {
+    test.helper = {
+      prop: form === `helper-prop`,
+      constant: skeleton.constantArb,
+    }
+    test.body = { kind: `arrow`, refs }
+  } else if (form === `identifier`) {
     test.body = {
       kind: `ident`,
       name: functionNames[skeleton.callee % functionNames.length],
@@ -589,6 +619,8 @@ function predictReports(program) {
 
   const refOfOracle = (ref) => refReaches(program.oracle, oracle, ref)
   const reachesPart = (test) => {
+    // A generated property: a non-constant arbitrary, and a body that reads its value.
+    if (test.helper?.prop && !test.helper.constant) return true
     const { body } = test
     const bodyReaches =
       body.kind === `arrow`
@@ -635,6 +667,9 @@ function predictReports(program) {
 
 const REGISTRAR_TEXT = `import { it } from 'vitest'\nexport function regAll() { it('reg inner', () => { void 0 }) }\n`
 const BROKEN_TEXT = `export function brokenFn() {\n`
+// A helper that registers the body its caller passes: a plain test, and a
+// curried fast-check property, as serializerProp does.
+const HELPER_TEXT = `import { it } from 'vitest'\nimport { test as fcTest } from '@fast-check/vitest'\nexport function regPlain(name, body) { it(name, body) }\nexport function regProp(arbitraries) {\n  return (name, check) => { fcTest.prop(arbitraries)(name, check) }\n}\n`
 
 /** The files for a program, and the subject that each line of the oracle names. */
 function renderProgram(program) {
@@ -645,6 +680,8 @@ function renderProgram(program) {
       files.set(file, BROKEN_TEXT)
     } else if (module.role === `registrar`) {
       files.set(file, REGISTRAR_TEXT)
+    } else if (module.role === `helper`) {
+      files.set(file, HELPER_TEXT)
     } else {
       const rendered = renderModule(module, program)
       files.set(file, rendered.text)
@@ -768,6 +805,17 @@ function renderTest(test, push) {
 
 function registrationText(test) {
   const { body, title } = test
+  if (test.helper !== undefined) {
+    const arbitrary = test.helper.constant ? `fc.constant(1)` : `fc.integer()`
+    const head = test.helper.prop ? `regProp([${arbitrary}])` : `regPlain`
+    return [
+      `${head}('${title}', (value) => {`,
+      `    expect(1).toBe(1)`,
+      `    void value`,
+      `    ${statementsOf(body.refs).join(`\n    `)}`,
+      `  })`,
+    ]
+  }
   if (test.table !== undefined) {
     const rows = test.table.rows.map((row) =>
       row.fn === undefined
@@ -1017,6 +1065,7 @@ const STATES = [
   `type-model-declaration`,
   `unparseable-companion`,
   `imported-registration`,
+  `caller-passed-body-helper`,
   `companion-edited-between-lints`,
 ]
 const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
@@ -1074,6 +1123,9 @@ function recordStates(program) {
   }
   if (program.calls.some((call) => !call.file.includes(`oracle`))) {
     states.add(`imported-registration`)
+  }
+  if (program.tests.some((test) => test.helper !== undefined)) {
+    states.add(`caller-passed-body-helper`)
   }
   for (const state of states) reach.reach(state)
 }
@@ -1174,6 +1226,10 @@ describe(`declared reach in oracle files`, () => {
   campaign(`type models`, { ...BASE, typeModels: true })
   campaign(`unparseable companion`, { ...BASE, broken: true })
   campaign(`imported registration helper`, { ...BASE, registrar: true })
+  campaign(`caller-passed body helpers`, {
+    ...BASE,
+    forms: [...BASE.forms, `helper-plain`, `helper-prop`],
+  })
   campaign(`all families`, ALL)
 })
 
