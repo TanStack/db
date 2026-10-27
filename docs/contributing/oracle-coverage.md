@@ -2940,16 +2940,17 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       the application recovers it (restart in the page, or reload). It
       judges every tab's status once every source has delivered or stopped,
       and again after recovery. Eager cells also compare rows at both
-      checkpoints, except the stopped tab's rows before recovery after
-      cleanup or resume invalidation. It also judges the full-snapshot
-      request after resume invalidation. Its 290 storm cells pass. Every ordinary storm
+      checkpoints, except a cleaned-up tab before recovery. It also judges the
+      full-snapshot request after resume invalidation. A Collection in
+      `error` keeps showing durable rows (maintainer decision on PR #2265),
+      so the tab that resume invalidation put in `error` must show its peers'
+      refetch. Its 290 storm cells pass. Every ordinary storm
       cell fails on `5649a07d4`. Removing Electric's abandon on the `onError`,
-      give-up, or signal-abort path fails 12 cells each. Two abandon mutants
-      survive here: cleanup's, because the persisted wrapper ends its
-      transactions on cleanup (the Electric descriptor-isolation oracle kills
-      it without persistence), and resume invalidation's, which changes only
-      the rows of a Collection in `error`, which no law promises. On-demand
-      cells judge receipts and status only.
+      give-up, or signal-abort path fails 12 cells each, and on the resume
+      invalidation path 16 cells. Cleanup's abandon mutant survives here,
+      because the persisted wrapper ends its transactions on cleanup; the
+      Electric descriptor-isolation oracle kills it without persistence.
+      On-demand cells judge receipts and status only.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in

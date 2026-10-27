@@ -6,7 +6,7 @@
  * runs its own Electric stream, and all of them store through one SQLite
  * database and one elected leader. Tabs coordinate only through durable
  * commits and the notices those commits broadcast. This file is the Browser
- * host owner for two laws about that arrangement.
+ * host owner for three laws about that arrangement.
  *
  * Law 1, reserved commits survive a refetch storm. Authority:
  * SyncPersistenceCapabilityV1 `reserveCommitTurn` (packages/db/src/types.ts),
@@ -50,12 +50,16 @@
  * Collection status and public rows, and the position from which a
  * recovered tab's new stream starts.
  *
- * A Collection in `error` after resume invalidation has no promised rows, so
- * its rows are judged only after recovery. Removing Electric's abandon in
- * resume invalidation changes only those unjudged rows, so that mutant
- * survives here. Electric's own cleanup abandon is redundant behind the
- * persisted wrapper, which ends its transactions on cleanup; the Electric
- * descriptor-isolation oracle judges it without persistence.
+ * Law 3, a Collection in `error` keeps showing durable rows. Authority:
+ * maintainer decision on PR #2265. A persisted Collection that a source
+ * failure put in `error` still applies its peers' durable commits, so its
+ * public rows match the durable rows. This file judges it after resume
+ * invalidation, the one stop that puts the Collection in `error`; the source
+ * must end its reserved transaction for the peers' refetch to apply.
+ *
+ * Electric's own cleanup abandon is redundant behind the persisted wrapper,
+ * which ends its transactions on cleanup, so that mutant survives here; the
+ * Electric descriptor-isolation oracle judges it without persistence.
  *
  * Limits: the stream is controlled, not the installed SDK over HTTP; one
  * process hosts every tab; one Collection; no subset demand in on-demand
@@ -435,7 +439,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // applies its peers' refetch from durable rows, as it did before
   // reservations deferred hydrations. Electric then fails no further, except
   // that resume invalidation puts the Collection in `error`, as Electric
-  // documents. The application's recovery, cleanup and a restart, then brings
+  // documents; that Collection still shows durable rows (Law 3). The
+  // application's recovery, cleanup and a restart, then brings
   // the tab to the head. After resume invalidation the restart must request a
   // full snapshot (electric.ts: "a full snapshot is required").
   type StormHistory = {
@@ -597,9 +602,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
 
       // Checkpoint 1, every source has delivered or stopped. A rejected
       // reserved commit puts its Collection in `error`. A stopped tab that is
-      // still open shows its peers' refetch, except after cleanup (no rows)
-      // or resume invalidation (`error`, rows not promised). Eager rows must
-      // equal the head snapshot; on-demand rows are not judged (above).
+      // still open shows its peers' refetch, including one in `error` after
+      // resume invalidation (Law 3); a cleaned-up tab has no rows. Eager rows
+      // must equal the head snapshot; on-demand rows are not judged (above).
       const stoppedStatus =
         stop === `cleanup`
           ? `cleaned-up`
@@ -607,9 +612,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
             ? `error`
             : `ready`
       const judgesRowsBeforeRestart = (tab: Tab) =>
-        syncMode === `eager` &&
-        (tab !== stoppedTab ||
-          (stop !== `cleanup` && stop !== `resume invalidated`))
+        syncMode === `eager` && (tab !== stoppedTab || stop !== `cleanup`)
       const observe = (judgesRows: (tab: Tab) => boolean) =>
         tabs.map((tab) => ({
           tab: tab.tab,
