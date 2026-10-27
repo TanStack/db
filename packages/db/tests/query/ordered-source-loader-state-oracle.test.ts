@@ -2207,8 +2207,10 @@ type AuthorityObservation = {
   // while authoritative work was in flight, and reports whose release of an
   // older tie truncated or disposed the loader.
   movedEndReports: number
-  // Reports whose own first page read past a window that then shrank.
+  // Reports whose own first page read past a window that then shrank, and
+  // reports to a disposed loader.
   reportsPastWindow: number
+  reportsAfterDispose: number
   reportsOwingRepair: number
   reportsDuringWork: number
   reportReleasesEndingLoader: number
@@ -2613,6 +2615,7 @@ async function checkAuthorityCase(
   let repairedReportsOnOwnPage = 0
   let movedEndReports = 0
   let reportsPastWindow = 0
+  let reportsAfterDispose = 0
   let reportsOwingRepair = 0
   let reportsDuringWork = 0
   let reportReleasesEndingLoader = 0
@@ -2983,6 +2986,7 @@ async function checkAuthorityCase(
             ({ fullSource, outcome, released }) =>
               fullSource && outcome === `ok` && !released,
           )
+          if (isDisposed()) reportsAfterDispose++
           const owesRepair =
             repairOwed && !replayPending() && !isDisposed() && command.react
           if (owesRepair) reportsOwingRepair++
@@ -3408,6 +3412,7 @@ async function checkAuthorityCase(
     repairedReportsOnOwnPage,
     movedEndReports,
     reportsPastWindow,
+    reportsAfterDispose,
     reportsOwingRepair,
     reportsDuringWork,
     reportReleasesEndingLoader,
@@ -4047,6 +4052,8 @@ describe(`Ordered source request authority`, () => {
   //   disposes the loader, so releasing the older tie ends the loader;
   // - a two-row window whose first page and tie settle, then shrinks to one
   //   row before a report: the page read past the window, which proves it;
+  // - the moved-end prefix with the loader disposed before the report, which
+  //   the dispose law then judges;
   // - a plan that reads only the full source, then a report over it.
   // A release that truncates or disposes would end the quiet history, so
   // only the fifth prefix allows one.
@@ -4106,6 +4113,15 @@ describe(`Ordered source request authority`, () => {
       ],
       wide: true,
     },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert` },
+        { type: `dispose` },
+        { type: `report`, react: true },
+      ],
+    },
     { history: [{ type: `report`, react: true }], fullSource: true },
   ]
   const unprovenReportCase: fc.Arbitrary<AuthorityCase> = fc
@@ -4143,6 +4159,7 @@ describe(`Ordered source request authority`, () => {
         `ignoredReportsOverFullSource`,
         `movedEndReports`,
         `reportsPastWindow`,
+        `reportsAfterDispose`,
         `reportsOwingRepair`,
         `reportsDuringWork`,
         `reportReleasesEndingLoader`,
@@ -4159,8 +4176,8 @@ describe(`Ordered source request authority`, () => {
           }
         }),
         campaign === `fixed`
-          ? { seed: 20261023, numRuns: oracleRuns(600) }
-          : oraclePropertyOptions(600, unprovenReportProperty),
+          ? { seed: 20261023, numRuns: oracleRuns(1000) }
+          : oraclePropertyOptions(1000, unprovenReportProperty),
       )
       reach.assertReached()
     },

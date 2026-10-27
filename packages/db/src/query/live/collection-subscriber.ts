@@ -225,9 +225,11 @@ export class CollectionSubscriber<
           () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
           (error) => {
             // A truncate replay aborts the acquisition it supersedes. Its
-            // replacement decides the demand. A failure that fails the
-            // replay keeps the last publication until a later replay of this
-            // source succeeds, so it does not end the query.
+            // replacement decides the demand. A failure while a replay of
+            // this source failed, including another subscription's replay
+            // behind the same barrier, keeps the last publication until a
+            // later replay of the source succeeds, so it does not end the
+            // query.
             const replacement = subscription.pendingTruncateReplacement
             if (replacement) settleWith(replacement)
             else
@@ -235,7 +237,7 @@ export class CollectionSubscriber<
                 plan.id,
                 generation,
                 error,
-                !subscription.hasFailedTruncateReplacement,
+                !this.collectionConfigBuilder.hasFailedReplay(this.collection),
               )
           },
         )

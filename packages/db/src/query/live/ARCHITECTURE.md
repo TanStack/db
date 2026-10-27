@@ -1468,6 +1468,10 @@ join and an include of the same source, share one publication barrier. None
 of their replays publishes, and none whose last demand retired closes, while
 another of them still has replay work. So demand that any of them starts
 meanwhile joins its own open replay instead of falling outside recovery.
+A failed replay of any of them fails the barrier: until a later replay of the
+source succeeds, a lazy demand of any of them that fails keeps the last
+publication and does not end the query, even when its own subscription's
+replay finished.
 A rejection of an aborted lazy demand request is obsolete demand,
 not a load failure, as for the subscription. When a truncate supersedes the
 acquisition, its replay decides the demand, even if the replay settles before

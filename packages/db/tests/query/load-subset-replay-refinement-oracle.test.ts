@@ -1308,6 +1308,7 @@ type OrderedReach = {
   participantDemandFailures: number
   includeDemandFailures: number
   siblingDemandFailures: number
+  failedSiblingDemandFailures: number
   preloadReplayFailures: number
   discardedReplayMoves: number
 }
@@ -1614,6 +1615,7 @@ async function checkOrderedReplay(
     participantDemandFailures: 0,
     includeDemandFailures: 0,
     siblingDemandFailures: 0,
+    failedSiblingDemandFailures: 0,
     preloadReplayFailures: 0,
     discardedReplayMoves: 0,
   }
@@ -1661,6 +1663,10 @@ async function checkOrderedReplay(
                 held.push(resolve),
               )
               if (!ok) {
+                // The source's replay had already failed and still holds
+                // publication when this load fails.
+                const barrierFailed =
+                  (barriers.get(`markers`)?.failures.size ?? 0) > 0
                 const replayLoading = settleParticipant(
                   `markers`,
                   load,
@@ -1688,6 +1694,9 @@ async function checkOrderedReplay(
                   // two of its subscriptions share the barrier.
                   if (scenario.includes && scenario.joined) {
                     reach.siblingDemandFailures++
+                    // After the shared replay failed: the subscription whose
+                    // demand fails may have finished its own replay.
+                    if (barrierFailed) reach.failedSiblingDemandFailures++
                   }
                 }
                 if (queries.some(({ status }) => status === `loading`)) {
@@ -2568,6 +2577,31 @@ describe(`Ordered windows across truncate replays`, () => {
       reaches: `siblingDemandFailures`,
       recovers: true,
     },
+    {
+      // Found by the failed-replay random campaign. One subscription's
+      // replay fails, the other's finishes once it settles, and a rank move
+      // starts demand on that other subscription, which then fails. Its own
+      // replay had finished, so a per-subscription judgment ended the query,
+      // while the source's shared barrier still held the failed replay.
+      name: `a demand that fails after the sibling subscription's replay failed`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true, keepHolding: true, newest: false },
+        { type: `settle`, ok: false, newest: true, keepHolding: true },
+        { type: `move`, id: 2, rank: 1 },
+        { type: `settle`, ok: false, keepHolding: false, newest: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `some`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      reaches: `failedSiblingDemandFailures`,
+      recovers: true,
+    },
   ] satisfies Array<{
     name: string
     history: Array<OrderedCommand>
@@ -2621,6 +2655,7 @@ describe(`Ordered windows across truncate replays`, () => {
         participantDemandFailures: 0,
         includeDemandFailures: 0,
         siblingDemandFailures: 0,
+        failedSiblingDemandFailures: 0,
         preloadReplayFailures: 0,
         discardedReplayMoves: 0,
       }
@@ -2656,6 +2691,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `participantDemandFailures`,
         `includeDemandFailures`,
         `siblingDemandFailures`,
+        `failedSiblingDemandFailures`,
         `preloadReplayFailures`,
         `discardedReplayMoves`,
       ])
@@ -2759,16 +2795,26 @@ describe(`Ordered windows across truncate replays`, () => {
   // subscription's own replay loads while the other's still load; the graph
   // then demands markers for rows the commit privately exposed, and the
   // newest load fails.
+  // After the failing load, half the histories move a row, which starts
+  // demand once the shared replay has failed, and then fail the oldest held
+  // load: the other subscription may have finished its own replay by then.
   const siblingDemandCase = fc
     .tuple(
       failedReplayScenario,
       fc.constantFrom(`some` as const, `none` as const, `inner` as const),
       fc.integer({ min: 1, max: 2 }),
       fc.boolean(),
+      fc.option(
+        fc.record({
+          type: fc.constant(`move` as const),
+          id: fc.integer({ min: 1, max: 5 }),
+          rank: fc.integer({ min: 1, max: 60 }),
+        }),
+      ),
       fc.array(orderedCommand, { maxLength: 6 }),
     )
     .map(
-      ([scenario, joined, settles, newest, rest]): [
+      ([scenario, joined, settles, newest, move, rest]): [
         Array<OrderedCommand>,
         OrderedScenario,
       ] => [
@@ -2782,6 +2828,9 @@ describe(`Ordered windows across truncate replays`, () => {
             newest,
           })),
           { type: `settle`, ok: false, newest: true, keepHolding: true },
+          ...(move
+            ? [move, { type: `settle` as const, ok: false, newest: false }]
+            : []),
           ...rest,
         ],
         { ...scenario, joined, includes: true, markerMode: `on-demand` },
@@ -2962,6 +3011,7 @@ describe(`Ordered windows across truncate replays`, () => {
           `participantDemandFailures`,
           `includeDemandFailures`,
           `siblingDemandFailures`,
+          `failedSiblingDemandFailures`,
         ] as const,
         { minimum: 5 },
       )
@@ -2984,10 +3034,13 @@ describe(`Ordered windows across truncate replays`, () => {
           if (observed.siblingDemandFailures > 0) {
             reach.reach(`siblingDemandFailures`)
           }
+          if (observed.failedSiblingDemandFailures > 0) {
+            reach.reach(`failedSiblingDemandFailures`)
+          }
         }),
         campaign === `fixed`
-          ? { seed: 20261023, numRuns: oracleRuns(200) }
-          : oraclePropertyOptions(200, failedReplayProperty),
+          ? { seed: 20261023, numRuns: oracleRuns(400) }
+          : oraclePropertyOptions(400, failedReplayProperty),
       )
       reach.assertReached()
     },

@@ -662,6 +662,18 @@ export class CollectionConfigBuilder<
     return pending.length > 0 ? Promise.allSettled(pending) : undefined
   }
 
+  /**
+   * Whether a failed replay of a collection still holds publication. The
+   * query's subscriptions to one collection share that replay's barrier.
+   */
+  hasFailedReplay(collection: Collection): boolean {
+    return this.collectionSources.some(
+      (source) =>
+        source.collection === collection &&
+        this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+    )
+  }
+
   private hasFailedSourceRecovery(): boolean {
     return Object.values(this.subscriptions).some(
       (subscription) => subscription.hasFailedTruncateReplacement,

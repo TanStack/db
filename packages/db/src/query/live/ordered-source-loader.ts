@@ -685,8 +685,7 @@ export class OrderedSourceLoader {
   revalidateLoadedCoverage(): void {
     // A `requiresFullSource` plan's coverage is its full-source read: nothing
     // has settled before it, and it covers the source after.
-    if (!this.active || !this.hasSettledSourceRequest || this.coversSource())
-      return
+    if (!this.hasSettledSourceRequest || this.coversSource()) return
     const end = this.ownPrefixEnd()
     if (end === undefined) {
       this.invalidateSourceOrdering()
@@ -739,9 +738,9 @@ export class OrderedSourceLoader {
     } finally {
       this.retiringSupersededAcquisitions = false
     }
-    // A release that resets the cursor hands the window to the replay.
-    if (!this.active || orderedLoadGeneration !== this.orderedLoadGeneration)
-      return
+    // A release that resets the cursor, or disposes the loader, hands the
+    // window to the replay or ends it.
+    if (orderedLoadGeneration !== this.orderedLoadGeneration) return
     this.settledSourceBoundary = end
     // The pass that follows the report reads the tie, as a repair's first
     // request would start then, so a start that throws fails that pass.
