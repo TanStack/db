@@ -588,8 +588,12 @@ export type SyncPersistenceCapabilityV1<
    * a reload or reset from a peer notice, and sequence-gap recovery. A subset
    * load admitted while the turn is reserved also runs after the commit's
    * durable write. The source must end the transaction: commit it, or abandon
-   * it by committing with an aborted signal. A source that stops for good
-   * abandons it, or every later hydration keeps waiting.
+   * it by committing with an aborted signal. An abandon releases the waiting
+   * hydrations as a commit does, so they run. A source that stops for good
+   * abandons it, or every later hydration keeps waiting. The source must not
+   * await a `hydrateBaseline` that it started before reserving while the
+   * reservation is open: that baseline waits for the commit. Calling
+   * `hydrateBaseline` while the reservation is open rejects.
    */
   readonly reserveCommitTurn: () => void
   readonly scanPersistedRows: (

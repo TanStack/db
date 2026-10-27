@@ -5903,42 +5903,30 @@ function createWrappedSyncConfig<
         cancelAdmissionWait?: () => void
       }
       const acquisitions = new Map<LoadSubsetOptions, SubsetAcquisition>()
+      // Resolves when the reservation ends (committed, abandoned, or
+      // discarded by cleanup; maintainer decision on PR #2265) or when the
+      // load's own demand aborts. The load then runs, or rejects through its
+      // own signal.
       const waitForPublicationAdmission = (
         transaction: OpenSyncTransaction<T, TKey>,
         options: LoadSubsetOptions,
         acquisition: SubsetAcquisition,
-      ): Promise<void> => {
-        if (options.signal?.aborted) {
-          return Promise.reject(
-            options.signal.reason ?? new SyncTransactionAbortedError(),
-          )
-        }
-        return new Promise<void>((resolve, reject) => {
-          const waiters =
-            transaction.publicationAdmissionWaiters ??
-            (transaction.publicationAdmissionWaiters = new Set())
-          let settled = false
-          const settle = (action: () => void) => {
-            if (settled) return
-            settled = true
+      ): Promise<void> =>
+        new Promise<void>((resolve) => {
+          const waiters = (transaction.publicationAdmissionWaiters ??=
+            new Set())
+          const settle = () => {
             waiters.delete(waiter)
-            options.signal?.removeEventListener(`abort`, abort)
+            options.signal?.removeEventListener(`abort`, settle)
             acquisition.cancelAdmissionWait = undefined
-            action()
+            resolve()
           }
-          const waiter = {
-            resolve: () => settle(resolve),
-            reject: (error: unknown) => settle(() => reject(error)),
-          }
-          const abort = () =>
-            waiter.reject(
-              options.signal?.reason ?? new SyncTransactionAbortedError(),
-            )
+          const waiter = { resolve: settle, reject: settle }
+          if (options.signal?.aborted) return settle()
           waiters.add(waiter)
-          options.signal?.addEventListener(`abort`, abort, { once: true })
-          acquisition.cancelAdmissionWait = waiter.resolve
+          options.signal?.addEventListener(`abort`, settle, { once: true })
+          acquisition.cancelAdmissionWait = settle
         })
-      }
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
       const reportUpstreamError = (error: unknown) => {
         if (persistedReadiness?.getSnapshot().status !== `loading`) {

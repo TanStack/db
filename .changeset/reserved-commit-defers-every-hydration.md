@@ -9,3 +9,5 @@ Keep a sync transaction that reserved its commit turn from failing when a persis
 A peer reset now applies in arrival order with peer commit notices, so a commit from before the reset can no longer publish a row that the reset removed.
 
 Electric now abandons its open transaction when its stream stops for good, so hydrations that wait for that transaction can run.
+
+An abandoned reservation now releases the subset loads that waited for it, as a commit does, so they run. Before, a load admitted while the turn was reserved rejected with `SyncTransactionAbortedError` when the source abandoned the transaction.

@@ -2902,8 +2902,12 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       that starts no hydration. Gap recovery is one hydration cycle from its
       first step, so a reservation that opens at its scope entry straddles
       it. The reserving timings are
-      across the mutex turn, across scope entry, during the read, in the
-      route's first publication, and across startup. The ending is commits,
+      before a subset load's admission, across the mutex turn, across scope
+      entry, during the read, in the route's first publication, and across
+      startup. A load that waits for a reservation runs after it ends,
+      whether it commits or is abandoned (maintainer decision on PR #2265);
+      on `851e8d9da` the abandoned admission cells failed with a rejected
+      load. The ending is commits,
       abandoned, cleanup, an aborted demand, or the source awaiting its own
       baseline. The follow-up is a reset then a pre-reset commit.
       Observations: receipts, final rows, row metadata, cursor, status,
@@ -2912,7 +2916,7 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       events before it. Every cell declares reach (ORC-015).
       | Evidence | Result |
       | --- | --- |
-      | Row-algebra cross and reservation cross | 649 cells pass. |
+      | Row-algebra cross and reservation cross | 657 cells pass. |
       | Gap recovery that reloads partway through, on `851e8d9da` | 28 cells fail: recovery advanced the stream position and applied a targeted delta before it deferred, so its retry skipped the reload. A gate only at recovery start still fails 15 scope-entry cells; reloads that start their own cycle inside recovery fail 61. |
       | `5649a07d4` | The open cells fail with `a persisted sync transaction cannot cross a hydration cycle`. Three `after read` reset follow-up cells also fail, because `main` applied a pre-reset commit before the reset set its term fence. Queueing resets with notices fixes this pre-existing defect. |
       | Hostile mutants | Each mutant fails its cells, and every failure is an assertion. Deferring every notice fails the targeted change. Dropping the follower reply's wait fails the routed subset. Reporting hydration start before the check fails the aborted demand. A reset reload that starts its own cycle fails the first-publication reset. Applying a reset outside the notice queue fails the reset follow-ups. Retrying a waited notice while the reservation is open fails the follow-up and routed cells (repeated pullSince). Checking only at the mutex turn fails every scope-entry cell. Gating subset hydration only fails every reset, reload, and gap cell. Requeueing a waited notice behind later notices fails 12 reset follow-up cells: the pre-reset commit is published before its reset, and a reload is lost. |

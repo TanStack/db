@@ -17609,6 +17609,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // The commit timing places the first sync transaction against the route:
   // - `after read`: it begins after the read is published;
   // - `queued`: it begins and commits while the read waits;
+  // - `open before admission`: it begins and reserves before the route's
+  //   subset load is admitted, so the load waits in the wrapper's admission
+  //   path. Whether the reservation commits or is abandoned, the load runs
+  //   after it ends (maintainer decision on PR #2265);
   // - `open across mutex turn`: it begins and reserves while the read waits
   //   behind the gate, before the read's turn;
   // - `open across scope entry`: it reserves after the read's turn began and
@@ -17649,6 +17653,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   type PersistedReadTiming =
     | `after read`
     | `queued`
+    | `open before admission`
     | `open across mutex turn`
     | `open across scope entry`
     | `open during the read`
@@ -17672,6 +17677,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   type PersistedReadReach =
     | `route performed a persisted read`
     | `reservation opened while the read was pending`
+    | `reservation opened before the route was admitted`
     | `reservation opened while a read was in progress`
     | `reservation opened in the route's first publication`
     | `reservation opened before startup settled`
@@ -17728,6 +17734,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       remoteRow,
     } = fixtureRows
     const waits =
+      commitTiming === `open before admission` ||
       commitTiming === `open across mutex turn` ||
       commitTiming === `open across scope entry`
     // The transaction straddles a hydration that already began.
@@ -18185,8 +18192,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           followUp === `none`)
           ? []
           : ([`route performed a persisted read`] as const)),
-        ...(waits
+        ...(waits && commitTiming !== `open before admission`
           ? ([`reservation opened while the read was pending`] as const)
+          : []),
+        ...(commitTiming === `open before admission`
+          ? ([`reservation opened before the route was admitted`] as const)
           : []),
         ...(commitTiming === `open during the read`
           ? ([`reservation opened while a read was in progress`] as const)
@@ -18350,6 +18360,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           stripVirtualProps(row),
         ]),
       )
+      if (commitTiming === `open before admission`) {
+        beginReservedSourceStep()
+        reach.reach(`reservation opened before the route was admitted`)
+      }
       routeAdmitted = true
       let ownBaselineRejection: string | undefined
       if (
@@ -18507,7 +18521,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         endReservation()
         remainingSteps = sourceSteps.slice(1)
       } else {
-        if (commitTiming === `open across mutex turn`) {
+        if (commitTiming === `open before admission`) {
+          // The reservation opened before the route was admitted.
+          releasePersistence.resolve()
+          await atPersistedOracleCheckpoint(
+            pendingOperations[0]!,
+            `predecessor applied while the reservation is open`,
+          )
+        } else if (commitTiming === `open across mutex turn`) {
           // The read was admitted before this reservation.
           beginReservedSourceStep()
           if (!readPublished) {
@@ -18867,6 +18888,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       (
         [
           `after read`,
+          `open before admission`,
           `open across mutex turn`,
           `open across scope entry`,
           `open during the read`,
@@ -18874,6 +18896,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           `open across startup`,
         ] as const
       ).flatMap((commitTiming) => {
+        // Only a subset load is admitted through the wrapper's admission.
+        if (
+          commitTiming === `open before admission` &&
+          route !== `subset` &&
+          route !== `complete subset`
+        ) {
+          return []
+        }
         if (commitTiming === `open during the read` && route === `targeted`)
           return []
         // Only a route whose hydration publishes rows reaches a publication.
@@ -18887,6 +18917,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           return []
         }
         const waits =
+          commitTiming === `open before admission` ||
           commitTiming === `open across mutex turn` ||
           commitTiming === `open across scope entry`
         const endings: Array<PersistedReadEnding> =
