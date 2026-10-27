@@ -3,6 +3,7 @@ import {
   withChangeTracking,
   withFlatChangeTracking,
 } from '../proxy'
+import { assertCollectionKey } from '../utils'
 import { normalizeError } from '../utils/error.js'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
@@ -20,7 +21,6 @@ import {
   SchemaMustBeSynchronousError,
   SchemaValidationError,
   UpdateKeyNotFoundError,
-  assertCollectionKey,
 } from '../errors'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'

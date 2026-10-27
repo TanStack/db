@@ -14,7 +14,9 @@ import { createOracleReach } from './oracle-reach'
  * the surviving entries in either key order or the caller's value order. Equal
  * values use key order as a stable tie-breaker, so no entry disappears inside
  * a tie. Keys are strings or numbers, the Collection key type; a sync write
- * or mutation with another key throws before it reaches SortedMap. Deferred
+ * or mutation with another key throws before it reaches SortedMap. `NaN` is a
+ * number, and a grouped live query keys a `NaN` group by it, so a `NaN` key
+ * is one key that key order places after every other number. Deferred
  * writes may postpone ordering within one synchronous batch, but point reads
  * remain current and ordered reads restore the same view.
  *
@@ -36,7 +38,7 @@ import { createOracleReach } from './oracle-reach'
  *
  * Not promised: other mutation during iteration (immediate writes, clear),
  * the order of rows once a placed row changed in place, keys outside the key
- * type, NaN and -0 keys, a comparator that throws, and the work of key order
+ * type, -0 keys, a comparator that throws, and the work of key order
  * without a comparator, which the public API cannot observe. The coverage map
  * records these limits.
  *
@@ -66,10 +68,26 @@ function burstEntries(seed: number): Array<[number, number]> {
   return keys.map((key) => [key, ((key * 7) % 5) - 2])
 }
 
-const probeKeys: Array<ModelKey> = [-3, -2, -1, 0, 1, 2, 3, 10, 26, 50]
+const probeKeys: Array<ModelKey> = [
+  -3,
+  -2,
+  -1,
+  0,
+  1,
+  2,
+  3,
+  Number.NaN,
+  10,
+  26,
+  50,
+]
 
-// The generated keys are numbers, which key order sorts ascending.
-const compareModelKeys = (a: ModelKey, b: ModelKey) => a - b
+// The generated keys are numbers, which key order sorts ascending with `NaN`
+// after every other number.
+const compareModelKeys = (a: ModelKey, b: ModelKey) =>
+  Number.isNaN(a) || Number.isNaN(b)
+    ? Number(Number.isNaN(a)) - Number(Number.isNaN(b))
+    : a - b
 
 function modelOrder(model: Map<ModelKey, number>, order: Order) {
   return [...model].sort(
@@ -155,6 +173,9 @@ const fixedStep = (
  * - A placed row changed in place, then neighbours deleted and rewritten. A
  *   binary search guided by the stale order would remove a neighbour.
  * - A deferred key deleted before a large deferred batch.
+ * - A placed `NaN` key deleted and rewritten without deferral. A miss check by
+ *   `===` never matches `NaN`, and a fallback `indexOf` returns -1, so a
+ *   splice there removes the last key instead.
  */
 const fixedHistories: Array<Array<Action>> = [
   [
@@ -184,6 +205,13 @@ const fixedHistories: Array<Array<Action>> = [
     fixedStep(`burst`, 0, 3),
     fixedStep(`set`, 2, 0, false, true),
   ],
+  [
+    fixedStep(`set`, Number.NaN, 0),
+    fixedStep(`set`, 1, 1),
+    fixedStep(`set`, 2, 2),
+    fixedStep(`set`, Number.NaN, 3, false, true),
+    fixedStep(`delete`, Number.NaN, 0, false, true),
+  ],
 ]
 
 describe.each([`key`, `ascending`, `descending`] as const)(
@@ -210,6 +238,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
           [
             `deferred-burst-observed`,
             `entry-yielded-after-pruning`,
+            `placed-nan-key-written`,
             ...comparatorStates,
           ],
           { minimum: 5 },
@@ -231,7 +260,10 @@ describe.each([`key`, `ascending`, `descending`] as const)(
                   `mutate`,
                   `mutate`,
                 ),
-                key: fc.integer({ min: -3, max: 3 }),
+                key: fc.oneof(
+                  { arbitrary: fc.integer({ min: -3, max: 3 }), weight: 6 },
+                  { arbitrary: fc.constant(Number.NaN), weight: 2 },
+                ),
                 value: fc.integer({ min: -3, max: 3 }),
                 deferOrder: fc.boolean(),
                 observe: fc.boolean(),
@@ -285,6 +317,14 @@ describe.each([`key`, `ascending`, `descending`] as const)(
               observe()
               for (const action of actions) {
                 const key = action.key
+                if (
+                  (action.kind === `set` || action.kind === `delete`) &&
+                  !action.deferOrder &&
+                  Number.isNaN(key) &&
+                  model.has(key) &&
+                  !deferred.has(key)
+                )
+                  reach.reach(`placed-nan-key-written`)
                 if (action.kind === `set`) {
                   written(key)
                   expect(
@@ -310,7 +350,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
                       deferred.has(candidate) === action.deferOrder,
                   )
                   if (targets.length > 0) {
-                    const target = targets[(action.key + 3) % targets.length]!
+                    const target = targets[(action.value + 3) % targets.length]!
                     actual.get(target)!.rank = action.value
                     model.set(target, action.value)
                     if (order !== `key`) {

@@ -123,9 +123,14 @@ export class SortedMap<TKey extends string | number, TValue> {
   /** Removes a key's slot while its placed value is still mapped. */
   private unplace(key: TKey): void {
     // Binary search misses a value that a sync source mutated in place after
-    // it was placed, so fall back to a scan.
+    // it was placed, so fall back to a scan. Slots compare as Map keys do, so
+    // a NaN key matches its own slot.
+    const sameKey = (candidate: TKey) =>
+      candidate === key || (candidate !== candidate && key !== key)
     let index = this.indexOf(key, this.map.get(key)!)
-    if (this.sortedKeys[index] !== key) index = this.sortedKeys.indexOf(key)
+    if (!sameKey(this.sortedKeys[index]!)) {
+      index = this.sortedKeys.findIndex(sameKey)
+    }
     this.sortedKeys.splice(index, 1)
   }
 

@@ -232,15 +232,6 @@ export class InvalidKeyError extends CollectionOperationError {
   }
 }
 
-/** Throws unless a key has the Collection key type: a string or a number. */
-export function assertCollectionKey(key: unknown, item: unknown): void {
-  if (typeof key !== `string` && typeof key !== `number`) {
-    throw key === undefined
-      ? new UndefinedKeyError(item)
-      : new InvalidKeyError(key, item)
-  }
-}
-
 export class DuplicateKeyError extends CollectionOperationError {
   constructor(key: string | number) {
     super(
