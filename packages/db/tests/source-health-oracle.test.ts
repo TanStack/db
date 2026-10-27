@@ -55,8 +55,12 @@
  * reported failure. A problem shows its newest failure and lists its frame,
  * oldest first, in `errors` (maintainer decision). The failure reason's
  * frame is every `reportError()` of the sync run since the slot was last
- * clear: `reportHealthy()` empties it, and a reload's new run that reports
- * starts a new one, which its first commit keeps. An error is once per sync
+ * clear, once per error value: a report of a value already listed keeps
+ * that failure's place and `at` and changes nothing. `reportHealthy()`
+ * empties it, `reportHealthy(error)` removes only the failure whose cause is
+ * that value (a value not listed changes nothing), and a reload's new run
+ * that reports starts a new one, which its first commit keeps (maintainer
+ * decision). An error is once per sync
  * run, so its frame is one failure. A live query's request error lists every
  * request failure still open on its node, once per cause, in the order each
  * was shown; a failed replay adds every failed load it was judged on. It
@@ -86,8 +90,10 @@
  * Steps act on Collection `A` or `B`: `ready` writes row 1 during a first
  * load or a reload, commits, and calls `markReady()`; `write` adds row 1, 2,
  * or 3 to the run's open transaction, beginning one if none is open;
- * `commit` commits it; `fail` calls `fail()`; `report` calls `reportError()`;
- * `healthy` calls `reportHealthy()`; `crash` crashes the Collection through
+ * `commit` commits it; `fail` calls `fail()`; `report` calls `reportError()`
+ * with a new error value, or with the value of a failure the slot lists;
+ * `healthy` calls `reportHealthy()` with no value, with a listed failure's
+ * value, or with an unlisted value of the same message; `crash` crashes the Collection through
  * its lifecycle, as a crash cause would; `reload` calls `collection.reload()`.
  * A reload keeps the rows, status, and shown problem, and marks the node
  * `reloading`, until the new run's first commit (the next `ready`) replaces
@@ -150,7 +156,8 @@
  * report it is (the same object, by the model's serial); a problem whose
  * `message`, `cause`, and `at` are not its newest failure's projects as a
  * mismatch. A legal `report` or `healthy` that changes the tree announces
- * one `health:change`. An Effect that ends as it is created leaves A's listener count
+ * one `health:change`, and one that leaves the frame as it was announces
+ * none. An Effect that ends as it is created leaves A's listener count
  * where it was. While a Collection is cleaning up or cleaned up, no sync run
  * of it is live at the adapter (every run it started has had its cleanup
  * called), and a cleanup during a reload leaves that reload settled. It also checks identity: reading twice gives the same tree,
@@ -232,8 +239,17 @@ type SourceStepKind =
   | `reload-cleanup-held`
   | `retired-cleanup-rejects`
   | `cancel`
+// The error value a `report` or `healthy` step passes. A number names a
+// failure the failure reason lists, by its place in the frame (modulo the
+// frame's length); with nothing listed it names an unlisted value. An
+// unlisted value is a new error with the same message as the listed ones, so
+// only its identity tells it apart. Without `cause`, `report` passes a new
+// error and `healthy` passes no value.
+type CauseChoice = number | `unlisted`
+type CauseStep = { kind: `report` | `healthy`; cause: CauseChoice }
 type Step =
   | { kind: SourceStepKind; source: SourceName }
+  | (CauseStep & { source: SourceName })
   // `write` adds a row to the sync run's open transaction, beginning one if
   // none is open; `commit` commits it (an empty transaction when none is
   // open). The transaction stays open across other steps.
@@ -321,8 +337,11 @@ type GateModel = { gate: Gate; cause: string | null; reloading: boolean }
 // `failures` is the failure reason's frame (maintainer decision): every
 // reportError() of the sync run since the slot was last clear, oldest first.
 // The node's `failureReason` is the newest of them, and its `errors` lists
-// them all. `reportHealthy()` empties the frame. A frame belongs to one sync
-// run, so a reload's new run that reports starts a new frame.
+// them all. One error value is one failure: reporting a listed value again
+// leaves the frame as it was, since that failure is still open.
+// `reportHealthy()` empties the frame, and `reportHealthy(error)` removes the
+// failure whose cause is `error`, if one is listed. A frame belongs to one
+// sync run, so a reload's new run that reports starts a new frame.
 // `failureFromReload`: the new run reported `failures` itself, so its first
 // commit keeps them.
 // `rows` are the applied synced rows; `open` is the run's open transaction.
@@ -924,6 +943,7 @@ function applyModel(
 // adapter's markReady() without a write; the on-demand grammars use it.
 type SourceAction =
   | { kind: SourceStepKind | `mark-ready` }
+  | CauseStep
   | { kind: `write`; key: RowKey; untagged?: boolean }
   | { kind: `commit` }
   | { kind: `direct-write`; key: RowKey }
@@ -1097,21 +1117,33 @@ function applySourceStep(
     case `report`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
       else {
+        const listed = chosenFailure(source.failures, step)
         // A reload's new run that reports starts its own frame; the
         // retired run's failures leave with that run.
         if (source.reloading && !source.failureFromReload) source.failures = []
-        source.failures.push({
-          message: `${label} problem`,
-          serial: ++counter.serial,
-        })
+        // A value the frame still lists is that same open failure: it keeps
+        // its place and its `at` (maintainer decision).
+        if (!listed || !source.failures.includes(listed))
+          source.failures.push({
+            message: `${label} problem`,
+            serial: ++counter.serial,
+          })
         source.failureFromReload = source.reloading
       }
       break
     case `healthy`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
-      else {
+      else if (!(`cause` in step)) {
         source.failures = []
         source.failureFromReload = false
+      } else {
+        // Only the failure whose cause is the value leaves; a value the
+        // frame does not list changes nothing (maintainer decision).
+        const listed = chosenFailure(source.failures, step)
+        source.failures = source.failures.filter(
+          (failure) => failure !== listed,
+        )
+        if (source.failures.length === 0) source.failureFromReload = false
       }
       break
     case `crash`:
@@ -1119,6 +1151,24 @@ function applySourceStep(
       break
   }
   return { outcome, settles: true }
+}
+
+// The listed failure a step's error value is, if any (see `CauseChoice`).
+// The model and the driver both read it from the frame before the step.
+function chosenFailure(
+  frame: ReadonlyArray<Failure>,
+  step: SourceAction,
+): Failure | undefined {
+  return `cause` in step && typeof step.cause === `number`
+    ? frame[step.cause % frame.length]
+    : undefined
+}
+
+function sameFailures(
+  a: ReadonlyArray<Failure>,
+  b: ReadonlyArray<Failure>,
+): boolean {
+  return a.length === b.length && a.every((failure, i) => failure === b[i])
 }
 
 // markReady() of the current sync run. A reload completes at it when its run
@@ -1740,6 +1790,10 @@ const historyReachStates = [
   `report adds a failure to an open frame`,
   `reload's new run reports over the retired run's frame`,
   `failure frame clears with failures listed`,
+  `report repeats a listed failure`,
+  `healthy removes one failure of several`,
+  `healthy removes the last listed failure`,
+  `healthy names an unlisted value while failures are listed`,
 ] as const
 type HistoryReach = ReturnType<
   typeof createOracleReach<(typeof historyReachStates)[number]>
@@ -1801,6 +1855,9 @@ async function runHistory(
   // only subscriber.
   const mirrors = { A: new Map<number, number>(), B: new Map<number, number>() }
   const mirrored = { A: false, B: false }
+  // Each error value the driver reported, by the model's serial of that
+  // failure, so a later step can pass the same value again.
+  const causes = new Map<number, Error>()
   // A restart happened while a retired run's cleanup was still pending.
   const freshSinceRetire = { A: false, B: false }
   // The source's last cleanup ran from a listener during a reload (reach).
@@ -1966,6 +2023,30 @@ async function runHistory(
           source.failures.length > 1
         )
           reach.reach(`failure frame clears with failures listed`)
+        // A step that names an error value, on a run that can report.
+        const listed =
+          `cause` in step &&
+          source.gate === `ready` &&
+          !source.stopped &&
+          source.failures.length > 0
+            ? step.cause
+            : undefined
+        if (
+          step.kind === `report` &&
+          typeof listed === `number` &&
+          !(source.reloading && !source.failureFromReload)
+        )
+          reach.reach(`report repeats a listed failure`)
+        if (step.kind === `healthy` && typeof listed === `number`)
+          reach.reach(
+            source.failures.length > 1
+              ? `healthy removes one failure of several`
+              : `healthy removes the last listed failure`,
+          )
+        if (step.kind === `healthy` && listed === `unlisted`)
+          reach.reach(
+            `healthy names an unlisted value while failures are listed`,
+          )
         if (
           (step.kind === `ready` || step.kind === `commit`) &&
           !source.retired &&
@@ -1988,14 +2069,29 @@ async function runHistory(
           if (model.sources[name].retiredCleanup) freshSinceRetire[name] = true
       const queryEndedBefore = model.queryEnded
       const serialBefore = model.serial
+      // The step's source frame before the step: a `cause` names its
+      // failures, and a step that leaves it as it was announces nothing.
+      const frameBefore =
+        `source` in step ? [...model.sources[step.source].failures] : []
       const expected = applyModel(shape, model, step)
       // The write tag the model gave this step, if it wrote.
       const tag = model.serial
       // A report the model numbered is that failure: its cause projects as
       // the model's serial.
       const reported = (error: Error) => {
-        if (model.serial !== serialBefore) reportedSerials.set(error, tag)
+        if (model.serial !== serialBefore) {
+          reportedSerials.set(error, tag)
+          causes.set(tag, error)
+        }
         return error
+      }
+      // The error value a `cause` names: the listed failure's own value, or
+      // a new one with the same message.
+      const causeOf = (choice: CauseStep & { source: SourceName }) => {
+        const listed = chosenFailure(frameBefore, choice)
+        return listed
+          ? causes.get(listed.serial)!
+          : new Error(`${choice.source} problem`)
       }
       events = []
       let thrown: unknown
@@ -2160,13 +2256,20 @@ async function runHistory(
           } else if (step.kind === `fail`) {
             params.fail(reported(new Error(`${step.source} gave up`)))
           } else if (step.kind === `healthy`) {
-            params.reportHealthy()
+            if (`cause` in step) params.reportHealthy(causeOf(step))
+            else params.reportHealthy()
           } else if (step.kind === `crash`) {
             params.collection._lifecycle.crash(
               new Error(`${step.source} crashed`),
             )
           } else {
-            params.reportError(reported(new Error(`${step.source} problem`)))
+            params.reportError(
+              reported(
+                `cause` in step
+                  ? causeOf(step)
+                  : new Error(`${step.source} problem`),
+              ),
+            )
           }
         }
       } catch (error) {
@@ -2301,6 +2404,19 @@ async function runHistory(
               `${label}: one health:change`,
             ).toBe(1)
         }
+        // A report of a value already listed, or a healthy call for a value
+        // not listed, leaves the frame as it was: nothing changed, so
+        // nothing is announced (maintainer decision; law 17).
+        if (
+          (step.kind === `report` || step.kind === `healthy`) &&
+          expected === `ok` &&
+          `source` in step &&
+          sameFailures(frameBefore, model.sources[step.source].failures)
+        )
+          expect(
+            events.filter((event) => event.kind === `health`).length,
+            `${label}: an unchanged frame announces nothing`,
+          ).toBe(0)
       }
     }
   } finally {
@@ -2336,6 +2452,11 @@ const on = (kind: SourceStepKind, source: SourceName): Step => ({
   source,
 })
 const restart: Step = { kind: `restart` }
+const naming = (
+  kind: CauseStep[`kind`],
+  source: SourceName,
+  cause: CauseChoice,
+): Step => ({ kind, source, cause })
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
@@ -2602,6 +2723,38 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     { kind: `write`, source: `A`, key: 3 },
     { kind: `commit`, source: `A` },
   ],
+  // One error value is one failure: reporting it again changes nothing, and
+  // reportHealthy(error) removes only its failure, so the problem then shows
+  // the newest failure still listed.
+  'a failure reason lists each error value once and clears failure by failure':
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      naming(`report`, `A`, 0),
+      naming(`healthy`, `A`, 1),
+      naming(`healthy`, `A`, `unlisted`),
+      naming(`healthy`, `A`, 1),
+      naming(`healthy`, `A`, 0),
+    ],
+  // A reload's new run starts its own frame, also with a value the retired
+  // run's frame lists; before it reports, a healthy call for a value edits
+  // the retired run's frame that still shows.
+  "a reload's new run that reports a retired failure's value starts its own frame":
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      on(`reload`, `A`),
+      naming(`healthy`, `A`, 2),
+      naming(`report`, `A`, 0),
+      naming(`healthy`, `A`, 0),
+      on(`ready`, `A`),
+    ],
   'a failure reason clears when the sync adapter reports healthy': [
     on(`ready`, `A`),
     on(`ready`, `B`),
@@ -2799,6 +2952,18 @@ describe(`source failure and health oracle`, () => {
         )
         .map(([source, key]): Step => ({ kind: `direct-write`, source, key })),
     },
+    // A report or healthy call that names an error value: a listed
+    // failure's, or an unlisted one.
+    {
+      weight: 2,
+      arbitrary: fc
+        .tuple(
+          fc.constantFrom(`report` as const, `healthy` as const),
+          fc.constantFrom(`A` as const, `B` as const),
+          fc.constantFrom<CauseChoice>(0, 1, 2, `unlisted`),
+        )
+        .map(([kind, source, cause]) => naming(kind, source, cause)),
+    },
     { weight: 1, arbitrary: fc.constant(restart) },
     { weight: 1, arbitrary: fc.constant({ kind: `reload-query` } as const) },
     { weight: 1, arbitrary: fc.constant({ kind: `effect` } as const) },
@@ -2867,6 +3032,20 @@ describe(`source failure and health oracle`, () => {
       on(`report`, `A`),
       { kind: `write`, source: `A`, key: 1, untagged: true },
       on(`fail`, `A`),
+    ],
+    // A frame of three failures: a listed value reported again, a healthy
+    // call for one of several, for an unlisted value, and for the last.
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      naming(`report`, `A`, 1),
+      naming(`healthy`, `A`, 0),
+      naming(`healthy`, `A`, `unlisted`),
+      naming(`healthy`, `A`, 0),
+      naming(`healthy`, `A`, 0),
     ],
     // A retired run's cleanup that rejects after a cleanup and a fresh start.
     [
@@ -5362,10 +5541,16 @@ function reportRequests(
   // A request the query aborted no longer holds its keys. Releasing the
   // owner removes its work from the replay too (law 9): the replay succeeds
   // only as a replacement for the demand that remains, so what a released
-  // load loaded before its release does not count for the verdict.
+  // load loaded before its release does not count for the verdict. Nor does
+  // its failure: the replay fails only for a demand the query still holds
+  // when it settles (law 16), and a request error goes when its demand
+  // retires (the glossary's request error), so a failed replay does not
+  // list a load the query released before the verdict, even one that still
+  // shares a key the query holds.
   for (const serial of aborted) {
     demand.requested.delete(serial)
     demand.replayLoads.delete(serial)
+    demand.replayFailedLoads.delete(serial)
   }
   settleReplay(model)
 }
@@ -6872,6 +7057,28 @@ describe(`lazy join demand grammar`, () => {
   }
   for (const [name, steps] of Object.entries(named))
     it(name, () => runLazyHistory(steps))
+  // A churn replay request fails, then a demand change releases it while it
+  // still shares a key with a replay load that later fails too.
+  it(`a failed replay does not list a load the query released before its verdict`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+        { kind: `reload` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-fail` },
+      ],
+      { honorsAbort: false },
+    ))
   it(`an older load's success clears its key's failure while a newer load is pending`, () =>
     runLazyHistory(
       [

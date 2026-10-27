@@ -337,8 +337,11 @@ the newest failure's, so code that reads only those keeps working. `errors`
 lists each failure, oldest first, as `{ name, message, code?, at, cause }`:
 
 - A source's `failureReason` lists each `reportError()` of the sync run since
-  it began, for example each failed refetch of a query Collection.
-  `reportHealthy()` ends it, and a `reload()` whose new sync run reports
+  it began, for example each failed refetch of a query Collection. One error
+  value is one failure: a value that is already listed keeps its place and
+  its `at`. `reportHealthy(error)` removes that value's failure, for example
+  when one of several failing queries recovers, and the other failures stay.
+  `reportHealthy()` ends the list, and a `reload()` whose new sync run reports
   starts a new list.
 - An `error` from `fail()`, a failed first load, or a crash has one failure.
 - A query's own `error` lists every failed request for more data that is still
@@ -549,9 +552,10 @@ A sync adapter reports failures with three calls:
 
 | Call | Meaning | Effect |
 | --- | --- | --- |
-| `reportError(error)` | Something went wrong; I am still trying. | Sets `failureReason` and adds the failure to its `errors`. Only after the first ready. |
+| `reportError(error)` | Something went wrong; I am still trying. | Sets `failureReason` and adds the failure to its `errors`. An `error` value that is already listed changes nothing. Only after the first ready. |
 | `fail(error)` | I stopped. | Before the first ready: `status: 'error'`. After: the node's `error`; the rows stay. |
 | `reportHealthy()` | Sync works again. | Clears `failureReason`. Only after the first ready. |
+| `reportHealthy(error)` | This part works again. | Removes the failure whose cause is `error` from `errors`. `failureReason` clears when no failure is left. Only after the first ready. |
 
 ```ts
 sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) => {
@@ -581,6 +585,11 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
   `markReady` after a failed first load, and any call after `fail`. Calls
   after a crash do nothing. `reportHealthy` when nothing is wrong changes
   nothing, so you can call it after every commit.
+- When several parts of your source can fail at the same time, such as
+  separate requests, report each part's own error and call
+  `reportHealthy(error)` with that error when the part recovers. The other
+  failures stay listed. `reportHealthy(error)` for an error that is not
+  listed changes nothing.
 - An `error` from `fail` clears only through `reload()`, which calls your
   `sync` function again for a new run.
 - Keep the run's readiness in your `sync` function, as `ready` above does.

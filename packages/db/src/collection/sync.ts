@@ -401,8 +401,8 @@ export class CollectionSyncManager<
           reportError: (error: unknown) => {
             if (isCurrentSync()) this.lifecycle.reportError(error)
           },
-          reportHealthy: () => {
-            if (isCurrentSync()) this.lifecycle.reportHealthy()
+          reportHealthy: (error?: unknown) => {
+            if (isCurrentSync()) this.lifecycle.reportHealthy(error)
           },
           truncate: (options) => {
             if (!isCurrentSync()) return

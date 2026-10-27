@@ -5979,7 +5979,8 @@ function createWrappedSyncConfig<
         fail: reportUpstreamError,
         reportError: (error: unknown) =>
           afterStartup(() => params.reportError(error)),
-        reportHealthy: () => afterStartup(params.reportHealthy),
+        reportHealthy: (error?: unknown) =>
+          afterStartup(() => params.reportHealthy(error)),
         markReady: () =>
           afterStartup(async () => {
             await sourceResultAssigned
@@ -6353,8 +6354,8 @@ function createWrappedSyncConfig<
           reportError: (error: unknown) => {
             if (active()) wrappedParams.reportError(error)
           },
-          reportHealthy: () => {
-            if (active()) wrappedParams.reportHealthy()
+          reportHealthy: (error?: unknown) => {
+            if (active()) wrappedParams.reportHealthy(error)
           },
           begin: () => {
             if (active()) wrappedParams.begin()

@@ -12324,136 +12324,234 @@ describe(`reload settles on the new run's first result`, () => {
 })
 
 /**
- * While any observed Query fails, the node's `failureReason` shows one that
- * is still failing, the latest such failure. It clears once none fails. The
- * lane fails two subsets' Queries in turn and recovers the one the node shows
- * or the other one first.
+ * While any observed Query fails, the node's `failureReason` lists the
+ * failures of the Queries still failing, oldest first, and shows the newest.
+ * A Query that fails reports its error (`reportError`). A Query that
+ * recovers while another still fails removes its own failures
+ * (`reportHealthy(error)` of each error it reported), so the other Queries'
+ * failures keep their places, their `at`, and their causes. When the last
+ * failing Query recovers, the slot clears (`reportHealthy()`). This is the
+ * adapter API's maintainer decision: `reportHealthy(error)` removes just the
+ * failure whose cause is that value, and the slot clears when its list
+ * empties.
  *
  * The glossary's health tree entry adds identity: the tree keeps stable
  * object identity while its content is unchanged, and `health:change`
  * announces a change (ARCHITECTURE law 17 makes the tree an observation).
- * So the model below is a list of failing Queries in failure order; the node
- * shows the last one. After each step, the shown problem either changed, and
- * one `health:change` announces it, or it did not, and the node, its
- * `failureReason` object, and that object's `at` stay the same with no
- * `health:change`. Recovering the Query the node does not show leaves the
- * shown problem unchanged.
+ *
+ * The model is the frame: each listed failure is the subset whose Query
+ * failed and the very error value its fetch threw, in failure order. The
+ * lane loads two subsets and enumerates every history of four steps, each
+ * step a fetch of one subset's Query that fails or succeeds. After each step
+ * the node's `failureReason.errors` lists exactly the model's causes, by
+ * identity and in order, its own `message` and `cause` are the newest's, and
+ * a failure listed before and after keeps its entry's `at`. A step that
+ * leaves the frame as it was keeps the node and its `failureReason` object
+ * and announces no `health:change`. A step that adds or removes one failure,
+ * or clears the slot, announces one; a Query that recovers with several
+ * failures listed removes each, and each removal is announced.
+ *
+ * Limits: one Collection, two subsets, histories of four fetches; a
+ * recovery whose result applies late is the next test's.
  */
 describe(`failureReason follows the still-failing Queries`, () => {
-  it.each([`shown`, `other`] as const)(
-    `recovering the %s Query first`,
-    async (first) => {
-      const client = new QueryClient({
-        defaultOptions: { queries: { retry: false, staleTime: Infinity } },
-      })
-      const failing = new Set<number>()
-      const collection = createCollection(
-        queryCollectionOptions({
-          id: `failing-queries-${first}`,
-          queryKey: [`failing-queries`, first],
-          queryClient: client,
-          getKey: (row: { id: number }) => row.id,
-          syncMode: `on-demand`,
-          startSync: true,
-          queryFn: (ctx): Promise<Array<{ id: number }>> => {
-            const limit = (
-              ctx.meta?.loadSubsetOptions as { limit?: number } | undefined
-            )?.limit
-            return failing.has(limit!)
-              ? Promise.reject(new Error(`subset ${limit} failed`))
-              : Promise.resolve([{ id: limit! }])
-          },
-        }),
+  type Fetch = { subset: 1 | 2; fails: boolean }
+  const fetches: ReadonlyArray<Fetch> = [
+    { subset: 1, fails: true },
+    { subset: 2, fails: true },
+    { subset: 1, fails: false },
+    { subset: 2, fails: false },
+  ]
+  let histories: Array<Array<Fetch>> = [[]]
+  for (let length = 0; length < 4; length++)
+    histories = histories.flatMap((history) =>
+      fetches.map((fetch) => [...history, fetch]),
+    )
+  const reach = createOracleReach(`query-db.failing-queries`, [
+    `a Query recovers while another's failure stays listed`,
+    `a Query fails again while its failure is listed`,
+    `a Query with two failures listed recovers while another fails`,
+    `the last failing Query recovers with several failures listed`,
+  ])
+
+  // The declared states a fetch enters from the frame before it.
+  function recordReach(
+    frame: ReadonlyArray<{ subset: number }>,
+    subset: number,
+    fails: boolean,
+  ) {
+    const listed = frame.filter((failure) => failure.subset === subset).length
+    const failingQueries = new Set(frame.map((failure) => failure.subset)).size
+    if (fails && listed > 0)
+      reach.reach(`a Query fails again while its failure is listed`)
+    if (!fails && listed > 0 && failingQueries > 1) {
+      reach.reach(`a Query recovers while another's failure stays listed`)
+      if (listed > 1)
+        reach.reach(
+          `a Query with two failures listed recovers while another fails`,
+        )
+    }
+    if (!fails && listed > 0 && failingQueries === 1 && frame.length > 1)
+      reach.reach(
+        `the last failing Query recovers with several failures listed`,
       )
-      const consoleError = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
-      const refetch = async (limit: number) => {
-        const query = client
-          .getQueryCache()
-          .findAll()
-          .find(
-            (q) =>
-              (q.meta?.loadSubsetOptions as { limit?: number } | undefined)
-                ?.limit === limit,
-          )!
-        await query.fetch().catch(() => undefined)
-        await flushPromises()
-      }
-      const shown = () => collection.health.failureReason?.message ?? null
-      // Model: failing Queries in failure order; the node shows the last.
-      const modelFailing: Array<number> = []
-      const modelShown = () =>
-        modelFailing.length === 0
-          ? null
-          : `subset ${modelFailing[modelFailing.length - 1]} failed`
-      let healthChanges = 0
-      // Reach: steps that leave the shown problem unchanged.
-      let unchangedSteps = 0
-      const stopHealth = collection.on(`health:change`, () => {
-        healthChanges++
-      })
-      // One step: fail or recover a subset's Query, then compare the node
-      // with the model. An unchanged shown problem keeps its identity.
-      const step = async (limit: number, fails: boolean, label: string) => {
+  }
+
+  async function runHistory(
+    history: ReadonlyArray<Fetch>,
+    index: number,
+    persisted: boolean,
+  ) {
+    if (!persisted) reach.beginHistory()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    const failing = new Set<number>()
+    // The error value each failed fetch threw, in fetch order.
+    const thrown: Array<Error> = []
+    const options = queryCollectionOptions({
+      id: `failing-queries-${persisted}-${index}`,
+      queryKey: [`failing-queries`, persisted, index],
+      queryClient: client,
+      getKey: (row: { id: number }) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      queryFn: (ctx): Promise<Array<{ id: number }>> => {
+        const limit = (
+          ctx.meta?.loadSubsetOptions as { limit?: number } | undefined
+        )?.limit
+        if (!failing.has(limit!)) return Promise.resolve([{ id: limit! }])
+        const error = new Error(`subset ${limit} failure ${thrown.length}`)
+        thrown.push(error)
+        return Promise.reject(error)
+      },
+    })
+    // The persisted wrapper relays the adapter's calls to core, so the same
+    // model judges Query Collection behind it (receiving witness).
+    const collection = createCollection(
+      persisted
+        ? (persistedCollectionOptions({
+            ...(options as any),
+            persistence: { adapter: createPersistedQueryAdapter() },
+          }) as unknown as typeof options)
+        : options,
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const refetch = async (limit: number) => {
+      const query = client
+        .getQueryCache()
+        .findAll()
+        .find(
+          (q) =>
+            (q.meta?.loadSubsetOptions as { limit?: number } | undefined)
+              ?.limit === limit,
+        )!
+      await query.fetch().catch(() => undefined)
+      await flushPromises()
+    }
+    // Model: the listed failures, oldest first.
+    let frame: Array<{ subset: number; cause: Error }> = []
+    let healthChanges = 0
+    const stopHealth = collection.on(`health:change`, () => {
+      healthChanges++
+    })
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      await collection._sync.loadSubset({ limit: 2 })
+      await flushPromises()
+      for (const [at, { subset, fails }] of history.entries()) {
+        const label = `${JSON.stringify(history)} step ${at}`
+        const listed = frame.filter((failure) => failure.subset === subset)
+        const failingBefore = new Set(frame.map((failure) => failure.subset))
+        // The persisted run replays the plain lane's histories, whose reach
+        // the plain run records.
+        if (!persisted) recordReach(frame, subset, fails)
         const before = {
           node: collection.health,
           failureReason: collection.health.failureReason,
-          at: collection.health.failureReason?.at,
-          shown: modelShown(),
           changes: healthChanges,
         }
-        const index = modelFailing.indexOf(limit)
-        if (index >= 0) modelFailing.splice(index, 1)
+        const entryOf = (cause: Error) =>
+          before.failureReason?.errors.find((entry) => entry.cause === cause)
+        if (fails) failing.add(subset)
+        else failing.delete(subset)
+        const thrownBefore = thrown.length
+        await refetch(subset)
+        const previousFrame = frame
         if (fails) {
-          modelFailing.push(limit)
-          failing.add(limit)
-        } else failing.delete(limit)
-        await refetch(limit)
-        expect(shown(), label).toBe(modelShown())
-        if (modelShown() === before.shown) {
-          unchangedSteps++
+          expect(thrown.length, `${label}: the fetch failed`).toBe(
+            thrownBefore + 1,
+          )
+          frame = [...frame, { subset, cause: thrown.at(-1)! }]
+        } else if (listed.length > 0)
+          frame =
+            failingBefore.size === 1
+              ? []
+              : frame.filter((failure) => failure.subset !== subset)
+
+        const problem = collection.health.failureReason
+        expect(
+          problem?.errors.map((entry) => entry.cause) ?? [],
+          `${label}: listed causes`,
+        ).toEqual(frame.map((failure) => failure.cause))
+        expect(problem?.cause ?? null, `${label}: shown cause`).toBe(
+          frame.at(-1)?.cause ?? null,
+        )
+        expect(problem?.message ?? null, `${label}: shown message`).toBe(
+          frame.at(-1)?.cause.message ?? null,
+        )
+        for (const entry of problem?.errors ?? []) {
+          const kept = entryOf(entry.cause as Error)
+          if (kept)
+            expect(entry.at, `${label}: a kept failure keeps its at`).toBe(
+              kept.at,
+            )
+        }
+        const unchanged =
+          frame.length === previousFrame.length &&
+          frame.every((failure, i) => failure === previousFrame[i])
+        if (unchanged) {
           expect(collection.health, `${label}: same node`).toBe(before.node)
-          expect(
-            collection.health.failureReason,
-            `${label}: same failureReason`,
-          ).toBe(before.failureReason)
-          expect(collection.health.failureReason?.at, `${label}: same at`).toBe(
-            before.at,
+          expect(problem, `${label}: same failureReason`).toBe(
+            before.failureReason,
           )
           expect(healthChanges, `${label}: no health:change`).toBe(
             before.changes,
           )
+        } else if (
+          Math.abs(frame.length - previousFrame.length) === 1 ||
+          frame.length === 0
+        ) {
+          // One failure added or removed, or the slot cleared, is one change.
+          expect(healthChanges, `${label}: one health:change`).toBe(
+            before.changes + 1,
+          )
         } else {
+          // A recovered Query with several failures listed removes each
+          // (reportHealthy(error) of each); every removal is announced.
           expect(healthChanges, `${label}: health:change`).toBeGreaterThan(
             before.changes,
           )
         }
       }
-      try {
-        await collection._sync.loadSubset({ limit: 1 })
-        await collection._sync.loadSubset({ limit: 2 })
-        await flushPromises()
-        await step(1, true, `subset 1 fails`)
-        await step(2, true, `subset 2 fails`)
-        expect(shown()).toBe(`subset 2 failed`)
-        const recovered = first === `shown` ? 2 : 1
-        const remaining = first === `shown` ? 1 : 2
-        await step(recovered, false, `after one recovers`)
-        expect(shown(), `after one recovers`).toBe(`subset ${remaining} failed`)
-        await step(remaining, false, `after both recover`)
-        expect(shown(), `after both recover`).toBeNull()
-        expect(unchangedSteps, `reach: an unchanged shown problem`).toBe(
-          first === `other` ? 1 : 0,
-        )
-      } finally {
-        stopHealth()
-        consoleError.mockRestore()
-        await collection.cleanup()
-        client.clear()
-      }
-    },
-  )
+    } finally {
+      stopHealth()
+      consoleError.mockRestore()
+      await collection.cleanup()
+      client.clear()
+    }
+  }
+
+  it(`every history of four fetches refines the model`, async () => {
+    for (const [index, history] of histories.entries())
+      await runHistory(history, index, false)
+    reach.assertReached()
+  }, 120_000)
+
+  it(`every history of four fetches refines the model behind the persisted wrapper`, async () => {
+    for (const [index, history] of histories.entries())
+      await runHistory(history, index, true)
+  }, 120_000)
 
   // A recovered Query's result can apply late, behind a persisting write.
   // Another Query failing meanwhile does not keep the recovered one listed:

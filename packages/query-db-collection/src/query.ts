@@ -1285,23 +1285,23 @@ export function queryCollectionOptions(
     }
     const failedResultApplications = new Map<string, unknown>()
     // A failed fetch or result application after Collection readiness is a
-    // failureReason, since TanStack Query fetches again. It clears once no
-    // observed Query is failing.
-    // In failure order, so the latest failure still failing is last.
-    const failingQueries = new Map<string, unknown>()
+    // failureReason, since TanStack Query fetches again. Each observed Query
+    // still failing keeps the errors it reported. A Query that recovers
+    // removes its own failures, so the other Queries' failures keep their
+    // places; once no Query fails, the failureReason clears.
+    const failingQueries = new Map<string, Array<unknown>>()
     const reportFailing = (hashedQueryKey: string, error: unknown) => {
-      failingQueries.delete(hashedQueryKey)
-      failingQueries.set(hashedQueryKey, error)
+      failingQueries.set(hashedQueryKey, [
+        ...(failingQueries.get(hashedQueryKey) ?? []),
+        error,
+      ])
       if (runReady) reportError(error)
     }
     const reportRecovered = (hashedQueryKey: string) => {
-      const [shownQuery] = [...failingQueries.keys()].slice(-1)
+      const errors = failingQueries.get(hashedQueryKey)
       if (!failingQueries.delete(hashedQueryKey) || !runReady) return
-      // The node shows the latest Query still failing, or nothing. Recovering
-      // another Query leaves the shown problem, and its identity, unchanged.
       if (failingQueries.size === 0) reportHealthy()
-      else if (hashedQueryKey === shownQuery)
-        reportError([...failingQueries.values()].slice(-1)[0])
+      else for (const error of errors!) reportHealthy(error)
     }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,

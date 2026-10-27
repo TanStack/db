@@ -1800,7 +1800,8 @@ every row before the top-K (a recorded limit).
     problem after initial-query readiness, including an on-demand source
     whose own first load fails then, leaves the query's status and rows
     alone and shows on the node that owns it. A source's `reportError()` is
-    its node's `failureReason`, which `reportHealthy()` clears; its `fail()`
+    its node's `failureReason`, which `reportHealthy()` clears and
+    `reportHealthy(error)` trims by one failure; its `fail()`
     after Collection readiness is its node's `error`, which stays for the
     sync run, and every later report from that sync adapter throws. A lazy
     load or a root Collection's load that fails after initial-query readiness
@@ -1858,7 +1859,8 @@ every row before the top-K (a recorded limit).
     query's own node, a request for more data failed). A problem shows its
     newest failure and lists every failure of its frame in `errors`: a
     failure reason's frame is its sync run's reports since the slot was last
-    clear, an `error` from `fail()`, a failed first load, or a crash is one
+    clear, once per error value, less each failure that
+    `reportHealthy(error)` removed (the slot clears when none is left), an `error` from `fail()`, a failed first load, or a crash is one
     failure, and a request error lists the request failures still open. An include's source
     has `kind: 'include'`; its per-row child Collections are not in the tree,
     so adding a child changes nothing. Every change to the tree is announced

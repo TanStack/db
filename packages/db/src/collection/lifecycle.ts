@@ -456,18 +456,31 @@ export class CollectionLifecycleManager<
       this.reloading && !this.failureReasonFromReload
         ? []
         : (this.failureReason?.errors ?? [])
+    // One error value is one failure: one already listed is still open, so
+    // it keeps its place and its `at`, and nothing changes.
+    if (kept.some((failure) => failure.cause === error)) return
     this.failureReason = problemOf([...kept, describeProblem(error)])
     this.failureReasonFromReload = this.reloading
     this.events.emitHealthChange()
   }
 
-  /** The source synced successfully again. With nothing to clear it does nothing. */
-  public reportHealthy(): void {
+  /**
+   * The source synced successfully again. With no error it clears the
+   * failure reason; with one it removes the failure whose cause is that
+   * value, and the failure reason clears once none is left. With nothing to
+   * remove it does nothing.
+   */
+  public reportHealthy(error?: unknown): void {
     if (this.status === `crashed`) return
     this.assertAdapterActive(`reportHealthy`)
     this.assertReady(`reportHealthy`)
-    if (!this.failureReason) return
-    this.failureReason = null
+    const listed = this.failureReason?.errors ?? []
+    const open =
+      error === undefined
+        ? []
+        : listed.filter((failure) => failure.cause !== error)
+    if (open.length === listed.length) return
+    this.failureReason = open.length > 0 ? problemOf(open) : null
     this.events.emitHealthChange()
   }
 

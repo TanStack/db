@@ -471,8 +471,11 @@ export interface SyncConfig<
     markReady: () => void
     /**
      * Report a problem after the first ready while the sync adapter keeps
-     * trying. It shows as the node's `failureReason`; the status and rows do
-     * not change. Throws before the first ready and after `fail()`.
+     * trying. It shows as the node's `failureReason` and adds a failure to its
+     * `errors`; the status and rows do not change. One error value is one
+     * failure: reporting a value already listed changes nothing, and that
+     * failure keeps its place and its `at`. Throws before the first ready and
+     * after `fail()`.
      */
     reportError: (error: unknown) => void
     /**
@@ -484,11 +487,14 @@ export interface SyncConfig<
      */
     fail: (error: unknown) => void
     /**
-     * Sync works again: clears a `failureReason`. With nothing to clear it does
-     * nothing, so it can follow every commit. Throws before the first ready
-     * and after `fail()`.
+     * Sync works again. With no `error`, clears the `failureReason`. With an
+     * `error`, removes only the failure whose cause is that value, for
+     * example one of several requests that recovered; the `failureReason`
+     * then shows the newest failure left, and clears once none is left. With
+     * nothing to clear or remove it does nothing, so it can follow every
+     * commit. Throws before the first ready and after `fail()`.
      */
-    reportHealthy: () => void
+    reportHealthy: (error?: unknown) => void
     /**
      * Replace the synced rows. By default the replacement also marks the
      * Collection ready. Set markReady:false to publish without changing status,
@@ -804,8 +810,9 @@ export interface CollectionErrorInfo {
  * A problem on a health node. Its own fields are its newest failure's, and
  * `errors` lists every failure of its frame that is still open, oldest
  * first; the last entry is the newest. A source's `failureReason` lists each
- * `reportError()` of the sync run since the problem began; `reportHealthy()`
- * ends it. An `error` from `fail()`, a failed first load, or a crash is one
+ * `reportError()` of the sync run since the problem began, once per error
+ * value; `reportHealthy(error)` removes that value's failure, and
+ * `reportHealthy()` ends it. An `error` from `fail()`, a failed first load, or a crash is one
  * failure. A query's request error lists every request failure still open
  * on its node, once per error value, and a failed replay adds each load it
  * failed for.
