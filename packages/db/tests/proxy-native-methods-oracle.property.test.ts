@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { withChangeTracking } from '../src/proxy'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config.js'
 
 /**
  * # Do built-in array and typed-array methods behave on a draft as natively?
@@ -41,36 +46,17 @@ import { withChangeTracking } from '../src/proxy'
  */
 
 // ---------------------------------------------------------------------------
-// Campaigns. `TANSTACK_DB_PROXY_NATIVE_SEED` and
-// `TANSTACK_DB_PROXY_NATIVE_PATH` select a direct replay.
+// Campaigns. Each generated property has a fixed campaign and a random
+// campaign over the same grammar and check. A path replay of one property
+// runs its recorded history once and every other test stands aside. A seed
+// alone reseeds the random campaigns.
 
-const replaySeed = process.env.TANSTACK_DB_PROXY_NATIVE_SEED
-const replayPath = process.env.TANSTACK_DB_PROXY_NATIVE_PATH
 const FIXED_SEED = 2026102
 const RUNS = 400
-const campaigns =
-  replaySeed === undefined && replayPath === undefined
-    ? [
-        { name: String(FIXED_SEED), seed: FIXED_SEED as number | undefined },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed: replaySeed === undefined ? undefined : Number(replaySeed),
-        },
-      ]
-function campaignOptions(seed: number | undefined): fc.Parameters<unknown> {
-  if (replayPath !== undefined && replaySeed === undefined)
-    throw new Error(`TANSTACK_DB_PROXY_NATIVE_PATH requires a seed`)
-  if (seed !== undefined && !Number.isSafeInteger(seed))
-    throw new Error(`TANSTACK_DB_PROXY_NATIVE_SEED must be an integer`)
-  return {
-    numRuns: RUNS,
-    ...(seed === undefined ? {} : { seed }),
-    ...(replayPath === undefined ? {} : { path: replayPath }),
-  }
-}
+const ARRAY_METHODS = `proxy.native-array-methods`
+const TYPED_METHODS = `proxy.native-typed-methods`
+
+const it = oracleReplayTest(vitestIt)
 
 const prototypeMethods = (prototype: object, skip: Set<string>) =>
   Object.getOwnPropertyNames(prototype).filter(
@@ -253,19 +239,21 @@ describe(`array methods behave like native arrays`, () => {
       expectArrayCall([{ x: 1 }, 2, [{ x: 3 }], { x: 0 }], m, k)
   })
 
-  for (const { name, seed } of campaigns) {
-    it(`matches native arrays across generated rows (${name})`, () => {
-      fc.assert(
-        fc.property(
-          arraySpecArb,
-          fc.constantFrom(...arrayMethods),
-          fc.nat(4),
-          expectArrayCall,
-        ),
-        campaignOptions(seed),
-      )
-    })
-  }
+  it(`matches native arrays across generated rows (${FIXED_SEED})`, () => {
+    fc.assert(
+      fc.property(
+        arraySpecArb,
+        fc.constantFrom(...arrayMethods),
+        fc.nat(4),
+        expectArrayCall,
+      ),
+      { numRuns: oracleRuns(RUNS), seed: FIXED_SEED },
+    )
+  })
+  oracleReplayTest(fcTest, ARRAY_METHODS).prop(
+    [arraySpecArb, fc.constantFrom(...arrayMethods), fc.nat(4)],
+    oraclePropertyOptions(RUNS, ARRAY_METHODS),
+  )(`matches native arrays across generated rows (random)`, expectArrayCall)
 
   it(`reaches every method, holes, empty rows, and nested objects in the fixed campaign`, () => {
     const sample = fc.sample(
@@ -410,20 +398,25 @@ describe(`typed-array methods behave like native typed arrays`, () => {
     expectTypedCall([-0, 0], `reverse`, 0, false)
   })
 
-  for (const { name, seed } of campaigns) {
-    it(`matches native typed arrays across generated rows (${name})`, () => {
-      fc.assert(
-        fc.property(
-          typedSpecArb,
-          fc.constantFrom(...typedMethods),
-          fc.nat(4),
-          fc.boolean(),
-          expectTypedCall,
-        ),
-        campaignOptions(seed),
-      )
-    })
-  }
+  it(`matches native typed arrays across generated rows (${FIXED_SEED})`, () => {
+    fc.assert(
+      fc.property(
+        typedSpecArb,
+        fc.constantFrom(...typedMethods),
+        fc.nat(4),
+        fc.boolean(),
+        expectTypedCall,
+      ),
+      { numRuns: oracleRuns(RUNS), seed: FIXED_SEED },
+    )
+  })
+  oracleReplayTest(fcTest, TYPED_METHODS).prop(
+    [typedSpecArb, fc.constantFrom(...typedMethods), fc.nat(4), fc.boolean()],
+    oraclePropertyOptions(RUNS, TYPED_METHODS),
+  )(
+    `matches native typed arrays across generated rows (random)`,
+    expectTypedCall,
+  )
 
   it(`reaches every method, empty rows, NaN, and -0 in the fixed campaign`, () => {
     const sample = fc.sample(

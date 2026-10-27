@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { include, pooledLiveQueries } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
 import {
@@ -9,12 +10,8 @@ import {
   resolveLiveQueryValue,
 } from '../src/live-query-options.js'
 import { BaseQueryBuilder, getQueryIR } from '../src/query/builder/index.js'
-import {
-  caseWhen,
-  eq,
-  materialize,
-  toArray,
-} from '../src/query/builder/functions.js'
+import { caseWhen, eq } from '../src/query/builder/functions.js'
+import { materialize, toArray } from '../src/query/builder/include-functions.js'
 import { collectSourceRefs } from '../src/query/ir.js'
 import type { DeferredLiveQueryCollections } from '../src/live-query-options.js'
 
@@ -319,13 +316,13 @@ describe(`live query preparation`, () => {
             .where(({ child }) => eq(child.parentId, parent.id))
           return {
             id: parent.id,
-            children: childQuery,
+            children: include(childQuery),
             nested: { inlineChildren: toArray(childQuery) },
             materializedChildren: materialize(childQuery),
             conditionalChildren: caseWhen(
               eq(parent.id, `parent`),
-              childQuery,
-              childQuery,
+              include(childQuery),
+              include(childQuery),
             ),
           }
         })
@@ -434,5 +431,106 @@ describe(`live query identity`, () => {
     expect(getLiveQueryHash(config(compare))).not.toBe(
       getLiveQueryHash(config((a: string, b: string) => a.length - b.length)),
     )
+  })
+})
+
+// A source Collection can expose arbitrary adapter utilities. A coincidentally
+// named utility is not live-query window metadata and identity must not call it.
+it.each([false, true])(
+  `derives a keyed source identity without invoking utilities (throws=%s)`,
+  async (throws) => {
+    let calls = 0
+    const source = createCollection({
+      id: `keyed-source-utils`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: () => {} },
+      utils: {
+        getWindow: () => {
+          calls++
+          if (throws) throw new Error(`adapter utility requires a caller`)
+          return { limit: 7, offset: 3 }
+        },
+      },
+    })
+    try {
+      expect(getLiveQueryHash(source, [`source-key`])).toBe(
+        getLiveQueryHash(undefined, [`source-key`]),
+      )
+      expect(calls, `identity reads no arbitrary adapter utility`).toBe(0)
+    } finally {
+      await source.cleanup()
+    }
+  },
+)
+
+describe(`pooling is opt-in`, () => {
+  const source = () =>
+    createCollection<{ id: number; group: number }>({
+      id: `pool-opt-in-${Math.random()}`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+  const eqQuery = (rows: ReturnType<typeof source>) =>
+    new BaseQueryBuilder()
+      .from({ row: rows })
+      .where(({ row }) => eq(row.group, 1))
+
+  // A pooled view has no Collection config; a compiled live query has one.
+  it(`compiles its own Collection unless the hook passes pooledLiveQueries`, () => {
+    const rows = source()
+    expect(resolveLiveQueryValue(eqQuery(rows))?.config).toBeDefined()
+    expect(
+      resolveLiveQueryValue({ query: eqQuery(rows) })?.config,
+    ).toBeDefined()
+    expect(
+      resolveLiveQueryValue({ query: eqQuery(rows), pool: pooledLiveQueries })
+        ?.config,
+    ).toBeUndefined()
+  })
+
+  // The public observation: every framework hook resolves its query here, so
+  // two equality-filtered queries without `pool` keep a source subscription
+  // each. On main before this change they shared one.
+  it(`keeps one source subscription per query without pool`, async () => {
+    const rows = source()
+    const queries = [1, 2].map((group) =>
+      resolveLiveQueryValue(
+        new BaseQueryBuilder()
+          .from({ row: rows })
+          .where(({ row }) => eq(row.group, group)),
+      )!,
+    )
+    const subscriptions = queries.map((query) =>
+      query.subscribeChanges(() => {}),
+    )
+    await Promise.all(queries.map((query) => query.preload()))
+    expect(rows.subscriberCount).toBe(2)
+    for (const subscription of subscriptions) subscription.unsubscribe()
+  })
+
+  it(`does not pool when the hook passes pool: false`, () => {
+    const rows = source()
+    expect(
+      resolveLiveQueryValue(
+        { query: eqQuery(rows), pool: pooledLiveQueries },
+        { pool: false },
+      )?.config,
+    ).toBeDefined()
+  })
+})
+
+describe(`pool does not change a DbClient query's identity`, () => {
+  it(`hashes a preload and a pooling hook config alike`, () => {
+    const client = new DbClient()
+    const rows = createCollection<{ id: number; group: number }>({
+      id: `pool-identity-${Math.random()}`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const query = (q: any) =>
+      q.from({ row: rows }).where(({ row }: any) => eq(row.group, 1))
+    const hash = (value: unknown) =>
+      getLiveQueryHash(prepareLiveQueryValue(value, client))
+    expect(hash({ query, pool: pooledLiveQueries })).toBe(hash({ query }))
   })
 })

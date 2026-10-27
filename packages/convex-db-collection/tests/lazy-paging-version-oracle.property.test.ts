@@ -26,6 +26,7 @@ import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { assertLazySourceFacts } from './lazy-paging-model-oracle'
@@ -200,7 +201,7 @@ it(`checks every native publication against coherent monotone authored revisions
           if (h.skip && h.revisions >= 4)
             reach.reach(`superseded-before-delivery`)
         }),
-        { numRuns: 50, ...parameters },
+        { numRuns: oracleRuns(50), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )

@@ -22,6 +22,7 @@ import { expect, it } from 'vitest'
 import { convexMutationCodec } from '../src/offline'
 import { cleanupOfflineOracle } from '../../offline-transactions/tests/oracle-lifecycle'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import type {
   OfflineTransaction,
   StorageAdapter,
@@ -289,7 +290,7 @@ it(`preserves the Convex mutation value domain across durable serialization`, as
           }
         },
       )
-      await fc.assert(property, { numRuns: 100, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(100), ...parameters })
     },
     { fixedSeed: 20261022 },
   )

@@ -1,7 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   add,
   caseWhen,
@@ -10,18 +8,21 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   lt,
   materialize,
   multiply,
   sum,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { runTrace } from '../trace-runner.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
@@ -219,7 +220,7 @@ function createCollectionQuery(
         return {
           id: parent.id,
           group: parent.group,
-          children: childRows,
+          children: include(childRows),
           arrayChildren: toArray(
             reuseChildRelation ? childRows : createChildRows(),
           ),
@@ -675,7 +676,6 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
   { type: `deleteChild`, id: 10 },
 ]
 
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 const relationshipProperty = `includes-collection.relationship-history`
 const publicKeyOrderProperty = `includes-collection.public-key-order`
 const layoutSwapProperty = `includes-collection.layout-swap`
@@ -822,27 +822,20 @@ describe(`Collection-valued includes oracle`, () => {
       projection: collectionProjection,
     })
 
-  if (requestedReplayProperty === undefined) {
-    fcTest.prop([collectionScenarioArbitrary], {
-      numRuns: oracleRuns(30),
-      seed: 1_658_101,
-    })(
-      `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
-      runRelationshipHistory,
-    )
-  }
-  if (
-    requestedReplayProperty === undefined ||
-    requestedReplayProperty === relationshipProperty
-  ) {
-    fcTest.prop(
-      [collectionScenarioArbitrary],
-      oraclePropertyOptions(30, relationshipProperty),
-    )(
-      `keeps Collection, toArray, and materialize equivalent across random or replayed relationship histories`,
-      runRelationshipHistory,
-    )
-  }
+  oracleReplayTest(fcTest).prop([collectionScenarioArbitrary], {
+    numRuns: oracleRuns(30),
+    seed: 1_658_101,
+  })(
+    `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
+    runRelationshipHistory,
+  )
+  oracleReplayTest(fcTest, relationshipProperty).prop(
+    [collectionScenarioArbitrary],
+    oraclePropertyOptions(30, relationshipProperty),
+  )(
+    `keeps Collection, toArray, and materialize equivalent across random or replayed relationship histories`,
+    runRelationshipHistory,
+  )
 
   fcTest(
     `exhaustively matches every two-step history in the smallest relationship domain`,
@@ -1240,10 +1233,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -1332,10 +1327,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -1386,9 +1383,11 @@ describe(`Collection-valued includes oracle`, () => {
       const live = createLiveQueryCollection((q) =>
         q.from({ parent: parents.collection }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentGroup, parent.group)),
+          children: include(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group)),
+          ),
         })),
       )
 
@@ -1534,11 +1533,13 @@ describe(`Collection-valued includes oracle`, () => {
             .select(({ message }) => ({
               kind: `message` as const,
               id: message.id,
-              children: q
-                .from({ messageChild: children.collection })
-                .where(({ messageChild }) =>
-                  eq(messageChild.parentGroup, message.group),
-                ),
+              children: include(
+                q
+                  .from({ messageChild: children.collection })
+                  .where(({ messageChild }) =>
+                    eq(messageChild.parentGroup, message.group),
+                  ),
+              ),
             }))
           const toolRows = q
             .from({ tool: tools.collection })
@@ -1789,10 +1790,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -1866,10 +1869,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -2035,7 +2040,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
           first: materialize(childRows().findOne()),
@@ -2078,27 +2083,20 @@ describe(`Collection-valued includes oracle`, () => {
     )
   }
 
-  if (requestedReplayProperty === undefined) {
-    fcTest.prop([publicKeyOrderArbitrary], {
-      numRuns: oracleRuns(20),
-      seed: 1_658_102,
-    })(
-      `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
-      runPublicKeyOrder,
-    )
-  }
-  if (
-    requestedReplayProperty === undefined ||
-    requestedReplayProperty === publicKeyOrderProperty
-  ) {
-    fcTest.prop(
-      [publicKeyOrderArbitrary],
-      oraclePropertyOptions(20, publicKeyOrderProperty),
-    )(
-      `uses one raw public-key order across Collection and inline materializations with a random or replayed seed`,
-      runPublicKeyOrder,
-    )
-  }
+  oracleReplayTest(fcTest).prop([publicKeyOrderArbitrary], {
+    numRuns: oracleRuns(20),
+    seed: 1_658_102,
+  })(
+    `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
+    runPublicKeyOrder,
+  )
+  oracleReplayTest(fcTest, publicKeyOrderProperty).prop(
+    [publicKeyOrderArbitrary],
+    oraclePropertyOptions(20, publicKeyOrderProperty),
+  )(
+    `uses one raw public-key order across Collection and inline materializations with a random or replayed seed`,
+    runPublicKeyOrder,
+  )
 
   const runLayoutSwap = async ({
     length,
@@ -2138,7 +2136,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
           first: materialize(childRows().findOne()),
@@ -2213,27 +2211,20 @@ describe(`Collection-valued includes oracle`, () => {
     )
   }
 
-  if (requestedReplayProperty === undefined) {
-    fcTest.prop([orderSwapArbitrary], {
-      numRuns: oracleRuns(20),
-      seed: 1_658_103,
-    })(
-      `propagates order-only child swaps through every materialization with a fixed seed`,
-      runLayoutSwap,
-    )
-  }
-  if (
-    requestedReplayProperty === undefined ||
-    requestedReplayProperty === layoutSwapProperty
-  ) {
-    fcTest.prop(
-      [orderSwapArbitrary],
-      oraclePropertyOptions(20, layoutSwapProperty),
-    )(
-      `propagates order-only child swaps through every materialization with a random or replayed seed`,
-      runLayoutSwap,
-    )
-  }
+  oracleReplayTest(fcTest).prop([orderSwapArbitrary], {
+    numRuns: oracleRuns(20),
+    seed: 1_658_103,
+  })(
+    `propagates order-only child swaps through every materialization with a fixed seed`,
+    runLayoutSwap,
+  )
+  oracleReplayTest(fcTest, layoutSwapProperty).prop(
+    [orderSwapArbitrary],
+    oraclePropertyOptions(20, layoutSwapProperty),
+  )(
+    `propagates order-only child swaps through every materialization with a random or replayed seed`,
+    runLayoutSwap,
+  )
 
   for (const { intermediate, final } of [
     { intermediate: `A`, final: `A` },
@@ -2319,11 +2310,13 @@ describe(`Collection-valued includes oracle`, () => {
         const live = createLiveQueryCollection((q) =>
           q.from({ parent: parents.collection }).select(({ parent }) => ({
             id: parent.id,
-            children: q
-              .from({ child: orderedChildren })
-              .where(({ child }) => eq(child.parentGroup, parent.group))
-              .orderBy(({ child }) => child.rank)
-              .select(({ child }) => ({ id: child.id, value: child.value })),
+            children: include(
+              q
+                .from({ child: orderedChildren })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .orderBy(({ child }) => child.rank)
+                .select(({ child }) => ({ id: child.id, value: child.value })),
+            ),
           })),
         )
         const callbacks: Array<{
@@ -2511,12 +2504,14 @@ describe(`Collection-valued includes oracle`, () => {
       const live = createLiveQueryCollection((q) =>
         q.from({ parent: parents.collection }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.parentGroup, parent.group))
-            .orderBy(({ child }) => child.rank)
-            .limit(2)
-            .select(({ child }) => ({ id: child.id, value: child.value })),
+          children: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.rank)
+              .limit(2)
+              .select(({ child }) => ({ id: child.id, value: child.value })),
+          ),
         })),
       )
       const callbacks: Array<{
@@ -2676,7 +2671,7 @@ describe(`Collection-valued includes oracle`, () => {
               eq(parent.active, true),
               {
                 kind: `active` as const,
-                facade: childRows(),
+                facade: include(childRows()),
                 array: toArray(childRows()),
                 materialized: materialize(childRows()),
               },
@@ -2782,7 +2777,7 @@ describe(`Collection-valued includes oracle`, () => {
 
             return {
               id: parent.id,
-              facade: summaries(),
+              facade: include(summaries()),
               array: toArray(summaries()),
               materialized: materialize(summaries()),
               implicit: materialize(total()),
@@ -2888,7 +2883,7 @@ describe(`Collection-valued includes oracle`, () => {
 
             return {
               id: parent.id,
-              facade: summaries(),
+              facade: include(summaries()),
               array: toArray(summaries()),
               materialized: materialize(summaries()),
             }
@@ -2961,7 +2956,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
         }
@@ -3028,7 +3023,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
         }
@@ -3120,7 +3115,7 @@ describe(`Collection-valued includes oracle`, () => {
 
           return {
             id: parent.id,
-            facade: childRows(),
+            facade: include(childRows()),
             array: toArray(childRows()),
             materialized: materialize(childRows()),
           }
@@ -3218,25 +3213,18 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  if (requestedReplayProperty === undefined) {
-    fcTest.prop([optimisticChildArbitrary], {
-      numRuns: oracleRuns(20),
-      seed: 1_658_104,
-    })(
-      `matches optimistic child settlement histories with a fixed seed`,
-      runOptimisticChildHistory,
-    )
-  }
-  if (
-    requestedReplayProperty === undefined ||
-    requestedReplayProperty === optimisticChildProperty
-  ) {
-    fcTest.prop(
-      [optimisticChildArbitrary],
-      oraclePropertyOptions(20, optimisticChildProperty),
-    )(
-      `matches optimistic child settlement histories with a random or replayed seed`,
-      runOptimisticChildHistory,
-    )
-  }
+  oracleReplayTest(fcTest).prop([optimisticChildArbitrary], {
+    numRuns: oracleRuns(20),
+    seed: 1_658_104,
+  })(
+    `matches optimistic child settlement histories with a fixed seed`,
+    runOptimisticChildHistory,
+  )
+  oracleReplayTest(fcTest, optimisticChildProperty).prop(
+    [optimisticChildArbitrary],
+    oraclePropertyOptions(20, optimisticChildProperty),
+  )(
+    `matches optimistic child settlement histories with a random or replayed seed`,
+    runOptimisticChildHistory,
+  )
 })

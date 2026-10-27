@@ -52,19 +52,23 @@
  * the next `current()` read. After a rejection, no later read exposes rows:
  * each `current()` throws or holds none, so a framework whose memo throws once
  * cannot fall back to the previous query's rows. Each driver releases any
- * native scope that a rejected mount acquired. In the current drivers this
- * check cannot fail, and reactive drivers do not reject here. React unmounts
- * a tree whose render throws, so its driver rethrows on later reads. Preact
- * keeps a component whose render throws mounted, so its driver mounts the hook
- * under an error boundary, as an application must to recover, and rethrows on
- * later reads. A Preact component without a boundary is outside this cut. It guards a future driver whose binding stays mounted. The one such
- * binding today, a `DbClient`-backed Svelte query, has its own witness in the
- * Svelte descriptor release oracle, which reads each field after a rejection.
+ * native scope that a rejected mount acquired. A reactive driver rejects
+ * after mount when its new input fails to compile, as when a re-render drops
+ * `groupKeys()`. Vue's computed serves its previous value after it throws
+ * once, so vue-db catches the error in a computed that does not throw and
+ * clears its rows before it rethrows; before that repair this check failed
+ * there. React unmounts a tree whose render throws, so its driver rethrows
+ * on later reads. Preact keeps a component whose render throws mounted, so
+ * its driver mounts the hook under an error boundary, as an application must
+ * to recover, and rethrows on later reads. A Preact component without a
+ * boundary is outside this cut. A `DbClient`-backed Svelte query also stays
+ * mounted; the Svelte descriptor release oracle reads each of its fields
+ * after a rejection.
  *
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection } from '@tanstack/db'
+import type { Collection, PooledLiveQueries } from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -130,6 +134,7 @@ export interface DbOps {
   count: (a: any) => any
   sum: (a: any) => any
   coalesce: (...args: Array<any>) => any
+  groupKeys: (callback: (refs: any) => any) => any
   /** Build an optimistic action: onMutate applies optimistic state, mutationFn confirms. */
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void
@@ -194,6 +199,12 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
    * show reads these, not only the value after `setParam` settles.
    */
   publications: () => ReadonlyArray<unknown>
+  /**
+   * The keyed `state` map's rows at the same publication points. A binding
+   * that applies row changes to its map can show rows there that `data`
+   * never holds.
+   */
+  statePublications: () => ReadonlyArray<unknown>
 }
 
 /**
@@ -244,10 +255,12 @@ export interface LiveQueryDriver {
   /**
    * Mount a live query whose input depends on a parameter that can change after
    * mount. `build` returns a query, or `null`/`undefined` to represent disabled.
+   * With `pool`, use the adapter's config form for a parameterized query.
    */
   mountControllable: <P>(
     build: (q: any, param: P) => any,
     initial: P,
+    opts?: { pool?: PooledLiveQueries },
   ) => ControllableHandle<P>
   /**
    * Mount a controllable query in the config-object form whose `queryKey` is
@@ -261,10 +274,14 @@ export interface LiveQueryDriver {
   ) => ControllableHandle<P>
   /** Mount a pre-created collection passed directly to the hook. */
   mountCollection: (collection: Collection<any, any, any>) => LiveQueryHandle
-  /** Mount via the config-object input form (`{ query: build }`). */
+  /** Mount via the config-object input form (`{ query: build, ...opts }`). */
   mountConfig: (
     build: QueryBuild,
-    opts?: { gcTime?: number; queryKey?: ReadonlyArray<unknown> },
+    opts?: {
+      gcTime?: number
+      pool?: PooledLiveQueries
+      queryKey?: ReadonlyArray<unknown>
+    },
   ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle
@@ -290,8 +307,10 @@ export interface LiveQueryDriver {
     serverSnapshot?: boolean
     suspense?: boolean
     /**
-     * Public sharing policy: queries filtered only by `eq` on one source share
-     * one source subscription per filtered field set, instead of one each.
+     * Public sharing policy: queries whose config passes `pooledLiveQueries`
+     * and that filter only by `eq` on one source share one source subscription
+     * per filtered field set, instead of one each. Every other query has a
+     * subscription of its own: pooling is opt-in per query.
      */
     pooledEqFilters?: boolean
   }

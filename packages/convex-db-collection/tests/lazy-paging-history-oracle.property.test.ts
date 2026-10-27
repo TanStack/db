@@ -21,6 +21,7 @@ import fc from 'fast-check'
 import { createTransaction } from '@tanstack/db'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import {
@@ -351,7 +352,7 @@ it(`generates ownership and callback schedules against one independent scope law
             () => f.source.cleanup(),
           )
         }),
-        { numRuns: 60, ...parameters },
+        { numRuns: oracleRuns(60), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )
@@ -432,7 +433,7 @@ it(`compares paired hidden suffixes at the production discovery boundary`, async
             reach.reach(`leading-three-tie`)
           },
         ),
-        { numRuns: 60, ...parameters },
+        { numRuns: oracleRuns(60), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )
@@ -466,6 +467,6 @@ it(`accepts retained and reacquired overshoot while rejecting a lost row`, () =>
         assertLazyCoverage(reacquired, source, { limit: size }, descending)
       },
     ),
-    { seed: 20261027, numRuns: 120 },
+    { seed: 20261027, numRuns: oracleRuns(120) },
   )
 })

@@ -16,6 +16,7 @@ import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
@@ -288,7 +289,7 @@ it(`refines the same receipt model through native uniquely establishing batches`
             reach.reach(h.react ? `react` : `javascript`)
           },
         ),
-        { numRuns: 45, ...parameters },
+        { numRuns: oracleRuns(45), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )

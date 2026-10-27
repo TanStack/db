@@ -81,6 +81,7 @@ function expectNoRepeatedSnapshotRequests() {
 
 const mockStream = {
   subscribe: mockSubscribe,
+  unsubscribeAll: vi.fn(),
   fetchSnapshot: mockFetchSnapshot,
   requestSnapshot: async (...args: any) => {
     const result = await mockRequestSnapshot(...args)

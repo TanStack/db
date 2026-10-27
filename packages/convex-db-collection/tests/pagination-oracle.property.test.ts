@@ -27,6 +27,7 @@ import { makeFunctionReference } from 'convex/server'
 import { expect, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
 import type { ConvexCollectionClient } from '../src/index'
@@ -376,7 +377,7 @@ it(`refines every published snapshot across reactive ranges and page splits`, as
           }
         },
       )
-      await fc.assert(property, { numRuns: 60, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261022 },
   )
@@ -441,7 +442,7 @@ it(`materializes complete rows once during finite initial pagination`, async () 
           )
         },
       )
-      await fc.assert(initialWork, { numRuns: 60, ...parameters })
+      await fc.assert(initialWork, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261022 },
   )
@@ -538,7 +539,7 @@ it(`rejects an oversized eager mirror before continuing and preserves accepted r
           )
         },
       )
-      await fc.assert(rowBound, { numRuns: 60, ...parameters })
+      await fc.assert(rowBound, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261023 },
   )

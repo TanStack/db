@@ -28,6 +28,7 @@ import fc from 'fast-check'
 import { expect, inject, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from '../tests/helpers'
 import { lazyRequest } from '../tests/lazy-paging-driver'
 import { assertLazySourceFacts } from '../tests/lazy-paging-model-oracle'
@@ -529,7 +530,7 @@ it(`receives receipt and version laws through both real SDKs and backend`, async
               )
           },
         ),
-        { numRuns: 4, ...parameters },
+        { numRuns: oracleRuns(4), ...parameters },
       ),
     { fixedSeed: 20261028 },
   )

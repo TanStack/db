@@ -1,4 +1,7 @@
+import { oracleRuns } from '../../db/tests/oracle-config'
+
 /** Runner support only: both fixed/random campaigns receive the same budget.
+ * The shared multiplier and this profile's optional deep-run multiplier compose.
  * Explicit seed/path replay still overrides it to the selected history. */
 export function lazyOracleRuns(normal: number): number {
   const value = process.env.CONVEX_LAZY_ORACLE_RUNS_MULTIPLIER ?? `1`
@@ -11,7 +14,7 @@ export function lazyOracleRuns(normal: number): number {
     throw new Error(
       `CONVEX_LAZY_ORACLE_RUNS_MULTIPLIER must be a positive integer`,
     )
-  return normal * multiplier
+  return oracleRuns(normal) * multiplier
 }
 
 /** Execute both receiving paths even after one fails, preserving nested law

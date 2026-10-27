@@ -19,6 +19,7 @@ import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
@@ -386,7 +387,7 @@ it(`generates legal response/receipt/application/cancellation interleavings`, as
             }
           },
         ),
-        { numRuns: 60, ...parameters },
+        { numRuns: oracleRuns(60), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )

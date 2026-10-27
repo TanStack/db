@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { count, max, sum } from '../../src/query/builder/functions.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -194,10 +198,12 @@ function createCommentCount(size: number) {
     q.from({ issue: issues }).select(({ issue }) => ({
       id: issue.id,
       title: issue.title,
-      comments: q
-        .from({ comment: comments })
-        .where(({ comment }) => eq(comment.issueId, issue.id))
-        .select(({ comment }) => ({ n: count(comment.id) })),
+      comments: include(
+        q
+          .from({ comment: comments })
+          .where(({ comment }) => eq(comment.issueId, issue.id))
+          .select(({ comment }) => ({ n: count(comment.id) })),
+      ),
     })),
   )
   const write = (

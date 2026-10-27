@@ -8,6 +8,8 @@ const config = defineConfig({
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
     environment: `jsdom`,
+    // Generated fixed/random campaigns include real Collection lifecycles.
+    testTimeout: 30_000,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,

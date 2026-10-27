@@ -48,9 +48,12 @@ import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
 import type { WatchOnChangeHandler } from '@powersync/common'
 import type { PowerSyncLogger } from '@powersync/node'
 
-const describePowerSync = TEST_DATABASE_IMPLEMENTATION
-  ? describe
-  : describe.skip
+// Without a SQLite binding the oracle would silently not run, so fail loudly.
+if (TEST_DATABASE_IMPLEMENTATION === undefined) {
+  throw new Error(
+    `PowerSync correctness oracle needs a SQLite binding: install better-sqlite3, or run on Node 24+ where node:sqlite is available`,
+  )
+}
 
 type CrudRow = { data: string }
 
@@ -137,7 +140,7 @@ async function cleanupAfterOracle(
   }
 }
 
-describePowerSync(`PowerSync correctness oracle`, () => {
+describe(`PowerSync correctness oracle`, () => {
   afterEach(() => vi.restoreAllMocks())
 
   it(`rejects stale full-row patches and undeclared public keys`, () => {

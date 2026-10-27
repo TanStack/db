@@ -19,8 +19,13 @@
  * every boundary. Fixed/fresh histories use the same generator and checker.
  */
 import { fc } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect, it as vitestIt } from 'vitest'
 import { createLiveQueryCollection } from '../../src'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../oracle-config'
 import {
   Channel,
   deferred,
@@ -40,6 +45,14 @@ import { recordCollection } from './recorder'
 import { runCampaign } from './campaign'
 import type { Change, OracleRow } from './cross-tab-oracle'
 import type { Operation } from './harness'
+
+// Campaigns. The fixed campaign and the fresh campaign run the same generator
+// and checker. A path replay of `indexeddb.pending-history` runs its recorded
+// history once, and every other test in this file stands aside. A seed alone
+// reseeds the fresh campaign.
+const FIXED_SEED = 11792027
+const PENDING_HISTORY = `indexeddb.pending-history`
+const it = oracleReplayTest(vitestIt)
 
 type PeerStep = {
   kind: 'write' | 'delete' | 'clear' | 'import'
@@ -428,19 +441,26 @@ it('a peer no-op cannot spend another source acknowledgement', async () => {
   })
 })
 
-const replaySeed = process.env.TANSTACK_INDEXEDDB_PENDING_SEED
-const replayPath = process.env.TANSTACK_INDEXEDDB_PENDING_PATH
-for (const seed of replaySeed ? [Number(replaySeed)] : [11792027, undefined])
-  it(`refines held mutations through ${seed === undefined ? 'fresh' : 'fixed'} peer histories`, async () => {
+const runs =
+  process.env.TANSTACK_INDEXEDDB_ORACLE_PROFILE === 'stress' ? 300 : 30
+it(`refines held mutations through fixed peer histories`, async () => {
+  await runCampaign(
+    'pending',
+    histories,
+    (history, receipt) => run(history, receipt.reach),
+    { runs: oracleRuns(runs), seed: FIXED_SEED },
+  )
+}, 120_000)
+oracleReplayTest(vitestIt, PENDING_HISTORY)(
+  `refines held mutations through fresh peer histories`,
+  async () => {
+    const { numRuns, seed, path } = oraclePropertyOptions(runs, PENDING_HISTORY)
     await runCampaign(
       'pending',
       histories,
       (history, receipt) => run(history, receipt.reach),
-      {
-        runs:
-          process.env.TANSTACK_INDEXEDDB_ORACLE_PROFILE === 'stress' ? 300 : 30,
-        seed,
-        path: replayPath,
-      },
+      { runs: numRuns, seed, path },
     )
-  }, 120_000)
+  },
+  120_000,
+)

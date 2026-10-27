@@ -26,6 +26,7 @@ import { createLiveQueryCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import {
@@ -425,7 +426,7 @@ it(`composes native failures, shared holds, retirement and terminal restart`, as
             reach.reach(state)
           }
         }),
-        { numRuns: 40, ...parameters },
+        { numRuns: oracleRuns(40), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )

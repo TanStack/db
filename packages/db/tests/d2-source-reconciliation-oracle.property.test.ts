@@ -10,17 +10,15 @@ import { createEffect } from '../src/query/effect.js'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
-const { replayPath, replayProperty } = readOracleRunConfig()
-const it = replayPath === undefined ? vitestIt : vitestIt.skip
-const fixedCampaign = replayPath === undefined ? fcTest : fcTest.skip
-const randomCampaign = (property: string) =>
-  replayPath === undefined || replayProperty === property ? fcTest : fcTest.skip
+const it = oracleReplayTest(vitestIt)
+const fixedCampaign = oracleReplayTest(fcTest)
+const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 /**
  * D2 source reconciliation turns source-key snapshots into exact signed row

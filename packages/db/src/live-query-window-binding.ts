@@ -1,4 +1,6 @@
 import { codedMessage, devBuild } from './error-message.js'
+import { UnhashableQueryIRError } from './errors.js'
+import { getLiveQueryHash } from './live-query-options.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
   assertLiveQueryWindowManyResult,
@@ -12,6 +14,8 @@ import {
   shouldPreserveLiveQueryWindowPageCount,
 } from './live-query-window-controller.js'
 import type { Collection } from './collection/index.js'
+import type { DbClient } from './client.js'
+import type { LiveQueryKey } from './live-query-options.js'
 import type { LiveQueryWindowController } from './live-query-window-controller.js'
 
 /**
@@ -80,6 +84,9 @@ export interface LiveQueryWindowUpdate extends LiveQueryWindowPageShape {
   dependencies?: ReadonlyArray<unknown>
   /** Context compared by reference, such as the `DbClient` a query binds to. */
   scope?: unknown
+  /** Hydration identity for a client-backed window. */
+  client?: DbClient
+  queryKey?: LiveQueryKey
   recompile: LiveQueryWindowRecompile
 }
 
@@ -89,6 +96,8 @@ export interface LiveQueryWindowBinding extends LiveQueryWindowPageShape {
   dependencies: ReadonlyArray<unknown> | undefined
   scope: unknown
   collection: Collection<any, any, any>
+  /** The transport identity of this binding's initial query window. */
+  queryHash: string | undefined
   /** Whether this binding created `collection` from a query. */
   ownsCollection: boolean
   controller: LiveQueryWindowController<any, any>
@@ -162,6 +171,7 @@ export function bindLiveQueryWindow(
   const requiredLimit = initialPageCount * update.pageSize + 1
 
   let collection = previous?.collection
+  let queryHash = previous?.queryHash
   let ownsCollection = previous?.ownsCollection ?? false
   let warning: string | undefined
   if (needsNewCollection) {
@@ -178,14 +188,16 @@ export function bindLiveQueryWindow(
       // rows are correct. A collection in terminal error, such as after its
       // source restarted, cannot serve the query again.
       collection = uncommitted.collection
+      queryHash = uncommitted.queryHash
       ownsCollection = true
     } else {
       const window = openWindowCollection(
         resolved ?? resolveLiveQueryWindowInput<any>(update.input),
-        update.pageSize,
         requiredLimit,
+        update,
       )
       collection = window.collection
+      queryHash = window.queryHash
       ownsCollection = window.ownsCollection
       warning = window.warning
     }
@@ -198,11 +210,14 @@ export function bindLiveQueryWindow(
     pageSize: update.pageSize,
     initialPageParam: update.initialPageParam,
     collection: collection!,
+    queryHash,
     ownsCollection,
     controller: createLiveQueryWindowController(collection, {
       pageSize: update.pageSize,
       initialPageParam: update.initialPageParam,
       initialPageCount,
+      client: update.client,
+      queryHash,
     }),
     warning,
   }
@@ -248,25 +263,44 @@ function compareUpdate(
  */
 function openWindowCollection(
   input: ReturnType<typeof resolveLiveQueryWindowInput<any>>,
-  pageSize: number,
   requiredLimit: number,
+  update: LiveQueryWindowUpdate,
 ): {
   collection: Collection<any, any, any>
+  queryHash: string | undefined
   ownsCollection: boolean
   warning: string | undefined
 } {
+  const prepared =
+    input.kind === `collection`
+      ? input.collection
+      : { query: input.query.limit(requiredLimit).offset(0) }
+  let queryHash: string | undefined
+  if (update.client) {
+    try {
+      queryHash = getLiveQueryHash(prepared, update.queryKey)
+    } catch (error) {
+      if (!(error instanceof UnhashableQueryIRError) || update.queryKey?.length)
+        throw error
+    }
+  }
   if (input.kind === `collection`) {
     const warning = getLiveQueryWindowCollectionWarning(
       input.collection,
-      pageSize + 1,
+      update.pageSize + 1,
     )
     if (liveQueryWindowMatches(input.collection, requiredLimit)) {
       input.collection.startSyncImmediate()
     }
-    return { collection: input.collection, ownsCollection: false, warning }
+    return {
+      collection: input.collection,
+      queryHash,
+      ownsCollection: false,
+      warning,
+    }
   }
   const collection = createLiveQueryCollection({
-    query: input.query.limit(requiredLimit).offset(0),
+    query: (prepared as { query: typeof input.query }).query,
     gcTime: WINDOW_COLLECTION_GC_TIME_MS,
   })
   assertLiveQueryWindowManyResult(collection)
@@ -274,5 +308,5 @@ function openWindowCollection(
   // render reads only rows the sources already hold, and sends no request
   // until the subscription attaches.
   collection.startSyncImmediate()
-  return { collection, ownsCollection: true, warning: undefined }
+  return { collection, queryHash, ownsCollection: true, warning: undefined }
 }

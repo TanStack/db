@@ -19,6 +19,7 @@ import { DbClient, collectionOptions, createCollection } from '@tanstack/db'
 import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexCollectionOptions } from '../src/index'
 import { controlledClient, query, withTestCleanup } from './helpers'
 
@@ -128,7 +129,7 @@ it(`keeps concrete options ownership across generated lifecycle checkpoints`, as
           }
         },
       )
-      await fc.assert(property, { numRuns: 60, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261022 },
   )

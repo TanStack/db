@@ -32,6 +32,7 @@ import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { runOracleCampaign } from '../oracle-campaign.js'
+import { oracleRuns } from '../oracle-config'
 import { flushPromises, withOracleCleanup } from '../utils.js'
 import type {
   LoadSubsetOptions,
@@ -461,7 +462,7 @@ it(`composes overlapping replay receipts, failure, surviving ownership and resta
             reach.reach(state)
           }
         }),
-        { numRuns: 35, ...parameters },
+        { numRuns: oracleRuns(35), ...parameters },
       ),
     { fixedSeed: 20261027 },
   )

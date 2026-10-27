@@ -28,6 +28,7 @@ import {
 } from '@tanstack/db'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { withTestCleanup } from './helpers'
 import {
@@ -68,7 +69,7 @@ function rowsFor(h: History, ties = true): Array<LazyRow> {
     text: h.texts[i]!,
   }))
 }
-const runBudget = 60
+const runBudget = oracleRuns(60)
 const fixedSeed = 20261026
 
 it(`matches exact finite, offset, tie, continuation, whole and empty scopes`, async () => {

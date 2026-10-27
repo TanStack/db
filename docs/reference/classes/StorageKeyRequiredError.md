@@ -3,7 +3,7 @@ id: StorageKeyRequiredError
 title: StorageKeyRequiredError
 ---
 
-Defined in: [packages/db/src/errors.ts:1013](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1013)
+Defined in: [packages/db/src/errors.ts:1033](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1033)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:1013](https://github.com/TanStack/db/blob
 new StorageKeyRequiredError(): StorageKeyRequiredError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1014](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1014)
+Defined in: [packages/db/src/errors.ts:1034](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1034)
 
 #### Returns
 
