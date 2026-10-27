@@ -4690,3 +4690,18 @@ campaign was not run on `main` at that time. Owner: the includes oracle owner. N
 path from a later run. Until then, this entry cannot tell an operator
 regression from an older defect. A later failure of that campaign must record
 its seed here before anyone calls it pre-existing.
+
+### Ordered signalling-refetch work scope, October 27
+
+Owner: `packages/db/tests/query/ordered-work-oracle.property.test.ts`. The
+architecture's "Ordered requests, continuation, and recovery" law permits
+full-source fallback for an underfilled joined prefix without an order index.
+The signalling-refetch assertion therefore forbids extra full-source requests
+only when finite continuation is available, indexed joined windows and direct
+source-filter windows. Unindexed joined histories retain all public row, order,
+publication and other applicable work comparisons. They do not claim a bounded
+refetch transfer. The authority is the existing architecture contract, not a
+new behavior decision. Replay seed `-931507916`, path
+`21:3:3:3:4:3:4:4:4:5:4:4:4:4` reaches the permitted fallback after an ineligible
+upsert into an empty source and a joined-marker change. This was an overly
+broad oracle assertion, not a production repair.

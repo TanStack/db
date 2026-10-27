@@ -5892,7 +5892,15 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         // tie, and refill; a whole-source read would be the cost the report
         // exists to avoid. A page that ends on a null or NaN rank takes the
         // documented full-source fallback instead.
-        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
+        // A joined predicate can leave the root prefix underfilled. Without
+        // an order index, finite continuation is unavailable, so the
+        // architecture permits full-source fallback. Row checks still apply.
+        const boundedContinuation = testCase.indexed || !joined
+        if (
+          signalsRefetch &&
+          boundedContinuation &&
+          unexpressiblePageEnds === unexpressibleBefore
+        ) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
@@ -7903,6 +7911,32 @@ describe(`eager indexed ordered windows`, () => {
         history: [
           { type: `touch`, id: 10 },
           { type: `delete`, id: 2 },
+        ],
+      })
+    },
+  )
+
+  it.each([false, true])(
+    `revalidates an empty joined prefix after an ineligible insert (indexed: %s)`,
+    async (indexed) => {
+      await checkEagerWindow({
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [
+          { type: `upsert`, id: 0, rank: 0, eligible: false },
+          { type: `flip`, id: 1 },
         ],
       })
     },
