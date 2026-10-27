@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { count, createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
@@ -299,5 +300,73 @@ describe('subquery boundaries preserve operators and user rows', () => {
       await live.cleanup()
       await source.collection.cleanup()
     }
+  })
+
+  it('keeps one default-key findOne QueryRef row through candidate changes', async () => {
+    const first = { id: 1 }
+    const second = { id: 2 }
+    const source = createControlledCollection('find-one-default-source', [
+      first,
+      second,
+    ])
+    const anchors = createControlledCollection('find-one-default-anchors', [
+      first,
+      second,
+    ])
+    const joined = createLiveQueryCollection({
+      query: (q) => {
+        const firstQuery = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({ id: item.id }))
+          .findOne()
+        return q
+          .from({ anchor: anchors.collection })
+          .innerJoin({ first: firstQuery }, ({ anchor, first: row }) =>
+            eq(anchor.id, row.id),
+          )
+          .select(({ first: row }) => ({ id: row.id }))
+      },
+      getKey: (row) => row.id,
+    })
+    const leading = createLiveQueryCollection({
+      query: (q) => {
+        const firstQuery = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({ id: item.id }))
+          .findOne()
+        return q
+          .from({ first: firstQuery })
+          .innerJoin({ anchor: anchors.collection }, ({ first: row, anchor }) =>
+            eq(row.id, anchor.id),
+          )
+          .select(({ first: row }) => ({ id: row.id }))
+      },
+      getKey: (row) => row.id,
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        await Promise.all([joined.preload(), leading.preload()])
+        for (const live of [joined, leading]) {
+          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
+        }
+
+        source.write('delete', first)
+        for (const live of [joined, leading]) {
+          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 2 }])
+        }
+
+        source.write('insert', first)
+        for (const live of [joined, leading]) {
+          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
+        }
+      },
+      () => [
+        () => joined.cleanup(),
+        () => leading.cleanup(),
+        () => source.collection.cleanup(),
+        () => anchors.collection.cleanup(),
+      ],
+    )
   })
 })

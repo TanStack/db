@@ -91,9 +91,45 @@ function expectPublicSnapshotFollowsModel(
   ).toEqual(expectedDistinctRows(modelPeople.values(), modelTags.values()))
 }
 
+/**
+ * The aggregate QueryRef is one row whose total counts every source item. The
+ * joined person is published only when that total equals its ID.
+ */
+function expectedAggregateJoinRows(
+  itemRows: ReadonlyMap<number, { id: number }>,
+  personRows: ReadonlyMap<number, { id: number }>,
+): Array<{ personId: number; total: number }> {
+  const total = itemRows.size
+  return Array.from(personRows.values())
+    .filter((person) => person.id === total)
+    .map((person) => ({ personId: person.id, total }))
+}
+
+/**
+ * The joined bag of person-tag candidates, sorted by the declared person ID.
+ * An ordered findOne publishes the first candidate, and a sticky singleton
+ * would keep an earlier one.
+ */
+function expectedFindOneCandidates(
+  personRows: ReadonlyMap<number, { id: number; groupId: number }>,
+  tagRows: ReadonlyMap<number, { id: number; groupId: number }>,
+): Array<{ personId: number; tagId: number }> {
+  return Array.from(personRows.values())
+    .flatMap((person) =>
+      Array.from(tagRows.values())
+        .filter((tag) => tag.groupId === person.groupId)
+        .map((tag) => ({ personId: person.id, tagId: tag.id })),
+    )
+    .sort((left, right) => left.personId - right.personId)
+}
+
 declareOracle({
   check: [expectPublicSnapshotFollowsModel],
-  model: [expectedDistinctRows],
+  model: [
+    expectedDistinctRows,
+    expectedAggregateJoinRows,
+    expectedFindOneCandidates,
+  ],
 })
 
 describe('subquery boundaries preserve operators and user rows', () => {
@@ -294,10 +330,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
     const modelItems = new Map(initialItems.map((row) => [row.id, row]))
     const modelPeople = new Map(initialPeople.map((row) => [row.id, row]))
     const checkPublicSnapshot = (checkpoint: string) => {
-      const total = modelItems.size
-      const expected = Array.from(modelPeople.values())
-        .filter((person) => person.id === total)
-        .map((person) => ({ personId: person.id, total }))
+      const expected = expectedAggregateJoinRows(modelItems, modelPeople)
       expect(live.toArray.map(stripVirtualProps), checkpoint).toEqual(expected)
     }
 
@@ -370,10 +403,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
     ])
     const modelPeople = new Map([[2, { id: 2 }]])
     const checkPublicSnapshot = (checkpoint: string) => {
-      const total = modelItems.size
-      const expected = Array.from(modelPeople.values())
-        .filter((person) => person.id === total)
-        .map((person) => ({ personId: person.id, total }))
+      const expected = expectedAggregateJoinRows(modelItems, modelPeople)
       expect(live.toArray.map(stripVirtualProps), checkpoint).toEqual(expected)
     }
     await withHistoryCleanup(
@@ -397,74 +427,6 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => live.cleanup(),
         () => source.collection.cleanup(),
         () => persons.collection.cleanup(),
-      ],
-    )
-  })
-
-  it('keeps one default-key findOne QueryRef row through candidate changes', async () => {
-    const first = { id: 1 }
-    const second = { id: 2 }
-    const source = createControlledCollection('find-one-default-source', [
-      first,
-      second,
-    ])
-    const anchors = createControlledCollection('find-one-default-anchors', [
-      first,
-      second,
-    ])
-    const joined = createLiveQueryCollection({
-      query: (q) => {
-        const firstQuery = q
-          .from({ item: source.collection })
-          .select(({ item }) => ({ id: item.id }))
-          .findOne()
-        return q
-          .from({ anchor: anchors.collection })
-          .innerJoin({ first: firstQuery }, ({ anchor, first: row }) =>
-            eq(anchor.id, row.id),
-          )
-          .select(({ first: row }) => ({ id: row.id }))
-      },
-      getKey: (row) => row.id,
-    })
-    const leading = createLiveQueryCollection({
-      query: (q) => {
-        const firstQuery = q
-          .from({ item: source.collection })
-          .select(({ item }) => ({ id: item.id }))
-          .findOne()
-        return q
-          .from({ first: firstQuery })
-          .innerJoin({ anchor: anchors.collection }, ({ first: row, anchor }) =>
-            eq(row.id, anchor.id),
-          )
-          .select(({ first: row }) => ({ id: row.id }))
-      },
-      getKey: (row) => row.id,
-    })
-
-    await withHistoryCleanup(
-      async () => {
-        await Promise.all([joined.preload(), leading.preload()])
-        for (const live of [joined, leading]) {
-          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
-        }
-
-        source.write('delete', first)
-        for (const live of [joined, leading]) {
-          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 2 }])
-        }
-
-        source.write('insert', first)
-        for (const live of [joined, leading]) {
-          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
-        }
-      },
-      () => [
-        () => joined.cleanup(),
-        () => leading.cleanup(),
-        () => source.collection.cleanup(),
-        () => anchors.collection.cleanup(),
       ],
     )
   })
@@ -527,14 +489,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
     const recordPublicSnapshot = (checkpoint: string) => {
       // Enumerate the joined bag, sort by the declared person ID, then take
       // one row. This reference does not use the compiler's singleton state.
-      const candidates = Array.from(modelPeople.values())
-        .flatMap((person) =>
-          Array.from(modelTags.values())
-            .filter((tag) => tag.groupId === person.groupId)
-            .map((tag) => ({ personId: person.id, tagId: tag.id })),
-        )
-        .sort((left, right) => left.personId - right.personId)
-      const first = candidates[0]
+      const first = expectedFindOneCandidates(modelPeople, modelTags)[0]
       const expected = first
         ? [{ anchorId: first.personId, tagId: first.tagId }]
         : []
@@ -627,13 +582,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
     const modelPeople = new Map(initialPeople.map((row) => [row.id, row]))
     const modelTags = new Map(initialTags.map((row) => [row.id, row]))
     const checkPublicSnapshot = (checkpoint: string) => {
-      const first = Array.from(modelPeople.values())
-        .flatMap((person) =>
-          Array.from(modelTags.values())
-            .filter((tag) => tag.groupId === person.groupId)
-            .map((tag) => ({ personId: person.id, tagId: tag.id })),
-        )
-        .sort((left, right) => left.personId - right.personId)[0]
+      const first = expectedFindOneCandidates(modelPeople, modelTags)[0]
       const actual = live.toArray.map((row) => ({
         anchorId: row.anchorId,
         first: row.first && {
