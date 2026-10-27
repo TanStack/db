@@ -1,5 +1,10 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import type {
   BrowserOPFSWorkerErrorCode,
@@ -41,7 +46,10 @@ import type {
  * plus caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
- * locking, real bfcache admission, or browser process teardown.
+ * locking, real bfcache admission, or browser process teardown. The open
+ * histories begin after asset resolution. The OPFS open outcome oracle in
+ * opfs-open-outcome-oracle.ts owns how an open settles across asset lookup,
+ * worker start, WASM load, and initialization, with jsdom and Chromium drivers.
  */
 
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
@@ -280,6 +288,7 @@ function installEnvironment(behavior: WorkerBehavior): ControlledPage {
   vi.stubGlobal(`navigator`, {
     storage: { getDirectory: () => Promise.resolve({}) },
   })
+  vi.stubGlobal(`location`, { href: `https://example.test/` })
   vi.stubGlobal(`addEventListener`, page.addEventListener.bind(page))
   vi.stubGlobal(`removeEventListener`, page.removeEventListener.bind(page))
   return page
@@ -932,66 +941,6 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
-const lifecycleSeed = Number(
-  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED ?? 1844,
-)
-const lifecycleRuns = Number(
-  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_RUNS ?? 48,
-)
-const lifecyclePath = process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_PATH
-const mixedSeed = Number(process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED ?? 1845)
-const mixedRuns = Number(process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_RUNS ?? 32)
-const mixedPath = process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_PATH
-const failureSeed = Number(
-  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED ?? 1846,
-)
-const failureRuns = Number(
-  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_RUNS ?? 18,
-)
-const failurePath = process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_PATH
-const terminalEventSeed = Number(
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED ?? 1847,
-)
-const terminalEventRuns = Number(
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_RUNS ?? 24,
-)
-const terminalEventPath =
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_PATH
-const closeSeed = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED ?? 1848)
-const closeRuns = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_RUNS ?? 32)
-const closePath = process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_PATH
-const replayRequested = [
-  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED,
-  lifecyclePath,
-  process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED,
-  mixedPath,
-  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED,
-  failurePath,
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED,
-  terminalEventPath,
-  process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED,
-  closePath,
-].some((value) => value !== undefined)
-
-type OracleCampaign = {
-  label: `fixed` | `random` | `replay`
-  seed?: number
-  path?: string
-}
-
-function oracleCampaigns(
-  seed: number,
-  replaySeedSupplied: boolean,
-  path: string | undefined,
-  replayRequestedForFile: boolean,
-): Array<OracleCampaign> {
-  if (replaySeedSupplied || path !== undefined) {
-    return [{ label: `replay`, seed, ...(path === undefined ? {} : { path }) }]
-  }
-  if (replayRequestedForFile) return []
-  return [{ label: `fixed`, seed }, { label: `random` }]
-}
-
 const pagehideHistory = fc.record({
   pending: fc.constantFrom<RequestKind>(`init`, `execute`, `close`),
   delivery: fc.constantFrom<DeliveryStage>(
@@ -1189,10 +1138,12 @@ bfcache admission, durability, native handle release, or wa-sqlite #88. The
 Chromium Web Lock fixture checks native queued-lock release separately.
 Challenge/replay: fixed examples exhaust the cheap structural products. Each
 generated lane runs a fixed and an unseeded campaign with the same grammar and
-run budget. Verbose FastCheck output retains original/reduced traces. Setting
-SEED or PATH selects only the direct replay for that lane. Use its
-TANSTACK_DB_OPFS_*_ORACLE_{SEED,RUNS,PATH} controls with this file's
-package-local Vitest command.
+run budget. Verbose FastCheck output retains original/reduced traces. A path
+replay selects only the direct replay of its lane's property, named by
+TANSTACK_DB_ORACLE_PROPERTY: opfs.page-lifecycle, opfs.mixed-execute,
+opfs.terminal-event, opfs.close, or opfs.failure-cleanup. A seed without a
+path reseeds the unseeded campaigns. Run it with this file's package-local
+Vitest command.
 */
 describe(`OPFS page lifecycle oracle`, () => {
   it.each([
@@ -1397,93 +1348,89 @@ describe(`OPFS page lifecycle oracle`, () => {
     expectDisposed(page, worker)
   })
 
-  for (const campaign of oracleCampaigns(
-    lifecycleSeed,
-    process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED !== undefined,
-    lifecyclePath,
-    replayRequested,
-  )) {
-    fcTest.prop([pagehideHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: lifecycleRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: pagehideExamples,
-      verbose: true,
-    })(
-      `matches the independent model across generated histories (${campaign.label})`,
-      runPagehideHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    mixedSeed,
-    process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED !== undefined,
-    mixedPath,
-    replayRequested,
-  )) {
-    fcTest.prop([mixedExecuteHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: mixedRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: mixedExamples,
-      verbose: true,
-    })(
-      `preserves completed siblings while aborting pending siblings (${campaign.label})`,
-      runMixedExecuteHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    terminalEventSeed,
-    process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED !== undefined,
-    terminalEventPath,
-    replayRequested,
-  )) {
-    fcTest.prop([terminalEventHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: terminalEventRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: terminalEventExamples,
-      verbose: true,
-    })(
-      `rejects pending work across Worker terminal event paths (${campaign.label})`,
-      runTerminalEventHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    closeSeed,
-    process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED !== undefined,
-    closePath,
-    replayRequested,
-  )) {
-    fcTest.prop([closeHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: closeRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: closeExamples,
-      verbose: true,
-    })(
-      `settles pending work and refuses new work across explicit close (${campaign.label})`,
-      runCloseHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    failureSeed,
-    process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED !== undefined,
-    failurePath,
-    replayRequested,
-  )) {
-    fcTest.prop([failureHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: failureRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: failureExamples,
-      verbose: true,
-    })(
-      `matches terminal cleanup and error mapping across worker failures (${campaign.label})`,
-      runFailureHistory,
-    )
-  }
+  oracleReplayTest(fcTest).prop([pagehideHistory], {
+    seed: 1844,
+    numRuns: oracleRuns(48),
+    examples: pagehideExamples,
+    verbose: true,
+  })(
+    `matches the independent model across generated histories (fixed)`,
+    runPagehideHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop([pagehideHistory], {
+    ...oraclePropertyOptions(48, `opfs.page-lifecycle`),
+    examples: pagehideExamples,
+    verbose: true,
+  })(
+    `matches the independent model across generated histories (random)`,
+    runPagehideHistory,
+  )
+  oracleReplayTest(fcTest).prop([mixedExecuteHistory], {
+    seed: 1845,
+    numRuns: oracleRuns(32),
+    examples: mixedExamples,
+    verbose: true,
+  })(
+    `preserves completed siblings while aborting pending siblings (fixed)`,
+    runMixedExecuteHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop([mixedExecuteHistory], {
+    ...oraclePropertyOptions(32, `opfs.mixed-execute`),
+    examples: mixedExamples,
+    verbose: true,
+  })(
+    `preserves completed siblings while aborting pending siblings (random)`,
+    runMixedExecuteHistory,
+  )
+  oracleReplayTest(fcTest).prop([terminalEventHistory], {
+    seed: 1847,
+    numRuns: oracleRuns(24),
+    examples: terminalEventExamples,
+    verbose: true,
+  })(
+    `rejects pending work across Worker terminal event paths (fixed)`,
+    runTerminalEventHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.terminal-event`).prop([terminalEventHistory], {
+    ...oraclePropertyOptions(24, `opfs.terminal-event`),
+    examples: terminalEventExamples,
+    verbose: true,
+  })(
+    `rejects pending work across Worker terminal event paths (random)`,
+    runTerminalEventHistory,
+  )
+  oracleReplayTest(fcTest).prop([closeHistory], {
+    seed: 1848,
+    numRuns: oracleRuns(32),
+    examples: closeExamples,
+    verbose: true,
+  })(
+    `settles pending work and refuses new work across explicit close (fixed)`,
+    runCloseHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.close`).prop([closeHistory], {
+    ...oraclePropertyOptions(32, `opfs.close`),
+    examples: closeExamples,
+    verbose: true,
+  })(
+    `settles pending work and refuses new work across explicit close (random)`,
+    runCloseHistory,
+  )
+  oracleReplayTest(fcTest).prop([failureHistory], {
+    seed: 1846,
+    numRuns: oracleRuns(18),
+    examples: failureExamples,
+    verbose: true,
+  })(
+    `matches terminal cleanup and error mapping across worker failures (fixed)`,
+    runFailureHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop([failureHistory], {
+    ...oraclePropertyOptions(18, `opfs.failure-cleanup`),
+    examples: failureExamples,
+    verbose: true,
+  })(
+    `matches terminal cleanup and error mapping across worker failures (random)`,
+    runFailureHistory,
+  )
 })

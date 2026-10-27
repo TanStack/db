@@ -1565,8 +1565,13 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(salesRep2?.total_amount).toBe(850) // 150+300+400
         expect(salesRep2?.order_count).toBe(3)
 
-        // No sales rep (null): order 5 - null becomes the direct value as key
-        const noSalesRep = salesRepSummary.get(null as any)
+        // No sales rep (null): order 5. Collection keys are strings or
+        // numbers, so the null group gets a string key.
+        const nullGroup = salesRepSummary.toArray.find(
+          (row) => row.sales_rep_id === null,
+        )
+        expect(typeof nullGroup?.$key).toBe(`string`)
+        const noSalesRep = salesRepSummary.get(nullGroup!.$key)
         expect(noSalesRep?.sales_rep_id).toBeNull()
         expect(noSalesRep?.total_amount).toBe(250)
         expect(noSalesRep?.order_count).toBe(1)

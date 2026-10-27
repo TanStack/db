@@ -79,12 +79,12 @@ import {
 } from '../src/proxy.js'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
 
 const property = `flat-change-tracking.equivalence`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 const MISSING = Symbol(`missing`)
 const FRESH_OBJECT = Symbol(`fresh object`)
@@ -660,7 +660,7 @@ function runHistory(history: History): void {
 }
 
 describe(`flat change tracking oracle`, () => {
-  if (requestedReplayProperty === undefined) {
+  if (!oracleReplayRequested()) {
     for (const { name, history } of pinnedHistories) {
       it(`matches the draft proxy when ${name}`, () => runHistory(history))
     }
@@ -713,16 +713,10 @@ describe(`flat change tracking oracle`, () => {
       seed: 44_502_101,
       numRuns: oracleRuns(200),
     })(`matches the draft proxy (fixed)`, runHistory)
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(200, property))(
-      `matches the draft proxy (random)`,
-      runHistory,
-    )
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(200, property))(
-      `matches the draft proxy (replay)`,
-      runHistory,
-    )
-  } else {
-    it.skip(`runs only when its replay property is selected`, () => {})
   }
+  // A path replay of this property runs its one recorded history here.
+  oracleReplayTest(fcTest, property).prop(
+    [historyArbitrary],
+    oraclePropertyOptions(200, property),
+  )(`matches the draft proxy (random)`, runHistory)
 })

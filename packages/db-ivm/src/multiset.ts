@@ -1,4 +1,4 @@
-import { chunkedArrayPush, getStringId } from './utils.js'
+import { chunkedArrayPush } from './utils.js'
 import { hash } from './hashing/index.js'
 
 export type MultiSetArray<T> = Array<[T, number]>
@@ -94,21 +94,7 @@ export class MultiSet<T> {
           (typeof data[0] === `string` || typeof data[0] === `number`),
       )
     ) {
-      const referenceIds = new Map<object | symbol, number>()
-      return consolidateBy(inner, (data) => {
-        const [key, value] = data as [string | number, unknown]
-        // Length prefixes keep user text from crossing component boundaries.
-        let valueId: string
-        if (Array.isArray(value) && value.length === 2) {
-          const firstId = getStringId(value[0], referenceIds)
-          const secondId = getStringId(value[1], referenceIds)
-          valueId = `tuple_${firstId.length}:${firstId}${secondId}`
-        } else {
-          valueId = `leaf_${getStringId(value, referenceIds)}`
-        }
-        const keyId = getStringId(key, referenceIds)
-        return `${keyId.length}:${keyId}${valueId}`
-      })
+      return consolidateKeyed(inner)
     }
 
     // Unkeyed data of a single primitive type is its own identity, and the
@@ -140,6 +126,43 @@ export class MultiSet<T> {
   getInner(): MultiSetArray<T> {
     return this.#inner
   }
+}
+
+/**
+ * Consolidates `[key, value]` records. `Map` keys compare by SameValueZero,
+ * which is the identity the keyed rule asks for: primitives by value (`-0`
+ * equals `0`, `NaN` equals `NaN`) and objects by reference. A join tuple is
+ * looked up element by element, and leaves and tuples use separate maps.
+ */
+function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
+  const leaves = new Map<unknown, Map<unknown, [T, number]>>()
+  const tuples = new Map<unknown, Map<unknown, Map<unknown, [T, number]>>>()
+  const entries: MultiSetArray<T> = []
+  for (const [data, multiplicity] of inner) {
+    const [key, value] = data as [string | number, unknown]
+    let entry: [T, number] | undefined
+    if (Array.isArray(value) && value.length === 2) {
+      let byFirst = tuples.get(key)
+      if (!byFirst) tuples.set(key, (byFirst = new Map()))
+      let bySecond = byFirst.get(value[0])
+      if (!bySecond) byFirst.set(value[0], (bySecond = new Map()))
+      entry = bySecond.get(value[1])
+      if (!entry) {
+        bySecond.set(value[1], (entry = [data, 0]))
+        entries.push(entry)
+      }
+    } else {
+      let byValue = leaves.get(key)
+      if (!byValue) leaves.set(key, (byValue = new Map()))
+      entry = byValue.get(value)
+      if (!entry) {
+        byValue.set(value, (entry = [data, 0]))
+        entries.push(entry)
+      }
+    }
+    entry[1] += multiplicity
+  }
+  return new MultiSet(entries.filter(([, multiplicity]) => multiplicity !== 0))
 }
 
 /**
