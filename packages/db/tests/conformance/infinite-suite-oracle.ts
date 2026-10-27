@@ -23,11 +23,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createOracleReach } from '../oracle-reach'
 import { declareOracle } from '../oracle-declaration.js'
-import { registerInfiniteQueryCaseScenarios } from './infinite-suite-cases'
 import {
   captureError,
   createScenarioState,
-  registerRegistrySelfTest,
   rows,
   runScenario,
   scenarioLifetime,
@@ -38,7 +36,10 @@ import {
 } from './infinite-suite-harness'
 import { expectPageRows } from './page-laws-oracle'
 import { scenarioRegistry } from './registration'
-import type { InfiniteRow } from './infinite-suite-harness'
+import type {
+  InfiniteQueryContext,
+  InfiniteRow,
+} from './infinite-suite-harness'
 import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
@@ -181,7 +182,10 @@ declareOracle({
   model: [expectedOverlappingWindow],
 })
 
-export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
+export function runInfiniteQuerySuite(
+  rawDriver: InfiniteQueryDriver,
+  registerUnitScenarios: (context: InfiniteQueryContext) => void,
+): void {
   const registry = scenarioRegistry(rawDriver.knownGaps)
   const state = createScenarioState()
   const driver = wrapDriver(rawDriver, state)
@@ -201,7 +205,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
-    registerInfiniteQueryCaseScenarios({ driver, registry, state })
+    registerUnitScenarios({ driver, registry, state })
 
     scenario(
       `first-paint-ready`,
@@ -1782,7 +1786,5 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expectPageRows(handle.current(), rows(8).slice(6, 8), 3)
       },
     )
-
-    registerRegistrySelfTest(registry)
   })
 }

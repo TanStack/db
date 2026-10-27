@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import { runSQLiteCoreAdapterContractSuite } from './sqlite-core-adapter-contract-suite'
 import { runSQLiteBindingCapacityOracleSuite } from './sqlite-core-adapter-oracle.test'
+import { runSQLiteBindingCapacityUnitTests } from './sqlite-core-adapter-binding-units'
 import { SqliteCliDriver } from './sqlite-core-adapter-support'
 
 // A managed physical storage ID must travel through the real sqlite3 CLI
@@ -57,4 +58,9 @@ it(`persists a claimed on-demand row through sqlite3 CLI arguments`, async () =>
 })
 
 runSQLiteCoreAdapterContractSuite(`SQLiteCorePersistenceAdapter (sqlite3 CLI)`)
+// The unit tests register here, in the binding-capacity describe block that
+// the oracle's tests also use, so their full names are unchanged.
+describe(`SQLite subset binding-capacity oracle`, () => {
+  runSQLiteBindingCapacityUnitTests()
+})
 runSQLiteBindingCapacityOracleSuite()

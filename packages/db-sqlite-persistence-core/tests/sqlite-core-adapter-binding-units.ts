@@ -2,10 +2,10 @@
  * Unit checks for SQLite subset binding capacity. They compare with literal
  * expectations: the controlled driver rejects an over-cap statement, a cursor
  * request issues two bounded SELECTs and returns its literal row, and index
- * DDL keeps IN values as literals. The binding-capacity oracle in
- * sqlite-core-adapter-oracle.test.ts registers them in its suite, so their
- * names stay under that suite. They reach no model or check, so they are
- * supplemental coverage here.
+ * DDL keeps IN values as literals. The ordinary runner
+ * sqlite-core-adapter-cli-runtime.test.ts registers them in the binding-capacity
+ * describe block, so their names stay under that suite. They reach no model or
+ * check, so they are supplemental coverage here.
  */
 import assert from 'node:assert/strict'
 import { IR } from '@tanstack/db'

@@ -26,7 +26,6 @@ import {
   recordOracleReplay,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { runSQLiteBindingCapacityUnitTests } from './sqlite-core-adapter-binding-units'
 import {
   bigintBoundary,
   chunkBoundary,
@@ -898,8 +897,6 @@ const bindingFixedIt = oracleReplayTest(it)
 
 export function runSQLiteBindingCapacityOracleSuite(): void {
   describe(`SQLite subset binding-capacity oracle`, () => {
-    runSQLiteBindingCapacityUnitTests()
-
     bindingFixedIt(
       `returns exact rows at single-list, statement-total, and typed boundaries`,
       async () => {

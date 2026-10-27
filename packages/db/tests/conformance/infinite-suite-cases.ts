@@ -9,6 +9,7 @@
 import { expect, it } from 'vitest'
 import {
   captureError,
+  registerRegistrySelfTest,
   rows,
   runScenario,
   scenarioLifetime,
@@ -233,4 +234,16 @@ export function registerInfiniteQueryCaseScenarios(
       ])
     },
   )
+}
+
+/**
+ * The unit scenarios of the infinite-query suite, and the registry self-test
+ * that counts them. An ordinary runner passes this registrar to
+ * runInfiniteQuerySuite, so the shared oracle file calls no registering helper.
+ */
+export function registerInfiniteQueryUnitScenarios(
+  context: InfiniteQueryContext,
+): void {
+  registerInfiniteQueryCaseScenarios(context)
+  registerRegistrySelfTest(context.registry)
 }
