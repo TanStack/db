@@ -90,6 +90,12 @@ const FORWARD_TIMEOUT_MS = 10_000
 const COLLECTION_ID = `persisted-demand-coverage-receiver`
 
 export * from './persisted-demand-coverage-receiving-histories'
+// The model types a receiving driver records with.
+export type {
+  CoverageRecord,
+  QueryObservation,
+  SourceEvent,
+} from '../persisted-demand-coverage-model-oracle'
 
 export type UpstreamBehavior = `hold` | `reject` | `answer-at-once`
 
