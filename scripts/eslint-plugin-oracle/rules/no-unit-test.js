@@ -62,10 +62,13 @@ import {
  * a check or a model. Reviewers still check those.
  *
  * An oracle file registers only oracle tests, so it may not call an imported
- * helper that registers tests in a file that is not oracle-named. Such a call
- * gets an importedRegistration report: the author registers those tests from
- * an ordinary test file. A call to an oracle-named helper is not reported,
- * because that module's tests are linted on their own.
+ * helper that registers a test of its own in a file that is not oracle-named.
+ * Such a call gets an importedRegistration report: the author registers those
+ * tests from an ordinary test file. A helper that registers the body its caller
+ * passes does not register a test of its own. Its caller's body is the test,
+ * and it is judged at the call, as a local parameter registration is. A call to
+ * an oracle-named helper is not reported, because that module's tests are
+ * linted on their own.
  */
 
 const declarationHelper = `declareOracle`
@@ -141,16 +144,20 @@ function importedModuleReaches(fromFile, source, name, session) {
 function importedRegisters(fromFile, source, name, session, visiting) {
   const file = resolveTestModule(fromFile, source, session)
   const module = file === undefined ? undefined : loadModule(file, session)
-  return module !== undefined && module.registersTests(name, visiting)
+  return module?.registrationShape(name, visiting)
 }
 
 /**
- * The call that an oracle file makes to an imported helper which registers
- * tests, or undefined. A helper in an oracle-named module is linted on its own.
+ * The shape of an imported helper that a call in an oracle file invokes, or
+ * undefined. The root is the identifier under any curried calls, as in
+ * `serializerProp(property, [arb])(name, check)`. A helper in an oracle-named
+ * module is linted on its own.
  */
-function importedRegistrationCall(node, file, sourceCode, session) {
-  if (node.callee.type !== `Identifier`) return undefined
-  const definition = findVariable(sourceCode.getScope(node), node.callee.name)
+function importedHelperShape(node, file, sourceCode, session) {
+  let callee = node.callee
+  while (callee.type === `CallExpression`) callee = callee.callee
+  if (callee.type !== `Identifier`) return undefined
+  const definition = findVariable(sourceCode.getScope(node), callee.name)
     ?.defs[0]
   if (
     definition?.type !== `ImportBinding` ||
@@ -165,7 +172,59 @@ function importedRegistrationCall(node, file, sourceCode, session) {
   if (module === undefined || basename(module).includes(`oracle`))
     return undefined
   const helper = loadModule(module, session)
-  return helper?.registersTests(imported) ? node : undefined
+  return helper?.registrationShape(imported)
+}
+
+/**
+ * Whether a helper call reaches a part through the body its caller passes. The
+ * body reaches when it uses a part. A fast-check property (`.prop`) also
+ * reaches when one of its arbitraries generates values and its body reads the
+ * value, because then the body is a generated property.
+ */
+function callerBodyReaches(node, helper, module) {
+  const body = node.arguments.at(-1)
+  if (body === undefined) return false
+  if (module.nodeReaches(body)) return true
+  return (
+    helper.prop &&
+    isFunction(body) &&
+    generatesValues(node, module) &&
+    module.usesInput(body)
+  )
+}
+
+/**
+ * Whether an arbitrary generates values: a call that is not a constant, or a
+ * variable whose initializer is one. An identifier is followed to its definition.
+ */
+function generatedArbitrary(value, module) {
+  if (value?.type === `Identifier`) {
+    const definition = findVariable(module.scopeOf(value), value.name)?.defs[0]
+    return (
+      definition?.type === `Variable` &&
+      definition.node.init !== null &&
+      generatedArbitrary(definition.node.init, module)
+    )
+  }
+  return value?.type === `CallExpression` && !isConstant(value)
+}
+
+/** Whether a curried call's arguments include a non-constant arbitrary. */
+function generatesValues(node, module) {
+  for (
+    let inner = node.callee;
+    inner.type === `CallExpression`;
+    inner = inner.callee
+  ) {
+    for (const argument of inner.arguments) {
+      const values =
+        argument.type === `ArrayExpression` ? argument.elements : [argument]
+      if (values.some((value) => generatedArbitrary(value, module))) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 /** The test module that a relative import names, or undefined. */
@@ -594,13 +653,14 @@ class OracleModule {
   }
 
   /**
-   * Whether an export of this module is a function that registers a test. A
-   * function registers a test when its body contains a registration, including
-   * inside a function it declares. A cycle of re-exports registers nothing.
+   * How an export of this module registers tests, or undefined when it
+   * registers none. A function registers the body that it writes ('own') or
+   * the body that its caller passes ('parameter'). A cycle of re-exports
+   * registers nothing.
    */
-  registersTests(name, visiting = new Set()) {
+  registrationShape(name, visiting = new Set()) {
     const key = `${this.file}\0${name}`
-    if (visiting.has(key)) return false
+    if (visiting.has(key)) return undefined
     visiting.add(key)
     const entry = this.exported.get(name)
     if (entry?.variable !== undefined) {
@@ -611,7 +671,7 @@ class OracleModule {
           : definition?.type === `Variable` && isFunction(definition.node.init)
             ? definition.node.init
             : undefined
-      return fn !== undefined && this.#bodyRegisters(fn)
+      return fn === undefined ? undefined : this.#bodyShape(fn)
     }
     if (entry !== undefined) {
       return importedRegisters(
@@ -622,24 +682,45 @@ class OracleModule {
         visiting,
       )
     }
-    return this.starSources.some((source) =>
-      importedRegisters(this.file, source, name, this.session, visiting),
-    )
+    for (const source of this.starSources) {
+      const shape = importedRegisters(
+        this.file,
+        source,
+        name,
+        this.session,
+        visiting,
+      )
+      if (shape !== undefined) return shape
+    }
+    return undefined
   }
 
-  #bodyRegisters(fn) {
+  /**
+   * The shape of the registrations in a function's body. A registration whose
+   * body is a parameter of the function registers the caller's body. Any other
+   * registration registers a body that the function writes, which wins.
+   */
+  #bodyShape(fn) {
     const sourceCode = { getScope: (node) => this.scopeOf(node) }
-    let found = false
+    let shape
     walk(fn, (node) => {
-      if (
-        !found &&
-        node.type === `CallExpression` &&
-        registeredTest(node, sourceCode) !== undefined
-      ) {
-        found = true
+      if (node.type !== `CallExpression`) return
+      const test = registeredTest(node, sourceCode)
+      if (test === undefined) return
+      const body = test.body
+      const isParameter =
+        body.type === `Identifier` &&
+        findVariable(sourceCode.getScope(body), body.name)?.defs[0]?.type ===
+          `Parameter`
+      if (!isParameter) shape = { kind: `own` }
+      else if (shape?.kind !== `own`) {
+        shape = {
+          kind: `parameter`,
+          prop: calleeCall(node.callee, `prop`) !== undefined,
+        }
       }
     })
-    return found
+    return shape
   }
 
   /** The innermost scope of a node, as ESLint's `getScope` finds it. */
@@ -894,10 +975,23 @@ export default {
     let anyReached = false
     return {
       CallExpression(node) {
-        if (
-          importedRegistrationCall(node, context.filename, sourceCode, session)
-        ) {
+        // A curried callee is not a call of its own: the outermost call is the
+        // registration.
+        const outermost = !(
+          node.parent.type === `CallExpression` && node.parent.callee === node
+        )
+        const helper = outermost
+          ? importedHelperShape(node, context.filename, sourceCode, session)
+          : undefined
+        if (helper?.kind === `own`) {
           context.report({ node, messageId: `importedRegistration` })
+        }
+        if (helper?.kind === `parameter`) {
+          // The helper registers the body its caller passes, so the caller's
+          // body is the test, judged here as a local parameter registration is.
+          if (callerBodyReaches(node, helper, module)) anyReached = true
+          else unreached.push(node)
+          return
         }
         const test = registeredTest(node, sourceCode)
         if (test === undefined || isPlaceholder(test.body)) return
