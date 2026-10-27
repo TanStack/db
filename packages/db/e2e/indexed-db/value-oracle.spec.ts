@@ -156,7 +156,7 @@ declareOracle({ model: [expectedFirstOpenRows] })
 // Same/independent names distinguish queue sharing from accidental global
 // ownership. Prototype and Unicode store names also receive native creation,
 // dictionary lookup, broadcast and restore; the wider renaming grammar stays
-// in compatibility-oracle.test.ts.
+// in compatibility.test.ts.
 for (const shared of [true, false]) {
   for (const store of ['__proto__', '雪/é']) {
     test(`initializes concurrent native opens with shared ${shared} and store ${store}`, async ({
