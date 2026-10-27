@@ -99,14 +99,17 @@ A manual probe ran the packaged consumer under Vite development and preview in
 Playwright's Firefox 150, which opened and queried SQLite, and WebKit 26.4,
 which refuses the OPFS storage root even on a blank page. With the storage
 check, WebKit's open rejects with `PersistenceUnavailableError`; before it,
-the open reported an internal error. Real Safari was checked by hand
-separately.
+the open reported an internal error. Real Safari 27.0 on macOS was checked by
+hand against `9d0ee7234`: under Vite development, through the asset lookup, and
+under a Vite production preview, the page opened SQLite, wrote and read a row,
+and started one classic worker.
 
 Both oracles cover Vite only, in Chromium. The bundler consumer checks add
 webpack 5 builds and Next.js with Turbopack and webpack, in development and
-production, as fixed receiving witnesses. Nothing covers webpack-dev-server,
-Rspack, Parcel, esbuild, other browsers, an open from inside a worker, or a
-Vite client injected without a script `src`. The README states the last two as
+production, as fixed receiving witnesses. Firefox and real Safari were checked by hand,
+not by a repository test. Nothing covers webpack-dev-server, Rspack, Parcel,
+esbuild, an open from inside a worker, or a Vite client injected without a
+script `src`. The README states the last two as
 cases that need the exclusion.
 
 The Vite production builds in these tests run with `NODE_ENV=production`.
