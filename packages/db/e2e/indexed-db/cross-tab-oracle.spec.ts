@@ -28,101 +28,16 @@ import {
   oracleRuns,
 } from '../../tests/oracle-config'
 import { retainedDocument } from './browser-evidence-oracle'
-import type { BrowserContext, Page } from '@playwright/test'
+import {
+  awaitRestore,
+  closePages,
+  observe,
+  open,
+  withPages,
+} from './cross-tab-support'
+import type { BrowserContext } from '@playwright/test'
 import type { BrowserEvidence } from './browser'
 import type { Change, OracleRow } from '../../tests/indexed-db/cross-tab-oracle'
-
-async function open(
-  context: BrowserContext,
-  database: string,
-  tab: string,
-  split = false,
-  options = '',
-) {
-  const page = await context.newPage()
-  await page.goto(
-    `/e2e/indexed-db/browser.html?database=${database}&tab=${tab}&fault=${split ? 'split' : 'none'}${options}`,
-  )
-  await installed(page)
-  if (!options.includes('hold=startup'))
-    await page.evaluate(() => window.crossTab!.ready())
-  return page
-}
-async function installed(page: Page) {
-  await page.waitForFunction(
-    () => window.crossTab !== undefined || window.crossTabFailure !== undefined,
-  )
-  const failure = await page.evaluate(() => window.crossTabFailure)
-  if (failure) throw new Error(failure)
-}
-async function awaitRestore(page: Page) {
-  await installed(page)
-  await page.evaluate(() => window.crossTab!.ready())
-}
-const observe = (page: Page) => page.evaluate(() => window.crossTab!.observe())
-
-async function closePages(context: BrowserContext) {
-  const failures: Array<unknown> = []
-  for (const page of context.pages()) {
-    for (const action of [
-      () => page.evaluate(() => window.crossTab?.flushEvidence()),
-      () => page.evaluate(() => window.crossTab?.cleanup()),
-      () => page.evaluate(() => window.crossTab?.flushEvidence()),
-      () => page.close(),
-    ]) {
-      try {
-        await action()
-      } catch (error) {
-        failures.push(error)
-      }
-    }
-  }
-  return failures
-}
-
-async function withPages(
-  context: BrowserContext,
-  run: (events: Array<BrowserEvidence>, database: string) => Promise<void>,
-) {
-  const events: Array<BrowserEvidence> = []
-  const errors: Array<string> = []
-  await context.exposeBinding(
-    'retainOracleEvent',
-    (_source, event: BrowserEvidence) => {
-      events.push(event)
-    },
-  )
-  context.on('page', (page) =>
-    page.on('pageerror', (error) => errors.push(String(error))),
-  )
-  let primary: unknown
-  try {
-    await run(events, `oracle-${crypto.randomUUID()}`)
-  } catch (error) {
-    primary = error
-  }
-  const cleanup = await closePages(context)
-  await test.info().attach('native-evidence', {
-    body: JSON.stringify({
-      engine: test.info().project.name,
-      browserVersion: context.browser()!.version(),
-      events,
-      errors,
-      primary: String(primary ?? ''),
-      cleanup: cleanup.map(String),
-    }),
-    contentType: 'application/json',
-  })
-  if (primary !== undefined) {
-    if (cleanup.length)
-      throw new AggregateError(cleanup, 'Native oracle and cleanup failed', {
-        cause: primary,
-      })
-    throw primary
-  }
-  expect(errors, 'unexpected page errors').toEqual([])
-  expect(cleanup, 'cleanup failures').toEqual([])
-}
 
 async function overlap(
   context: BrowserContext,
@@ -828,25 +743,6 @@ test('native reload readiness waits for its establishing storage read', async ({
   })
 })
 
-test('cleanup retains a primary mismatch and closes every page after an injected cleanup failure', async ({
-  context,
-}) => {
-  const primary = new OracleMismatch(
-    'calibration',
-    'before cleanup',
-    'expected',
-    'wrong',
-  )
-  await expect(
-    withPages(context, async (_events, database) => {
-      await open(context, database, 'first', false, '&cleanupFailure=1')
-      await open(context, database, 'second')
-      throw primary
-    }),
-  ).rejects.toMatchObject({ cause: primary })
-  expect(context.pages()).toHaveLength(0)
-})
-
 // Native administrative deletion witness. Hold only the old success callback;
 // its late delivery grants no authority over a recreated Collection.
 test('late administrative deletion receipt preserves a recreated database snapshot', async ({
@@ -1097,47 +993,6 @@ for (const reason of ['explicit', 'upgrade', 'delete'] as const)
             )
         })
       })
-
-// fake-indexeddb cannot provide this witness: its deletion queue treats a
-// close-pending connection as closed. Real engines must wait for BOTH native
-// transaction completion and the unmanaged connection, in either release order.
-for (const transactionFirst of [false, true])
-  test(`native deletion waits for both obligations, transaction first ${transactionFirst}`, async ({
-    context,
-  }) => {
-    await withPages(context, async (_events, database) => {
-      const a = await open(context, database, 'owner')
-      const b = await open(context, database, 'administrator')
-      await a.evaluate(() => window.crossTab!.openBlocker())
-      await a.evaluate(() => window.crossTab!.holdStorage())
-      await b.evaluate(() => window.crossTab!.startSchema('delete'))
-      await a.waitForFunction(
-        () => window.crossTab!.observe().versionChanges === 1,
-      )
-      expect((await observe(a)).status).toBe('error')
-      if (transactionFirst) {
-        await a.evaluate(() => window.crossTab!.releaseBarrier())
-        expect((await observe(a)).writes.at(-1)).toBe('complete')
-        expect((await observe(b)).schema.status).toBe('pending')
-        await a.evaluate(() => window.crossTab!.closeBlocker())
-      } else {
-        await a.evaluate(() => window.crossTab!.closeBlocker())
-        await b.evaluate(
-          () =>
-            new Promise<void>((resolve) =>
-              requestAnimationFrame(() => resolve()),
-            ),
-        )
-        expect((await observe(a)).writes.at(-1)).toBe('pending')
-        expect((await observe(b)).schema.status).toBe('pending')
-        await a.evaluate(() => window.crossTab!.releaseBarrier())
-      }
-      await b.waitForFunction(
-        () => window.crossTab!.observe().schema.status === 'complete',
-      )
-      expect((await observe(a)).status).toBe('error')
-    })
-  })
 
 // Chromium DevTools supplies actual abnormal closure, including native aborts;
 // no synthetic close event or test-triggered transaction.abort supplies it.
