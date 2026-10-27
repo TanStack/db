@@ -2,8 +2,13 @@
  * Ordinary tests for persistedCollectionOptions: option validation, startup metadata, coordinator and single-process subset wiring, and fixed wire-projection cases. The persisted-wrapper laws that these tests touch (durability, hydration, lifecycle) are owned by persisted-oracle.test.ts.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection, createTransaction } from '@tanstack/db'
 import {
+  createCollection,
+  createLiveQueryCollection,
+  createTransaction,
+} from '@tanstack/db'
+import {
+  IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   persistedCollectionOptions,
 } from '../src'
@@ -11,6 +16,7 @@ import {
   atPersistedOracleCheckpoint,
   cleanupPersistedOracle,
   createCoordinatorHarness,
+  createDeferred,
   createEventGate,
   createFailStopCoordinatorHarness,
   createRecordingAdapter,
@@ -18,7 +24,11 @@ import {
   observeSettlement,
   stripVirtualProps,
 } from './persisted-support'
-import type { PersistedCollectionCoordinator, ProtocolEnvelope } from '../src'
+import type {
+  PersistedCollectionCoordinator,
+  PersistedTx,
+  ProtocolEnvelope,
+} from '../src'
 import type { Todo, TodoSyncParams } from './persisted-support'
 
 describe(`persistedCollectionOptions`, () => {
@@ -1683,3 +1693,215 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 })
+
+// The immutable authored order is crossing→later. The model has no coordinator
+// route or runtime lifecycle: a durable exact-ID hit contributes crossing once;
+// otherwise a certified empty interval lets the replacement apply it once.
+function modelSourceReconciliation(committedBeforeClose: boolean) {
+  const before = committedBeforeClose ? [`crossing`] : []
+  return {
+    atUncertain: {
+      publicIds: [`crossing`],
+      durableIds: before,
+      cursor: committedBeforeClose ? `crossing` : null,
+    },
+    afterReconciliation: {
+      publicIds: [`crossing`],
+      liveIds: [`crossing`],
+      liveStatus: `ready`,
+      durableIds: [`crossing`],
+      cursor: `crossing`,
+      syncRuns: 1,
+      durableTxCount: 1,
+    },
+    afterSuffix: {
+      publicIds: [`crossing`, `later`],
+      liveIds: [`crossing`, `later`],
+      liveStatus: `ready`,
+      durableIds: [`crossing`, `later`],
+      cursor: `later`,
+      syncRuns: 1,
+      durableTxCount: 2,
+    },
+  }
+}
+
+// The controlled coordinator loses one source RPC answer after either storing
+// its transaction or storing nothing. It holds the exact-ID reconciliation so
+// the driver can compare the pending receipt and public/durable state at the
+// uncertainty cut. Browser/SQLite owns the atomic absence proof and actual
+// election; this driver checks the wrapped receipt and dependent query path.
+it.each([false, true])(
+  `reconciles a source receipt without ending its dependent live query when applied=%s`,
+  async (committedBeforeClose) => {
+    const expected = modelSourceReconciliation(committedBeforeClose)
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const error = new IndeterminateCommitError({
+      collectionId: `source-restart`,
+      requestType: `rpc:applyCommittedTx:req`,
+      previousLeaderId: `retired`,
+      previousTerm: 1,
+      currentLeaderId: `replacement`,
+      currentTerm: 2,
+      cause: new Error(`lost response`),
+    })
+    let first = true
+    const reconciliationEntered = createDeferred()
+    const releaseReconciliation = createDeferred()
+    let durableFirstTx: PersistedTx | undefined
+    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+      if (first) {
+        first = false
+        if (committedBeforeClose) {
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            tx,
+          )
+          durableFirstTx = tx
+        }
+        throw error
+      }
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    coordinator.reconcileCommittedTx = async (collectionId, tx, anchor) => {
+      expect(anchor.latestRowVersion).toBe(0)
+      reconciliationEntered.resolve()
+      await releaseReconciliation.promise
+      const alreadyApplied = durableFirstTx !== undefined
+      const committed = alreadyApplied
+        ? durableFirstTx!
+        : { ...tx, term: 2, seq: 1, rowVersion: 1 }
+      if (!alreadyApplied)
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          committed,
+        )
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: `controlled-reconciliation`,
+        ok: true,
+        alreadyApplied,
+        committed: {
+          term: committed.term,
+          seq: committed.seq,
+          rowVersion: committed.rowVersion,
+        },
+      }
+    }
+
+    let source!: TodoSyncParams
+    let syncRuns = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `source-restart`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            syncRuns++
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+    const livePublishedKeys: Array<string> = []
+    const liveSubscription = live.subscribeChanges((changes) => {
+      livePublishedKeys.push(...changes.map(({ key }) => String(key)))
+    })
+    let hasPrimaryFailure = false
+    const observe = () => ({
+      publicIds: [...collection.keys()].sort(),
+      liveIds: [...live.keys()].sort(),
+      liveStatus: live.status,
+      durableIds: [...adapter.rows.keys()].sort(),
+      cursor: adapter.collectionMetadata.get(`probe:cursor`) ?? null,
+    })
+
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `initial ready`)
+      await atPersistedOracleCheckpoint(
+        live.preload(),
+        `dependent live query ready`,
+      )
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `crossing`, title: `source` },
+      })
+      source.metadata?.collection.set(`probe:cursor`, `crossing`)
+      const firstReceipt = Promise.resolve(source.commit()).then(
+        () => undefined,
+      )
+      const firstSettlement = observeSettlement(firstReceipt)
+      await atPersistedOracleCheckpoint(
+        reconciliationEntered.promise,
+        `exact-ID reconciliation entered`,
+      )
+      expect(firstSettlement.read()).toEqual({ status: `pending` })
+      expect({
+        publicIds: [...collection.keys()].sort(),
+        durableIds: [...adapter.rows.keys()].sort(),
+        cursor: adapter.collectionMetadata.get(`probe:cursor`) ?? null,
+      }).toEqual(expected.atUncertain)
+      expect(live.status).toBe(`ready`)
+      releaseReconciliation.resolve()
+      await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `reconciled source receipt`,
+      )
+
+      expect(firstSettlement.read()).toEqual({ status: `fulfilled` })
+      expect({ status: collection.status, syncRuns }).toEqual({
+        status: `ready`,
+        syncRuns: 1,
+      })
+      expect({
+        ...observe(),
+        syncRuns,
+        durableTxCount: adapter.applyCommittedTxCalls.length,
+      }).toEqual(expected.afterReconciliation)
+      expect(livePublishedKeys).toContain(`crossing`)
+
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `later`, title: `source suffix` },
+      })
+      source.metadata?.collection.set(`probe:cursor`, `later`)
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(source.commit()),
+        `later source receipt`,
+      )
+      expect({
+        ...observe(),
+        syncRuns,
+        durableTxCount: adapter.applyCommittedTxCalls.length,
+      }).toEqual(expected.afterSuffix)
+      expect(livePublishedKeys).toContain(`later`)
+    } catch (failure) {
+      hasPrimaryFailure = true
+      throw failure
+    } finally {
+      releaseReconciliation.resolve()
+      liveSubscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [() => live.cleanup(), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
