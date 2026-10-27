@@ -19,7 +19,11 @@ import {
   NonAggregateExpressionNotInGroupByError,
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleRuns,
+} from '../oracle-config.js'
 
 /**
  * # What does an aggregate query publish beside its aggregates?
@@ -794,6 +798,15 @@ const history = fc
     ),
   )
 
+// The check is `runHistory`: it runs each generated history, and after every
+// step it compares the published rows and the compile outcome with
+// `modelGroup` and `modelError`. The generated properties and the pinned
+// replays above reach it.
+declareOracle({
+  check: [runHistory],
+  model: [modelGroup, modelError],
+})
+
 describe(`aggregate select shapes`, () => {
   it(`match the model across generated shapes (fixed campaign)`, async () => {
     // A repeatable baseline. Seed 2094 is arbitrary.
@@ -884,39 +897,5 @@ describe(`aggregate select shapes`, () => {
       true,
       [],
     )
-  })
-
-  // Pinned witness: a group key that holds a literal object or NaN matches a
-  // select value that builds the same literal again.
-  it(`matches group keys holding array, Date and NaN literals`, async () => {
-    const source = createCollection(
-      mockSyncCollectionOptions<{ id: number; v: number; d: Date | null }>({
-        id: `sg-literals-${Math.random().toString(36).slice(2)}`,
-        getKey: (r) => r.id,
-        initialData: [{ id: 1, v: 1, d: null }],
-      }),
-    )
-    const keys: Record<string, (c: any) => any> = {
-      array: (c) => inArray(c.v, [1, 2]),
-      date: (c) => coalesce(c.d, new Date(5)),
-      nan: (c) => add(c.v, NaN),
-    }
-    for (const [name, key] of Object.entries(keys)) {
-      const query = createLiveQueryCollection((q) =>
-        q
-          .from({ c: source })
-          .groupBy(({ c }) => key(c))
-          .select(({ c }) => ({ g: key(c), n: count(c.id) })),
-      )
-      await query.preload()
-      expect(
-        query.toArray.map((row: any) => [row.g, row.n]),
-        name,
-      ).toEqual([
-        [name === `array` ? true : name === `date` ? new Date(5) : NaN, 1],
-      ])
-      await query.cleanup()
-    }
-    await source.cleanup()
   })
 })
