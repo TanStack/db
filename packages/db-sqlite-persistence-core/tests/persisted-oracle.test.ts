@@ -17,8 +17,9 @@ import {
 } from '@tanstack/db'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import {
   IndeterminateCommitError,
@@ -210,19 +211,17 @@ function expectExactSnapshot(
   for (const [key, row] of expected) expect(actual.get(key)).toStrictEqual(row)
 }
 
-const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
-const describeUnlessOracleReplay =
-  requestedOracleReplayProperty === undefined ||
-  requestedOracleReplayProperty === `persistence.retained-demand` ||
-  requestedOracleReplayProperty === `persistence.generation-notice` ||
-  requestedOracleReplayProperty === `persistence.follower-remote-demand`
-    ? describe
-    : describe.skip
+// A path replay of one of these properties runs this suite. A replay of any
+// other property stands it aside.
+const describeUnlessOracleReplay = oracleReplayTest(
+  describe,
+  `persistence.retained-demand`,
+  `persistence.generation-notice`,
+  `persistence.follower-remote-demand`,
+)
 
-const itUnlessAnyOracleReplay =
-  requestedOracleReplayProperty === undefined ? it : it.skip
-const describeUnlessAnyOracleReplay =
-  requestedOracleReplayProperty === undefined ? describe : describe.skip
+const itUnlessAnyOracleReplay = oracleReplayTest(it)
+const describeUnlessAnyOracleReplay = oracleReplayTest(describe)
 
 const hydrationScopeModes = [
   `none`,
@@ -3975,7 +3974,7 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
     if (match === undefined) throw new Error(`missing grammar: ${property}`)
     return match
   }
-  const sampleOptions = (seed: number) => ({ seed, numRuns: 4 })
+  const sampleOptions = (seed: number) => ({ seed, numRuns: oracleRuns(4) })
   return [
     {
       grammar: grammar(`sqlite-persistence.source-fifo-order`),
@@ -4102,31 +4101,27 @@ function registerGeneratedPersistenceProperty<Value>(options: {
   run: (value: Value) => Promise<void>
 }): void {
   const { property, title, arbitrary, fixedSeed, run } = options
-  if (requestedOracleReplayProperty === undefined) {
-    fcTest.prop([arbitrary], { seed: fixedSeed, numRuns: oracleRuns(4) })(
-      `${title} (fixed)`,
-      run,
-    )
-    fcTest.prop([arbitrary], oraclePropertyOptions(4, property))(
-      `${title} (random)`,
-      run,
-    )
-  } else if (requestedOracleReplayProperty === property) {
-    fcTest.prop([arbitrary], oraclePropertyOptions(4, property))(
-      `${title} (replay)`,
-      run,
-    )
-  }
+  oracleReplayTest(fcTest).prop([arbitrary], {
+    seed: fixedSeed,
+    numRuns: oracleRuns(4),
+  })(`${title} (fixed)`, run)
+  oracleReplayTest(fcTest, property).prop(
+    [arbitrary],
+    oraclePropertyOptions(4, property),
+  )(`${title} (random)`, run)
 }
 
-const describeDurabilityOracles =
-  requestedOracleReplayProperty === undefined ||
-  requestedOracleReplayProperty.startsWith(`sqlite-persistence.`)
-    ? describe
-    : describe.skip
+const describeDurabilityOracles = oracleReplayTest(
+  describe,
+  `sqlite-persistence.source-fifo-order`,
+  `sqlite-persistence.abort-graph`,
+  `sqlite-persistence.owner-isolation`,
+  `sqlite-persistence.open-transaction-boundary`,
+  `sqlite-persistence.request-local-failure-buffered-source`,
+)
 
 describeDurabilityOracles(`generated persistence durability oracles`, () => {
-  if (requestedOracleReplayProperty === undefined) {
+  if (!oracleReplayRequested()) {
     it(`reconstructs the full grammar and rejects ablated, out-of-range, and foreign histories`, () => {
       for (const {
         grammar,

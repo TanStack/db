@@ -13,6 +13,8 @@ import {
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
+  oracleReplayRequested,
+  oracleReplayTest,
   readOracleRunConfig,
 } from './oracle-config.js'
 import {
@@ -1056,7 +1058,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   afterAll(() => {
     // A direct property replay may select only that test by name.
-    if (replay.replayPath !== undefined) return
+    if (oracleReplayRequested()) return
     expect(observedAcquisitionCells).toEqual(legalAcquisitionCells)
     expect(observedAcquisitionInteractions).toEqual(
       requiredAcquisitionInteractions,
@@ -4615,7 +4617,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
+  const fixedCampaign = oracleReplayTest(fcTest)
 
   fixedCampaign.prop([asyncRestartScenarioArbitrary], {
     numRuns: 30 * multiplier,

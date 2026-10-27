@@ -21,6 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # The run-budget report compares changed files with the merge-base.
+          fetch-depth: 0
           persist-credentials: false
       - name: Setup Tools
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
@@ -30,6 +32,8 @@ jobs:
         run: pnpm run test:doc-snippets
       - name: Check oracle lint without inline directives
         run: pnpm run lint:oracles
+      - name: Report lowered oracle run budgets
+        run: node scripts/check-oracle-run-counts.mjs --format=github
       - name: Test oracle lint rules
         run: pnpm run test:lint-rules
   minified-db:
