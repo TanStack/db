@@ -8,6 +8,7 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
+import { declareOracle } from '../oracle-config.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import type { crossJoinParentRoutes } from '../../src/query/compiler/parent-routes.js'
 
@@ -60,57 +61,59 @@ vi.mock('../../src/query/compiler/parent-routes.js', async (importOriginal) => {
   }
 })
 
+type Parent = { id: number }
+type Main = { id: number; parentId: number; anchorId: number }
+type Anchor = { id: number }
+type Kind = `right` | `full`
+type Expected = {
+  parentId: number
+  mainId: number | undefined
+  anchorId: number | undefined
+}
+
+const sortRows = (rows: Array<Expected>) =>
+  rows.sort(
+    (a, b) =>
+      a.parentId - b.parentId ||
+      (a.mainId ?? Infinity) - (b.mainId ?? Infinity) ||
+      (a.anchorId ?? Infinity) - (b.anchorId ?? Infinity),
+  )
+
+const model = (
+  parents: ReadonlyArray<Parent>,
+  mains: ReadonlyArray<Main>,
+  anchors: ReadonlyArray<Anchor>,
+  kind: Kind,
+): Array<Expected> =>
+  sortRows(
+    parents.flatMap((parent) =>
+      mains
+        .filter((main) => main.parentId === parent.id)
+        .flatMap((main): Array<Expected> => {
+          const matches = anchors.filter(
+            (anchor) => anchor.id === main.anchorId,
+          )
+          if (matches.length === 0 && kind === `full`) {
+            return [
+              {
+                parentId: parent.id,
+                mainId: main.id,
+                anchorId: undefined,
+              },
+            ]
+          }
+          return matches.map((anchor) => ({
+            parentId: parent.id,
+            mainId: main.id,
+            anchorId: anchor.id,
+          }))
+        }),
+    ),
+  )
+
+declareOracle({ model: [model] })
+
 describe(`direct outer-join route work`, () => {
-  type Parent = { id: number }
-  type Main = { id: number; parentId: number; anchorId: number }
-  type Anchor = { id: number }
-  type Kind = `right` | `full`
-  type Expected = {
-    parentId: number
-    mainId: number | undefined
-    anchorId: number | undefined
-  }
-
-  const sortRows = (rows: Array<Expected>) =>
-    rows.sort(
-      (a, b) =>
-        a.parentId - b.parentId ||
-        (a.mainId ?? Infinity) - (b.mainId ?? Infinity) ||
-        (a.anchorId ?? Infinity) - (b.anchorId ?? Infinity),
-    )
-
-  const model = (
-    parents: ReadonlyArray<Parent>,
-    mains: ReadonlyArray<Main>,
-    anchors: ReadonlyArray<Anchor>,
-    kind: Kind,
-  ): Array<Expected> =>
-    sortRows(
-      parents.flatMap((parent) =>
-        mains
-          .filter((main) => main.parentId === parent.id)
-          .flatMap((main): Array<Expected> => {
-            const matches = anchors.filter(
-              (anchor) => anchor.id === main.anchorId,
-            )
-            if (matches.length === 0 && kind === `full`) {
-              return [
-                {
-                  parentId: parent.id,
-                  mainId: main.id,
-                  anchorId: undefined,
-                },
-              ]
-            }
-            return matches.map((anchor) => ({
-              parentId: parent.id,
-              mainId: main.id,
-              anchorId: anchor.id,
-            }))
-          }),
-      ),
-    )
-
   for (const kind of [`right`, `full`] as const) {
     for (const mode of [`eager`, `onDemand`] as const) {
       test(`${kind} main correlation with ${mode} sources avoids work from unrelated joined rows`, async () => {
