@@ -55,6 +55,7 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { Index } from '../src/indexes.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
@@ -230,6 +231,14 @@ function expectRefinement(
     }
   }
 }
+
+// The refinement law is declared with its model, the multiset of values per
+// key, and its grammar, the generated addition histories.
+declareOracle({
+  check: [expectRefinement],
+  model: [expectedIndex],
+  grammar: [historyArbitrary],
+})
 
 // ---------------------------------------------------------------------------
 // Campaigns. The fixed and random campaigns run the same property, grammar,
