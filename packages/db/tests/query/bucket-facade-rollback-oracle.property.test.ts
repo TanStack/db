@@ -1,15 +1,25 @@
-import { D2, MultiSet } from '@tanstack/db-ivm'
-import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
-import { createTransaction } from '../../src/transactions.js'
+import { describe, expect, it } from 'vitest'
 import { stripVirtualProps } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
-import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
-import type { Collection } from '../../src/collection/index.js'
-import type { ChangeMessage, SyncConfig } from '../../src/types.js'
-import type { Transaction } from '../../src/transactions.js'
-import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleRuns,
+} from '../oracle-config.js'
+import {
+  BUCKETS,
+  Driver,
+  expectedRows,
+  injectFailure,
+  orderOf,
+  withCleanup,
+} from './bucket-facade-rollback-support.js'
+import type {
+  BucketKey,
+  Model,
+  ModelRow,
+  Op,
+} from './bucket-facade-rollback-support.js'
 
 /**
  * # Does a failed facade flush restore exactly what it wrote, and only that?
@@ -146,20 +156,7 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  */
 
 const PROPERTY = `bucket-facade.rollback-history`
-const BUCKETS = [`b0`, `b1`, `b2`, `b3`] as const
 const IDS = [1, 2, 3, 4, 5, 6] as const
-
-type BucketKey = string
-type Row = { id: number; v: number }
-type ModelRow = { value: Row; order: string }
-type Model = Map<BucketKey, Map<number, ModelRow>>
-
-type Op =
-  | { type: `activate`; bucket: BucketKey }
-  | { type: `insert`; bucket: BucketKey; id: number; v: number; rank: number }
-  | { type: `update`; bucket: BucketKey; id: number; v: number; rank: number }
-  | { type: `delete`; bucket: BucketKey; id: number }
-  | { type: `retire`; bucket: BucketKey }
 
 /**
  * How a flush ends. `contradict` retires a shown bucket without the graph's
@@ -174,19 +171,6 @@ type Outcome =
   | `throwNew`
   | `rollback`
   | `contradict`
-
-type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
-type FacadeEntry = {
-  collection: Collection<Row, number>
-  sync: FacadeSync | undefined
-}
-
-/** The rows a facade must show, in order. */
-function expectedRows(rows: Map<number, ModelRow> | undefined): Array<Row> {
-  return [...(rows?.values() ?? [])]
-    .sort((left, right) => (left.order < right.order ? -1 : 1))
-    .map((row) => row.value)
-}
 
 type LayoutExpectation = `required` | `forbidden` | `permitted`
 
@@ -240,34 +224,6 @@ function shownLayoutExpectation(
     : expectation
 }
 
-/**
- * Run `body`, then `cleanup`. When both throw, keep the body's failure as the
- * primary error: an AggregateError whose `cause` is that failure and whose
- * `errors` list it before the cleanup error (ORC-010).
- */
-async function withCleanup(
-  body: () => void | Promise<void>,
-  cleanup: () => Promise<void>,
-): Promise<void> {
-  let failure: { error: unknown } | undefined
-  try {
-    await body()
-  } catch (error) {
-    failure = { error }
-  }
-  try {
-    await cleanup()
-  } catch (cleanupError) {
-    if (!failure) throw cleanupError
-    throw new AggregateError(
-      [failure.error, cleanupError],
-      `oracle failure, then cleanup failure`,
-      { cause: failure.error },
-    )
-  }
-  if (failure) throw failure.error
-}
-
 function cloneModel(model: Model): Model {
   return new Map([...model].map(([bucket, rows]) => [bucket, new Map(rows)]))
 }
@@ -287,11 +243,6 @@ function applyOps(model: Model, ops: ReadonlyArray<Op>): Model {
   }
   return next
 }
-
-function orderOf(rank: number, id: number): string {
-  return `${rank}:${id}`
-}
-
 /** Buckets whose facade a flush of these operations writes. */
 function writtenBuckets(ops: ReadonlyArray<Op>): Set<BucketKey> {
   return new Set(
@@ -339,460 +290,6 @@ function legalize(
     for (const [key, value] of next) state.set(key, value)
   }
   return ops
-}
-
-/** The child facade a parent row's `kids` field points to. */
-function kidsOf(row: unknown): unknown {
-  return (row as { kids?: unknown } | undefined)?.kids
-}
-
-/**
- * Make the next `commit` or `write` of a facade's sync throw once. A `write`
- * failure leaves the facade's sync transaction open, as a validation error
- * from a real write would.
- */
-function injectFailure(
-  sync: FacadeSync,
-  method: `commit` | `write` | `staged`,
-): void {
-  if (method === `staged`) {
-    // The facade's writes are staged, then the commit throws before it
-    // commits, so the sync transaction stays open with those writes.
-    const commit = sync.commit
-    sync.commit = () => {
-      sync.commit = commit
-      throw new Error(`injected facade write failure`)
-    }
-    return
-  }
-  if (method === `commit`) {
-    const commit = sync.commit
-    sync.commit = () => {
-      sync.commit = commit
-      commit()
-      throw new Error(`injected facade write failure`)
-    }
-    return
-  }
-  const write = sync.write
-  sync.write = () => {
-    sync.write = write
-    throw new Error(`injected facade write failure`)
-  }
-}
-
-class Driver {
-  private readonly graph = new D2()
-  private readonly rows = this.graph.newInput<[string, BucketRow]>()
-  private readonly activity = this.graph.newInput<[string, true]>()
-  readonly adapter: BucketFacadeAdapter
-  private readonly events = new Map<object, number>()
-  private changes = new Map<object, Array<ChangeMessage<Row, number>>>()
-  private readonly wrapped = new WeakSet<object>()
-  private reads = new Map<object, number>()
-  private readonly sent = new Map<BucketKey, Map<number, BucketRow>>()
-  // Rows a user transaction inserted into a facade. They are optimistic, so
-  // the graph never sent them and the model's synced rows do not hold them.
-  /** Optimistic row ids per facade, and whether the row is visible. */
-  private localIds = new WeakMap<object, Map<number, boolean>>()
-  private readonly localTransactions: Array<Transaction> = []
-  private nextLocalId = 100
-  // Rows of a persisting user transaction that holds a facade's sync commits.
-  // The transaction settles without a sync write, so its row then leaves.
-  readonly heldIds = new Set<number>()
-  private nextHeldId = 1000
-
-  constructor() {
-    this.adapter = new BucketFacadeAdapter(
-      `rollback-oracle-${Math.random()}`,
-      [
-        {
-          edgeId: `children`,
-          rows: this.rows,
-          activeBuckets: this.activity,
-          hasOrderBy: true,
-        },
-      ],
-      () => {},
-    )
-    this.graph.finalize()
-  }
-
-  private entries(): Map<string, FacadeEntry> {
-    return (
-      (
-        this.adapter as unknown as {
-          entries: Map<string, Map<string, FacadeEntry>>
-        }
-      ).entries.get(`children`) ?? new Map()
-    )
-  }
-
-  entry(bucket: BucketKey): FacadeEntry | undefined {
-    return this.entries().get(bucket)
-  }
-
-  /** Send operations to the graph as the materialization graph would. */
-  send(ops: ReadonlyArray<Op>): void {
-    for (const op of ops) {
-      const sent = this.sent.get(op.bucket)
-      if (op.type === `activate`) {
-        this.activity.sendData(new MultiSet([[[op.bucket, true], 1]]))
-        this.sent.set(op.bucket, new Map())
-      } else if (op.type === `retire`) {
-        for (const row of sent?.values() ?? []) {
-          this.rows.sendData(new MultiSet([[[op.bucket, row], -1]]))
-        }
-        this.activity.sendData(new MultiSet([[[op.bucket, true], -1]]))
-        this.sent.delete(op.bucket)
-      } else if (op.type === `delete`) {
-        this.rows.sendData(new MultiSet([[[op.bucket, sent!.get(op.id)!], -1]]))
-        sent!.delete(op.id)
-      } else {
-        const previous = sent!.get(op.id)
-        if (previous) {
-          this.rows.sendData(new MultiSet([[[op.bucket, previous], -1]]))
-        }
-        const row: BucketRow = [
-          op.id,
-          { id: op.id, v: op.v },
-          orderOf(op.rank, op.id),
-        ]
-        this.rows.sendData(new MultiSet([[[op.bucket, row], 1]]))
-        sent!.set(op.id, row)
-      }
-    }
-    this.graph.run()
-  }
-
-  /** Retire a bucket without retracting its rows, which a legal graph never does. */
-  retireWithoutRetractions(bucket: BucketKey): void {
-    this.activity.sendData(new MultiSet([[[bucket, true], -1]]))
-    this.graph.run()
-  }
-
-  /** Cancel a contradictory retirement that a failed flush kept pending. */
-  cancelRetirement(bucket: BucketKey): void {
-    this.activity.sendData(new MultiSet([[[bucket, true], 1]]))
-    this.graph.run()
-  }
-
-  /**
-   * Insert a row into a shown facade inside a user transaction that stays
-   * pending, as an application may with a Collection-valued include. The
-   * facade then shows an optimistic row the graph never sent.
-   */
-  addLocal(
-    bucket: BucketKey,
-    sharedId?: number,
-    shown?: { id: number; type: `delete` | `update` },
-  ): void {
-    const facade = this.entry(bucket)?.collection
-    if (!facade) return
-    if (shown && !facade.has(shown.id)) return
-    const id = shown?.id ?? sharedId ?? this.nextLocalId++
-    const transaction = createTransaction({
-      autoCommit: false,
-      mutationFn: () => new Promise<void>(() => {}),
-    })
-    // An optimistic delete or update of a graph row makes the visible rows
-    // differ from the projected synced rows without any hold.
-    transaction.mutate(() => {
-      if (shown?.type === `delete`) facade.delete(id)
-      else if (shown?.type === `update`)
-        // A fresh value, so the update always records a mutation: an empty
-        // transaction is tracked by no Collection, and its rollback would
-        // reject with no handler (core behavior, outside this oracle).
-        facade.update(id, (draft) => {
-          draft.v = 100 + this.nextLocalId++
-        })
-      else facade.insert({ id, v: 0, $key: id } as unknown as Row)
-    })
-    this.localTransactions.push(transaction)
-    const ids = this.localIds.get(facade) ?? new Map()
-    ids.set(id, shown?.type !== `delete`)
-    this.localIds.set(facade, ids)
-  }
-
-  /**
-   * Start a persisting user transaction on a shown facade. While it persists,
-   * the facade holds every sync commit, including the adapter's flush and
-   * rollback writes. Returns a function that settles it.
-   */
-  hold(bucket: BucketKey): (() => Promise<void>) | undefined {
-    const facade = this.entry(bucket)?.collection
-    if (!facade) return undefined
-    const id = this.nextHeldId++
-    this.heldIds.add(id)
-    let settle!: () => void
-    const transaction = createTransaction({
-      autoCommit: false,
-      mutationFn: () =>
-        new Promise<void>((resolve) => {
-          settle = resolve
-        }),
-    })
-    transaction.mutate(() => {
-      facade.insert({ id, v: 0, $key: id } as unknown as Row)
-    })
-    const committed = transaction.commit()
-    return async () => {
-      settle()
-      await committed
-    }
-  }
-
-  /** Count events and stored-row reads for every facade that exists now. */
-  instrument(): void {
-    for (const entry of this.entries().values()) {
-      const facade = entry.collection
-      if (!this.events.has(facade)) {
-        this.events.set(facade, 0)
-        const seen = new Set<number>()
-        facade.subscribeChanges(
-          (messages) => {
-            this.events.set(facade, (this.events.get(facade) ?? 0) + 1)
-            // Change-message protocol: an insert names a key this subscriber
-            // does not have, and an update or delete names one it has.
-            for (const message of messages) {
-              if (seen.has(message.key) === (message.type === `insert`))
-                this.protocolViolations.push(
-                  `${facade.id}: ${message.type} of ${message.key} while ${seen.has(message.key) ? `present` : `absent`}`,
-                )
-              if (message.type === `delete`) seen.delete(message.key)
-              else seen.add(message.key)
-            }
-            const changes = this.changes.get(facade) ?? []
-            changes.push(...messages)
-            this.changes.set(facade, changes)
-            // Start from the facade's current rows, so the replay begins from
-            // what this subscriber has seen. A subscriber without initial state
-            // never hears of rows it was not sent.
-          },
-          { includeInitialState: true },
-        )
-      }
-      const stored = facade._state.syncedData as unknown as Record<
-        PropertyKey,
-        (...args: Array<unknown>) => unknown
-      >
-      if (this.wrapped.has(stored)) continue
-      this.wrapped.add(stored)
-      // The adapter also reads the projected synced rows, held writes included.
-      const state = facade._state as unknown as Record<
-        string,
-        (...args: Array<unknown>) => unknown
-      >
-      for (const method of [`acceptedSyncedEntries`, `getAcceptedSyncedRow`]) {
-        const original = state[method]!.bind(state)
-        state[method] = (...args: Array<unknown>) => {
-          this.reads.set(facade, (this.reads.get(facade) ?? 0) + 1)
-          return original(...args)
-        }
-      }
-      // Every read path of the stored rows: iteration, forEach, and lookups.
-      for (const method of [
-        Symbol.iterator,
-        `entries`,
-        `keys`,
-        `values`,
-        `forEach`,
-        `get`,
-        `has`,
-      ]) {
-        const original = stored[method]!.bind(stored)
-        stored[method] = (...args: Array<unknown>) => {
-          this.reads.set(facade, (this.reads.get(facade) ?? 0) + 1)
-          return original(...args)
-        }
-      }
-    }
-  }
-
-  /**
-   * Make the facade the flush creates for `bucket` throw from its first
-   * commit. The facade does not exist before the flush, so wrap the adapter's
-   * entry factory for this one flush.
-   */
-  failNewFacade(bucket: BucketKey): void {
-    const adapter = this.adapter as unknown as {
-      getEntry: (edgeId: string, bucketKey: string) => FacadeEntry
-    }
-    const getEntry = adapter.getEntry
-    adapter.getEntry = (edgeId, bucketKey) => {
-      const existed = this.entries().has(bucketKey)
-      const entry = getEntry.call(this.adapter, edgeId, bucketKey)
-      if (!existed && bucketKey === bucket) {
-        adapter.getEntry = getEntry
-        injectFailure(entry.sync!, `commit`)
-      }
-      return entry
-    }
-  }
-
-  /**
-   * Record every facade the next flush creates. A failed flush must dispose
-   * of them, which a holder sees as the facade's public `cleaned-up` status.
-   */
-  recordCreated(): Array<Collection<Row, number>> {
-    const created: Array<Collection<Row, number>> = []
-    const adapter = this.adapter as unknown as {
-      getEntry: (edgeId: string, bucketKey: string) => FacadeEntry
-    }
-    const getEntry = adapter.getEntry
-    const recording = (edgeId: string, bucketKey: string) => {
-      const existed = this.entries().has(bucketKey)
-      const entry = getEntry.call(this.adapter, edgeId, bucketKey)
-      if (!existed) created.push(entry.collection)
-      return entry
-    }
-    adapter.getEntry = recording
-    this.restoreGetEntry = () => {
-      // A one-shot failure wrapper underneath may already have removed both.
-      if (adapter.getEntry === recording) adapter.getEntry = getEntry
-    }
-    return created
-  }
-
-  restoreGetEntry: () => void = () => {}
-
-  eventCounts(): Map<object, number> {
-    return new Map(this.events)
-  }
-
-  /**
-   * Each existing facade's layout revision. The live-query observer compares
-   * it to detect a reorder of a Collection-valued include. A committed batch
-   * advances it when it marks a layout change and the visible key order
-   * changes; a discarded publication restores it.
-   */
-  layoutCounts(): Map<object, number> {
-    return new Map(
-      [...this.entries().values()].map((entry) => [
-        entry.collection,
-        entry.collection._layoutRevision,
-      ]),
-    )
-  }
-
-  /** Change events each facade published since the last call. */
-  takeChanges(): Map<object, Array<ChangeMessage<Row, number>>> {
-    const changes = this.changes
-    this.changes = new Map()
-    return changes
-  }
-
-  /** Facades read since the last call. */
-  takeReads(): Map<object, number> {
-    const reads = this.reads
-    this.reads = new Map()
-    return reads
-  }
-
-  /** The adapter holds exactly the facades the model shows. */
-  checkHeld(model: Model, label: string): void {
-    expect(
-      [...this.entries().keys()].sort(),
-      `${label}: facades held by the adapter`,
-    ).toEqual([...model.keys()].sort())
-  }
-
-  check(model: Model, label: string): void {
-    expect(
-      this.protocolViolations,
-      `${label}: change-message protocol`,
-    ).toEqual([])
-    // The adapter holds exactly the facades the model shows: a failed flush
-    // removes the facades it created, and a retired bucket has no facade.
-    expect(
-      [...this.entries().keys()].sort(),
-      `${label}: facades held by the adapter`,
-    ).toEqual([...model.keys()].sort())
-    // A retired or replaced facade shows only its visible optimistic rows,
-    // including one retired while a hold spanned several flushes.
-    const held = new Set([...this.entries().values()].map((e) => e.collection))
-    for (const facade of held) this.shownFacades.add(facade)
-    for (const facade of this.shownFacades) {
-      if (held.has(facade)) continue
-      const visible = [...this.local(facade)]
-        .filter(([, shown]) => shown)
-        .map(([id]) => id)
-      expect(
-        [...facade.keys()].sort(),
-        `${label}: rows of a retired facade`,
-      ).toEqual(visible.sort())
-    }
-    for (const bucket of BUCKETS) {
-      const rows = model.get(bucket)
-      const facade = this.entry(bucket)?.collection
-      if (!rows) continue
-      expect(facade, `${label}: facade ${bucket}`).toBeDefined()
-      // A facade the model shows has been made ready by the flush that
-      // created it.
-      expect(facade!.status, `${label}: status of ${bucket}`).toBe(`ready`)
-      // An optimistic row overlays a graph row with the same id, so neither is
-      // compared by value.
-      const local = this.local(facade!)
-      expect(
-        facade!.toArray
-          .map(stripVirtualProps)
-          .filter((row) => !local.has(row.id)),
-        `${label}: rows of ${bucket}`,
-      ).toEqual(expectedRows(rows).filter((row) => !local.has(row.id)))
-      for (const [id, visible] of local) {
-        expect(facade!.has(id), `${label}: local row ${bucket}/${id}`).toBe(
-          visible,
-        )
-      }
-      for (const id of rows.keys()) {
-        if (local.has(id)) continue
-        const stored = facade!.get(id)
-        expect(stored, `${label}: row ${bucket}/${id}`).toBeDefined()
-        expect(facade!.getKeyFromItem(stored!), `${label}: key ${id}`).toBe(id)
-      }
-    }
-  }
-
-  /** Change messages that were invalid for the subscriber that got them. */
-  readonly protocolViolations: Array<string> = []
-
-  /** Every facade a check has seen the adapter hold. */
-  private readonly shownFacades = new Set<Collection<any, any, any>>()
-
-  /**
-   * Try to clean up a shown facade from outside the adapter, as a holder
-   * might. Its live query owns it, so the call throws and the facade keeps
-   * receiving the graph's writes.
-   */
-  async attemptCleanup(bucket: BucketKey): Promise<void> {
-    const facade = this.entry(bucket)?.collection
-    if (!facade) return
-    await expect(facade.cleanup(), `holder cleanup`).rejects.toThrow(
-      /cannot be cleaned up directly/,
-    )
-    expect(facade.status, `status after a refused cleanup`).toBe(`ready`)
-  }
-
-  /**
-   * Roll back every open optimistic transaction. Its rows leave, so a graph
-   * row that shared one of their ids is compared by value from now on.
-   */
-  settleLocals(): void {
-    for (const transaction of this.localTransactions.splice(0))
-      transaction.rollback()
-    this.localIds = new WeakMap()
-  }
-
-  /** Optimistic row ids on a facade. */
-  local(facade: object): Map<number, boolean> {
-    return this.localIds.get(facade) ?? new Map()
-  }
-
-  async cleanup(): Promise<void> {
-    for (const transaction of this.localTransactions) transaction.rollback()
-    this.adapter.cleanup()
-    await Promise.resolve()
-  }
 }
 
 /** The row ids a facade's events may name after these operations. */
@@ -1280,6 +777,15 @@ const step = fc.record({
   settleLocal: fc.integer({ min: 0, max: 5 }).map((n) => n === 0),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
+// The parts this file declares. runHistory runs one generated or pinned
+// history through the real adapter and compares it with the model after each
+// flush; checkEvents is its exactly-once publication comparison. The model
+// predicts the rows that each flush owes, which events it may name, and which
+// layout revision it owes.
+declareOracle({
+  check: [runHistory, checkEvents],
+  model: [applyOps, layoutExpectation, shownLayoutExpectation, touchedIds],
+})
 
 describe(`bucket facade rollback`, () => {
   it(`restores written facades and reads no others (fixed campaign)`, async () => {
@@ -1294,40 +800,6 @@ describe(`bucket facade rollback`, () => {
     await fc.assert(
       fc.asyncProperty(history, runHistory),
       oraclePropertyOptions(150, PROPERTY),
-    )
-  })
-
-  // Pinned: a list of 50 buckets with 3 rows each, where one insert touches
-  // one bucket. The flush must read that bucket's rows and no others.
-  it(`reads only the written facade in a wide list`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        const wide = Array.from({ length: 50 }, (_, index) => `w${index}`)
-        for (const bucket of wide) {
-          driver.send([
-            { type: `activate`, bucket },
-            ...[1, 2, 3].map((id): Op => ({
-              type: `insert`,
-              bucket,
-              id,
-              v: id,
-              rank: id,
-            })),
-          ])
-        }
-        driver.adapter.flush().publish()
-        driver.instrument()
-        driver.send([{ type: `insert`, bucket: `w7`, id: 4, v: 4, rank: 4 }])
-        driver.takeReads()
-        driver.adapter.flush().publish()
-        const written = driver.entry(`w7`)!.collection
-        const untouchedReads = [...driver.takeReads()]
-          .filter(([facade]) => facade !== written)
-          .map(([facade]) => (facade as Collection<Row, number>).id)
-        expect(untouchedReads).toEqual([])
-      },
-      () => driver.cleanup(),
     )
   })
 
@@ -1411,197 +883,6 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned: nested facades. A parent facade's row refers to a child facade.
-  // The child edge commits first, then the parent edge's commit throws. The
-  // failed flush must restore the child's rows, keep the parent's reference
-  // to the old child facade, and drop the child facade it created. The retry
-  // then applies every change.
-  it(`restores a child facade when its parent edge fails`, async () => {
-    const graph = new D2()
-    const childRows = graph.newInput<[string, BucketRow]>()
-    const childActive = graph.newInput<[string, true]>()
-    const parentRows = graph.newInput<[string, BucketRow]>()
-    const parentActive = graph.newInput<[string, true]>()
-    const adapter = new BucketFacadeAdapter(
-      `rollback-oracle-nested-${Math.random()}`,
-      [
-        {
-          edgeId: `children`,
-          rows: childRows,
-          activeBuckets: childActive,
-          hasOrderBy: false,
-        },
-        {
-          edgeId: `parents`,
-          rows: parentRows,
-          activeBuckets: parentActive,
-          hasOrderBy: false,
-        },
-      ],
-      () => {},
-    )
-    graph.finalize()
-    const entries = (
-      adapter as unknown as {
-        entries: Map<string, Map<string, FacadeEntry>>
-      }
-    ).entries
-    const facade = (edgeId: string, bucket: string) =>
-      entries.get(edgeId)?.get(bucket)?.collection
-    const ref = (bucketKey: string) => ({
-      [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
-    })
-    const row = (publicKey: number, value: object): BucketRow => [
-      publicKey,
-      value,
-      undefined,
-    ]
-    const child10 = row(10, { id: 10, v: 1 })
-    const parent1 = row(1, { id: 1, kids: ref(`c1`) })
-
-    await withCleanup(
-      () => {
-        childActive.sendData(new MultiSet([[[`c1`, true], 1]]))
-        childRows.sendData(new MultiSet([[[`c1`, child10], 1]]))
-        parentActive.sendData(new MultiSet([[[`p1`, true], 1]]))
-        parentRows.sendData(new MultiSet([[[`p1`, parent1], 1]]))
-        graph.run()
-        adapter.flush().publish()
-        const c1 = facade(`children`, `c1`)!
-        const p1 = facade(`parents`, `p1`)!
-        expect(kidsOf(p1.get(1))).toBe(c1)
-
-        let events = 0
-        c1.subscribeChanges(() => events++)
-        p1.subscribeChanges(() => events++)
-
-        // The flush updates c1, creates c2, and moves parent 1 to c2.
-        const child10v2 = row(10, { id: 10, v: 2 })
-        const child11 = row(11, { id: 11, v: 1 })
-        const parent1moved = row(1, { id: 1, kids: ref(`c2`) })
-        childRows.sendData(
-          new MultiSet([
-            [[`c1`, child10], -1],
-            [[`c1`, child10v2], 1],
-          ]),
-        )
-        childActive.sendData(new MultiSet([[[`c2`, true], 1]]))
-        childRows.sendData(new MultiSet([[[`c2`, child11], 1]]))
-        parentRows.sendData(
-          new MultiSet([
-            [[`p1`, parent1], -1],
-            [[`p1`, parent1moved], 1],
-          ]),
-        )
-        graph.run()
-        injectFailure(entries.get(`parents`)!.get(`p1`)!.sync!, `commit`)
-
-        expect(() => adapter.flush()).toThrow(`injected facade write failure`)
-        expect(c1.toArray.map(stripVirtualProps)).toEqual([{ id: 10, v: 1 }])
-        expect(kidsOf(p1.get(1))).toBe(c1)
-        expect([...entries.get(`children`)!.keys()]).toEqual([`c1`])
-        expect(events).toBe(0)
-
-        // The retry applies the pending changes the failed flush kept.
-        adapter.flush().publish()
-        const c2 = facade(`children`, `c2`)!
-        expect(c1.toArray.map(stripVirtualProps)).toEqual([{ id: 10, v: 2 }])
-        expect(c2.toArray.map(stripVirtualProps)).toEqual([{ id: 11, v: 1 }])
-        expect(kidsOf(p1.get(1))).toBe(c2)
-      },
-      async () => {
-        adapter.cleanup()
-        await Promise.resolve()
-      },
-    )
-  })
-
-  // Calibration for ORC-010: when the history fails and cleanup also throws,
-  // the report keeps the history's failure as its cause.
-  it(`keeps the oracle failure when cleanup also fails`, async () => {
-    const failure = new Error(`oracle assertion`)
-    const cleanupFailure = new Error(`cleanup failure`)
-    const result = await withCleanup(
-      () => Promise.reject(failure),
-      () => Promise.reject(cleanupFailure),
-    ).then(
-      () => undefined,
-      (error: unknown) => error,
-    )
-    expect(result).toBeInstanceOf(AggregateError)
-    const aggregate = result as AggregateError
-    expect(aggregate.cause).toBe(failure)
-    expect(aggregate.errors).toEqual([failure, cleanupFailure])
-
-    // Without a history failure, the cleanup failure is reported as is.
-    await expect(
-      withCleanup(
-        () => Promise.resolve(),
-        () => Promise.reject(cleanupFailure),
-      ),
-    ).rejects.toBe(cleanupFailure)
-  })
-
-  // Invariant witness: the flush runs inside the graph run, so graph output
-  // cannot reach the adapter before its rollback. If it did, restoring the
-  // consumed deltas would overwrite it, so the rollback throws instead.
-  it(`throws when graph output arrives between a flush and its rollback`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        driver.send([{ type: `update`, bucket: `b0`, id: 1, v: 2, rank: 1 }])
-        const publication = driver.adapter.flush()
-        driver.send([{ type: `insert`, bucket: `b0`, id: 2, v: 3, rank: 2 }])
-        expect(() => publication.rollback()).toThrow(
-          `Bucket facade received graph output between a flush and its rollback`,
-        )
-        // The rollback restored the facade and closed its deferral before it
-        // threw, so the new delta still publishes on the next flush.
-        const facade = driver.entry(`b0`)!.collection
-        expect(facade.toArray.map(stripVirtualProps)).toEqual([{ id: 1, v: 1 }])
-        let events = 0
-        facade.subscribeChanges(() => {
-          events++
-        })
-        driver.adapter.flush().publish()
-        expect(facade.toArray.map(stripVirtualProps)).toEqual([
-          { id: 1, v: 1 },
-          { id: 2, v: 3 },
-        ])
-        expect(events).toBe(1)
-      },
-      () => driver.cleanup(),
-    )
-  })
-
-  // A live query can be disposed between a flush and its rollback, for
-  // example by a listener that runs during the root commit. The rollback then
-  // has nothing to restore and must not bring the disposed facades back.
-  it(`does nothing on rollback after cleanup`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        driver.send([{ type: `update`, bucket: `b0`, id: 1, v: 2, rank: 1 }])
-        const publication = driver.adapter.flush()
-        driver.adapter.cleanup()
-        publication.rollback()
-        expect(driver.entry(`b0`)).toBeUndefined()
-        expect(driver.adapter.hasPendingChanges()).toBe(false)
-      },
-      () => driver.cleanup(),
-    )
-  })
-
   // A retired facade can still show rows the graph never sent: an optimistic
   // row from a pending user transaction, or a held sync commit behind a
   // persisting one. Retiring the bucket must not fail the flush.
@@ -1622,84 +903,6 @@ describe(`bucket facade rollback`, () => {
         local: 0,
       },
     ])
-  })
-
-  it(`retires a bucket while a facade transaction persists`, async () => {
-    const driver = new Driver()
-    let settle!: () => void
-    await withCleanup(
-      async () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        const facade = driver.entry(`b0`)!.collection
-        const transaction = createTransaction({
-          autoCommit: false,
-          mutationFn: () =>
-            new Promise<void>((resolve) => {
-              settle = resolve
-            }),
-        })
-        transaction.mutate(() => {
-          facade.insert({ id: 50, v: 0, $key: 50 } as unknown as Row)
-        })
-        const committed = transaction.commit()
-        driver.send([{ type: `retire`, bucket: `b0` }])
-        expect(() => driver.adapter.flush().publish()).not.toThrow()
-        expect(driver.entry(`b0`)).toBeUndefined()
-        settle()
-        await committed
-      },
-      () => driver.cleanup(),
-    )
-  })
-
-  // The graph retracts a bucket's rows before it retires the bucket, so a
-  // row the graph sent and never retracted is a contradictory graph signal.
-  // The flush throws and restores the facade, as for any failed flush.
-  it(`throws when a retired bucket still has rows the graph sent`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        const facade = driver.entry(`b0`)!.collection
-        driver.retireWithoutRetractions(`b0`)
-        expect(() => driver.adapter.flush()).toThrow(
-          `Bucket facade retired with rows the graph did not retract`,
-        )
-        expect(driver.entry(`b0`)?.collection).toBe(facade)
-        expect(facade.toArray.map(stripVirtualProps)).toEqual([{ id: 1, v: 1 }])
-      },
-      () => driver.cleanup(),
-    )
-  })
-
-  // The retraction is an ordinary facade write, so a rollback restores it.
-  it(`restores a retired facade's rows when the root commit fails`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        const facade = driver.entry(`b0`)!.collection
-        driver.send([{ type: `retire`, bucket: `b0` }])
-        const publication = driver.adapter.flush()
-        publication.prepare()
-        publication.rollback()
-        expect(driver.entry(`b0`)?.collection).toBe(facade)
-        expect(facade.toArray.map(stripVirtualProps)).toEqual([{ id: 1, v: 1 }])
-      },
-      () => driver.cleanup(),
-    )
   })
 
   // Pinned: a failed flush that writes two existing buckets and retires a
@@ -1733,104 +936,6 @@ describe(`bucket facade rollback`, () => {
         throwPick: 0,
       },
     ])
-  })
-
-  // A throwing subscriber of one facade must not keep another facade's
-  // deferral open. Each facade publishes, then the first error is rethrown.
-  it(`publishes every facade when one facade's subscriber throws`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `activate`, bucket: `b1` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-          { type: `insert`, bucket: `b1`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        const subscriberError = new Error(`subscriber failure`)
-        const throwing = driver.entry(`b0`)!.collection.subscribeChanges(() => {
-          throw subscriberError
-        })
-        const keys: Array<number> = []
-        driver
-          .entry(`b1`)!
-          .collection.subscribeChanges((changes) =>
-            keys.push(...changes.map((change) => change.key)),
-          )
-        driver.send([
-          { type: `insert`, bucket: `b0`, id: 2, v: 1, rank: 2 },
-          { type: `insert`, bucket: `b1`, id: 2, v: 1, rank: 2 },
-        ])
-        expect(() => driver.adapter.flush().publish()).toThrow(subscriberError)
-        expect(keys).toEqual([2])
-        throwing.unsubscribe()
-        driver.send([{ type: `insert`, bucket: `b1`, id: 3, v: 1, rank: 3 }])
-        driver.adapter.flush().publish()
-        expect(keys).toEqual([2, 3])
-      },
-      () => driver.cleanup(),
-    )
-  })
-
-  // A failed flush whose restore also throws still discards every deferral,
-  // so the facade publishes the next successful flush.
-  it(`keeps publishing a facade after its restore throws`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        const entry = driver.entry(`b0`)!
-        const keys: Array<number> = []
-        entry.collection.subscribeChanges((changes) =>
-          keys.push(...changes.map((change) => change.key)),
-        )
-        driver.send([{ type: `insert`, bucket: `b0`, id: 2, v: 1, rank: 2 }])
-        const publication = driver.adapter.flush()
-        publication.prepare()
-        // The restore's commit throws.
-        injectFailure(entry.sync!, `commit`)
-        expect(() => publication.rollback()).toThrow(
-          `injected facade write failure`,
-        )
-        driver.send([{ type: `insert`, bucket: `b0`, id: 3, v: 1, rank: 3 }])
-        driver.adapter.flush().publish()
-        expect(keys).toContain(3)
-      },
-      () => driver.cleanup(),
-    )
-  })
-
-  // A flush with no facade changes copies no bookkeeping, so a root-only
-  // write does no work proportional to the number of buckets.
-  it(`copies nothing for a flush without facade changes`, async () => {
-    const driver = new Driver()
-    await withCleanup(
-      () => {
-        driver.send([
-          { type: `activate`, bucket: `b0` },
-          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
-        ])
-        driver.adapter.flush().publish()
-        const adapter = driver.adapter as unknown as { snapshot: () => unknown }
-        let snapshots = 0
-        const snapshot = adapter.snapshot
-        adapter.snapshot = () => {
-          snapshots++
-          return snapshot.call(driver.adapter)
-        }
-        const publication = driver.adapter.flush()
-        publication.prepare()
-        publication.rollback()
-        driver.adapter.flush().publish()
-        expect(snapshots).toBe(0)
-      },
-      () => driver.cleanup(),
-    )
   })
 
   // Pinned replay of a generated failure: an update to a row that an earlier
