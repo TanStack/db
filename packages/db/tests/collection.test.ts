@@ -1304,7 +1304,10 @@ describe(`Collection`, () => {
         sync.write({ type: `insert`, value: { id: badKey, value: `bad` } }),
       ).toThrow(error)
       expect(() =>
-        sync.write({ type: `delete`, key: badKey as string | number }),
+        sync.write({
+          type: `delete`,
+          key: badKey as unknown as string | number,
+        }),
       ).toThrow(error)
       sync.write({ type: `insert`, value: { id: 1, value: `good` } })
       sync.commit()
