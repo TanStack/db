@@ -33,6 +33,7 @@ import { SerializationError } from '../src/errors'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
@@ -371,6 +372,11 @@ async function runHistory({ entry, handler, payload }: History) {
     ],
   )
 }
+
+declareOracle({
+  check: [runHistory],
+  model: [restoredArray, restoredObject],
+})
 
 describe(`LocalStorage value fidelity oracle`, () => {
   if (!oracleReplayRequested()) {
