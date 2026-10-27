@@ -3063,7 +3063,9 @@ peer's notice named it as written in this run. A reload that a peer's notice
 causes is a storage read too: its truncate replaces rows without
 truncating source authority, so rows no source wrote keep their seed status
 (decisions 9, 11, and 15). The persisted oracle's receiving witnesses cover peer writes and
-those reload routes; no grammar dimension generates a peer. Restart and resume reads belong to the
+those reload routes; no grammar dimension generates a peer. Two held-cleanup
+Query retention witnesses race on CI; the review record's "Open" section
+holds the evidence and the next witness. Restart and resume reads belong to the
 SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
 with one sync run.
 ## Deferred contracts and evidence

@@ -759,8 +759,23 @@ storage never held.
 
 ## Open
 
-Nothing in this bug class is known to be open. The limits in the evidence
-block still apply.
+- **Held-cleanup retention witnesses race on CI.** `does not publish a
+  retention-cleaned owner through a claim made during the cleanup hold` and
+  `hydrated clients drop a held-cleanup row once its peer and claimant
+  release it` (Query ownership lifecycle) sometimes see no expiry
+  transaction staged within 5 seconds of the unload while an optimistic
+  blocker holds sync. They failed on CI at `1c7624710` and `9ec84d81c` and
+  passed on the rerun of `9ec84d81c`, at `c065ab5ec`, and at `bc8f5f3d2`;
+  locally they pass five times in five at load average 43. The witnesses
+  without a hold pass in under 120 ms. Refuted: a Node timer firing before
+  the entry's wall-clock deadline (a timer set after a 50 ms busy task fired
+  12 ms later), and a wait on a held receipt (no step of the expiry awaits
+  one). Next witness: drive these witnesses with fake timers, so `vi.waitFor`
+  advances time itself, and record which step of the expiry is skipped when
+  it fails. Owner: this pull request.
+
+Nothing else in this bug class is known to be open. The limits in the
+evidence block still apply.
 
 ## Oracle guide requirements
 
