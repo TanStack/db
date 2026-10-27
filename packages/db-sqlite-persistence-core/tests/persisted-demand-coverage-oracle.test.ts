@@ -1570,6 +1570,68 @@ async function runCoverageReadOutlastsWait(): Promise<{
   ])
 }
 
+// The wait also runs from before the load's cache-claim renewal. A renewal
+// held past the wait lets D settle as soon as the coverage check passes.
+async function runClaimRenewalOutlastsWait(): Promise<{
+  settledAfterRenewal: boolean
+  heldRenewals: number
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverD(driver)
+  useFakeClock()
+  // A claim that lasts 30 s is inside the 60 s renewal window from the
+  // start, so the first load renews it.
+  const base = new SQLiteCorePersistenceAdapter({
+    driver,
+    cacheGenerationClaimTtlMs: 30_000,
+  })
+  // Startup renews the claim before any load; the load's own renewal is
+  // the next one, so hold that.
+  const renewals = { seen: 0, held: 0, release: () => {} }
+  const adapter = new Proxy(base, {
+    get(target, property) {
+      if (property === `renewCacheGenerationClaim`) {
+        return (
+          ...args: Parameters<
+            NonNullable<typeof target.renewCacheGenerationClaim>
+          >
+        ) => {
+          if (++renewals.seen !== 2) {
+            return target.renewCacheGenerationClaim(...args)
+          }
+          renewals.held++
+          return new Promise<void>((resolve) => {
+            renewals.release = resolve
+          }).then(() => target.renewCacheGenerationClaim(...args))
+        }
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === `function` ? value.bind(target) : value
+    },
+  })
+  const { collection, upstream } = onDemandSource(adapter, 1000)
+  const query = filterQuery(collection, `a`)
+  const preload = trackPreload(query)
+  return withCleanup(async () => {
+    for (let i = 0; i < 200 && renewals.held === 0; i++) await drain()
+    // Positive witness: the load had started, and its renewal held it
+    // before it reached the source.
+    expect(collection.isLoadingSubset).toBe(true)
+    expect(upstream.calls.length).toBe(0)
+    await vi.advanceTimersByTimeAsync(1000)
+    renewals.release()
+    await drain()
+    return {
+      settledAfterRenewal: preload() === `resolved`,
+      heldRenewals: renewals.held,
+    }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
 async function runReleaseDuringCoverageCheck(): Promise<{
   loadingAfterRelease: boolean
   heldReads: number
@@ -2680,6 +2742,14 @@ describe(`persisted demand coverage oracle`, () => {
     expect(await runCoverageReadOutlastsWait()).toEqual({
       settledWhenReadReturns: true,
       heldReads: 1,
+    })
+  })
+
+  it(`measures the wait from before the load's cache-claim renewal`, async () => {
+    quietConsole()
+    expect(await runClaimRenewalOutlastsWait()).toEqual({
+      settledAfterRenewal: true,
+      heldRenewals: 1,
     })
   })
 

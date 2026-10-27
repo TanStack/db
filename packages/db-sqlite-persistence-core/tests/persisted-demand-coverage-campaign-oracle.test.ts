@@ -1,7 +1,13 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  getLoadSubsetDemandKey,
+} from '@tanstack/db'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
@@ -24,7 +30,7 @@ import {
   withMacrotaskReads,
 } from './helpers/demand-coverage-driver.js'
 import type { Row } from './helpers/demand-coverage-driver.js'
-import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 import type { SQLiteDriver } from '../src/index.js'
 
 /**
@@ -46,8 +52,10 @@ import type { SQLiteDriver } from '../src/index.js'
  *
  * ## History grammar
  *
- * Rows `r1` to `r4` each belong to group `a` or `b`, or do not exist. The two
- * demands are `group = 'a'` and `group = 'b'`, each read by a live query.
+ * Rows `r1` to `r4` each belong to group `a` or `b` with a rank from 1 to 3,
+ * so ranks can tie, or do not exist. Three live queries read demands:
+ * `group = 'a'`, `group = 'b'`, and the window `w`, `group = 'a' orderBy
+ * rank limit 2`, which core loads as a limited load and a tie-boundary load.
  * Session 1 is online and runs a generated command sequence:
  *
  * - `start d`: a live query starts reading demand d; its load waits.
@@ -57,7 +65,8 @@ import type { SQLiteDriver } from '../src/index.js'
  *   separates an obsolete load from the current one.
  * - `fail d`: the source rejects d's loads; the query is then released.
  * - `release d`: the live query of d is cleaned up, which aborts its load.
- * - `write id group`: the source inserts or moves a row, without a load.
+ * - `write id group rank`: the source inserts, moves, or re-ranks a row,
+ *   without a load.
  * - `delete id`: the source deletes a row, without a load.
  * - `truncate`: the source truncates. Active demands load again.
  *
@@ -67,7 +76,7 @@ import type { SQLiteDriver } from '../src/index.js'
  * load could wrongly record coverage.
  *
  * Session 2 reopens the same database offline, with a wait of 0, and reads
- * both demands. Its source never answers.
+ * all three demands. Its source never answers.
  *
  * ## Model
  *
@@ -78,42 +87,54 @@ import type { SQLiteDriver } from '../src/index.js'
  * between the source receiving it and settling it (law 6 in
  * `packages/db/src/query/live/ARCHITECTURE.md`); it records nothing. A
  * truncate also ends every coverage record and empties SQLite. A current load
- * that settles records how many rows SQLite holds for its demand. A failed or
- * released load records nothing. When the wrapper asks for a demand again
- * after a truncate is its own scheduling, which the law leaves open, so the
- * model reads it from the log instead of predicting it.
+ * that settles records how many rows SQLite holds for its exact demand, and
+ * for a limited load which rows. A failed or released load records nothing.
+ * Offline, a query is ready exactly when every load it sent in session 2 is
+ * covered. When the wrapper asks for a demand again after a truncate, and
+ * when core sends a window's tie-boundary load, is scheduling that the law
+ * leaves open, so the model reads both from the logs instead of predicting
+ * them.
  *
  * ## Observation and checkpoint
  *
- * After session 2 has waited 300 ms of real time, each demand's live query
- * status and its rows, compared exactly with the model.
+ * After session 2 has waited 300 ms of real time, each live query's status
+ * and its rows (the window's in order), compared exactly with the model.
  *
  * Declared reach (ORC-015): histories in which a demand is covered offline,
  * uncovered offline, covered but short of rows, ended by a truncate, settled
- * through an obsolete load, moved between demands, and recorded twice. The
- * fixed and random campaigns run the same property with 40 histories each.
+ * through an obsolete load, moved between demands, and recorded twice; a
+ * window covered offline, a window that holds other rows than it recorded,
+ * and a window whose tie-boundary load is uncovered. The fixed and random
+ * campaigns run the same property with 40 histories each.
  *
  * Parts 2 and 3 sweep a storage failure over every adapter call and a
  * release over every step of a load; their laws are stated beside them.
  *
- * Limits: unordered demands only (ordered windows are in the fixed oracle);
- * a session-1 wait long enough that no session-1 load settles from SQLite
- * except on failure; real timers in session 1, so checkpoints are coarse;
+ * Limits: a session-1 wait long enough that no session-1 load settles from
+ * SQLite except on failure; real timers in session 1, so checkpoints are
+ * coarse; no cursor or offset loads (page moves are in the fixed oracle);
  * one process and the default coordinator; `node:sqlite` only.
  */
 
 type Group = `a` | `b`
-const GROUPS: ReadonlyArray<Group> = [`a`, `b`]
 const IDS = [`r1`, `r2`, `r3`, `r4`] as const
 type Id = (typeof IDS)[number]
+type Rank = 1 | 2 | 3
+type RowState = { group: Group; rank: Rank }
+// The demands that live queries read: each group unordered, and the window
+// `group = 'a' orderBy rank limit 2`.
+type Demand = `a` | `b` | `w`
+const DEMANDS: ReadonlyArray<Demand> = [`a`, `b`, `w`]
+const groupOf = (demand: Demand): Group => (demand === `b` ? `b` : `a`)
+const WINDOW_LIMIT = 2
 
 type Command =
-  | { type: `start`; demand: Group }
-  | { type: `answer`; demand: Group }
-  | { type: `settle-oldest`; demand: Group }
-  | { type: `fail`; demand: Group }
-  | { type: `release`; demand: Group }
-  | { type: `write`; id: Id; group: Group }
+  | { type: `start`; demand: Demand }
+  | { type: `answer`; demand: Demand }
+  | { type: `settle-oldest`; demand: Demand }
+  | { type: `fail`; demand: Demand }
+  | { type: `release`; demand: Demand }
+  | { type: `write`; id: Id; group: Group; rank: Rank }
   | { type: `delete`; id: Id }
   | { type: `truncate` }
 
@@ -121,31 +142,45 @@ type History = {
   // A source that honors abort drops a load that the wrapper aborts; one
   // that ignores it may still settle that load later.
   honorsAbort: boolean
-  initial: Partial<Record<Id, Group>>
+  initial: Partial<Record<Id, RowState>>
   commands: ReadonlyArray<Command>
 }
 
 type Observation = Record<
-  Group,
+  Demand,
   { ready: boolean; rows?: ReadonlyArray<string> }
 >
 
 // ---------------------------------------------------------------------------
 // Model
 //
-// The model replays the source's own log of what happened, not the commands:
+// The model replays the source's log of what happened, not the commands:
 // which rows the source wrote or deleted, when it truncated, and each load it
 // settled. A load is current when no truncate came between the source
 // receiving it and settling it, and obsolete otherwise (law 6). When the
 // wrapper asks for a demand again after a truncate is its own scheduling,
 // which the law leaves open, so the model does not predict it.
+//
+// Coverage is per exact demand (`getLoadSubsetDemandKey`, the law's demand
+// identity). A current load that settles records how many rows SQLite holds
+// for its demand, and for a limited load, which rows. Offline, a load is
+// covered when its demand has a record, SQLite still holds at least that
+// many of its rows, and a limited load holds the same rows. A query is ready
+// offline exactly when every load it sent in session 2 is covered. The model
+// reads those loads from session 2's log instead of predicting them: when a
+// window sends its tie-boundary load, and for which boundary, follows from
+// the restored rows and is core's scheduling.
+//
+// To read a demand's rows, the model evaluates the load's own filter, order,
+// and limit over the rows SQLite holds. Ties in an order break by key, as the
+// SQLite adapter's `ORDER BY ..., key ASC` does (an abstraction, ORC-009).
 // ---------------------------------------------------------------------------
 
 type SourceEvent =
-  | { type: `rows`; rows: ReadonlyArray<readonly [Id, Group]> }
+  | { type: `rows`; rows: ReadonlyArray<readonly [Id, RowState]> }
   | { type: `delete`; id: Id }
   | { type: `truncate` }
-  | { type: `settled`; demand: Group; current: boolean }
+  | { type: `settled`; load: LoadSubsetOptions; current: boolean }
 
 type ReachState =
   | `covered offline`
@@ -155,60 +190,176 @@ type ReachState =
   | `obsolete load settled`
   | `row moved between demands`
   | `coverage recorded twice`
+  | `window covered offline`
+  | `window holds other rows`
+  | `tie-boundary load uncovered`
 
-const rowsOf = (rows: Map<Id, Group>, demand: Group): Array<Id> =>
-  [...rows].filter(([, group]) => group === demand).map(([id]) => id)
+// The expression forms these loads carry (`packages/db/src/query/ir.ts`).
+type Expr = {
+  type?: string
+  name?: string
+  args?: ReadonlyArray<Expr>
+  path?: ReadonlyArray<string>
+  value?: unknown
+}
+type ModelRow = { id: Id; group: Group; rank: Rank }
+
+function evaluate(expr: Expr, row: ModelRow): unknown {
+  if (expr.type === `ref`) {
+    return row[expr.path![expr.path!.length - 1] as keyof ModelRow]
+  }
+  if (expr.type === `val`) return expr.value
+  const args = (expr.args ?? []).map((arg) => evaluate(arg, row))
+  const [left, right] = args as [never, never]
+  switch (expr.name) {
+    case `eq`:
+      return left === right
+    case `gt`:
+      return left > right
+    case `gte`:
+      return left >= right
+    case `lt`:
+      return left < right
+    case `lte`:
+      return left <= right
+    case `and`:
+      return args.every(Boolean)
+    case `or`:
+      return args.some(Boolean)
+    case `not`:
+      return !left
+  }
+  throw new Error(`unmodelled expression ${JSON.stringify(expr)}`)
+}
+
+// The rows a load reads from SQLite, in its order.
+function readDemand(
+  load: LoadSubsetOptions,
+  sqlite: Map<Id, RowState>,
+): Array<Id> {
+  if (load.cursor !== undefined || load.offset !== undefined) {
+    throw new Error(`unmodelled load ${demandKey(load)}`)
+  }
+  const where = load.where as Expr | undefined
+  const rows = [...sqlite]
+    .map(([id, state]): ModelRow => ({ id, ...state }))
+    .filter((row) => where === undefined || evaluate(where, row) === true)
+  const orderBy = (load.orderBy ?? []) as unknown as ReadonlyArray<{
+    expression: Expr
+    compareOptions?: { direction?: `asc` | `desc` }
+  }>
+  rows.sort((x, y) => {
+    for (const { expression, compareOptions } of orderBy) {
+      const a = evaluate(expression, x) as number
+      const b = evaluate(expression, y) as number
+      if (a !== b) {
+        return (
+          (a < b ? -1 : 1) * (compareOptions?.direction === `desc` ? -1 : 1)
+        )
+      }
+    }
+    return x.id < y.id ? -1 : x.id > y.id ? 1 : 0
+  })
+  const ids = rows.map((row) => row.id)
+  return load.limit === undefined ? ids : ids.slice(0, load.limit)
+}
+
+// The demand identity the law uses: two loads cover each other only with
+// the same key.
+const demandKey = (load: LoadSubsetOptions): string =>
+  String(getLoadSubsetDemandKey(load))
+const rowsKey = (ids: ReadonlyArray<Id>) => JSON.stringify([...ids].sort())
+const windowRows = (sqlite: Map<Id, RowState>): Array<Id> =>
+  [...sqlite]
+    .filter(([, state]) => state.group === `a`)
+    .sort(([x, a], [y, b]) => a.rank - b.rank || (x < y ? -1 : 1))
+    .slice(0, WINDOW_LIMIT)
+    .map(([id]) => id)
 
 function expectedObservation(
   events: ReadonlyArray<SourceEvent>,
+  sent: Record<Demand, ReadonlyArray<LoadSubsetOptions>>,
   reach: (state: ReachState) => void,
 ): Observation {
   // SQLite holds every row the source wrote since its last truncate; a
   // source write reaches it whether or not a load asked for the row.
-  const sqlite = new Map<Id, Group>()
-  // Each demand's recorded row count.
-  const coverage = new Map<Group, number>()
+  const sqlite = new Map<Id, RowState>()
+  // Each demand's record: its row count and, for a limited load, its rows.
+  const records = new Map<string, { count: number; rows?: string }>()
   for (const event of events) {
     switch (event.type) {
       case `rows`:
-        for (const [id, group] of event.rows) {
+        for (const [id, state] of event.rows) {
           const before = sqlite.get(id)
-          if (before !== undefined && before !== group) {
+          if (before !== undefined && before.group !== state.group) {
             reach(`row moved between demands`)
           }
-          sqlite.set(id, group)
+          sqlite.set(id, state)
         }
         break
       case `delete`:
         sqlite.delete(event.id)
         break
       case `truncate`:
-        if (coverage.size > 0) reach(`coverage ended by a truncate`)
+        if (records.size > 0) reach(`coverage ended by a truncate`)
         sqlite.clear()
-        coverage.clear()
+        records.clear()
         break
-      case `settled`:
+      case `settled`: {
         if (!event.current) {
           reach(`obsolete load settled`)
           break
         }
-        if (coverage.has(event.demand)) reach(`coverage recorded twice`)
-        coverage.set(event.demand, rowsOf(sqlite, event.demand).length)
+        const key = demandKey(event.load)
+        if (records.has(key)) reach(`coverage recorded twice`)
+        const rows = readDemand(event.load, sqlite)
+        records.set(key, {
+          count: rows.length,
+          rows: event.load.limit === undefined ? undefined : rowsKey(rows),
+        })
+      }
     }
   }
+  const covered = (load: LoadSubsetOptions): boolean => {
+    const record = records.get(demandKey(load))
+    if (record === undefined) return false
+    const rows = readDemand(load, sqlite)
+    if (rows.length < record.count) {
+      reach(`covered but short of rows`)
+      return false
+    }
+    if (record.rows !== undefined && record.rows !== rowsKey(rows)) {
+      reach(`window holds other rows`)
+      return false
+    }
+    return true
+  }
   const observation = {} as Observation
-  for (const demand of GROUPS) {
-    const recorded = coverage.get(demand)
-    const rows = rowsOf(sqlite, demand).sort()
-    if (recorded === undefined) {
+  for (const demand of DEMANDS) {
+    const loads = sent[demand]
+    // Positive witness: session 2 asked the offline source for the demand.
+    if (loads.length === 0) {
+      throw new Error(`session 2 sent no load for demand ${demand}`)
+    }
+    const coverage = loads.map(covered)
+    if (demand === `w` && coverage[0] && coverage.includes(false)) {
+      reach(`tie-boundary load uncovered`)
+    }
+    if (!coverage.every(Boolean)) {
       reach(`uncovered offline`)
       observation[demand] = { ready: false }
-    } else if (rows.length < recorded) {
-      reach(`covered but short of rows`)
-      observation[demand] = { ready: false }
-    } else {
-      reach(`covered offline`)
-      observation[demand] = { ready: true, rows }
+      continue
+    }
+    reach(demand === `w` ? `window covered offline` : `covered offline`)
+    observation[demand] = {
+      ready: true,
+      rows:
+        demand === `w`
+          ? windowRows(sqlite)
+          : [...sqlite]
+              .filter(([, state]) => state.group === demand)
+              .map(([id]) => id)
+              .sort(),
     }
   }
   return observation
@@ -218,28 +369,39 @@ function expectedObservation(
 // Production driver
 // ---------------------------------------------------------------------------
 
-const rowFor = (id: Id, group: Group): Row => ({
-  id,
-  group,
-  rank: IDS.indexOf(id),
-  value: `v1`,
-})
+const rowFor = (
+  id: Id,
+  group: Group,
+  rank: number = IDS.indexOf(id) + 1,
+): Row => ({ id, group, rank, value: `v1` })
 
-// The demand a load reads: its `group = ...` filter value.
-function demandOf(options: LoadSubsetOptions): Group {
-  const value = (
-    options.where as { args?: Array<{ value?: unknown }> } | undefined
-  )?.args?.[1]?.value
-  if (value !== `a` && value !== `b`) {
-    throw new Error(`unexpected demand ${JSON.stringify(options.where)}`)
-  }
-  return value
+// The live query a demand label names.
+function queryFor(source: Collection<Row, string, any>, demand: Demand) {
+  if (demand !== `w`) return filterQuery(source, demand)
+  return createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .where(({ row }) => eq(row.group, `a`))
+      .orderBy(({ row }) => row.rank)
+      .limit(WINDOW_LIMIT),
+  )
+}
+
+// Which live query a load serves: the window's loads carry a limit or a
+// rank bound; the others filter one group.
+function demandOf(options: LoadSubsetOptions): Demand {
+  const text = JSON.stringify(options.where)
+  if (options.limit !== undefined || text.includes(`"rank"`)) return `w`
+  if (text.includes(`"value":"a"`)) return `a`
+  if (text.includes(`"value":"b"`)) return `b`
+  throw new Error(`unexpected demand ${text}`)
 }
 
 type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
 type Pending = {
   resolve: () => void
   reject: (error: unknown) => void
+  options: LoadSubsetOptions
   // The source's truncate count when it received the load.
   epoch: number
 }
@@ -253,12 +415,16 @@ function campaignSource(
   waitMs: number,
   honorsAbort = true,
 ) {
-  const pending = new Map<Group, Array<Pending>>()
-  const calls: Array<Group> = []
+  const pending = new Map<Demand, Array<Pending>>()
+  const sent: Record<Demand, Array<LoadSubsetOptions>> = { a: [], b: [], w: [] }
   const events: Array<SourceEvent> = []
   let epoch = 0
-  const settled = (demand: Group, load: Pending) => {
-    events.push({ type: `settled`, demand, current: load.epoch === epoch })
+  const settled = (load: Pending) => {
+    events.push({
+      type: `settled`,
+      load: load.options,
+      current: load.epoch === epoch,
+    })
     load.resolve()
   }
   let params: SyncParams | undefined
@@ -275,10 +441,10 @@ function campaignSource(
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               const demand = demandOf(options)
-              calls.push(demand)
+              sent[demand].push(options)
               if (!online) return new Promise<void>(() => {})
               return new Promise<void>((resolve, reject) => {
-                const entry = { resolve, reject, epoch }
+                const entry = { resolve, reject, options, epoch }
                 pending.set(demand, [...(pending.get(demand) ?? []), entry])
                 options.signal?.addEventListener(
                   `abort`,
@@ -306,53 +472,42 @@ function campaignSource(
     apply(sync)
     await sync.commit()
   }
+  const writeRows = async (rows: ReadonlyArray<readonly [Id, RowState]>) => {
+    await commit((sync) => {
+      for (const [id, state] of rows) {
+        sync.write({
+          type: written.has(id) ? `update` : `insert`,
+          value: rowFor(id, state.group, state.rank),
+        })
+        written.add(id)
+      }
+    })
+    events.push({ type: `rows`, rows })
+  }
   return {
     collection,
-    calls,
+    sent,
     events,
     started: () => params !== undefined,
-    hasPending: (demand: Group) => (pending.get(demand)?.length ?? 0) > 0,
-    async answer(demand: Group, rows: ReadonlyArray<Row>) {
-      await commit((sync) => {
-        for (const row of rows) {
-          sync.write({
-            type: written.has(row.id as Id) ? `update` : `insert`,
-            value: row,
-          })
-          written.add(row.id as Id)
-        }
-      })
-      events.push({
-        type: `rows`,
-        rows: rows.map((row) => [row.id as Id, row.group as Group] as const),
-      })
-      for (const load of pending.get(demand)?.splice(0) ?? []) {
-        settled(demand, load)
-      }
+    hasPending: (demand: Demand) => (pending.get(demand)?.length ?? 0) > 0,
+    async answer(demand: Demand, rows: ReadonlyArray<readonly [Id, RowState]>) {
+      await writeRows(rows)
+      for (const load of pending.get(demand)?.splice(0) ?? []) settled(load)
     },
     // A released demand's loads stop at the source either way.
-    forget(demand: Group) {
+    forget(demand: Demand) {
       pending.delete(demand)
     },
-    settleOldest(demand: Group) {
+    settleOldest(demand: Demand) {
       const load = pending.get(demand)?.shift()
-      if (load) settled(demand, load)
+      if (load) settled(load)
     },
-    fail(demand: Group) {
+    fail(demand: Demand) {
       for (const load of pending.get(demand)?.splice(0) ?? []) {
         load.reject(new Error(`offline`))
       }
     },
-    async write(row: Row) {
-      await commit((sync) => {
-        sync.write({
-          type: written.has(row.id as Id) ? `update` : `insert`,
-          value: row,
-        })
-        written.add(row.id as Id)
-      })
-      events.push({ type: `rows`, rows: [[row.id as Id, row.group as Group]] })
-    },
+    write: (id: Id, state: RowState) => writeRows([[id, state]]),
     async remove(id: Id) {
       if (!written.has(id)) return
       written.delete(id)
@@ -375,9 +530,12 @@ const settle = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms))
 async function runHistory(history: History): Promise<{
   observation: Observation
   events: ReadonlyArray<SourceEvent>
+  sent: Record<Demand, ReadonlyArray<LoadSubsetOptions>>
 }> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  const truth = new Map(Object.entries(history.initial) as Array<[Id, Group]>)
+  const truth = new Map(
+    Object.entries(history.initial) as Array<[Id, RowState]>,
+  )
   let events: ReadonlyArray<SourceEvent> = []
 
   // Session 1 is online. Its wait is long, so a load settles from SQLite
@@ -385,14 +543,14 @@ async function runHistory(history: History): Promise<{
   {
     const source = campaignSource(driver, true, 60_000, history.honorsAbort)
     events = source.events
-    const queries = new Map<Group, ReturnType<typeof filterQuery>>()
-    // A reacquired load reaches the source shortly after the load it
-    // replaces settles, so wait a little for one before a no-op.
-    const untilPending = async (demand: Group) => {
+    const queries = new Map<Demand, ReturnType<typeof queryFor>>()
+    // A reacquired load, or a window's tie-boundary load, reaches the source
+    // shortly after an earlier load settles, so wait a little before a no-op.
+    const untilPending = async (demand: Demand) => {
       if (!queries.has(demand)) return
       for (let i = 0; i < 10 && !source.hasPending(demand); i++) await settle(5)
     }
-    const release = async (demand: Group) => {
+    const release = async (demand: Demand) => {
       const query = queries.get(demand)
       queries.delete(demand)
       await query?.cleanup()
@@ -410,7 +568,7 @@ async function runHistory(history: History): Promise<{
         switch (command.type) {
           case `start`: {
             if (queries.has(command.demand)) break
-            const query = filterQuery(source.collection, command.demand)
+            const query = queryFor(source.collection, command.demand)
             queries.set(command.demand, query)
             void query.preload().catch(() => undefined)
             for (let i = 0; i < 50 && !source.hasPending(command.demand); i++) {
@@ -420,17 +578,19 @@ async function runHistory(history: History): Promise<{
             expect(source.hasPending(command.demand)).toBe(true)
             break
           }
-          case `answer`:
+          case `answer`: {
             await untilPending(command.demand)
             if (!source.hasPending(command.demand)) break
+            // A source may return more rows than a load asks for: it
+            // answers with every row of the demand's group.
+            const group = groupOf(command.demand)
             await source.answer(
               command.demand,
-              [...truth]
-                .filter(([, group]) => group === command.demand)
-                .map(([id, group]) => rowFor(id, group)),
+              [...truth].filter(([, state]) => state.group === group),
             )
             await settle()
             break
+          }
           case `settle-oldest`:
             await untilPending(command.demand)
             source.settleOldest(command.demand)
@@ -445,11 +605,13 @@ async function runHistory(history: History): Promise<{
           case `release`:
             await release(command.demand)
             break
-          case `write`:
-            truth.set(command.id, command.group)
-            await source.write(rowFor(command.id, command.group))
+          case `write`: {
+            const state = { group: command.group, rank: command.rank }
+            truth.set(command.id, state)
+            await source.write(command.id, state)
             await settle()
             break
+          }
           case `delete`:
             truth.delete(command.id)
             await source.remove(command.id)
@@ -457,45 +619,39 @@ async function runHistory(history: History): Promise<{
             break
           case `truncate`: {
             await source.truncate()
-            // Each active demand loads again after the truncate.
+            // Active demands load again after the truncate; when is the
+            // wrapper's scheduling, so the driver only gives it a moment.
             for (let i = 0; i < 50; i++) {
               if ([...queries.keys()].every((d) => source.hasPending(d))) break
               await settle(5)
             }
-            expect(
-              [...queries.keys()].filter((d) => !source.hasPending(d)),
-            ).toEqual([])
             break
           }
         }
       }
       await settle(50)
     }, [
-      ...GROUPS.map((demand) => () => queries.get(demand)?.cleanup()),
+      ...DEMANDS.map((demand) => () => queries.get(demand)?.cleanup()),
       () => source.collection.cleanup(),
     ])
   }
 
   // Session 2 is offline.
   const source = campaignSource(driver, false, 0)
-  const queries = GROUPS.map((demand) => filterQuery(source.collection, demand))
+  const queries = DEMANDS.map((demand) => queryFor(source.collection, demand))
   return withCleanup(async () => {
     for (const query of queries) void query.preload().catch(() => undefined)
     await settle(300)
-    // Positive witness: session 2 asked the offline source for both demands.
-    expect(new Set(source.calls)).toEqual(new Set(GROUPS))
     const observation = {} as Observation
-    GROUPS.forEach((demand, index) => {
+    DEMANDS.forEach((demand, index) => {
       const query = queries[index]!
+      const ids = query.toArray.map((row) => row.id)
       observation[demand] =
         query.status === `ready`
-          ? {
-              ready: true,
-              rows: query.toArray.map((row) => row.id).sort(),
-            }
+          ? { ready: true, rows: demand === `w` ? ids : ids.sort() }
           : { ready: false }
     })
-    return { observation, events }
+    return { observation, events, sent: source.sent }
   }, [
     ...queries.map((query) => () => query.cleanup()),
     () => source.collection.cleanup(),
@@ -802,48 +958,25 @@ async function runReleaseAt(
 // ---------------------------------------------------------------------------
 
 const groupArb = fc.constantFrom<Group>(`a`, `b`)
+const demandArb = fc.constantFrom<Demand>(`a`, `b`, `w`)
+const rankArb = fc.constantFrom<Rank>(1, 2, 3)
 const idArb = fc.constantFrom<Id>(...IDS)
-const commandArb: fc.Arbitrary<Command> = fc.oneof(
-  {
-    arbitrary: fc.record({
-      type: fc.constant(`start` as const),
-      demand: groupArb,
-    }),
-    weight: 4,
-  },
-  {
-    arbitrary: fc.record({
-      type: fc.constant(`answer` as const),
-      demand: groupArb,
-    }),
-    weight: 4,
-  },
-  {
-    arbitrary: fc.record({
-      type: fc.constant(`settle-oldest` as const),
-      demand: groupArb,
-    }),
-    weight: 1,
-  },
-  {
-    arbitrary: fc.record({
-      type: fc.constant(`fail` as const),
-      demand: groupArb,
-    }),
-    weight: 1,
-  },
-  {
-    arbitrary: fc.record({
-      type: fc.constant(`release` as const),
-      demand: groupArb,
-    }),
-    weight: 2,
-  },
+const onDemand = <T extends Command[`type`]>(type: T, weight: number) => ({
+  arbitrary: fc.record({ type: fc.constant(type), demand: demandArb }),
+  weight,
+})
+const commandArb = fc.oneof(
+  onDemand(`start`, 4),
+  onDemand(`answer`, 4),
+  onDemand(`settle-oldest`, 1),
+  onDemand(`fail`, 1),
+  onDemand(`release`, 2),
   {
     arbitrary: fc.record({
       type: fc.constant(`write` as const),
       id: idArb,
       group: groupArb,
+      rank: rankArb,
     }),
     weight: 3,
   },
@@ -852,38 +985,53 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     weight: 2,
   },
   { arbitrary: fc.constant({ type: `truncate` as const }), weight: 1 },
-)
+) as fc.Arbitrary<Command>
+
+// A full load cycle answers twice, so that a window's tie-boundary load,
+// which follows its limited load, settles too.
+const cycle = (demand: Demand): ReadonlyArray<Command> => [
+  { type: `start`, demand },
+  { type: `answer`, demand },
+  { type: `answer`, demand },
+  { type: `release`, demand },
+]
+
 // Compound steps make the rarer orders likely: a covered demand that then
-// loses a row, a full load cycle, which a later cycle of the same demand
-// records again, and a truncate while a load waits, answered or settled
-// alone. Each is only a sequence of the commands above.
+// loses, gains, or moves a row; a full load cycle, which a later cycle of
+// the same demand records again; and a truncate while a load waits,
+// answered or settled alone. Each is only a sequence of the commands above.
 const stepArb: fc.Arbitrary<ReadonlyArray<Command>> = fc.oneof(
   { arbitrary: commandArb.map((command) => [command]), weight: 6 },
   {
-    // Cover a demand over a row, then move that row away or delete it.
     arbitrary: fc
-      .tuple(groupArb, idArb, fc.boolean())
-      .map(([demand, id, move]): ReadonlyArray<Command> => [
-        { type: `write`, id, group: demand },
-        { type: `start`, demand },
-        { type: `answer`, demand },
-        { type: `release`, demand },
-        move
-          ? { type: `write`, id, group: demand === `a` ? `b` : `a` }
-          : { type: `delete`, id },
+      .tuple(
+        demandArb,
+        idArb,
+        rankArb,
+        fc.constantFrom(`move`, `delete`, `rerank`),
+      )
+      .map(([demand, id, rank, change]): ReadonlyArray<Command> => [
+        { type: `write`, id, group: groupOf(demand), rank },
+        ...cycle(demand),
+        change === `delete`
+          ? { type: `delete`, id }
+          : {
+              type: `write`,
+              id,
+              group:
+                change === `move`
+                  ? groupOf(demand) === `a`
+                    ? `b`
+                    : `a`
+                  : groupOf(demand),
+              rank: rank === 1 ? 3 : 1,
+            },
       ]),
-    weight: 2,
+    weight: 3,
   },
+  { arbitrary: demandArb.map(cycle), weight: 2 },
   {
-    arbitrary: groupArb.map((demand): ReadonlyArray<Command> => [
-      { type: `start`, demand },
-      { type: `answer`, demand },
-      { type: `release`, demand },
-    ]),
-    weight: 2,
-  },
-  {
-    arbitrary: groupArb.map((demand): ReadonlyArray<Command> => [
+    arbitrary: demandArb.map((demand): ReadonlyArray<Command> => [
       { type: `start`, demand },
       { type: `truncate` },
       { type: `answer`, demand },
@@ -891,7 +1039,7 @@ const stepArb: fc.Arbitrary<ReadonlyArray<Command>> = fc.oneof(
     weight: 1,
   },
   {
-    arbitrary: groupArb.map((demand): ReadonlyArray<Command> => [
+    arbitrary: demandArb.map((demand): ReadonlyArray<Command> => [
       { type: `start`, demand },
       { type: `truncate` },
       { type: `settle-oldest`, demand },
@@ -906,15 +1054,17 @@ const historyArb: fc.Arbitrary<History> = fc.record({
       Object.fromEntries(
         IDS.map((id) => [
           id,
-          fc.constantFrom<Group | undefined>(`a`, `b`, undefined),
+          fc.option(fc.record({ group: groupArb, rank: rankArb }), {
+            nil: undefined,
+          }),
         ]),
-      ) as Record<Id, fc.Arbitrary<Group | undefined>>,
+      ) as Record<Id, fc.Arbitrary<RowState | undefined>>,
     )
     .map(
       (initial) =>
         Object.fromEntries(
-          Object.entries(initial).filter(([, group]) => group !== undefined),
-        ) as Partial<Record<Id, Group>>,
+          Object.entries(initial).filter(([, state]) => state !== undefined),
+        ) as Partial<Record<Id, RowState>>,
     ),
   commands: fc
     .array(stepArb, { minLength: 2, maxLength: 8 })
@@ -931,6 +1081,9 @@ const REACH_STATES: ReadonlyArray<ReachState> = [
   `obsolete load settled`,
   `row moved between demands`,
   `coverage recorded twice`,
+  `window covered offline`,
+  `window holds other rows`,
+  `tie-boundary load uncovered`,
 ]
 
 async function campaign(options: Parameters<typeof fc.assert>[1]) {
@@ -938,9 +1091,9 @@ async function campaign(options: Parameters<typeof fc.assert>[1]) {
   await fc.assert(
     fc.asyncProperty(historyArb, async (history) => {
       reach.beginHistory()
-      const { observation, events } = await runHistory(history)
+      const { observation, events, sent } = await runHistory(history)
       expect(observation).toEqual(
-        expectedObservation(events, (state) => reach.reach(state)),
+        expectedObservation(events, sent, (state) => reach.reach(state)),
       )
     }),
     options,
@@ -1008,32 +1161,52 @@ describe(`persisted demand coverage over generated histories`, () => {
     reach.assertReached()
   }, 300_000)
 
-  it(`rejects a model that ignores lost rows or obsolete loads`, () => {
-    // Calibration: a load covers a over two rows, then one is deleted. An
-    // obsolete load never covers.
+  it(`rejects a model that ignores lost rows, obsolete loads, or other window rows`, () => {
+    // Calibration over the source log alone. A load covers a over two rows;
+    // deleting one ends coverage; an obsolete load never covers; a window
+    // that holds other rows than it recorded is not covered.
+    const loadA: LoadSubsetOptions = {
+      where: new IR.Func(`eq`, [new IR.PropRef([`group`]), new IR.Value(`a`)]),
+    }
+    const loadW = {
+      ...loadA,
+      orderBy: [
+        {
+          expression: new IR.PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      limit: 2,
+    } as unknown as LoadSubsetOptions
+    const rows: SourceEvent = {
+      type: `rows`,
+      rows: [
+        [`r1`, { group: `a`, rank: 1 }],
+        [`r2`, { group: `a`, rank: 2 }],
+      ],
+    }
+    const sent = { a: [loadA], b: [], w: [loadW] }
+    const ignore = () => {}
     const covered: ReadonlyArray<SourceEvent> = [
-      {
-        type: `rows`,
-        rows: [
-          [`r1`, `a`],
-          [`r2`, `a`],
-        ],
-      },
-      { type: `settled`, demand: `a`, current: true },
+      rows,
+      { type: `settled`, load: loadA, current: true },
+      { type: `settled`, load: loadW, current: true },
     ]
-    expect(expectedObservation(covered, () => {}).a).toEqual({
-      ready: true,
-      rows: [`r1`, `r2`],
+    const observe = (events: ReadonlyArray<SourceEvent>) =>
+      expectedObservation(events, { ...sent, b: [loadA] }, ignore)
+    expect(observe(covered).a).toEqual({ ready: true, rows: [`r1`, `r2`] })
+    expect(observe([...covered, { type: `delete`, id: `r1` }]).a).toEqual({
+      ready: false,
     })
     expect(
-      expectedObservation([...covered, { type: `delete`, id: `r1` }], () => {})
-        .a,
+      observe([rows, { type: `settled`, load: loadA, current: false }]).a,
     ).toEqual({ ready: false })
+    expect(observe(covered).w).toEqual({ ready: true, rows: [`r1`, `r2`] })
     expect(
-      expectedObservation(
-        [covered[0]!, { type: `settled`, demand: `a`, current: false }],
-        () => {},
-      ).a,
+      observe([
+        ...covered,
+        { type: `rows`, rows: [[`r3`, { group: `a`, rank: 0 as Rank }]] },
+      ]).w,
     ).toEqual({ ready: false })
   })
 

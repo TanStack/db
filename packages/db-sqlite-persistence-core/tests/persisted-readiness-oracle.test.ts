@@ -164,6 +164,17 @@ async function checkWithCleanup(
  * their packages. This owner does not claim native SQLite, replacement client
  * records during the wait, or arbitrary provider/network histories.
  *
+ * The synchronous gate (`isInitialRenderReady`) is the Suspense observer's
+ * check before it suspends. Its law adds two conditions to the wait's: the
+ * query's own initial-render preload must have started, and each on-demand
+ * source must permit it through that query's settled demands, not through the
+ * source's shared loading state. Its checkpoints read the gate directly. A
+ * restore held past its deadline keeps it shut. A retried observer opens it
+ * only after the Collection's preload has started. A failed client stream
+ * opens it after a completed restore. One settled reader of a shared on-demand
+ * source opens while another reader's demand on it is held. An early network
+ * answer ends the wait before its 60-second deadline.
+ *
  * Audit: ORC-001/002 use the approved all-source rule and the independent
  * expectedPersistedSnapshot model. ORC-003/005 are the finite outcome grammar,
  * controlled persistence driver, and public snapshot checks. ORC-004/007/008
@@ -188,8 +199,11 @@ async function checkWithCleanup(
  * ORC-013: the joined half-ready snapshot rejects any-one-ready; the empty
  * restore rejects row-count readiness; the 99/100-ms deadline and 50/100-ms
  * joined deadlines reject early fallback; the restart witness rejects stale
- * public rows while the replacement read is held. ORC-014 does not apply to a
- * real-provider claim: this oracle explicitly ends at its controlled adapter.
+ * public rows while the replacement read is held. The synchronous-gate tests
+ * reject a gate that ignores the held restore, the unstarted preload, a failed
+ * client stream, a shared on-demand loading state, and an unnecessary deadline.
+ * ORC-014 does not apply to a real-provider claim: this oracle explicitly ends
+ * at its controlled adapter.
  */
 describe(`persisted-readiness oracle`, () => {
   it(`preserves a failed checkpoint and a secondary cleanup failure`, async () => {
@@ -1304,6 +1318,324 @@ describe(`persisted-readiness oracle`, () => {
       unsubscribeSource,
       () => sourceObserver.dispose(),
       () => persisted.cleanup(),
+    ])
+  })
+
+  // Synchronous gate. `isInitialRenderReady()` is the Suspense observer's
+  // check before it suspends. Unlike the wait above, it does not run the wait
+  // again: it reads the same law from the current state. The law is that a
+  // query may render locally only after its own network-first preload has
+  // started (the Collection's preload registration), its persisted restore is
+  // ready, and the sources permit it. The checkpoints below read the gate
+  // directly, so a gate that skips one of those conditions is not masked by
+  // the wait having already resolved.
+
+  it(`keeps the synchronous gate closed while a restore outlasts its network deadline`, async () => {
+    // Authority: the glossary's network-first initial render permits local
+    // rendering only when persisted readiness holds. A passed deadline alone
+    // is not enough while the restore read is still held.
+    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
+    const persisted = source(`gate-held-restore`, fixture.adapter, true, 100)
+    const observer = createLiveQueryObserver(persisted)
+    const unsubscribe = observer.subscribe(() => {})
+    await checkWithCleanup(async () => {
+      vi.useFakeTimers()
+      try {
+        let settled = false
+        const initialRender = observer.preloadForInitialRender()
+        void initialRender.then(
+          () => {
+            settled = true
+          },
+          () => {},
+        )
+        expect(observer.isInitialRenderReady()).toBe(false)
+
+        // Checkpoint: the deadline has passed, but the restore read is held.
+        await vi.advanceTimersByTimeAsync(100)
+        expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
+        expect(observer.isInitialRenderReady()).toBe(false)
+
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(settled).toBe(false)
+        expect(observer.isInitialRenderReady()).toBe(false)
+
+        // Checkpoint: the restore completes, so the gate opens with the wait.
+        fixture.load.resolve()
+        await initialRender
+        expect(observer.isInitialRenderReady()).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
+    }, [
+      () => fixture.load.resolve(),
+      unsubscribe,
+      () => observer.dispose(),
+      () => persisted.cleanup(),
+    ])
+  })
+
+  it(`keeps the synchronous gate closed until this query's network-first preload has started`, async () => {
+    // Authority: the observer comment on INITIAL_RENDER_PRELOADS. A
+    // network-first render requests the preload before it renders local rows,
+    // so a restored source with a passed deadline must not open the gate by
+    // itself. The source is restored through its own observer first.
+    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
+    const persisted = source(`gate-before-preload`, fixture.adapter, true)
+    const sourceObserver = createLiveQueryObserver(persisted)
+    const unsubscribeSource = sourceObserver.subscribe(() => {})
+    const query = createLiveQueryCollection({
+      query: (q) => q.from({ row: persisted }),
+    })
+    const observer = createLiveQueryObserver(query)
+    await checkWithCleanup(async () => {
+      fixture.load.resolve()
+      await vi.waitFor(() =>
+        expect(sourceObserver.getSnapshot().persistedStatus).toBe(`ready`),
+      )
+      expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
+      // Checkpoint: no preload was requested, so the gate stays closed.
+      expect(observer.isInitialRenderReady()).toBe(false)
+
+      await observer.preloadForInitialRender()
+      expect(observer.isInitialRenderReady()).toBe(true)
+    }, [
+      unsubscribeSource,
+      () => sourceObserver.dispose(),
+      () => observer.dispose(),
+      () => query.cleanup(),
+      () => persisted.cleanup(),
+    ])
+  })
+
+  it(`lets a retried observer use the synchronous gate after the Collection's preload has started`, async () => {
+    // Authority: the observer comment on INITIAL_RENDER_PRELOADS. React can
+    // discard a Suspense render and construct a new observer, but the
+    // Collection survives. Once its initial-render preload has completed,
+    // the retry's synchronous gate must open without a new suspension.
+    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
+    const persisted = source(`gate-retried-observer`, fixture.adapter, true)
+    const query = createLiveQueryCollection({
+      query: (q) => q.from({ row: persisted }),
+    })
+    const first = createLiveQueryObserver(query)
+    await checkWithCleanup(async () => {
+      fixture.load.resolve()
+      await first.preloadForInitialRender()
+      first.dispose()
+
+      const retry = createLiveQueryObserver(query)
+      try {
+        // Checkpoint: a new observer that has not preloaded itself. The
+        // Collection's registration and the restored source let it render.
+        expect(retry.getSnapshot()).toMatchObject({
+          persistedStatus: `ready`,
+          data: [{ id: `one`, value: `local` }],
+        })
+        expect(retry.isInitialRenderReady()).toBe(true)
+      } finally {
+        retry.dispose()
+      }
+    }, [
+      () => first.dispose(),
+      () => query.cleanup(),
+      () => persisted.cleanup(),
+    ])
+  })
+
+  // A failed client stream is a network failure for the gate as well as the
+  // wait. The first observer resolves its wait through that failure, so the
+  // Collection's preload is registered. A retry then reads the already failed
+  // stream from the client and must open its gate without the deadline.
+  for (const rows of [[], [{ id: `one`, value: `persisted` }]]) {
+    it(`opens a retried observer's gate on a failed client stream after a ${rows.length ? `nonempty` : `empty`} restore`, async () => {
+      const fixture = recordingAdapter(rows)
+      const persisted = source(
+        `gate-retried-stream-failure-${rows.length}`,
+        fixture.adapter,
+        true,
+        60_000,
+      )
+      const query = createLiveQueryCollection({
+        query: (q) => q.from({ row: persisted }),
+      })
+      const client = new DbClient()
+      const queryHash = `gate-retried-stream-failure-${rows.length}`
+      const stream = deferred<{ rows: Array<never> }>()
+      void client._registerLiveQuery(queryHash, stream.promise).catch(() => {})
+      const first = createLiveQueryObserver(query, {
+        client,
+        queryHash,
+        mode: `wholesale`,
+      })
+      const unsubscribe = first.subscribe(() => {})
+      await checkWithCleanup(async () => {
+        const initialRender = first.preloadForInitialRender()
+        fixture.load.resolve()
+        await vi.waitFor(() =>
+          expect(first.getSnapshot().persistedStatus).toBe(`ready`),
+        )
+        stream.reject(new Error(`client stream failed`))
+        await initialRender
+        unsubscribe()
+        first.dispose()
+
+        const retry = createLiveQueryObserver(query, {
+          client,
+          queryHash,
+          mode: `wholesale`,
+        })
+        try {
+          // Checkpoint: the retry's client stream is already failed, and the
+          // restore is complete. The failure is network failure for this gate.
+          expect(retry.isInitialRenderReady()).toBe(true)
+          expect(retry.getSnapshot().data).toMatchObject(rows)
+        } finally {
+          retry.dispose()
+        }
+      }, [
+        () => fixture.load.resolve(),
+        () => stream.reject(new Error(`client stream failed`)),
+        unsubscribe,
+        () => first.dispose(),
+        () => query.cleanup(),
+        () => persisted.cleanup(),
+      ])
+    })
+  }
+
+  it(`ends the initial-render wait when the network answers before the deadline`, async () => {
+    // Authority: the wait's own doc comment resolves on network data. The
+    // fallback deadline only bounds how long a render waits for the network,
+    // so a network that answers at once must end the wait immediately rather
+    // than after the 60-second deadline.
+    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
+    let markCollectionReady!: () => void
+    const persisted = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id: `network-answers-early`,
+        getKey: (row) => row.id,
+        persistence: { adapter: fixture.adapter },
+        initialRender: {
+          strategy: `network-first`,
+          networkTimeoutMs: 60_000,
+        },
+        sync: {
+          sync: ({ markReady }) => {
+            markCollectionReady = markReady
+            return {}
+          },
+        },
+      }),
+    )
+    const observer = createLiveQueryObserver(persisted)
+    const unsubscribe = observer.subscribe(() => {})
+    await checkWithCleanup(async () => {
+      fixture.load.resolve()
+      await vi.waitFor(() =>
+        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
+      )
+      vi.useFakeTimers()
+      try {
+        let settled = false
+        const initialRender = observer.preloadForInitialRender()
+        void initialRender.then(
+          () => {
+            settled = true
+          },
+          () => {},
+        )
+        await vi.advanceTimersByTimeAsync(0)
+        expect(settled).toBe(false)
+        expect(vi.getTimerCount()).toBeGreaterThan(0)
+
+        // Checkpoint: the network is ready at virtual time zero, long before
+        // the deadline. The wait clears its timer and resolves now.
+        markCollectionReady()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(settled).toBe(true)
+        expect(vi.getTimerCount()).toBe(0)
+        expect(observer.isInitialRenderReady()).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
+    }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
+  })
+
+  it(`gates each reader of a shared on-demand source on its own demands`, async () => {
+    // Authority: the glossary's network-first initial render requires every
+    // demand the query reaches on an on-demand source to have settled. Another
+    // reader's pending demand on the same source does not gate this reader.
+    // Model: readers A and B share on-demand source S. A's demand has settled
+    // and B's is held upstream. A's gate opens and B's stays shut.
+    const fixture = recordingAdapter([])
+    fixture.load.resolve()
+    let holdUpstream = false
+    const releases: Array<() => void> = []
+    const shared = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id: `on-demand-shared-readers`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
+        persistence: { adapter: fixture.adapter },
+        sync: {
+          sync: ({ begin, write, commit }) => ({
+            loadSubset: () => {
+              if (!holdUpstream) {
+                begin()
+                write({ type: `insert`, value: { id: `a`, value: `a` } })
+                return Promise.resolve(commit()).then(() => undefined)
+              }
+              return new Promise<void>((resolve) => {
+                releases.push(() => {
+                  begin()
+                  write({ type: `insert`, value: { id: `b`, value: `b` } })
+                  resolve(Promise.resolve(commit()).then(() => undefined))
+                })
+              })
+            },
+          }),
+        },
+      }),
+    )
+    const readerA = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ row: shared }).where(({ row }) => eq(row.value, `a`)),
+    })
+    const readerB = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ row: shared }).where(({ row }) => eq(row.value, `b`)),
+    })
+    const observerA = createLiveQueryObserver(readerA)
+    const observerB = createLiveQueryObserver(readerB)
+    const releaseHeld = () => {
+      for (const release of releases.splice(0)) release()
+    }
+    await checkWithCleanup(async () => {
+      await readerA.preload()
+      holdUpstream = true
+      const waitB = observerB.preloadForInitialRender()
+      waitB.catch(() => {})
+      // Checkpoint: B's demand reached the upstream and is still pending.
+      await vi.waitFor(() => expect(releases).toHaveLength(1))
+      expect(observerB.isInitialRenderReady()).toBe(false)
+
+      // Checkpoint: A's demand settled while B's load on S is pending. A's
+      // gate opens in the synchronous call that starts its wait.
+      void observerA.preloadForInitialRender().catch(() => {})
+      expect(observerA.isInitialRenderReady()).toBe(true)
+
+      releaseHeld()
+      await waitB
+      expect(observerB.isInitialRenderReady()).toBe(true)
+    }, [
+      releaseHeld,
+      () => observerA.dispose(),
+      () => observerB.dispose(),
+      () => readerA.cleanup(),
+      () => readerB.cleanup(),
+      () => shared.cleanup(),
     ])
   })
 })
