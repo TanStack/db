@@ -6,6 +6,8 @@ Keep a live query running when a lazy join or include load fails as part of a so
 
 A query that joins and includes the same source has two subscriptions to it. Their truncate replays now share one barrier. A lazy demand that fails while either replay still loads, or after either replay failed, no longer ends the query.
 
+A source whose `loadSubset` throws instead of returning a rejected promise now fails a truncate replay the same way. Before, a throw during a replay could end the query.
+
 An aborted subset request that a source rejects with `AbortError`, as the source contract asks, no longer ends a live query. A truncate replay or newer demand decides that request instead.
 
 Some sources refetch and then report that their pages shifted. An ordered window over such a source no longer skips a row tied with the refetched first page's new end. When the report shows that the page's end moved, the window reads the new end's tie group. It no longer trusts a row that an older tie request installed.

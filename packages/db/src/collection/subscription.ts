@@ -1114,21 +1114,25 @@ export class CollectionSubscription
               replayState.currentAttempt === replayAttempt)),
       )
     } catch (error) {
-      const demandIndex = this.subsetDemands.indexOf(demand)
-      if (demandIndex !== -1) {
-        if (
-          replayState &&
-          replayAttempt &&
-          this.truncateReplayState === replayState &&
-          replayState.currentAttempt === replayAttempt
-        ) {
-          replayState.failures.set(demand, normalizeError(error))
-          replayState.failed = true
-        }
-        this.subsetDemands.splice(demandIndex, 1)
-      }
       cancelAcquisition(acquisition)
-      throw error
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      // A load that throws inside an open replay fails that replay as a
+      // rejected load does. The demand stays, so the replay keeps
+      // publication until a later replay retries it, and its owner still
+      // releases it; the adapter acquired nothing to unload.
+      if (
+        demandIndex !== -1 &&
+        replayState &&
+        replayAttempt &&
+        this.truncateReplayState === replayState &&
+        replayState.currentAttempt === replayAttempt
+      ) {
+        acquisition.releaseAttempted = true
+        result = Promise.reject(normalizeError(error))
+      } else {
+        if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
+        throw error
+      }
     }
 
     if (!this.isSyncRunGenerationCurrent(syncRunGeneration)) {

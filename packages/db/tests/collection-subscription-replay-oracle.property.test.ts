@@ -2902,12 +2902,15 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
         if (site === `new request throws`) {
+          // A request that throws inside the open replay fails that replay
+          // as a rejected load does (maintainer decision), so it does not
+          // throw to its caller.
           expect(() =>
             subscription.requestSnapshot({
               where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
               optimizedOnly: false,
             }),
-          ).toThrow(`request failed`)
+          ).not.toThrow()
         }
         subscription.releaseSnapshot(where)
         await flushPromises()

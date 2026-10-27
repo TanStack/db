@@ -1473,6 +1473,11 @@ A failed replay of any of them fails the barrier: until a later replay of the
 source succeeds, a lazy demand of any of them that fails keeps the last
 publication and does not end the query, even when its own subscription's
 replay finished.
+A load that throws while it starts inside an open replay fails that replay as
+a rejected load does. Its demand stays with the subscription, so the replay
+keeps the last publication, a later replay retries the demand, and its owner
+still releases it; the adapter acquired nothing, so it receives no
+`unloadSubset` for that load.
 A rejection of an aborted lazy demand request is obsolete demand,
 not a load failure, as for the subscription. When a truncate supersedes the
 acquisition, its replay decides the demand, even if the replay settles before

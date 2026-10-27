@@ -2656,8 +2656,10 @@ describe(`createLiveQueryCollection`, () => {
               return {
                 loadSubset: (options) => {
                   if (!recovering) return true
-                  // Choose by request shape, not callback order: a startup
-                  // throw rolls back new demand but retains a replayed owner.
+                  // Choose by request shape, not callback order. A startup
+                  // throw inside the replay fails it as a rejection does, for
+                  // new demand and a replayed owner alike (maintainer
+                  // decision; ARCHITECTURE.md, replay participants).
                   const target =
                     demand === `retained`
                       ? options.limit !== undefined
@@ -2700,17 +2702,12 @@ describe(`createLiveQueryCollection`, () => {
             () => ({ status: `fulfilled` as const }),
             (error: unknown) => ({ status: `rejected` as const, error }),
           )
-          if (demand === `new` && delivery === `throw`) {
-            expect(settlement.status).toBe(`fulfilled`)
-            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-          } else {
-            expect(settlement.status).toBe(`rejected`)
-            if (settlement.status !== `rejected`)
-              throw new Error(`Expected replay rejection`)
-            expect(settlement.error).toBe(reportedError)
-            expect(settlement.error).toBeInstanceOf(Error)
-            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-          }
+          expect(settlement.status).toBe(`rejected`)
+          if (settlement.status !== `rejected`)
+            throw new Error(`Expected replay rejection`)
+          expect(settlement.error).toBe(reportedError)
+          expect(settlement.error).toBeInstanceOf(Error)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
           expect(live.utils.lastSubsetError).toBe(reportedError)
         } finally {
           replayGate.resolve()
