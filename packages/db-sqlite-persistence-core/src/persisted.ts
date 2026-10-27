@@ -6525,7 +6525,9 @@ function createWrappedSyncConfig<
           openTransaction.signal = signal
           pendingPublicationTransactions.push(openTransaction)
           rejudgeEnclosing(
-            openTransaction.truncate ? undefined : openTransaction.operationKeys,
+            openTransaction.truncate
+              ? undefined
+              : openTransaction.operationKeys,
           )
           if (
             openTransaction.queuedBecauseHydrating &&
