@@ -9,9 +9,15 @@ import { registeredOracleProperties } from './oracle-config.js'
  */
 // Each group is [owner file, prefix, suffixes] and, when the owner runs the
 // properties from another module, the module that names them.
+// A property whose owner lives outside packages/ names it with a `../` prefix.
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
+    `lint`,
+    `part-reach`,
+  ],
   [
     `db/tests/ssr-stream-record-wait-oracle.test.ts`,
     `ssr`,
@@ -818,7 +824,10 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
               property.endsWith(`.scenario-statistics`)
             ? `statistics-only`
             : `assertion`
-  const cwd = file?.split(`/`).slice(0, 2).join(`/`)
+  const outsidePackages = file?.startsWith(`packages/../`) === true
+  const cwd = outsidePackages
+    ? `scripts/eslint-plugin-oracle`
+    : file?.split(`/`).slice(0, 2).join(`/`)
   return {
     property,
     status,
@@ -833,7 +842,9 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
           : status === `seed-replay`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
-            : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+            : outsidePackages
+              ? `node --import tsx ../../packages/db/tests/oracle-replay.ts ${file.split(`/`).pop()}`
+              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [
