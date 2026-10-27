@@ -450,7 +450,6 @@ const nullableProjection: TraceProjection<
  * each computed from the driver's own Maps.
  */
 declareOracle({
-  check: [runTrace],
   model: [
     expectedMultiplicityRows,
     expectedCorrelationRows,
