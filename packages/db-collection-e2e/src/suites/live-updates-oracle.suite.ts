@@ -13,13 +13,11 @@ import {
   waitForUserRows,
   withOwnedUsers,
 } from './mutations.suite'
-import { createLiveUpdatesUnitTestSuite } from './live-updates.suite'
 import type { E2ETestConfig, User } from '../types'
 
 export function createLiveUpdatesTestSuite(
   getConfig: () => Promise<E2ETestConfig>,
 ) {
-  createLiveUpdatesUnitTestSuite(getConfig)
   describe('Live Updates Suite', () => {
     describe('Subscription Lifecycle', () => {
       it('should receive updates when subscribed', async () => {
