@@ -225,7 +225,6 @@
   "orderDirty": "d4",
   "recordRequestFailure": "d5",
   "refreshDetachedState": "d6",
-  "releaseDemandAt": "d7",
   "requestedSubsetWhere": "d8",
   "restoreInitialWindow": "d9",
   "settleTruncateReplay": "ea",
@@ -385,7 +384,6 @@
   "sortedExactValues": "gG",
   "reachedReady": "cc",
   "requestErrors": "gH",
-  "reportFailedRequest": "gJ",
   "includeSourceIds": "gL",
   "latchReady": "gO",
   "reportedTree": "gQ",
@@ -422,7 +420,6 @@
   "overlayHeldAndActive": "e8",
   "recordOutcome": "gP",
   "replacements": "dp",
-  "onLoaded": "gR",
   "publishedHealth": "gK",
   "reportHealth": "gT",
   "healthTree": "gV",
@@ -441,5 +438,13 @@
   "checkCoherence": "hc",
   "coverSource": "hd",
   "supersedes": "hf",
-  "oweDebt": "hg"
+  "oweDebt": "hg",
+  "publishHydrationHandoff": "d7",
+  "keepsFailedReplayOpen": "gJ",
+  "loadSubsetDepth": "gR",
+  "requestedWhere": "hh",
+  "onKeyOutcome": "hj",
+  "callLoadSubset": "hk",
+  "releaseDemands": "hl",
+  "show": "hm"
 }

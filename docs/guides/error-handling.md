@@ -271,7 +271,8 @@ definition, so its `health` is `undefined`.
     { alias: "task", kind: "source", status: "ready", hasErrors: false,
       failureReason: null, error: null, reloading: false, sources: [] },
     { alias: "user", kind: "source", status: "ready", hasErrors: true,
-      failureReason: { name: "FetchError", message: "Network request failed", at: 1760342400000 },
+      failureReason: { name: "FetchError", message: "Network request failed", at: 1760342400000,
+        errors: [{ name: "FetchError", message: "Network request failed", at: 1760342400000 }] },
       error: null, reloading: false, sources: [] },
   ],
 }
@@ -289,9 +290,11 @@ A node can show one of two problems. They follow TanStack Query's
 `failureReason` or an `error`. `hasErrors` on a node says whether that node or
 any node below it has one.
 
-Each problem is `{ name, message, code?, at, cause }`. `cause` holds the exact
-value the adapter reported, for example the `Response` or the error your
-`queryFn` threw. Every other field is plain JSON. A node keeps its object
+Each problem is `{ name, message, code?, at, cause, errors }`. `cause` holds
+the exact value the adapter reported, for example the `Response` or the error
+your `queryFn` threw. Every other field is plain JSON. The problem's own fields
+are its newest failure; `errors` lists every failure of the problem, oldest
+first (see [Every failure of a problem](#every-failure-of-a-problem)). A node keeps its object
 identity until something in its part of the tree changes, so `===` and
 `useMemo` work on it. Server-side rendering does not transfer `health`; the
 client builds its own tree from its own sync.
@@ -327,6 +330,45 @@ per alias. An include has one node, which shows the include's source; its
 per-row child Collections are not in the tree. A nested live query's node
 carries its own sources.
 
+#### Every failure of a problem
+
+A problem can have more than one failure. Its `message`, `cause`, and `at` are
+the newest failure's, so code that reads only those keeps working. `errors`
+lists each failure, oldest first, as `{ name, message, code?, at, cause }`:
+
+- A source's `failureReason` lists each `reportError()` of the sync run since
+  it began, for example each failed refetch of a query Collection.
+  `reportHealthy()` ends it, and a `reload()` whose new sync run reports
+  starts a new list.
+- An `error` from `fail()`, a failed first load, or a crash has one failure.
+- A query's own `error` lists every failed request for more data that is still
+  failing. A request that loads, or that the query no longer needs, leaves the
+  list. Two requests that fail with the same error are one entry. When a
+  source's reload cannot load the query's data again, the list has every load
+  that failed.
+
+Adding or removing a failure is a change: the node is a new object and
+`health:change` fires.
+
+```tsx
+function RetryLog({ health }: { health: HealthNode }) {
+  const problem = health.sources[0]?.failureReason
+  if (!problem) return null
+  return (
+    <details>
+      <summary>
+        Reconnecting: {problem.message} ({problem.errors.length} failures)
+      </summary>
+      <ul>
+        {problem.errors.map((failure, index) => (
+          <li key={index}>{failure.message}</li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+```
+
 ### Collections without a live query
 
 Every Collection has the same surface, so code that uses a Collection directly
@@ -347,7 +389,8 @@ After a query is ready it can ask for more data: the next page of an infinite
 query, or rows for a newly joined key. When that request fails, the query's own
 node (`root`) shows an `error`. The sources stay healthy and the rows already
 shown stay. The error clears when the data loads, or when the query no longer
-needs it, for example after the user scrolls back.
+needs it, for example after the user scrolls back. When several requests fail,
+the node shows the newest, and its `errors` lists every request still failing.
 
 ```tsx
 const { data, health, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
@@ -506,7 +549,7 @@ A sync adapter reports failures with three calls:
 
 | Call | Meaning | Effect |
 | --- | --- | --- |
-| `reportError(error)` | Something went wrong; I am still trying. | Sets `failureReason`. Only after the first ready. |
+| `reportError(error)` | Something went wrong; I am still trying. | Sets `failureReason` and adds the failure to its `errors`. Only after the first ready. |
 | `fail(error)` | I stopped. | Before the first ready: `status: 'error'`. After: the node's `error`; the rows stay. |
 | `reportHealthy()` | Sync works again. | Clears `failureReason`. Only after the first ready. |
 

@@ -495,6 +495,9 @@ export function reduceLifecycle(
       abortAttempt(model, attempt)
       attempt.reportable = false
     }
+    // Prompt cancellation settles the attempt, so the replay is judged as
+    // after any settlement: a held replacement can still cover it.
+    judgeReplay(model)
     setStatus(model)
     return { ownerId: owner.id }
   }

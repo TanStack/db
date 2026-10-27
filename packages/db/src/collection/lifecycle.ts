@@ -19,6 +19,7 @@ import type {
   CollectionConfig,
   CollectionErrorInfo,
   CollectionStatus,
+  HealthProblem,
 } from '../types'
 import type { CollectionEventsManager } from './events'
 import type { CollectionIndexesManager } from './indexes'
@@ -60,14 +61,15 @@ export class CollectionLifecycleManager<
   // After the first ready, the sync adapter's problem is health tree detail:
   // `failureReason` while it still tries, `stoppedError` once it called fail().
   // A live query's request failures are kept apart, so settling a request
-  // cannot clear the sync adapter's problem.
-  private failureReason: CollectionErrorInfo | null = null
+  // cannot clear the sync adapter's problem. The failure reason lists every
+  // reportError() of its sync run since it began.
+  private failureReason: HealthProblem | null = null
   // A reload's new run reported the failure reason, so its first commit keeps it.
   private failureReasonFromReload = false
-  private stoppedError: CollectionErrorInfo | null = null
+  private stoppedError: HealthProblem | null = null
   // The cause of status `error` or `crashed`, kept so readers see the same
   // object until the sync run ends.
-  private statusError: CollectionErrorInfo | null = null
+  private statusError: HealthProblem | null = null
   private requestErrors = new RequestErrors()
   // fail() ends the sync adapter's reporting for its sync run; a reload or
   // cleanup starts a new one.
@@ -296,16 +298,16 @@ export class CollectionLifecycleManager<
     if (this.status === `ready`) {
       // The rows stay; a reload that failed shows its new error instead.
       this.failureReason = null
-      this.stoppedError = describeProblem(error)
+      this.stoppedError = problemOf([describeProblem(error)])
       this.events.emitHealthChange()
     } else if (reload && this.status === `error`) {
       // A reload of a failed first load keeps status `error` with the new
       // cause.
-      this.statusError = describeProblem(error)
+      this.statusError = problemOf([describeProblem(error)])
       this.events.emitHealthChange()
     } else {
       this.validateStatusTransition(this.status, `error`)
-      this.statusError = describeProblem(error)
+      this.statusError = problemOf([describeProblem(error)])
       this.setStatus(`error`)
     }
     reload?.reject(error)
@@ -413,14 +415,14 @@ export class CollectionLifecycleManager<
     // A crash ends a reload in flight with it; its status change announces
     // the tree.
     this.endReload(error)
-    this.statusError = describeProblem(error)
+    this.statusError = problemOf([describeProblem(error)])
     this.setStatus(`crashed`)
   }
 
   /** The Collection's own problems, as health tree detail. */
   public get problems(): {
-    failureReason: CollectionErrorInfo | null
-    error: CollectionErrorInfo | null
+    failureReason: HealthProblem | null
+    error: HealthProblem | null
   } {
     const error = this.statusAllowsError()
       ? this.statusError
@@ -429,7 +431,7 @@ export class CollectionLifecycleManager<
   }
 
   /** The cause of status `error` or `crashed`, as health tree detail. */
-  public get statusProblem(): CollectionErrorInfo | null {
+  public get statusProblem(): HealthProblem | null {
     return this.statusAllowsError() ? this.statusError : null
   }
 
@@ -442,7 +444,13 @@ export class CollectionLifecycleManager<
     if (this.status === `crashed`) return
     this.assertAdapterActive(`reportError`)
     this.assertReady(`reportError`)
-    this.failureReason = describeProblem(error)
+    // A reload's new run that reports starts its own list: the retired run's
+    // failures leave with that run.
+    const kept =
+      this.reloading && !this.failureReasonFromReload
+        ? []
+        : (this.failureReason?.errors ?? [])
+    this.failureReason = problemOf([...kept, describeProblem(error)])
     this.failureReasonFromReload = this.reloading
     this.events.emitHealthChange()
   }
@@ -457,9 +465,12 @@ export class CollectionLifecycleManager<
     this.events.emitHealthChange()
   }
 
-  /** @internal A live query's request failed after initial-query readiness. */
-  public reportRequestError(key: string, error: unknown): void {
-    if (this.requestErrors.fail(key, error)) this.events.emitHealthChange()
+  /**
+   * @internal A live query's request failed after initial-query readiness,
+   * with each of its failures in failure order.
+   */
+  public reportRequestError(key: string, errors: Array<unknown>): void {
+    if (this.requestErrors.fail(key, errors)) this.events.emitHealthChange()
   }
 
   /** @internal The failed request settled or was released. */
@@ -788,39 +799,55 @@ export class CollectionLifecycleManager<
 
 /** @internal Requests that failed after initial-query readiness, by issuer. */
 export class RequestErrors {
-  // Each failed request's problem, with the number that orders it among the
-  // failures. Two requests that failed with one error share one entry value.
-  private readonly failed = new Map<string, [CollectionErrorInfo, number]>()
+  // Each failed request's failures, each with the number that orders it
+  // among the failures. Two requests that failed with one error share one
+  // entry value.
+  private readonly failed = new Map<
+    string,
+    Array<[CollectionErrorInfo, number]>
+  >()
   private failures = 0
-  problem: CollectionErrorInfo | null = null
+  problem: HealthProblem | null = null
 
-  /** Returns whether the shown problem changed. */
-  fail(key: string, error: unknown): boolean {
+  /** Returns whether the problem changed. */
+  fail(key: string, errors: Array<unknown>): boolean {
     this.failed.delete(key)
-    // Two requests that failed with one error show one problem, and it keeps
+    // Two requests that failed with one error are one failure, and it keeps
     // its place among the failures.
-    this.failed.set(
-      key,
-      [...this.failed.values()].find(
-        ([problem]) => problem.cause === error,
-      ) ?? [describeProblem(error), ++this.failures],
-    )
+    const entries: Array<[CollectionErrorInfo, number]> = []
+    for (const error of errors)
+      entries.push(
+        [...this.failed.values(), entries]
+          .flat()
+          .find(([failure]) => failure.cause === error) ?? [
+          describeProblem(error),
+          ++this.failures,
+        ],
+      )
+    this.failed.set(key, entries)
     return this.show()
   }
 
-  /** Returns whether the shown problem changed. */
+  /** Returns whether the problem changed. */
   settle(key: string): boolean {
     return this.failed.delete(key) && this.show()
   }
 
-  // The newest failure still failing shows.
+  // The newest failure still failing shows, and the problem lists every
+  // failure still failing, oldest first. It stays the same object until
+  // that list changes.
   private show(): boolean {
-    let newest: [CollectionErrorInfo | null, number] = [null, 0]
-    for (const entry of this.failed.values())
-      if (entry[1] > newest[1]) newest = entry
-    const changed = newest[0] !== this.problem
-    this.problem = newest[0]
-    return changed
+    const errors = [...new Set([...this.failed.values()].flat())]
+      .sort((a, b) => a[1] - b[1])
+      .map(([failure]) => failure)
+    const shown = this.problem?.errors ?? []
+    if (
+      errors.length === shown.length &&
+      errors.every((failure, index) => failure === shown[index])
+    )
+      return false
+    this.problem = errors.length > 0 ? problemOf(errors) : null
+    return true
   }
 }
 
@@ -847,6 +874,28 @@ export class LoadOrder {
   }
 }
 
+/**
+ * @internal A health problem: its newest failure's fields, with every
+ * failure of its frame listed, oldest first.
+ */
+export function problemOf(
+  errors: ReadonlyArray<CollectionErrorInfo>,
+): HealthProblem {
+  const newest = errors[errors.length - 1]!
+  return withCause({ ...newest, errors }, newest.cause)
+}
+
+// The original value stays available but out of JSON.
+function withCause<T extends object>(
+  info: T,
+  cause: unknown,
+): T & { cause: unknown } {
+  return Object.defineProperty(info, `cause`, {
+    value: cause,
+    enumerable: false,
+  }) as T & { cause: unknown }
+}
+
 /** @internal Health tree detail for a problem value. */
 export function describeProblem(error: unknown): CollectionErrorInfo {
   // Any value can be a problem. One that cannot describe itself, such as an
@@ -863,13 +912,13 @@ export function describeProblem(error: unknown): CollectionErrorInfo {
   } catch {
     // The problem still shows, with the generic parts.
   }
-  const info = {
-    name,
-    message,
-    ...(typeof code === `string` ? { code } : {}),
-    at: Date.now(),
-  } as CollectionErrorInfo
-  // The original value stays available but out of JSON.
-  Object.defineProperty(info, `cause`, { value: error, enumerable: false })
-  return info
+  return withCause(
+    {
+      name,
+      message,
+      ...(typeof code === `string` ? { code } : {}),
+      at: Date.now(),
+    },
+    error,
+  )
 }

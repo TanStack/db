@@ -96,8 +96,8 @@ type TruncateReplayPublicationControl = Readonly<{
   start: () => void
   succeed: () => void
   // The replay could not load every active demand again; a live query
-  // reports it on its node.
-  fail?: (error: Error) => void
+  // reports each failure on its node, in failure order.
+  fail?: (errors: Array<Error>) => void
   // The live query still holds logical demand, even when no acquisition of
   // it is left here, such as one whose load threw.
   holdsDemand?: () => boolean
@@ -697,18 +697,20 @@ export class CollectionSubscription
     if (this.keepsFailedReplayOpen(replayState)) return
 
     // A held replacement that loaded decides the demands it replaces.
-    const activeFailure = [...replayState.failures].find(
-      ([demand]) =>
-        this.subsetDemands.includes(demand) &&
-        !this.subsetDemands.some(
-          (replacement) =>
-            replacement.replaces?.includes(demand) &&
-            !replayState.failures.has(replacement),
-        ),
-    )
+    const activeFailures = [...replayState.failures]
+      .filter(
+        ([demand]) =>
+          this.subsetDemands.includes(demand) &&
+          !this.subsetDemands.some(
+            (replacement) =>
+              replacement.replaces?.includes(demand) &&
+              !replayState.failures.has(replacement),
+          ),
+      )
+      .map(([, error]) => error)
     try {
-      if (activeFailure) {
-        this.abandonTruncateReplay(replayState, activeFailure[1])
+      if (activeFailures.length > 0) {
+        this.abandonTruncateReplay(replayState, activeFailures)
       } else {
         this.flushTruncateReplay(replayState)
       }
@@ -723,13 +725,14 @@ export class CollectionSubscription
    */
   private abandonTruncateReplay(
     replayState: TruncateReplayState,
-    failure: Error,
+    failures: Array<Error>,
   ): void {
     if (this.truncateReplayState !== replayState) return
-    // A later check of the same failed attempt reports nothing new.
+    // A later check of the same failed attempt reports nothing new. The
+    // replay's own error is its earliest failure.
     const first = replayState.completion.isPending()
-    replayState.completion.reject(failure)
-    if (first) this.options.truncateReplayPublication?.fail?.(failure)
+    replayState.completion.reject(failures[0])
+    if (first) this.options.truncateReplayPublication?.fail?.(failures)
     // Delegated publication already delivered its rows. Only a private buffer
     // returns the caller's pagination position to the public snapshot; the
     // private rows and their sent-key tracking stay together for a retry.

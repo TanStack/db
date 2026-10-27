@@ -674,7 +674,7 @@ export class CollectionConfigBuilder<
 
   /** A root load of an eager source failed. */
   failRootLoad(sourceId: string, error: Error): void {
-    this.reportFailedRequest(`root:${sourceId}`, error)
+    this.reportFailedRequest(`root:${sourceId}`, [error])
   }
 
   /** A later root load of the source succeeded. */
@@ -688,18 +688,22 @@ export class CollectionConfigBuilder<
     this.clearFailedRequest(`replay:${sourceId}`)
   }
 
-  /** A source's truncate replay could not load the query's data again. */
-  failReplay(sourceId: string, error: Error): void {
-    if (this.reportFailedRequest(`replay:${sourceId}`, error)) return
-    this.failQuery(error.message, error)
+  /**
+   * A source's truncate replay could not load the query's data again: each
+   * of its failures, in failure order. Before the first ready the earliest
+   * fails the query.
+   */
+  failReplay(sourceId: string, errors: Array<Error>): void {
+    if (this.reportFailedRequest(`replay:${sourceId}`, errors)) return
+    this.failQuery(errors[0]!.message, errors[0])
   }
 
   // After the first ready, a failed load is a request error on this query's
   // node. It clears when the failed request settles later or is released.
-  reportFailedRequest(key: string, error: Error): boolean {
+  reportFailedRequest(key: string, errors: Array<Error>): boolean {
     const lifecycle = this.liveQueryCollection?._lifecycle
     if (lifecycle?.status !== `ready`) return false
-    lifecycle.reportRequestError(key, error)
+    lifecycle.reportRequestError(key, errors)
     return true
   }
 
@@ -1421,6 +1425,9 @@ export class CollectionConfigBuilder<
       )
     }
 
+    // A Collection read under several aliases changes this query's tree once
+    // per change, so its relay is registered once.
+    const relayed = new Set<object>()
     const loaders = this.collectionSources.map((source) => {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
@@ -1444,11 +1451,14 @@ export class CollectionConfigBuilder<
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
       // Relay health tree changes so this query's tree stays current.
-      syncState.unsubscribeCallbacks.add(
-        collection.on(`health:change`, () =>
-          this.liveQueryCollection?._emitHealthChange(),
-        ),
-      )
+      if (!relayed.has(collection)) {
+        relayed.add(collection)
+        syncState.unsubscribeCallbacks.add(
+          collection.on(`health:change`, () =>
+            this.liveQueryCollection?._emitHealthChange(),
+          ),
+        )
+      }
       let cleanupStartError: Error | undefined
       const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
         cleanupStartError = this.handleSourceCleanupStart(collectionId)

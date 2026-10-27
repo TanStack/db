@@ -335,16 +335,21 @@ describe(`retained live-query snapshots are point-in-time`, () => {
  * observer that tracks only row revisions and status cannot see that its
  * cached snapshot is stale.
  *
- * The model is one optional problem on the source with a serial number: a
- * `report` is a new problem with a new serial (a new `failureReason` with a
- * fresh message), `healthy` clears it, and a `healthy` with nothing to clear
- * changes nothing, keeping the serial. `write` changes a row and never the
+ * The model is the source's failure reason as its frame (maintainer
+ * decision): the list of failures reported since the slot was last clear,
+ * oldest first, with a serial number for the list. A `report` adds a failure
+ * with a fresh message and a new serial; the node's `failureReason` shows
+ * the newest, and its `errors` lists them all. `healthy` empties the list,
+ * and a `healthy` with nothing to clear changes nothing, keeping the
+ * serial. `write` changes a row and never the
  * tree. `subscribe` and `unsubscribe` move the observer across the attach cut
  * and change nothing in the model. At each `read` the driver compares the
- * snapshot's source node `failureReason`, the root `hasErrors`, and
- * `isSyncError` with the model, and requires the same tree object as the
- * previous read when the serial did not change and a different one when the
- * problem differs from the previous read's. A round trip between reads, such
+ * snapshot's source node `failureReason` (its message, its listed failures'
+ * messages in order, and each listed cause by identity), the root
+ * `hasErrors`, and `isSyncError` with the model, and requires the same tree
+ * object as the previous read when the serial did not change and a
+ * different one when the list differs from the previous read's, also when
+ * only a failure that is not the newest differs. A round trip between reads, such
  * as `report` then `healthy`, ends at the content the previous read saw; the
  * glossary requires identity to be stable while content is unchanged and
  * does not require a new object for equal content, so either identity is
@@ -366,6 +371,7 @@ type HealthReach =
   | `attached-read-after-health-change`
   | `read-across-attach-after-health-change`
   | `unchanged-tree-read`
+  | `read-with-several-failures`
 
 const healthCommand: fc.Arbitrary<HealthCommand> = fc.oneof(
   { weight: 3, arbitrary: fc.constant({ type: `report` as const }) },
@@ -422,25 +428,27 @@ async function checkHealthHistory(
   const { source, query, observer, controls } = setupHealth()
   await query.preload()
   let unsubscribe: (() => void) | undefined
-  // The model: the source's one problem, by serial, or none.
-  let problem: { serial: number; message: string } | null = null
+  // The model: the failure reason's frame, oldest first, and the serial of
+  // the list.
+  let failures: Array<Error> = []
   let serial = 0
   let reports = 0
   // What the last read saw, for the identity law and the reach states.
   let last:
-    | { serial: number; message: string | null; tree: HealthNode | undefined }
+    | { serial: number; messages: string; tree: HealthNode | undefined }
     | undefined
   let attachedSinceRead = false
   try {
     for (const [index, step] of commands.entries()) {
       if (step.type === `report`) {
-        const message = `problem ${reports++}`
-        controls().reportError(new Error(message))
-        problem = { serial: ++serial, message }
+        const failure = new Error(`problem ${reports++}`)
+        controls().reportError(failure)
+        failures = [...failures, failure]
+        serial++
       } else if (step.type === `healthy`) {
         controls().reportHealthy()
-        if (problem) {
-          problem = null
+        if (failures.length > 0) {
+          failures = []
           serial++
         }
       } else if (step.type === `write`) {
@@ -471,29 +479,41 @@ async function checkHealthHistory(
         } else if (last !== undefined) reach?.reach(`unchanged-tree-read`)
 
         const node = snapshot.health?.sources[0]
+        const problem = failures.length > 0
+        if (failures.length > 1) reach?.reach(`read-with-several-failures`)
         expect(snapshot.status, `${label}: status`).toBe(`ready`)
         expect(
-          node?.failureReason?.message ?? null,
+          {
+            message: node?.failureReason?.message ?? null,
+            errors:
+              node?.failureReason?.errors.map((failure) => failure.message) ??
+              [],
+          },
           `${label}: failureReason`,
-        ).toBe(problem?.message ?? null)
-        expect(snapshot.health?.hasErrors, `${label}: hasErrors`).toBe(
-          problem !== null,
-        )
-        expect(snapshot.isSyncError, `${label}: isSyncError`).toBe(
-          problem !== null,
-        )
-        const message = problem?.message ?? null
+        ).toEqual({
+          message: failures.at(-1)?.message ?? null,
+          errors: failures.map((failure) => failure.message),
+        })
+        expect(
+          node?.failureReason?.errors.every(
+            (failure, at) => failure.cause === failures[at],
+          ) ?? true,
+          `${label}: each listed failure is the reported value`,
+        ).toBe(true)
+        expect(snapshot.health?.hasErrors, `${label}: hasErrors`).toBe(problem)
+        expect(snapshot.isSyncError, `${label}: isSyncError`).toBe(problem)
+        const messages = JSON.stringify(failures.map((f) => f.message))
         if (last !== undefined) {
           if (last.serial === serial)
             expect(snapshot.health, `${label}: unchanged tree identity`).toBe(
               last.tree,
             )
-          else if (last.message !== message)
+          else if (last.messages !== messages)
             expect(snapshot.health, `${label}: changed tree identity`).not.toBe(
               last.tree,
             )
         }
-        last = { serial, message, tree: snapshot.health }
+        last = { serial, messages, tree: snapshot.health }
         attachedSinceRead = false
       }
     }
@@ -514,6 +534,7 @@ describe(`a snapshot shows the current health tree`, () => {
         `attached-read-after-health-change`,
         `read-across-attach-after-health-change`,
         `unchanged-tree-read`,
+        `read-with-several-failures`,
       ],
       { minimum: 5 },
     )

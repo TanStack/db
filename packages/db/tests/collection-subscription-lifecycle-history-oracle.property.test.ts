@@ -1514,6 +1514,25 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     expect(reached).toContain(`change:between-releases-would-publish`)
   })
 
+  // Prompt cancellation of the replaced owner's replay load is a settlement:
+  // the held replacement covers it, so the replay publishes.
+  it(`publishes a replay when a covered owner's replay load is canceled`, async () => {
+    await runHistory(
+      [
+        { type: `request`, demand: `c` },
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `replace`, demand: `b`, replaced: `a` },
+        { type: `truncate` },
+        settle(`b`, `current`, `oldest`, `resolve`),
+        settle(`c`, `current`, `oldest`, `resolve`),
+        { type: `abort`, demand: `a` },
+        { type: `request`, demand: `a` },
+      ],
+      { cancellation: `reject` },
+    )
+  })
+
   const runs = 80 * multiplier
   const cancellationArbitrary = fc.constantFrom(
     `manual` as const,
@@ -1553,7 +1572,8 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       demandChangeHistoriesRan = true
       await runDemandChangeHistory(history, cancellation)
     },
-    120_000,
+    // Five times the base budget; a run multiplier scales its histories.
+    120_000 * multiplier,
   )
   randomCampaign(`subscription-lifecycle.demand-change`).prop(
     [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
@@ -1568,7 +1588,8 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       demandChangeHistoriesRan = true
       await runDemandChangeHistory(history, cancellation)
     },
-    120_000,
+    // Five times the base budget; a run multiplier scales its histories.
+    120_000 * multiplier,
   )
   fixedCampaign.prop([syncLifecycleHistoryArbitrary], {
     numRuns: runs,

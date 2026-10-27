@@ -4,6 +4,7 @@ import { CleanupQueue } from '../collection/cleanup-queue.js'
 import {
   UNSUBSCRIBED_GC_FLOOR_MS,
   describeProblem,
+  problemOf,
 } from '../collection/lifecycle.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { makeComparator } from '../utils/comparison.js'
@@ -21,9 +22,9 @@ import type { CollectionSubscription } from '../collection/subscription.js'
 import type {
   ChangeMessage,
   CollectionDependent,
-  CollectionErrorInfo,
   CollectionStatus,
   HealthNode,
+  HealthProblem,
 } from '../types.js'
 import type {
   CollectionEventHandler,
@@ -565,7 +566,7 @@ class PooledLiveQuery {
     return this.partition.terminated ?? this.source.status
   }
 
-  private endedProblem: CollectionErrorInfo | undefined
+  private endedProblem: HealthProblem | undefined
 
   /** The same health tree a live-query Collection over this source exposes. */
   get health(): HealthNode {
@@ -580,13 +581,15 @@ class PooledLiveQuery {
     const error =
       this.source._lifecycle.statusProblem ??
       (this.partition.terminated === `crashed`
-        ? (this.endedProblem ??= describeProblem(
-            new Error(
-              devBuild() && process.env.NODE_ENV !== `production`
-                ? `The pooled live query's source ended`
-                : codedMessage(246),
+        ? (this.endedProblem ??= problemOf([
+            describeProblem(
+              new Error(
+                devBuild() && process.env.NODE_ENV !== `production`
+                  ? `The pooled live query's source ended`
+                  : codedMessage(246),
+              ),
             ),
-          ))
+          ]))
         : null)
     return healthNode(this, `view`, {
       alias: `root`,
