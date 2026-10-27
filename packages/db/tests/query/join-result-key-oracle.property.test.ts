@@ -45,6 +45,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
@@ -258,6 +259,8 @@ async function runHistory(history: History): Promise<void> {
     () => Promise.all([left.cleanup(), right.cleanup()]),
   ])
 }
+
+declareOracle({ check: [runHistory], model: [expectedPairs] })
 
 describe(`joined result key oracle`, () => {
   // The pinned histories and the fixed campaign stand aside during any path
