@@ -42,41 +42,15 @@ import { add, and, gt, lt, lte } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import { declareOracle } from '../oracle-config.js'
+import { checkWithCleanup } from './index-path-collision-support.js'
+import type { Release } from './index-path-collision-support.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 
 interface Row {
   id: string
   'a.b': number
   a: { b: number }
-}
-
-type Release = () => void | Promise<void>
-
-async function checkWithCleanup(
-  check: (register: (release: Release) => void) => void | Promise<void>,
-) {
-  const releases: Array<Release> = []
-  let primaryFailure: { error: unknown } | undefined
-  try {
-    await check((release) => releases.unshift(release))
-  } catch (error) {
-    primaryFailure = { error }
-  }
-
-  const cleanupErrors: Array<unknown> = []
-  for (const release of releases) {
-    try {
-      await release()
-    } catch (error) {
-      cleanupErrors.push(error)
-    }
-  }
-  if (cleanupErrors.length) {
-    throw new AggregateError(cleanupErrors, `Path oracle cleanup failed`, {
-      cause: primaryFailure?.error,
-    })
-  }
-  if (primaryFailure) throw primaryFailure.error
 }
 
 const flat = new PropRef([`a.b`])
@@ -107,10 +81,32 @@ async function readyCollection(
   return collection
 }
 
-const expectedKeys = rows
-  .filter((row) => row[`a.b`] > 5 && row.a.b < 20)
-  .map((row) => row.id)
-  .sort()
+// Model: plain JavaScript keeps the rows that a predicate accepts, then sorts
+// their ids. The predicate is the only input, so every query shape shares it.
+function modelKeys(accepts: (row: Row) => boolean): Array<string> {
+  return rows
+    .filter(accepts)
+    .map((row) => row.id)
+    .sort()
+}
+
+// Model: the selected-field order is a JavaScript sort of both path values,
+// with ids breaking ties.
+function modelSelectedOrder(): Array<string> {
+  return [...rows]
+    .sort(
+      (left, right) =>
+        left[`a.b`] + left.a.b - (right[`a.b`] + right.a.b) ||
+        left.id.localeCompare(right.id),
+    )
+    .map((row) => row.id)
+}
+
+const expectedKeys = modelKeys((row) => row[`a.b`] > 5 && row.a.b < 20)
+
+declareOracle({
+  model: [modelKeys, modelSelectedOrder],
+})
 
 const cases: Array<{
   name: string
@@ -144,10 +140,7 @@ it.each(cases)(
   async ({ name, where, accepts }) => {
     await checkWithCleanup(async (register) => {
       const collection = await readyCollection(name, register)
-      const expected = rows
-        .filter(accepts)
-        .map((row) => row.id)
-        .sort()
+      const expected = modelKeys(accepts)
       const queryKeys = () =>
         collection
           .currentStateAsChanges({ where })!
@@ -205,13 +198,7 @@ it(`keeps selected dotted and nested paths distinct in a public order`, async ()
     register(() => result.cleanup())
 
     await result.stateWhenReady()
-    const expected = [...rows]
-      .sort(
-        (left, right) =>
-          left[`a.b`] + left.a.b - (right[`a.b`] + right.a.b) ||
-          left.id.localeCompare(right.id),
-      )
-      .map((row) => row.id)
+    const expected = modelSelectedOrder()
     expect(result.toArray.map((row) => row.id)).toEqual(expected)
   })
 })
@@ -239,30 +226,3 @@ it.each([false, true])(
     })
   },
 )
-
-it(`preserves a mismatch and secondary cleanup error`, async () => {
-  const primary = new Error(`wrong public rows`)
-  const cleanup = new Error(`cleanup failed`)
-  const released: Array<string> = []
-  let failure: unknown
-
-  try {
-    await checkWithCleanup((register) => {
-      register(() => {
-        released.push(`source`)
-        throw cleanup
-      })
-      register(() => {
-        released.push(`query`)
-      })
-      throw primary
-    })
-  } catch (error) {
-    failure = error
-  }
-
-  expect(released).toEqual([`query`, `source`])
-  expect(failure).toBeInstanceOf(AggregateError)
-  expect((failure as AggregateError).cause).toBe(primary)
-  expect((failure as AggregateError).errors).toEqual([cleanup])
-})
