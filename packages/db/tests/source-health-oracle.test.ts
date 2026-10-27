@@ -3050,18 +3050,17 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
   // reload that waits for it does not start the ended query (a 30-times
   // counterexample of the model, which counted the ended reload as settled
   // and started the query while B was still cleaning up).
-  "a cleanup that ends a source's reload keeps an ended query from starting":
-    [
-      on(`ready`, `A`),
-      on(`ready`, `B`),
-      { kind: `cleanup-during-reload`, source: `A`, at: `source-health` },
-      on(`reload`, `A`),
-      on(`ready`, `A`),
-      on(`fail`, `B`),
-      { kind: `reload-query` },
-      { kind: `cleanup-hold`, source: `B` },
-      on(`ready`, `A`),
-    ],
+  "a cleanup that ends a source's reload keeps an ended query from starting": [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    { kind: `cleanup-during-reload`, source: `A`, at: `source-health` },
+    on(`reload`, `A`),
+    on(`ready`, `A`),
+    on(`fail`, `B`),
+    { kind: `reload-query` },
+    { kind: `cleanup-hold`, source: `B` },
+    on(`ready`, `A`),
+  ],
   'a report before Collection readiness throws': [
     on(`report`, `A`),
     on(`healthy`, `B`),
