@@ -1,6 +1,7 @@
 /** Host receiving laws: page/worker writes converge; changing a legal store
- * name preserves replacement/clear isolation. The independent model is an
- * authored list per store, with replacement and emptying as ordinary list laws.
+ * name preserves replacement/clear isolation. This file declares no check or
+ * model: its checkpoints compare with an authored list per store, written as
+ * literal states after each step, so these scenarios are not an oracle.
  * At each settled delivery cut compare public rows, export and raw storage in
  * both hosts. Two typed keys in one insertion also receive the core payload law.
  * Dedicated workers are live throughout; suspension/service workers are outside
