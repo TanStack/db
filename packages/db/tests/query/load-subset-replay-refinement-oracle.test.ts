@@ -1330,6 +1330,8 @@ type OrderedReach = {
   failedSiblingDemandFailures: number
   // Lazy demand whose load threw while it started, inside its replay.
   thrownReplayDemands: number
+  // Window moves whose load threw while the move started.
+  thrownMoves: number
   // A failed demand retires while another failure still holds its barrier.
   partialFailureRetirements: number
   preloadReplayFailures: number
@@ -1656,6 +1658,7 @@ async function checkOrderedReplay(
     siblingDemandFailures: 0,
     failedSiblingDemandFailures: 0,
     thrownReplayDemands: 0,
+    thrownMoves: 0,
     partialFailureRetirements: 0,
     preloadReplayFailures: 0,
     discardedReplayMoves: 0,
@@ -2217,7 +2220,17 @@ async function checkOrderedReplay(
             const requested = { offset: command.offset, limit: command.limit }
             reach.windowMoves++
             const move = ++latestMove
-            const settled = live.utils.setWindow(requested)
+            let settled: true | Promise<void>
+            try {
+              settled = live.utils.setWindow(requested)
+            } catch (error) {
+              // A move whose load throws while it starts has settled, failed,
+              // as a rejected one has; the window stays where it was.
+              settledMoves.add(move)
+              failedMoves.add(move)
+              reach.thrownMoves++
+              throw error
+            }
             if (settled === true) {
               settleMove(move)
               window = requested
@@ -2705,6 +2718,29 @@ describe(`Ordered windows across truncate replays`, () => {
       recovers: true,
     },
     {
+      // Found by the broad random campaign at five times its run count. A
+      // window move's marker load throws while the move starts, after an
+      // older move that still waits. The older move's settlement returned
+      // the latest request, which was still itself: a chaining cycle.
+      name: `a window move whose load throws while an older move waits`,
+      history: [
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `settle`, ok: true, keepHolding: true, newest: false },
+        { type: `markerThrows` },
+        { type: `window`, offset: 0, limit: 2 },
+        { type: `mark`, id: 1, on: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 3,
+        joined: false,
+        markerMode: `on-demand`,
+        includes: true,
+        historyDuringPreload: true,
+      },
+      reaches: `thrownMoves`,
+    },
+    {
       // Trace 2 from a comment on #2221. The window grows to three rows while
       // loads are held, shrinks to one behind a marker replay, and a source
       // truncate then discards that replay. The deferred one-row move was
@@ -2846,6 +2882,7 @@ describe(`Ordered windows across truncate replays`, () => {
         siblingDemandFailures: 0,
         failedSiblingDemandFailures: 0,
         thrownReplayDemands: 0,
+        thrownMoves: 0,
         partialFailureRetirements: 0,
         preloadReplayFailures: 0,
         discardedReplayMoves: 0,
@@ -2885,6 +2922,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `failedSiblingDemandFailures`,
         `thrownReplayDemands`,
         `partialFailureRetirements`,
+        `thrownMoves`,
         `preloadReplayFailures`,
         `discardedReplayMoves`,
       ])

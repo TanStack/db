@@ -431,14 +431,17 @@ export class CollectionConfigBuilder<
       this.latestWindowRequest = undefined
       return true
     }
-    return (this.latestWindowRequest = settlement.then(
+    const settled: Promise<void> = settlement.then(
       () => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
           this.settledWindow = requestedWindow
         }
-        return request === this.windowRequestGeneration
+        // A newer call wins; one that threw while it started left this one
+        // latest, and a promise cannot settle on behalf of itself.
+        const latest = this.latestWindowRequest
+        return request === this.windowRequestGeneration || latest === settled
           ? undefined
-          : this.latestWindowRequest
+          : latest
       },
       (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
@@ -447,7 +450,8 @@ export class CollectionConfigBuilder<
         }
         throw error
       },
-    ))
+    )
+    return (this.latestWindowRequest = settled)
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
