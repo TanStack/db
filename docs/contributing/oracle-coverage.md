@@ -2951,6 +2951,25 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       because the persisted wrapper ends its transactions on cleanup; the
       Electric descriptor-isolation oracle kills it without persistence.
       On-demand cells judge receipts and status only.
+      Generated histories in the same file interleave server changes,
+      deploys, partial and complete deliveries, every stop except resume
+      invalidation, restarts, and reloads across two or three eager tabs
+      (fixed seed 952051961 and a random seed, 60 runs each;
+      `TANSTACK_DB_MULTI_TAB_ORACLE_SEED` and `_PATH` replay one). The
+      model folds committed batches into the expected durable rows. After
+      every step it judges the durable rows, every Collection status, and
+      the rows of each tab with no open transaction; after every tab catches
+      up it judges them again. A Collection status changes only through its
+      own source (maintainer decision on PR #2265): a peer's commit leaves a
+      `loading` or failed tab as it is. That law failed on `main` (a peer's
+      truncate reload marked such a tab ready); the fixed seed fails without
+      the repair. Removing the reservation gate, or the `onError`, give-up,
+      or signal-abort abandon, fails both campaigns. Each declared premise,
+      including a peer commit after each kind of stop mid-transaction, is
+      reached in every campaign. Known gap #2267 is left out of the
+      generated histories and pinned with `it.fails`: a resumed tab that lags
+      behind a peer can receive an update for a row the peer already
+      deleted, and Electric's resume check puts it in `error`.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in

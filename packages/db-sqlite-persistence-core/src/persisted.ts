@@ -964,7 +964,9 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
       ) => void)
     | null
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
-  truncate: ((options?: { markReady?: boolean }) => void) | null
+  // A runtime truncate replaces rows from durable state. It never changes
+  // Collection status: only the Collection's own source does.
+  truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
   markError: ((error: unknown) => void) | null
 }
@@ -2563,7 +2565,7 @@ class PersistedCollectionRuntime<
         if (this.syncControls.begin && this.syncControls.commit) {
           const applied = this.withInternalApply(() => {
             this.syncControls.begin?.()
-            this.syncControls.truncate?.({ markReady: false })
+            this.syncControls.truncate?.()
             if (resetMetadata) {
               this.syncControls.metadata?.collection.set(
                 resetMetadata.key,
@@ -5997,7 +5999,7 @@ function createWrappedSyncConfig<
           begin: params.begin,
           write: params.write as SyncControlFns<T, TKey>[`write`],
           commit: params.commit,
-          truncate: params.truncate,
+          truncate: () => params.truncate({ markReady: false }),
           metadata: params.metadata ?? null,
           markError: params.markError,
         },
@@ -6861,7 +6863,7 @@ function createLoopbackSyncConfig<
           begin: params.begin,
           write: params.write as SyncControlFns<T, TKey>[`write`],
           commit: params.commit,
-          truncate: params.truncate,
+          truncate: () => params.truncate({ markReady: false }),
           metadata: params.metadata ?? null,
           markError: params.markError,
         },
