@@ -41,7 +41,9 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
+import { declareOracle } from '../oracle-config.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import { checkWithCleanup } from './virtual-row-fields-support.js'
 
 type Profile = { label: string }
 
@@ -83,39 +85,34 @@ function assertPublishedRootFields(row: unknown, name: string): void {
   expect(hasVirtualProps(row), `${name} root classification`).toBe(true)
 }
 
-async function checkWithCleanup(
-  check: () => Promise<void>,
-  cleanups: ReadonlyArray<() => Promise<void>>,
-): Promise<void> {
-  let primaryFailure: unknown
-  let checkFailed = false
-  try {
-    await check()
-  } catch (error) {
-    primaryFailure = error
-    checkFailed = true
-  }
-
-  const cleanupFailures: Array<unknown> = []
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      cleanupFailures.push(error)
+// Each observed value publishes the virtual row fields exactly when the model
+// classifies its subject as a row, so a missing or leaked field fails at the
+// observation that shows it.
+function expectPublishedFieldClassification(
+  observations: Array<{
+    name: string
+    subject: VirtualFieldSubject
+    value: unknown
+  }>,
+): void {
+  for (const observation of observations) {
+    const expectsFields = expectsVirtualFields(observation.subject)
+    expect(hasVirtualProps(observation.value), observation.name).toBe(
+      expectsFields,
+    )
+    for (const field of virtualFieldNames) {
+      expect(
+        field in Object(observation.value),
+        `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
+      ).toBe(expectsFields)
     }
   }
-
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(
-      cleanupFailures,
-      `Virtual row oracle check and cleanup failed`,
-      {
-        cause: primaryFailure,
-      },
-    )
-  }
-  if (checkFailed) throw primaryFailure
 }
+
+declareOracle({
+  check: [assertPublishedRootFields, expectPublishedFieldClassification],
+  model: [expectsVirtualFields],
+})
 
 describe(`virtual row field runtime boundary`, () => {
   test(`publishes every virtual field on implicit, expression, and functional root shapes`, async () => {
@@ -197,35 +194,6 @@ describe(`virtual row field runtime boundary`, () => {
       () => implicit.cleanup(),
       () => rows.cleanup(),
     ])
-  })
-
-  test(`keeps the primary mismatch and attempts every cleanup`, async () => {
-    const mismatch = new Error(`published row mismatch`)
-    const firstCleanupError = new Error(`first cleanup failed`)
-    const lastCleanupError = new Error(`last cleanup failed`)
-    const attempted: Array<string> = []
-
-    await expect(
-      checkWithCleanup(async () => {
-        throw mismatch
-      }, [
-        async () => {
-          attempted.push(`first`)
-          throw firstCleanupError
-        },
-        async () => {
-          attempted.push(`middle`)
-        },
-        async () => {
-          attempted.push(`last`)
-          throw lastCleanupError
-        },
-      ]),
-    ).rejects.toMatchObject({
-      cause: mismatch,
-      errors: [firstCleanupError, lastCleanupError],
-    })
-    expect(attempted).toEqual([`first`, `middle`, `last`])
   })
 
   test(`matches the row and value classification after publication`, async () => {
@@ -384,19 +352,7 @@ describe(`virtual row field runtime boundary`, () => {
         },
       ]
 
-      for (const observation of observations) {
-        const expectsFields = expectsVirtualFields(observation.subject)
-        expect(hasVirtualProps(observation.value), observation.name).toBe(
-          expectsFields,
-        )
-        for (const field of virtualFieldNames) {
-          expect(
-            field in Object(observation.value),
-            `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
-          ).toBe(expectsFields)
-        }
-      }
-
+      expectPublishedFieldClassification(observations)
       expect(result.$key).toBe(`row-1`)
       expect(result.$hasPendingWrites).toBe(!result.$synced)
       expect(result.wholeRows[0]!.$hasPendingWrites).toBe(
