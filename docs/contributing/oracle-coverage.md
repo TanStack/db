@@ -3143,7 +3143,7 @@ status, and a seed's metadata survives a reload after a named notice
 (decisions 9, 11, and 15 to 18). The peer is the driver, not a second
 Collection, so the claim stops at the controlled coordinator; a second
 production driver with two real coordinators is the open receiving
-witness. Missed notices and notices over the targeted key limit are not
+witness (issue #2272). Missed notices and notices over the targeted key limit are not
 generated; the persisted oracle's grids cover them. Two held-cleanup
 Query retention witnesses race on CI; the maintainer deferred the race until
 a failure reports the timer trace these witnesses now print, and the review

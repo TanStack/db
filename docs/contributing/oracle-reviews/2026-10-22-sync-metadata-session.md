@@ -862,7 +862,8 @@ Evidence:
 - **Limits.** The peer is the driver; no second Collection or real
   coordinator delivers its notices, so the claim stops at the controlled
   coordinator (ORC-014). The next receiving witness is a second production
-  driver of this oracle with two coordinators over a real channel. Missed
+  driver of this oracle with two coordinators over a real channel
+  (issue #2272). Missed
   notices and notices over the targeted key limit are not generated; the
   persisted oracle's grids cover them. The adapter is in memory, and restart
   stays outside this oracle.
