@@ -84,7 +84,8 @@ export function wrapDriver(
   }
   return {
     ...rawDriver,
-    makeSource: (data) => state.sources!.track(rawDriver.makeSource(data)),
+    makeSource: (data, collectionId) =>
+      state.sources!.track(rawDriver.makeSource(data, collectionId)),
     makeOnDemandSource: (data, delay) =>
       state.sources!.track(rawDriver.makeOnDemandSource(data, delay)),
     makeLaggingOnDemandSource: (data) =>
@@ -168,6 +169,6 @@ export async function waitForAsync(check: () => boolean): Promise<void> {
 /** Harness self-test: the suite registers each scenario key exactly once. */
 export function registerRegistrySelfTest(registry: ScenarioRegistry): void {
   it(`registers every distinct scenario without whole-test waivers`, () => {
-    expect(registry.size).toBe(39)
+    expect(registry.size).toBe(43)
   })
 }

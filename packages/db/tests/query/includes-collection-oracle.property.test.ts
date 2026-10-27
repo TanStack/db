@@ -6,6 +6,7 @@ import {
   concat,
   createLiveQueryCollection,
   eq,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -977,7 +978,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
           first: materialize(childRows().findOne()),
@@ -1074,7 +1075,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
           first: materialize(childRows().findOne()),
@@ -1246,11 +1247,13 @@ describe(`Collection-valued includes oracle`, () => {
         const live = createLiveQueryCollection((q) =>
           q.from({ parent: parents.collection }).select(({ parent }) => ({
             id: parent.id,
-            children: q
-              .from({ child: orderedChildren })
-              .where(({ child }) => eq(child.parentGroup, parent.group))
-              .orderBy(({ child }) => child.rank)
-              .select(({ child }) => ({ id: child.id, value: child.value })),
+            children: include(
+              q
+                .from({ child: orderedChildren })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .orderBy(({ child }) => child.rank)
+                .select(({ child }) => ({ id: child.id, value: child.value })),
+            ),
           })),
         )
         const callbacks: Array<{
@@ -1435,12 +1438,14 @@ describe(`Collection-valued includes oracle`, () => {
       const live = createLiveQueryCollection((q) =>
         q.from({ parent: parents.collection }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children })
-            .where(({ child }) => eq(child.parentGroup, parent.group))
-            .orderBy(({ child }) => child.rank)
-            .limit(2)
-            .select(({ child }) => ({ id: child.id, value: child.value })),
+          children: include(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.rank)
+              .limit(2)
+              .select(({ child }) => ({ id: child.id, value: child.value })),
+          ),
         })),
       )
       const callbacks: Array<{

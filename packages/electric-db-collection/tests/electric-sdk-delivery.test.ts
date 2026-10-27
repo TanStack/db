@@ -1,8 +1,8 @@
 // Installed-SDK delivery cases whose expectations are written by hand: an
-// ordinary subset snapshot, an externally aborted subset, a managed cache
-// rotation, a partial cache after cold restart, ordered concurrent snapshots,
-// a persisted restart, and scoped restarts that quarantine uncertified cache
-// rows. The delivery laws they illustrate are owned by
+// ordinary subset snapshot, an externally aborted subset, a partial cache after
+// cold restart, ordered concurrent snapshots, a persisted restart, and scoped
+// restarts that quarantine uncertified cache rows. The delivery laws they
+// illustrate are owned by
 // electric-sdk-delivery-oracle.property.test.ts.
 import { DatabaseSync } from 'node:sqlite'
 import { expect, it, vi } from 'vitest'
@@ -23,24 +23,19 @@ import {
   withElectricCleanup,
   withElectricSetup,
 } from './electric-oracle-lifecycle'
-import {
-  managedTagPersistence,
-  storageTargetId,
-} from './electric-persistence-fixture'
+import { managedTagPersistence } from './electric-persistence-fixture'
 import {
   controlledCoordinator,
   controlledHttp,
   deferred,
   headers,
+  recordVisibilityListeners,
 } from './electric-sdk-delivery-support'
 import type { Item, Request } from './electric-sdk-delivery-support'
 import type { SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type { TestRow } from './electric-persistence-fixture'
 import type { ElectricCollectionUtils } from '../src/electric'
-import type {
-  PersistenceAdapter,
-  SQLiteDriver,
-} from '../../db-sqlite-persistence-core/src'
+import type { SQLiteDriver } from '../../db-sqlite-persistence-core/src'
 
 let sequence = 0
 
@@ -260,211 +255,6 @@ it(`does not certify an aborted SDK subset snapshot`, async () => {
     await expect(Promise.resolve(second)).rejects.toMatchObject({
       name: `AbortError`,
     })
-  }, [() => collection.cleanup(), () => http.close()])
-})
-
-/**
- * A managed cache claim can expire while an installed SDK snapshot request is
- * still in flight. The source model has no row for the old predicate and one
- * row for the new predicate. The old provider session loses authority before
- * cache rotation; its late HTTP response cannot publish or persist a row in
- * the new generation. The replacement session must settle both demands from
- * its own snapshots. This receives the controlled provider-restart law through
- * the installed ShapeStream and HTTP path. A Map-backed adapter supplies the
- * generation boundary; real SQLite and native hosts have separate owners.
- */
-it(`discards an old SDK snapshot after managed cache rotation`, async () => {
-  const http = controlledHttp()
-  const rows = new Map<string, Map<number, Item>>([
-    [`old-generation`, new Map()],
-  ])
-  const metadata = new Map<string, Map<string, unknown>>([
-    [`old-generation`, new Map()],
-  ])
-  let storageId = `old-generation`
-  let claimExpired = false
-  let rotations = 0
-  const claimId = `managed-sdk-claim`
-  const adapter: PersistenceAdapter = {
-    claimCacheGeneration: () =>
-      Promise.resolve({
-        storageCollectionId: storageId,
-        claimId,
-        expiresAtMs: Date.now() + 10_000,
-      }),
-    renewCacheGenerationClaim: () =>
-      Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
-    rotateCacheGeneration: (
-      _collectionId,
-      _claimId,
-      resetMetadata,
-      expectedStorageId,
-    ) => {
-      expect(expectedStorageId).toBe(storageId)
-      rotations++
-      storageId = `new-generation`
-      rows.set(storageId, new Map())
-      metadata.set(
-        storageId,
-        new Map(
-          resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
-        ),
-      )
-      claimExpired = false
-      return Promise.resolve({
-        storageCollectionId: storageId,
-        claimId,
-        expiresAtMs: Date.now() + 10_000,
-      })
-    },
-    releaseCacheGenerationClaim: async () => {},
-    loadSubset: (id) =>
-      Promise.resolve(
-        Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
-          key,
-          value,
-        })),
-      ),
-    loadResumeSnapshot: (id) =>
-      Promise.resolve({
-        rows: Array.from(
-          rows.get(storageTargetId(id)) ?? [],
-          ([key, value]) => ({
-            key,
-            value,
-          }),
-        ),
-        keySet: {
-          status:
-            storageTargetId(id) === `old-generation`
-              ? `consistent`
-              : `incompatible`,
-        },
-        collectionMetadata: Array.from(
-          metadata.get(storageTargetId(id)) ?? [],
-          ([key, value]) => ({ key, value }),
-        ),
-        latestTerm: 0,
-        latestSeq: 0,
-        latestRowVersion: 0,
-        resetEpoch: 0,
-      }),
-    applyCommittedTx: (id, tx) => {
-      expect(tx.cacheGenerationClaimId).toBe(claimId)
-      const generationRows = rows.get(storageTargetId(id))!
-      if (tx.truncate) generationRows.clear()
-      for (const mutation of tx.mutations) {
-        if (mutation.type === `delete`) {
-          generationRows.delete(Number(mutation.key))
-        } else {
-          generationRows.set(Number(mutation.key), mutation.value as Item)
-        }
-      }
-      const generationMetadata = metadata.get(storageTargetId(id))!
-      for (const mutation of tx.collectionMetadataMutations ?? []) {
-        if (mutation.type === `delete`) generationMetadata.delete(mutation.key)
-        else generationMetadata.set(mutation.key, mutation.value)
-      }
-      return Promise.resolve()
-    },
-    ensureIndex: async () => {},
-  }
-  const electric = electricCollectionOptions<Item>({
-    id: `sdk-managed-restart-${++sequence}`,
-    shapeOptions: {
-      url: `http://test-url/managed-restart-${sequence}`,
-      params: { table: `rows` },
-      // A provider can finish an HTTP request after stream retirement.
-      fetchClient: (input, init) =>
-        http.fetchClient(input, { ...init, signal: undefined }),
-    },
-    syncMode: `on-demand`,
-    startSync: true,
-    getKey: (row) => row.id,
-  })
-  const collection = createCollection(
-    persistedCollectionOptions<
-      Item,
-      string | number,
-      never,
-      ElectricCollectionUtils<Item>
-    >({
-      ...electric,
-      persistence: { adapter },
-    }),
-  )
-  const demand = (id: number) => ({
-    where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
-  })
-  const respond = (request: Request, row: Item | undefined, offset: number) =>
-    request.respond(
-      new Response(
-        JSON.stringify({
-          metadata: {
-            xmin: `10`,
-            xmax: `20`,
-            xip_list: [],
-            database_lsn: `10`,
-            snapshot_mark: offset,
-          },
-          data: row
-            ? [
-                {
-                  key: String(row.id),
-                  value: { ...row, id: String(row.id) },
-                  headers: { operation: `insert` },
-                },
-              ]
-            : [],
-        }),
-        { headers: headers(offset) },
-      ),
-    )
-
-  await withElectricCleanup(async () => {
-    await atCheckpoint(http.take(), `old managed stream`)
-    const oldDemand = Promise.resolve(collection._sync.loadSubset(demand(1)))
-    void oldDemand.catch(() => undefined)
-    const oldSnapshot = await atCheckpoint(
-      http.take(true),
-      `old managed subset snapshot`,
-    )
-
-    claimExpired = true
-    const newDemand = Promise.resolve(collection._sync.loadSubset(demand(2)))
-    void newDemand.catch(() => undefined)
-    await vi.waitFor(() => expect(rotations).toBe(1))
-    expect(storageId).toBe(`new-generation`)
-
-    // The replacement SDK first reacquires the old demand, then the new one.
-    // Empty source snapshots for id 1 distinguish source authority from the
-    // old request's late row; the id 2 snapshot establishes the new row.
-    respond(
-      await atCheckpoint(http.take(true), `first replacement snapshot`),
-      undefined,
-      2,
-    )
-    respond(
-      await atCheckpoint(http.take(true), `replayed old demand`),
-      undefined,
-      3,
-    )
-    respond(
-      await atCheckpoint(http.take(true), `new demand snapshot`),
-      { id: 2, name: `fresh` },
-      4,
-    )
-    await atCheckpoint(
-      Promise.all([oldDemand, newDemand]),
-      `replacement demand settlement`,
-    )
-    expect(collection.get(2)?.name).toBe(`fresh`)
-
-    respond(oldSnapshot, { id: 1, name: `late-old` }, 1)
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    expect(collection.get(1)).toBeUndefined()
-    expect(collection.get(2)?.name).toBe(`fresh`)
-    expect([...rows.get(`new-generation`)!.keys()]).toEqual([2])
   }, [() => collection.cleanup(), () => http.close()])
 })
 
@@ -1167,3 +957,101 @@ it.each([
     ])
   },
 )
+
+// EventTarget identifies a listener by callback and capture, coalesces duplicate
+// additions, and applies removals in order (DOM Standard, "EventTarget"). This
+// bounded calibration sends every sequence of up to three add/remove calls
+// through the real EventTarget, then compares dispatch with the recorder before
+// teardown. Two callbacks and both capture modes distinguish wrong identities;
+// omitted, boolean, and object options distinguish equivalent capture spellings.
+// Three calls reach add/remove/re-add. Once and signal options are outside this
+// recorder's installed-SDK domain.
+it(`records EventTarget ownership across bounded listener histories`, () => {
+  type Step = {
+    add: boolean
+    callback: number
+    options: boolean | { capture: boolean } | undefined
+  }
+  const options = [
+    undefined,
+    false,
+    true,
+    { capture: false },
+    { capture: true },
+  ]
+  const steps: Array<Step> = [false, true].flatMap((add) =>
+    [0, 1].flatMap((callback) =>
+      options.map((capture) => ({ add, callback, options: capture })),
+    ),
+  )
+  function* histories(prefix: Array<Step> = []): Generator<Array<Step>> {
+    yield prefix
+    if (prefix.length < 3)
+      for (const step of steps) yield* histories([...prefix, step])
+  }
+  let checked = 0
+  for (const history of histories()) {
+    const listeners = recordVisibilityListeners()
+    const callbacks = [vi.fn(), vi.fn()]
+    try {
+      for (const step of history) {
+        const callback = callbacks[step.callback]!
+        if (step.add)
+          document.addEventListener(`visibilitychange`, callback, step.options)
+        else
+          document.removeEventListener(
+            `visibilitychange`,
+            callback,
+            step.options,
+          )
+      }
+      document.dispatchEvent(new Event(`visibilitychange`))
+      // Native dispatch supplies the independent count, including both capture
+      // identities of one callback. Teardown cannot change this observation.
+      const dispatched = callbacks.reduce(
+        (count, callback) => count + callback.mock.calls.length,
+        0,
+      )
+      expect(listeners.live(), JSON.stringify(history)).toBe(dispatched)
+      checked++
+    } finally {
+      listeners.restore()
+      for (const callback of callbacks) {
+        document.removeEventListener(`visibilitychange`, callback, false)
+        document.removeEventListener(`visibilitychange`, callback, true)
+      }
+    }
+  }
+  expect(checked).toBe(8421)
+}, 60_000)
+
+// Teardown must preserve a failed comparison and release its registrations.
+// Enumerate every retained subset of three fresh callbacks. Dispatch observes
+// actual EventTarget ownership independently of the recorder's live count.
+it(`releases recorded listeners after preserving a primary failure`, async () => {
+  for (let retained = 0; retained < 8; retained++) {
+    const listeners = recordVisibilityListeners()
+    const callbacks = Array.from({ length: 3 }, () => vi.fn())
+    const primary = new Error(`listener comparison failed`)
+    try {
+      await expect(
+        withElectricCleanup(() => {
+          for (const [index, callback] of callbacks.entries()) {
+            document.addEventListener(`visibilitychange`, callback)
+            if ((retained & (1 << index)) === 0)
+              document.removeEventListener(`visibilitychange`, callback)
+          }
+          expect(listeners.registered()).toBe(3)
+          throw primary
+        }, [() => listeners.restore()]),
+      ).rejects.toBe(primary)
+      document.dispatchEvent(new Event(`visibilitychange`))
+      for (const callback of callbacks) expect(callback).not.toHaveBeenCalled()
+    } finally {
+      // Independent cleanup also makes this calibration safe on the old recorder.
+      for (const callback of callbacks)
+        document.removeEventListener(`visibilitychange`, callback)
+      listeners.restore()
+    }
+  }
+})

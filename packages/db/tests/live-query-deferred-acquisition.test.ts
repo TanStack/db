@@ -535,9 +535,21 @@ describe(`a source whose start throws on resumption`, () => {
   })
 })
 describe(`preload answered by a DbClient stream`, () => {
-  for (const stream of [`pending`, `success`] as const) {
-    it(`a ${stream} stream still resumes deferred acquisition`, async () => {
-      const { collection: source, counts } = makeSource(`eager-idle`)
+  it.each(
+    ([`pending`, `success`] as const).flatMap((stream) =>
+      (
+        [
+          `eager-idle`,
+          `eager-render-deferred`,
+          `on-demand-idle`,
+          `on-demand-render-deferred`,
+        ] as const
+      ).map((state) => ({ stream, state })),
+    ),
+  )(
+    `a $stream stream still resumes $state acquisition`,
+    async ({ stream, state }) => {
+      const { collection: source, counts } = makeSource(state)
       const { outer } = makeLiveQuery(source, `all`, 1)
       const client = new DbClient()
       const queryHash = `deferred-acquisition-stream-${stream}`
@@ -556,14 +568,15 @@ describe(`preload answered by a DbClient stream`, () => {
         void observer.preload()
         await settle()
         expect(counts.starts, `after the preload`).toBe(1)
+        expect(counts.acquisitions > 0).toBe(state.startsWith(`on-demand`))
         expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
       } finally {
         observer.dispose()
         await outer.cleanup()
         await source.cleanup()
       }
-    })
-  }
+    },
+  )
 })
 
 describe(`a subscriber that outlives cleanup`, () => {

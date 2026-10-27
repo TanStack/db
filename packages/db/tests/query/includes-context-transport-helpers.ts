@@ -7,7 +7,7 @@
  */
 
 import { expect } from 'vitest'
-import { materialize, toArray } from '../../src/query/index.js'
+import { include, materialize, toArray } from '../../src/query/index.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { Context, QueryBuilder } from '../../src/query/builder/index.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
@@ -92,7 +92,7 @@ export function includeInEveryForm<TContext extends Context>(
   query: QueryBuilder<TContext>,
 ) {
   return {
-    collection: query,
+    collection: include(query),
     array: toArray(query),
     materialized: materialize(query),
   }

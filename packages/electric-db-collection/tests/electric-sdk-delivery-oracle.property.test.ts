@@ -2,16 +2,19 @@ import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { IR, createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   controlledHttp,
   deferred,
   headers,
+  recordVisibilityListeners,
 } from './electric-sdk-delivery-support'
 import {
   atCheckpoint,
@@ -23,7 +26,10 @@ import {
   createRetryModel,
   expectedRetryObservation,
 } from './electric-retry-decision-model'
-import type { Item } from './electric-sdk-delivery-support'
+import { storageTargetId } from './electric-persistence-fixture'
+import type { Item, Request } from './electric-sdk-delivery-support'
+import type { ElectricCollectionUtils } from '../src/electric'
+import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type {
   RetryDecision,
   RetryModel,
@@ -32,6 +38,26 @@ import type {
 } from './electric-retry-decision-model'
 import type { SyncMetadataApi } from '@tanstack/db'
 import type { Message } from '@electric-sql/client'
+import type * as ElectricSdkModule from '@electric-sql/client'
+
+// Observe the real constructor boundary without changing the installed SDK's
+// options, prototype, methods, or HTTP behavior. Only the rotation lane enables
+// the callback; every construction still executes the original ShapeStream.
+const sdkConstruction = vi.hoisted(() => ({
+  observe: undefined as (() => void) | undefined,
+}))
+vi.mock(`@electric-sql/client`, async (importOriginal) => {
+  const original = await importOriginal<typeof ElectricSdkModule>()
+  return {
+    ...original,
+    ShapeStream: new Proxy(original.ShapeStream, {
+      construct(target, args, newTarget) {
+        sdkConstruction.observe?.()
+        return Reflect.construct(target, args, newTarget)
+      },
+    }),
+  }
+})
 
 /**
  * # Does the installed Electric SDK deliver the adapter's assumed protocol?
@@ -68,6 +94,8 @@ import type { Message } from '@electric-sql/client'
  * A real node:sqlite cold-launch witness starts with an incompatible partial
  * cache and no reset marker. It must exclude that row before and after the
  * installed SDK returns an empty source snapshot for the demanded predicate.
+ * A source-release lane, documented at its property, checks that cleanup
+ * removes every listener that a run's streams registered on `document`.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
  * the authored snapshot or move frames, nor do they cover multiple row keys,
@@ -97,7 +125,13 @@ if (
 // with the model state at each checkpoint. The retry model is the shared
 // module `electric-retry-decision-model.ts`, which predicts each observation.
 declareOracle({
-  check: [checkSnapshots, checkMembership, runClientRetryCell],
+  check: [
+    checkSnapshots,
+    checkMembership,
+    runClientRetryCell,
+    checkSourceRelease,
+    checkManagedRotation,
+  ],
   model: [createRetryModel, applyRetryModel, expectedRetryObservation],
 })
 
@@ -892,4 +926,710 @@ fixedCase.each(clientRetryCells)(
   `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
   (outcome, mode, decision) => runClientRetryCell(outcome, mode, decision),
   60_000,
+)
+
+/**
+ * A managed cache claim can expire while an installed SDK snapshot request is
+ * still in flight. The source model has no row for the old predicate and one
+ * row for the new predicate. The old provider session loses authority before
+ * cache rotation; its late HTTP response cannot publish or persist a row in
+ * either generation. The SQLite persistence guide requires immediate retirement
+ * of expired source callbacks. This restriction belongs to this expired session;
+ * a peer with a valid claim may still use a retired generation. Each round
+ * remembers its retired storage target and excludes only the late response's
+ * absent key there, allowing other retained rows. The replacement session must
+ * settle both demands from its own snapshots. This receives the controlled
+ * provider-restart law through the installed ShapeStream and HTTP path. A
+ * Map-backed adapter supplies the generation boundary; real SQLite and native
+ * hosts have separate owners.
+ * It also receives the stream-listener release law below for the retired
+ * session. The Electric guide requires releasing its owned resources before
+ * constructing the replacement ShapeStream. The independent rule is zero
+ * old listeners at that constructor boundary, one replacement listener after
+ * delivery, and zero after cleanup. Cache rotation may finish before disposal;
+ * no zero-listener promise applies while the rotation result is held.
+ *
+ * Generated histories rotate one to three times in the same sync run. Each
+ * retired HTTP snapshot arrives while rotation is held, just before replacement
+ * snapshots, or after replacement settlement. A forwarding constructor observer
+ * records listener ownership before invoking the real SDK. It does not release
+ * resources or replace SDK behavior. This lane
+ * covers sequential rotations in an on-demand run with the installed browser
+ * SDK; overlapping rotations, other SDK versions, and native hosts remain separate.
+ * Both retained demands must remain pending until replacement source responses
+ * arrive. Promise outcomes are observed while rotation is held and again before
+ * the first replacement response; final rows alone cannot establish settlement.
+ */
+type RetiredSnapshotCut =
+  `during-rotation` | `before-snapshots` | `after-snapshots`
+const createRotationReach = () =>
+  createOracleReach<
+    | RetiredSnapshotCut
+    | `first-session`
+    | `replacement-session`
+    | `demands-await-replacement`
+    | `retired-target-observed`
+  >(`electric.sdk-rotation-release`, [
+    `during-rotation`,
+    `before-snapshots`,
+    `after-snapshots`,
+    `first-session`,
+    `replacement-session`,
+    `demands-await-replacement`,
+    `retired-target-observed`,
+  ])
+let rotationReach: ReturnType<typeof createRotationReach> | undefined
+
+async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
+  rotationReach?.beginHistory()
+  const listeners = recordVisibilityListeners()
+  const http = controlledHttp()
+  const rows = new Map<string, Map<number, Item>>([
+    [`old-generation`, new Map()],
+  ])
+  const metadata = new Map<string, Map<string, unknown>>([
+    [`old-generation`, new Map()],
+  ])
+  let storageId = `old-generation`
+  let claimExpired = false
+  let rotations = 0
+  let allowRotation = deferred<void>()
+  let rotationRequested = deferred<void>()
+  let replacementConstructed = deferred<void>()
+  const beforeConstruction: Array<number> = []
+  sdkConstruction.observe = () => {
+    beforeConstruction.push(listeners.live())
+    replacementConstructed.resolve()
+  }
+  const claimId = `managed-sdk-claim`
+  const adapter: PersistenceAdapter = {
+    claimCacheGeneration: () =>
+      Promise.resolve({
+        storageCollectionId: storageId,
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
+      }),
+    renewCacheGenerationClaim: () =>
+      Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
+    rotateCacheGeneration: (
+      _collectionId,
+      _claimId,
+      resetMetadata,
+      expectedStorageId,
+    ) => {
+      expect(expectedStorageId).toBe(storageId)
+      rotations++
+      rotationRequested.resolve()
+      storageId = `generation-${rotations}`
+      rows.set(storageId, new Map())
+      metadata.set(
+        storageId,
+        new Map(
+          resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
+        ),
+      )
+      claimExpired = false
+      return allowRotation.promise.then(() => ({
+        storageCollectionId: storageId,
+        claimId,
+        expiresAtMs: Date.now() + 10_000,
+      }))
+    },
+    releaseCacheGenerationClaim: async () => {},
+    loadSubset: (id) =>
+      Promise.resolve(
+        Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
+          key,
+          value,
+        })),
+      ),
+    loadResumeSnapshot: (id) =>
+      Promise.resolve({
+        rows: Array.from(
+          rows.get(storageTargetId(id)) ?? [],
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        ),
+        keySet: {
+          status:
+            storageTargetId(id) === `old-generation`
+              ? `consistent`
+              : `incompatible`,
+        },
+        collectionMetadata: Array.from(
+          metadata.get(storageTargetId(id)) ?? [],
+          ([key, value]) => ({ key, value }),
+        ),
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+    applyCommittedTx: (id, tx) => {
+      expect(tx.cacheGenerationClaimId).toBe(claimId)
+      const generationRows = rows.get(storageTargetId(id))!
+      if (tx.truncate) generationRows.clear()
+      for (const mutation of tx.mutations) {
+        if (mutation.type === `delete`) {
+          generationRows.delete(Number(mutation.key))
+        } else {
+          generationRows.set(Number(mutation.key), mutation.value as Item)
+        }
+      }
+      const generationMetadata = metadata.get(storageTargetId(id))!
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`) generationMetadata.delete(mutation.key)
+        else generationMetadata.set(mutation.key, mutation.value)
+      }
+      return Promise.resolve()
+    },
+    ensureIndex: async () => {},
+  }
+  const electric = electricCollectionOptions<Item>({
+    id: `sdk-managed-restart-${++sequence}`,
+    shapeOptions: {
+      url: `http://test-url/managed-restart-${sequence}`,
+      params: { table: `rows` },
+      // A provider can finish an HTTP request after stream retirement.
+      fetchClient: (input, init) =>
+        http.fetchClient(input, { ...init, signal: undefined }),
+    },
+    syncMode: `on-demand`,
+    startSync: true,
+    getKey: (row) => row.id,
+  })
+  const collection = await withElectricSetup(
+    () =>
+      createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          ElectricCollectionUtils<Item>
+        >({
+          ...electric,
+          persistence: { adapter },
+        }),
+      ),
+    [
+      () => allowRotation.resolve(),
+      () => http.close(),
+      () => listeners.restore(),
+      () => {
+        sdkConstruction.observe = undefined
+      },
+    ],
+  )
+  const demand = (id: number) => ({
+    where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+  })
+  const respond = (request: Request, row: Item | undefined, offset: number) =>
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: offset,
+          },
+          data: row
+            ? [
+                {
+                  key: String(row.id),
+                  value: { ...row, id: String(row.id) },
+                  headers: { operation: `insert` },
+                },
+              ]
+            : [],
+        }),
+        { headers: headers(offset) },
+      ),
+    )
+
+  await withElectricCleanup(async () => {
+    for (const [round, retiredSnapshotCut] of cuts.entries()) {
+      allowRotation = deferred<void>()
+      rotationRequested = deferred<void>()
+      const oldId = round * 2 + 1
+      const newId = oldId + 1
+      const retiredStorageId = storageId
+      const oldOptions = demand(oldId)
+      const newOptions = demand(newId)
+      const settlements: Array<`pending` | `fulfilled` | `rejected`> = []
+      const loadDemand = (options: ReturnType<typeof demand>) => {
+        const slot = settlements.push(`pending`) - 1
+        const result = Promise.resolve(collection._sync.loadSubset(options))
+        void result.then(
+          () => {
+            settlements[slot] = `fulfilled`
+          },
+          () => {
+            settlements[slot] = `rejected`
+          },
+        )
+        return result
+      }
+      const assertDemandsPending = async (checkpoint: string) => {
+        // Requests are still held. Yield one task so nested promise reactions
+        // report an early settlement before comparing their public outcomes.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect([...settlements], checkpoint).toEqual([`pending`, `pending`])
+      }
+      await atCheckpoint(http.take(), `old managed stream`)
+      const oldDemand = loadDemand(oldOptions)
+      const oldSnapshot = await atCheckpoint(
+        http.take(true),
+        `old managed subset snapshot`,
+      )
+
+      replacementConstructed = deferred<void>()
+      claimExpired = true
+      const newDemand = loadDemand(newOptions)
+      await atCheckpoint(rotationRequested.promise, `managed rotation entry`)
+      expect(rotations).toBe(round + 1)
+      expect(storageId).toBe(`generation-${round + 1}`)
+      expect([...beforeConstruction]).toHaveLength(round + 1)
+      expect(listeners.registered()).toBe(round + 1)
+
+      const deliverRetiredSnapshot = async () => {
+        respond(oldSnapshot, { id: oldId, name: `late-old` }, round * 4 + 1)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(collection.get(oldId)).toBeUndefined()
+        expect(
+          rows.get(retiredStorageId)!.has(oldId),
+          `retired response in retired cache`,
+        ).toBe(false)
+        rotationReach?.reach(`retired-target-observed`)
+      }
+      if (retiredSnapshotCut === `during-rotation`)
+        await deliverRetiredSnapshot()
+      await assertDemandsPending(`demands while cache rotation is held`)
+      allowRotation.resolve()
+      await atCheckpoint(
+        replacementConstructed.promise,
+        `replacement construction`,
+      )
+      expect([...beforeConstruction]).toHaveLength(round + 2)
+      expect(
+        beforeConstruction[round + 1],
+        `retired listeners before replacement construction`,
+      ).toBe(0)
+      rotationReach?.reach(retiredSnapshotCut)
+      rotationReach?.reach(
+        round === 0 ? `first-session` : `replacement-session`,
+      )
+      if (retiredSnapshotCut === `before-snapshots`)
+        await deliverRetiredSnapshot()
+      await assertDemandsPending(`demands before replacement source responses`)
+      rotationReach?.reach(`demands-await-replacement`)
+
+      // The replacement SDK first reacquires the old demand, then the new one.
+      // Empty snapshots for oldId distinguish source authority from the old
+      // request's late row; the newId snapshot establishes the fresh row.
+      respond(
+        await atCheckpoint(http.take(true), `first replacement snapshot`),
+        undefined,
+        round * 4 + 2,
+      )
+      respond(
+        await atCheckpoint(http.take(true), `replayed old demand`),
+        undefined,
+        round * 4 + 3,
+      )
+      respond(
+        await atCheckpoint(http.take(true), `new demand snapshot`),
+        { id: newId, name: `fresh` },
+        round * 4 + 4,
+      )
+      await atCheckpoint(
+        Promise.all([oldDemand, newDemand]),
+        `replacement demand settlement`,
+      )
+      expect([...settlements]).toEqual([`fulfilled`, `fulfilled`])
+      expect(collection.get(newId)?.name).toBe(`fresh`)
+
+      if (retiredSnapshotCut === `after-snapshots`)
+        await deliverRetiredSnapshot()
+      expect(collection.get(oldId)).toBeUndefined()
+      expect(collection.get(newId)?.name).toBe(`fresh`)
+      expect([...rows.get(storageId)!.keys()]).toEqual([newId])
+      expect(
+        rows.get(retiredStorageId)!.has(oldId),
+        `retired response in retired cache after replacement`,
+      ).toBe(false)
+      expect(listeners.registered()).toBe(round + 2)
+      expect(listeners.live(), `live listeners after rotation`).toBe(1)
+      // End these demands before the next round; its fresh IDs ensure an old
+      // source snapshot is really in flight when the next claim expires.
+      collection._sync.unloadSubset(oldOptions)
+      collection._sync.unloadSubset(newOptions)
+    }
+  }, [
+    () => allowRotation.resolve(),
+    () => collection.cleanup(),
+    () => http.close(),
+    () => expect(listeners.live(), `live listeners after cleanup`).toBe(0),
+    () => listeners.restore(),
+    () => {
+      sdkConstruction.observe = undefined
+    },
+  ])
+}
+
+fixedCase(`discards an old SDK snapshot after managed cache rotation`, () =>
+  checkManagedRotation([`after-snapshots`]),
+)
+const rotationViolation = sameViolation()
+sdkCampaigns(
+  `electric.sdk-rotation-release`,
+  `releases retired SDK resources before constructing a replacement`,
+  20261026,
+  rotationViolation,
+  async (seed) => {
+    rotationReach = createRotationReach()
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.constantFrom<RetiredSnapshotCut>(
+            `during-rotation`,
+            `before-snapshots`,
+            `after-snapshots`,
+          ),
+          { minLength: 1, maxLength: 3 },
+        ),
+        (cuts) =>
+          rotationViolation.check(cuts, () => checkManagedRotation(cuts)),
+      ),
+      {
+        ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
+        ...(seed === undefined ? {} : { seed }),
+      },
+    )
+    rotationReach.assertReached()
+  },
+)
+
+/**
+ * # Cleanup releases the installed client's stream listeners
+ *
+ * Cleanup ends a sync run and releases its adapter-owned resources
+ * (`CleanupFn` in `packages/db/src/types.ts`, and "Sync Implementation" in the
+ * collection options creator guide). The Electric adapter constructs one
+ * ShapeStream per provider session. The installed client registers a
+ * `visibilitychange` listener on `document` for each stream, so that the
+ * stream pauses while the page is hidden. That listener keeps the stream
+ * reachable until the client releases it. The law: after cleanup, `document`
+ * holds no `visibilitychange` listener from a stream of the cleaned-up run,
+ * whatever state the source reached. While a run is active, it holds at most
+ * the listener of its one stream.
+ *
+ * The model is the number of active sync runs, 0 or 1. It reads no adapter or
+ * client state. A run is active from its start until its cleanup, and each run
+ * constructs one stream, so the expected number of live listeners is at most
+ * the number of active runs, and exactly 0 once no run is active. The model
+ * does not predict when an active stream releases its listener, because the
+ * client may release it early, for example when its signal aborts.
+ *
+ * The history grammar has a sync mode and one to three sync runs. The first
+ * run starts with the Collection; each later run is a restart of the
+ * cleaned-up Collection through `preload()`. In each run the provider answers
+ * zero to three requests: a row-only batch, a row with an up-to-date, an HTTP
+ * 409 reset, or a 503 that `onError` retries. Rows and resets may remain
+ * incomplete when cleanup starts; neither needs a later up-to-date first.
+ * The run then stays open, gives up on one more 503, aborts the external
+ * signal, or receives a 503 whose asynchronous `onError` decision stays
+ * pending through cleanup. That held decision can later retry or give up;
+ * neither future outcome may postpone the run's resource release. Held
+ * decisions settle only in fixture teardown, so later runs can start while
+ * an old decision is still pending. Cleanup ends the run. The signal stays
+ * aborted, so a run that starts after an abort
+ * starts with an aborted signal and sends no request. The provider answers
+ * only a request the client sent. The grammar does not answer a request after
+ * a give-up or an abort, because the client sends none.
+ *
+ * The production driver uses a real Collection, the Electric adapter, the
+ * installed ShapeStream, and controlled HTTP. The recorder wraps
+ * `document.addEventListener` and `document.removeEventListener` and counts
+ * the `visibilitychange` listeners still registered. The comparison runs after
+ * each ordinary provider answer, give-up, abort, and cleanup. Ordinary answers
+ * wait for the next request; a held decision instead positively observes
+ * `onError` entry before cleanup, without awaiting that decision. The model
+ * still requires zero listeners after completed cleanup. The active upper
+ * bound and one-registration-per-run calibration describe this installed SDK
+ * and the driver's one-stream topology, rather than a universal SDK policy.
+ *
+ * Limits: the lane observes the browser listener in jsdom. Client versions
+ * that observe React Native's AppState instead register through a runtime
+ * adapter, which this lane does not install. A live Electric service and
+ * snapshot requests are outside this lane. The managed cache rotation case
+ * above replaces a provider session within one run; it receives the same law
+ * for the retired session.
+ */
+type ReleaseRun = {
+  answers: Array<`row` | `up-to-date` | `reset` | `retry`>
+  end: `open` | `give-up` | `abort` | `deciding-retry` | `deciding-give-up`
+}
+type ReleaseHistory = {
+  mode: `eager` | `on-demand` | `progressive`
+  runs: Array<ReleaseRun>
+}
+type ReleaseState =
+  | `cleanup-while-loading`
+  | `cleanup-after-ready`
+  | `cleanup-after-give-up`
+  | `cleanup-after-abort`
+  | `cleanup-of-restarted-run`
+  | `cleanup-after-partial-delivery`
+  | `cleanup-during-reset`
+  | `cleanup-during-retry-decision`
+
+const createReleaseReach = () =>
+  createOracleReach<ReleaseState>(`electric.sdk-source-release`, [
+    `cleanup-while-loading`,
+    `cleanup-after-ready`,
+    `cleanup-after-give-up`,
+    `cleanup-after-abort`,
+    `cleanup-of-restarted-run`,
+    `cleanup-after-partial-delivery`,
+    `cleanup-during-reset`,
+    `cleanup-during-retry-decision`,
+  ])
+// Each campaign declares its own reach.
+let releaseReach = createReleaseReach()
+
+async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
+  releaseReach.beginHistory()
+  const listeners = recordVisibilityListeners()
+  const http = controlledHttp()
+  const external = new AbortController()
+  let retries = true
+  let onErrorCalls = 0
+  let heldDecision:
+    ReturnType<typeof deferred<Record<string, never> | void>> | undefined
+  const settleDecisions: Array<() => void> = []
+  const collection = createCollection(
+    electricCollectionOptions<Item>({
+      id: `sdk-release-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/release-${sequence}`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+        signal: external.signal,
+        backoffOptions: {
+          initialDelay: 0,
+          maxDelay: 0,
+          multiplier: 1,
+          maxRetries: 0,
+        },
+        onError: () => {
+          onErrorCalls++
+          return heldDecision?.promise ?? (retries ? {} : undefined)
+        },
+      },
+      syncMode: history.mode,
+      startSync: true,
+      getKey: (row) => row.id,
+    }),
+  )
+
+  // The model is `activeRuns`. `sending` chooses legal provider steps.
+  // `pendingAnswers` records authored rows/resets since the latest up-to-date,
+  // not adapter internals; readiness reach uses public Collection status.
+  let activeRuns = 1
+  let runsStarted = 1
+  let sending = true
+  let offset = 0
+  const pendingAnswers = new Set<`row` | `reset`>()
+
+  const check = (label: string) =>
+    expect(listeners.live(), `${label}: live listeners`).toBeLessThanOrEqual(
+      activeRuns,
+    )
+  const next = (label: string) =>
+    atCheckpoint(http.take(), `${label} HTTP request`)
+
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  await withElectricCleanup(async () => {
+    for (const [index, run] of history.runs.entries()) {
+      if (index > 0) {
+        void collection.preload().catch(() => undefined)
+        activeRuns = 1
+        runsStarted++
+        sending = !external.signal.aborted
+        pendingAnswers.clear()
+      }
+      let request = sending ? await next(`run ${index} start`) : undefined
+      for (const answer of run.answers) {
+        if (!request) break
+        if (answer === `row` || answer === `up-to-date`) {
+          offset++
+          request.respond(
+            new Response(
+              JSON.stringify([
+                {
+                  key: `1`,
+                  value: { id: `1`, name: `row` },
+                  headers: { operation: `insert` },
+                },
+                ...(answer === `up-to-date`
+                  ? [
+                      {
+                        headers: {
+                          control: `up-to-date`,
+                          global_last_seen_lsn: String(offset),
+                        },
+                      },
+                    ]
+                  : []),
+              ]),
+              { headers: headers(offset) },
+            ),
+          )
+          if (answer === `up-to-date`) {
+            pendingAnswers.clear()
+          } else pendingAnswers.add(`row`)
+        } else if (answer === `reset`) {
+          offset++
+          request.respond(
+            new Response(
+              JSON.stringify([{ headers: { control: `must-refetch` } }]),
+              { status: 409, headers: { 'electric-handle': `shape` } },
+            ),
+          )
+          pendingAnswers.clear()
+          pendingAnswers.add(`reset`)
+        } else {
+          request.respond(new Response(`transient`, { status: 503 }))
+        }
+        request = await next(`run ${index} ${answer}`)
+        check(`run ${index} ${answer}`)
+      }
+      if (
+        request &&
+        (run.end === `deciding-retry` || run.end === `deciding-give-up`)
+      ) {
+        const calls = onErrorCalls
+        const decision = deferred<Record<string, never> | void>()
+        heldDecision = decision
+        settleDecisions.push(() =>
+          decision.resolve(run.end === `deciding-retry` ? {} : undefined),
+        )
+        request.respond(new Response(`transient`, { status: 503 }))
+        await vi.waitFor(() => expect(onErrorCalls).toBe(calls + 1))
+        releaseReach.reach(`cleanup-during-retry-decision`)
+        check(`run ${index} pending decision`)
+      } else if (request && run.end === `give-up`) {
+        const calls = onErrorCalls
+        retries = false
+        request.respond(new Response(`transient`, { status: 503 }))
+        await vi.waitFor(() => expect(onErrorCalls).toBe(calls + 1))
+        retries = true
+        sending = false
+        check(`run ${index} give-up`)
+      } else if (run.end === `abort` && !external.signal.aborted) {
+        external.abort()
+        sending = false
+        check(`run ${index} abort`)
+      }
+
+      releaseReach.reach(
+        external.signal.aborted
+          ? `cleanup-after-abort`
+          : !sending
+            ? `cleanup-after-give-up`
+            : collection.status === `ready`
+              ? `cleanup-after-ready`
+              : `cleanup-while-loading`,
+      )
+      if (index > 0) releaseReach.reach(`cleanup-of-restarted-run`)
+      if (pendingAnswers.has(`row`))
+        releaseReach.reach(`cleanup-after-partial-delivery`)
+      if (pendingAnswers.has(`reset`))
+        releaseReach.reach(`cleanup-during-reset`)
+      await collection.cleanup()
+      activeRuns = 0
+      check(`run ${index} cleanup`)
+      // A later run has its own decision; the old promise remains unresolved.
+      heldDecision = undefined
+    }
+    // Calibration: the recorder observed the listener of every run's stream.
+    expect(listeners.registered()).toBe(runsStarted)
+  }, [
+    () => collection.cleanup(),
+    () => settleDecisions.forEach((settle) => settle()),
+    () => http.close(),
+    () => listeners.restore(),
+    () => consoleError.mockRestore(),
+    () => consoleWarn.mockRestore(),
+  ])
+}
+
+// Replay the smallest incomplete deliveries and their terminal neighbors in
+// every mode through the same driver and cleanup comparison as generation.
+fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
+  `releases listeners after incomplete delivery in %s mode`,
+  async (mode) => {
+    for (const answer of [`row`, `reset`] as const)
+      for (const end of [
+        `open`,
+        `give-up`,
+        `abort`,
+        `deciding-retry`,
+        `deciding-give-up`,
+      ] as const)
+        await checkSourceRelease({ mode, runs: [{ answers: [answer], end }] })
+  },
+)
+
+const releaseViolation = sameViolation()
+const releaseProperty = fc.asyncProperty(
+  fc.record({
+    mode: fc.constantFrom(
+      `eager` as const,
+      `on-demand` as const,
+      `progressive` as const,
+    ),
+    runs: fc.array(
+      fc.record({
+        answers: fc.array(
+          fc.constantFrom(
+            `row` as const,
+            `up-to-date` as const,
+            `reset` as const,
+            `retry` as const,
+          ),
+          { maxLength: 3 },
+        ),
+        end: fc.constantFrom(
+          `open` as const,
+          `give-up` as const,
+          `abort` as const,
+          `deciding-retry` as const,
+          `deciding-give-up` as const,
+        ),
+      }),
+      { minLength: 1, maxLength: 3 },
+    ),
+  }),
+  (history: ReleaseHistory) =>
+    releaseViolation.check(history, () => checkSourceRelease(history)),
+)
+sdkCampaigns(
+  `electric.sdk-source-release`,
+  `releases every installed-SDK stream listener when a sync run is cleaned up`,
+  20261024,
+  releaseViolation,
+  async (seed) => {
+    releaseReach = createReleaseReach()
+    await fc.assert(releaseProperty, {
+      ...oraclePropertyOptions(40, `electric.sdk-source-release`),
+      ...(seed === undefined ? {} : { seed }),
+    })
+    releaseReach.assertReached()
+  },
 )

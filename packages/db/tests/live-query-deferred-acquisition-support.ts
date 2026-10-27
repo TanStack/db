@@ -23,6 +23,8 @@ export const ROWS: Array<Row> = [
  * `on-demand-holding` already holds every row, as it would after another
  * consumer's acquisition. Each fixture counts sync-run starts and acquisition
  * attempts: those are its provider work.
+ * `-render-deferred` sources are idle behind an abandoned render's start gate.
+ * They expose the same demand law through a different production start path.
  */
 export type SourceState =
   | `eager-idle`
@@ -30,6 +32,8 @@ export type SourceState =
   | `on-demand-idle`
   | `on-demand-running`
   | `on-demand-holding`
+  | `eager-render-deferred`
+  | `on-demand-render-deferred`
 /**
  * ## Query shapes
  *
@@ -62,7 +66,7 @@ export function makeSource(state: SourceState) {
     id: `deferred-acquisition-${sequence++}`,
     getKey: (row) => row.id,
     syncMode: onDemand ? `on-demand` : `eager`,
-    startSync: state !== `eager-idle` && state !== `on-demand-idle`,
+    startSync: state.endsWith(`running`) || state.endsWith(`holding`),
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     gcTime: 0,
@@ -98,6 +102,7 @@ export function makeSource(state: SourceState) {
       },
     },
   })
+  if (state.endsWith(`render-deferred`)) collection._deferSyncStart()
   return { collection, counts, truncate: () => truncateRows?.() }
 }
 export function makeLiveQuery(

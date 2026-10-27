@@ -25,8 +25,8 @@
  */
 
 import { describe, expect, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
   add,

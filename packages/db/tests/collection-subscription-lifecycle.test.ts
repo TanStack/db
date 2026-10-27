@@ -665,3 +665,32 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 })
+
+// During ordinary admission, the new owner exists before subscribeChanges
+// returns its handle. Cleanup in the acquiring-count callback must retain that
+// demand even though the subscription has not joined the publication channel.
+// The token judgment is one surviving owner, independent of production's list.
+it(`retains admitted demand during subscriber-change cleanup`, async () => {
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  let cleanup: Promise<void> | undefined
+  let observed: boolean | undefined
+  const off = source.on(`subscribers:change`, ({ subscriberCount }) => {
+    if (subscriberCount !== 1) return
+    cleanup = source.cleanup()
+    observed = source._hasSubscriberOrPreload()
+  })
+  const subscription = source.subscribeChanges(() => {})
+  try {
+    expect(observed).toBe(true)
+    expect(source.subscriberCount).toBe(1)
+    await cleanup
+  } finally {
+    off()
+    subscription.unsubscribe()
+    await source.cleanup()
+  }
+})

@@ -1,24 +1,32 @@
 /** Ordinary tests moved from descriptor-query-binding-oracle.test.tsx; the oracle file owns the law. */
+import { Writable } from 'node:stream'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
+  BTreeIndex,
   DbClient,
   Query,
+  UnhashableQueryIRError,
   collectionOptions,
   createCollection,
+  createLiveQueryCollection,
   eq,
+  getLiveQueryHash,
   getStableQueryBuilderHash,
   isUndefined,
   prepareLiveQueryValue,
   toArray,
 } from '@tanstack/db'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Suspense } from 'react'
+import { renderToPipeableStream, renderToString } from 'react-dom/server'
+import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import type { Row } from './descriptor-query-binding-support.tsx'
+import { renderSsr } from './descriptor-query-binding-support'
+import type { Row } from './descriptor-query-binding-support'
 import type {
   Context,
   DeferredLiveQueryCollections,
@@ -131,52 +139,6 @@ describe(`standalone descriptor query binding`, () => {
     expect(lateMaterializations).toBe(0)
     expect(lateStarts).toBe(0)
     mounted.unmount()
-  })
-  it(`lets a direct reader start a source after a descriptor render suspends`, async () => {
-    const client = new DbClient()
-    let starts = 0
-    const descriptor = collectionOptions(`suspended-direct-reader`, () => ({
-      id: `suspended-direct-reader`,
-      getKey: (row: Row) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ markReady }) => {
-          starts++
-          markReady()
-        },
-      },
-    }))
-    const query = new Query().from({ item: descriptor })
-    const never = new Promise<void>(() => {})
-
-    function Suspended(): ReactNode {
-      useLiveQuery({ query })
-      throw never
-    }
-
-    const mounted = render(
-      <DbProvider client={client}>
-        <Suspense fallback={<div>Waiting</div>}>
-          <Suspended />
-        </Suspense>
-      </DbProvider>,
-    )
-    const source = client.collection(descriptor)
-    let directRead: Promise<void> | undefined
-    try {
-      expect(mounted.getByText(`Waiting`)).toBeDefined()
-      expect(starts, `before commit or direct demand`).toBe(0)
-
-      directRead = source.preload()
-      void directRead.catch(() => {})
-      expect(starts, `direct demand starts the source`).toBe(1)
-      await directRead
-      expect(source.status).toBe(`ready`)
-    } finally {
-      mounted.unmount()
-      await client.cleanup()
-      await directRead?.catch(() => {})
-    }
   })
   it(`rejects an unbound descriptor after a same-hash concrete query`, async () => {
     const id = `standalone-descriptor-unbound-transition`
@@ -1293,3 +1255,452 @@ describe(`standalone descriptor query binding`, () => {
     }
   }
 })
+
+// Suspense discovery is explicit data demand in streaming mode. A warm source
+// must still register this query, rather than bypassing transport because its
+// live-query Collection happens to be ready before the wrapper reads it.
+describe(`SSR Suspense discovery`, () => {
+  for (const warm of [false, true]) {
+    it(`streams a render-discovered result with warm=${warm}`, async () => {
+      const descriptor = collectionOptions(`ssr-suspense-discovery`, () => ({
+        id: `ssr-suspense-discovery`,
+        getKey: (row: { id: string; name: string }) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, name: `server 1` } })
+            commit()
+            markReady()
+          },
+        },
+      }))
+      const client = new DbClient()
+      client._setSsrStreamingEnabled(true)
+      const query = new Query()
+        .from({ person: descriptor })
+        .select(({ person }) => ({ name: person.name }))
+      function Consumer() {
+        const result = useLiveSuspenseQuery({ query })
+        return <span>{result.data.map((row) => row.name).join(`,`)}</span>
+      }
+      // This driver invokes React's Node server host inside jsdom. Match the
+      // actual host's globals so the hydration getter cannot mistake it for a
+      // browser receiver waiting for a record the server has not produced yet.
+      const originalWindow = globalThis.window
+      vi.stubGlobal(`window`, undefined)
+      try {
+        if (warm)
+          await client.preloadLiveQuery({
+            query: new Query()
+              .from({ person: descriptor })
+              .select(({ person }) => ({ id: person.id })),
+          })
+        const errors: Array<unknown> = []
+        const html = await new Promise<string>((resolve, reject) => {
+          let text = ``
+          const sink = new Writable({
+            write(chunk, _encoding, done) {
+              text += chunk.toString()
+              done()
+            },
+          })
+          sink.on(`finish`, () => resolve(text))
+          sink.on(`error`, reject)
+          const stream = renderToPipeableStream(
+            <DbProvider client={client}>
+              <Suspense fallback={<span>loading</span>}>
+                <Consumer />
+              </Suspense>
+            </DbProvider>,
+            {
+              onAllReady() {
+                stream.pipe(sink)
+              },
+              onError(error) {
+                errors.push(error)
+              },
+            },
+          )
+        })
+        expect(errors).toEqual([])
+        expect(html).toContain(`<span>server 1</span>`)
+        const hash = getLiveQueryHash({ query })
+        const result = client
+          .dehydrate({ shouldDehydrateLiveQuery: () => true })
+          .liveQueries?.find((entry) => entry.queryHash === hash)
+        expect(
+          result,
+          `render-discovered warm and cold results enter transport`,
+        ).toBeDefined()
+        const snapshot = result?.snapshot ?? (await result?.promise)
+        expect(snapshot?.rows.map((row) => row.value)).toEqual([
+          expect.objectContaining({ name: `server 1` }),
+        ])
+      } finally {
+        vi.stubGlobal(`window`, originalWindow)
+        await client.cleanup()
+      }
+    })
+  }
+})
+
+/** Prepared Suspense results must render on either React server host. Streaming
+ * is explicit demand; opaque logic still requires a portable identity even
+ * when warm. This bounded grammar crosses source/query preparation, empty/nonempty
+ * results, streaming on/off, and keyed/unkeyed opaque discovery. The observation
+ * is final server markup and server errors, before any browser can repair it.
+ */
+describe(`SSR Suspense receiving matrix`, () => {
+  for (const streaming of [false, true]) {
+    for (const preparation of [`source`, `query`] as const) {
+      for (const count of [0, 2]) {
+        it(`renders prepared ${preparation} count=${count} streaming=${streaming}`, async () => {
+          const descriptor = collectionOptions(`suspense-prepared`, () => ({
+            id: `suspense-prepared`,
+            getKey: (row: { id: string; name: string }) => row.id,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                begin()
+                for (let i = 0; i < count; i++)
+                  write({
+                    type: `insert`,
+                    value: { id: String(i), name: `server ${i}` },
+                  })
+                commit()
+                markReady()
+              },
+            },
+          }))
+          const client = new DbClient()
+          client._setSsrStreamingEnabled(streaming)
+          const query = new Query()
+            .from({ person: descriptor })
+            .select(({ person }) => ({ name: person.name }))
+          function Consumer() {
+            const { data } = useLiveSuspenseQuery({ query })
+            return (
+              <output>
+                {data.map((row) => row.name).join(`,`) || `empty ready`}
+              </output>
+            )
+          }
+          const app = (
+            <DbProvider client={client}>
+              <Suspense fallback={<span>loading</span>}>
+                <Consumer />
+              </Suspense>
+            </DbProvider>
+          )
+          const browserWindow = globalThis.window
+          try {
+            if (preparation === `source`)
+              await client.collection(descriptor).preload()
+            else await client.preloadLiveQuery({ query })
+            vi.stubGlobal(`window`, undefined)
+            let html: string
+            const errors: Array<unknown> = []
+            if (!streaming) html = renderToString(app)
+            else
+              html = await new Promise<string>((resolve, reject) => {
+                let result = ``
+                const sink = new Writable({
+                  write(chunk, _encoding, done) {
+                    result += chunk.toString()
+                    done()
+                  },
+                })
+                sink.on(`finish`, () => resolve(result))
+                sink.on(`error`, reject)
+                const stream = renderToPipeableStream(app, {
+                  onAllReady() {
+                    stream.pipe(sink)
+                  },
+                  onError(error) {
+                    errors.push(error)
+                  },
+                })
+              })
+            expect(errors).toEqual([])
+            expect(
+              html,
+              `prepared results finish rather than suspend forever`,
+            ).toContain(
+              `<output>${count ? `server 0,server 1` : `empty ready`}</output>`,
+            )
+          } finally {
+            vi.stubGlobal(`window`, browserWindow)
+            await client.cleanup()
+          }
+        })
+      }
+    }
+  }
+  for (const warm of [false, true])
+    for (const keyed of [false, true]) {
+      it(`checks opaque streaming identity warm=${warm} keyed=${keyed}`, async () => {
+        const descriptor = collectionOptions(`opaque-ssr`, () => ({
+          id: `opaque-ssr`,
+          getKey: (row: { id: string }) => row.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              write({ type: `insert`, value: { id: `server` } })
+              commit()
+              markReady()
+            },
+          },
+        }))
+        const client = new DbClient()
+        client._setSsrStreamingEnabled(true)
+        const query = new Query()
+          .from({ row: descriptor })
+          .fn.where(({ row }) => row.id.length > 0)
+        function Consumer() {
+          const { data } = useLiveSuspenseQuery({
+            query,
+            ...(keyed ? { queryKey: [`opaque`] } : {}),
+          })
+          return <output>{data.map((row) => row.id).join(`,`)}</output>
+        }
+        const browserWindow = globalThis.window
+        try {
+          if (warm)
+            await client.preloadLiveQuery({
+              query: new Query()
+                .from({ row: descriptor })
+                .select(({ row }) => ({ id: row.id })),
+            })
+          vi.stubGlobal(`window`, undefined)
+          const errors: Array<unknown> = []
+          const html = await new Promise<string>((resolve, reject) => {
+            let result = ``
+            const sink = new Writable({
+              write(chunk, _encoding, done) {
+                result += chunk.toString()
+                done()
+              },
+            })
+            sink.on(`finish`, () => resolve(result))
+            sink.on(`error`, reject)
+            const stream = renderToPipeableStream(
+              <DbProvider client={client}>
+                <Suspense fallback={<span>loading</span>}>
+                  <Consumer />
+                </Suspense>
+              </DbProvider>,
+              {
+                onAllReady() {
+                  stream.pipe(sink)
+                },
+                onError(error) {
+                  errors.push(error)
+                },
+              },
+            )
+          })
+          if (keyed) {
+            expect(errors).toEqual([])
+            expect(html).toContain(`<output>server</output>`)
+            expect(
+              client
+                .dehydrate()
+                .liveQueries?.some(
+                  (q) =>
+                    q.queryHash === getLiveQueryHash({ query }, [`opaque`]),
+                ),
+            ).toBe(true)
+          } else {
+            expect(
+              errors,
+              `warm rows do not waive transport identity`,
+            ).toHaveLength(1)
+            // The shared conformance identity law rejects an unkeyed opaque
+            // React query during preparation, before SSR stream admission.
+            // Warming the source does not change that programming error.
+            expect(errors[0]).toBeInstanceOf(UnhashableQueryIRError)
+          }
+        } finally {
+          vi.stubGlobal(`window`, browserWindow)
+          await client.cleanup()
+        }
+      })
+    }
+})
+
+/** Result identity includes the caller's current input and its initial window.
+ * The reference is authored rows sliced by page size, never transport records.
+ * Browser replacement crosses builder -> callback Collection, with a distinct
+ * explicit key or derived identity. Server preload checks both matching and
+ * unbounded windows under one key; their portable result identities must differ.
+ */
+function useRuntimeWindow(
+  input: unknown,
+  config: { pageSize: number; queryKey?: Array<string> },
+) {
+  // Exercise the callback-returned Collection runtime path without extending
+  // TypeScript's current QueryBuilder-only callback overload.
+  return Reflect.apply(useLiveInfiniteQuery, undefined, [input, config]) as {
+    data: Array<{ id: string; name: string }>
+  }
+}
+describe(`infinite hydration identity`, () => {
+  for (const keyed of [false, true])
+    it(`switches to callback Collection keyed=${keyed}`, async () => {
+      const source = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `infinite-identity-source`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `a`, name: `old` },
+            { id: `b`, name: `new` },
+          ],
+        }),
+      )
+      const client = new DbClient()
+      const oldQuery = new Query()
+        .from({ row: source })
+        .where(({ row }) => eq(row.id, `a`))
+        .orderBy(({ row }) => row.id)
+      const supplied = createLiveQueryCollection({
+        query: new Query()
+          .from({ row: source })
+          .where(({ row }) => eq(row.id, `b`))
+          .orderBy(({ row }) => row.id)
+          .limit(2),
+      })
+      let unmount: (() => void) | undefined
+      try {
+        await client.preloadLiveQuery({
+          query: oldQuery.limit(2),
+          ...(keyed ? { queryKey: [`old`] } : {}),
+        })
+        await supplied.preload()
+        const wrapper = ({ children }: { children: ReactNode }) => (
+          <DbProvider client={client}>{children}</DbProvider>
+        )
+        const hook = renderHook(
+          ({ replacement }: { replacement: boolean }) =>
+            useRuntimeWindow(() => (replacement ? supplied : oldQuery), {
+              pageSize: 1,
+              ...(keyed ? { queryKey: [replacement ? `new` : `old`] } : {}),
+            }),
+          { wrapper, initialProps: { replacement: false } },
+        )
+        unmount = hook.unmount
+        expect(hook.result.current.data.map((row) => row.name)).toEqual([`old`])
+        hook.rerender({ replacement: true })
+        expect(
+          hook.result.current.data.map((row) => row.name),
+          `replacement owns its hydration identity`,
+        ).toEqual([`new`])
+      } finally {
+        unmount?.()
+        await client.cleanup()
+        await supplied.cleanup()
+        await source.cleanup()
+      }
+    })
+  for (const matching of [false, true])
+    it(`keeps keyed initial window distinct matching=${matching}`, async () => {
+      const descriptor = collectionOptions(`window-identity`, () => ({
+        id: `window-identity`,
+        getKey: (row: { id: string }) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const id of [`a`, `b`, `c`, `d`])
+              write({ type: `insert`, value: { id } })
+            commit()
+            markReady()
+          },
+        },
+      }))
+      const query = new Query()
+        .from({ row: descriptor })
+        .orderBy(({ row }) => row.id)
+      const client = new DbClient()
+      try {
+        const unbounded = getLiveQueryHash({ query }, [`window`])
+        const windowed = getLiveQueryHash({ query: query.limit(2).offset(0) }, [
+          `window`,
+        ])
+        await client.preloadLiveQuery({
+          query: matching ? query.limit(2).offset(0) : query,
+          queryKey: [`window`],
+        })
+        function Consumer() {
+          const result = useLiveInfiniteQuery(() => query, {
+            pageSize: 1,
+            queryKey: [`window`],
+          })
+          return <output>{result.data.map((row) => row.id).join(`,`)}</output>
+        }
+        const renderWindow = () =>
+          renderSsr(
+            <DbProvider client={client}>
+              <Consumer />
+            </DbProvider>,
+          )
+        if (matching) expect(renderWindow()).toContain(`<output>a</output>`)
+        else expect(renderWindow).toThrow(/SSR.*preload/)
+        expect(
+          unbounded,
+          `unbounded and windowed results cannot alias`,
+        ).not.toBe(windowed)
+        if (matching)
+          expect(
+            client
+              .dehydrate()
+              .liveQueries?.find((q) => q.queryHash === windowed)?.snapshot
+              ?.rows,
+          ).toHaveLength(2)
+      } finally {
+        await client.cleanup()
+      }
+    })
+})
+
+// Explicit keys identify the same window across builder preload and supplied
+// Collection input, including a callback that returns that Collection.
+for (const callback of [false, true])
+  it(`hydrates a supplied window with callback=${callback}`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `supplied-window-key`,
+        getKey: (row) => row.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        initialData: [{ id: `a` }, { id: `b` }, { id: `c` }],
+      }),
+    )
+    const query = new Query()
+      .from({ row: source })
+      .orderBy(({ row }) => row.id)
+      .limit(2)
+      .offset(0)
+    const supplied = createLiveQueryCollection({ query })
+    const client = new DbClient()
+    function Consumer() {
+      const result = useRuntimeWindow(callback ? () => supplied : supplied, {
+        pageSize: 1,
+        queryKey: [`supplied`],
+      })
+      return <output>{result.data.map((row) => row.id).join(`,`)}</output>
+    }
+    try {
+      await client.preloadLiveQuery({ query, queryKey: [`supplied`] })
+      expect(
+        renderSsr(
+          <DbProvider client={client}>
+            <Consumer />
+          </DbProvider>,
+        ),
+      ).toContain(`<output>a</output>`)
+    } finally {
+      await client.cleanup()
+      await supplied.cleanup()
+      await source.cleanup()
+    }
+  })

@@ -32,6 +32,7 @@ import {
   sum,
   upper,
 } from '../../src/query/builder/functions.js'
+import { include } from '../../src/query/index.js'
 import {
   UnhashableQueryIRError,
   getLoadSubsetDemandKey,
@@ -684,13 +685,15 @@ const structuredQueries: Array<[string, () => QueryIR]> = [
       getQueryIR(
         new Query().from({ user: usersCollection }).select(({ user }) => ({
           id: user.id,
-          posts: new Query()
-            .from({ post: postsCollection })
-            .where(({ post }) => eq(post.userId, user.id))
-            .select(({ post }) => ({
-              id: post.id,
-              title: post.title,
-            })),
+          posts: include(
+            new Query()
+              .from({ post: postsCollection })
+              .where(({ post }) => eq(post.userId, user.id))
+              .select(({ post }) => ({
+                id: post.id,
+                title: post.title,
+              })),
+          ),
         })),
       ),
   ],

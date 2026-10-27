@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
   createCollection,
-  createEffect,
   createLiveQueryCollection,
   eq,
   withCollectionSyncConfigCleanup,
@@ -50,6 +49,150 @@ describe(`Collection cleanup oracle calibration`, () => {
 })
 
 describe(`Collection cleanup admission oracle`, () => {
+  // Logical demand is distinct from a request to start a sync run. Cleanup
+  // rejects the latter, including resumption, while a deferred subscription
+  // may retain demand without starting even a live-query Collection's run.
+  // Idle and cleaned-up sources distinguish this law from checking only ready
+  // Collections. The callback is the synchronous cleanup-start observation cut.
+  it.each(
+    ([`plain`, `live-query`] as const).flatMap((kind) =>
+      ([`idle`, `ready`, `cleaned-up`] as const).map((priorStatus) => ({
+        kind,
+        priorStatus,
+      })),
+    ),
+  )(
+    `retains deferred demand during $priorStatus $kind cleanup`,
+    async ({ kind, priorStatus }) => {
+      let starts = 0
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+          },
+        },
+      })
+      const live = createLiveQueryCollection({
+        query: (q) => q.from({ row: source }),
+        gcTime: 0,
+      })
+      const collection = kind === `plain` ? source : live
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let reached = false
+      if (priorStatus === `ready`) {
+        source.startSyncImmediate()
+        collection.startSyncImmediate()
+      } else if (priorStatus === `cleaned-up`) {
+        await collection.cleanup()
+      }
+      const before = starts
+      const stop = collection._onCleanupStart(() => {
+        reached = true
+        expect(() => collection.subscribeChanges(() => {})).toThrow(
+          expect.objectContaining(cleanupError),
+        )
+        subscription = collection.subscribeChanges(() => {}, {
+          deferAcquisition: true,
+          includeInitialState: true,
+        })
+        expect(subscription.isDeferringAcquisition()).toBe(true)
+        expect(() => subscription!.resumeDeferredAcquisition()).toThrow(
+          expect.objectContaining(cleanupError),
+        )
+        expect(collection.subscriberCount).toBe(0)
+        expect(starts).toBe(before)
+      })
+      await withOracleCleanup(async () => {
+        await collection.cleanup()
+        expect(reached).toBe(true)
+        expect(subscription).toBeDefined()
+        expect(starts).toBe(before)
+        stop()
+        subscription!.resumeDeferredAcquisition()
+        for (let turn = 0; turn < 10; turn++) await Promise.resolve()
+        expect(collection.status).toBe(`ready`)
+        expect(collection.subscriberCount).toBe(1)
+      }, [
+        stop,
+        () => subscription?.unsubscribe(),
+        () => live.cleanup(),
+        () => source.cleanup(),
+      ])
+    },
+  )
+
+  // Promise ownership changes only when a replacement run actually starts.
+  // A validation failure or a still-deferred start cannot create a second
+  // retirement. Successful admission is the neighboring case: its new run
+  // must have a distinct cleanup promise even before the old one settles.
+  it.each([
+    `none`,
+    `deferred-start`,
+    `listener-failure`,
+    `subscribe`,
+    `resume`,
+    `preload`,
+  ] as const)(
+    `preserves retirement identity through %s admission`,
+    async (admission) => {
+      let starts = 0
+      let cleanups = 0
+      const collection = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+            return () => {
+              cleanups++
+            }
+          },
+        },
+      })
+      collection.startSyncImmediate()
+      const first = collection.cleanup()
+      const failure = new Error(`demand failed before replacement startup`)
+      let stop = () => {}
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      let preload: Promise<void> | undefined
+      await withOracleCleanup(async () => {
+        if (admission === `listener-failure`) {
+          stop = collection[`_changes`].onFirstSubscriberOrPreload(() => {
+            throw failure
+          })
+          expect(() => collection.subscribeChanges(() => {})).toThrow(failure)
+        } else if (admission === `deferred-start`) {
+          collection._deferSyncStart()
+          collection.startSyncImmediate()
+        } else if (admission === `subscribe`) {
+          subscription = collection.subscribeChanges(() => {})
+        } else if (admission === `resume`) {
+          subscription = collection.subscribeChanges(() => {}, {
+            deferAcquisition: true,
+          })
+          subscription.resumeDeferredAcquisition()
+        } else if (admission === `preload`) preload = collection.preload()
+        const replacement = [`subscribe`, `resume`, `preload`].includes(
+          admission,
+        )
+        const second = collection.cleanup()
+        expect(second === first).toBe(!replacement)
+        expect(starts).toBe(replacement ? 2 : 1)
+        expect(cleanups).toBe(starts)
+        await Promise.all([first, second, preload])
+      }, [
+        () => stop(),
+        () => subscription?.unsubscribe(),
+        () => collection.cleanup(),
+      ])
+    },
+  )
   it(`awaits a structural thenable returned from contextual-void cleanup`, async () => {
     const cleanupGate = createDeferred<void>()
     let cleanupCalls = 0
@@ -296,55 +439,6 @@ describe(`Collection cleanup admission oracle`, () => {
       offSecond()
       cleanupGate.resolve()
       await source.cleanup().catch(() => undefined)
-    }
-  })
-
-  it(`releases an Effect cleanup-start observer registered during active cleanup`, async () => {
-    const cleanupGate = createDeferred<void>()
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return { cleanup: () => cleanupGate.promise }
-        },
-      },
-    })
-    const registerCleanupStart = source._onCleanupStart.bind(source)
-    let activeCleanupStartObservers = 0
-    source._onCleanupStart = (callback) => {
-      activeCleanupStartObservers++
-      const unsubscribe = registerCleanupStart(callback)
-      let active = true
-      return () => {
-        if (!active) return
-        active = false
-        activeCleanupStartObservers--
-        unsubscribe()
-      }
-    }
-
-    let effect: ReturnType<typeof createEffect> | undefined
-    try {
-      await source.preload()
-      const cleanup = source.cleanup()
-
-      effect = createEffect({
-        query: (q) => q.from({ row: source }),
-        onBatch: () => {},
-        onSourceError: () => {},
-      })
-
-      expect(effect.disposed).toBe(true)
-      expect(source.subscriberCount).toBe(0)
-      expect(activeCleanupStartObservers).toBe(0)
-
-      cleanupGate.resolve()
-      await cleanup
-    } finally {
-      cleanupGate.resolve()
-      await effect?.dispose()
-      await source.cleanup()
     }
   })
 

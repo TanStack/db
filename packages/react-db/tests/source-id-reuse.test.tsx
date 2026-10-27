@@ -2,12 +2,17 @@
 // deferral it acquired, so a later reader can start a shared Collection. The reuse
 // law is owned by source-id-reuse-oracle.test.tsx.
 import { act, render, renderHook, waitFor } from '@testing-library/react'
-import { DbClient, collectionOptions, eq } from '@tanstack/db'
+import {
+  DbClient,
+  SourceCollectionIdReuseError,
+  collectionOptions,
+  createCollection,
+  eq,
+} from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { TestErrorBoundary, source } from './source-id-reuse-support'
 import type { Context, QueryBuilder } from '@tanstack/db'
@@ -69,8 +74,8 @@ describe(`React source ID reuse`, () => {
                 .join({ failingB: failing[1]! }, ({ failingA, failingB }) =>
                   eq(failingA.id, failingB.id),
                 )
-                .join({ healthy }, ({ failingA, healthy }) =>
-                  eq(failingA.id, healthy.id),
+                .join({ healthy }, ({ failingA, healthy: row }) =>
+                  eq(failingA.id, row.id),
                 )
                 .join({ settings: current }, ({ failingA, settings }) =>
                   eq(failingA.id, settings.id),
@@ -106,76 +111,6 @@ describe(`React source ID reuse`, () => {
     }
   })
 
-  it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
-    const client = new DbClient()
-    const first = source(`settings`, `first`)
-    const replacement = source(`settings`, `replacement`)
-    let syncStarts = 0
-    const descriptor = collectionOptions(`shared-after-collision`, () => ({
-      id: `shared-after-collision`,
-      getKey: (row: Row) => row.id,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          syncStarts++
-          begin()
-          write({
-            type: `insert`,
-            value: { id: `one`, value: `shared`, rank: 1 },
-          })
-          commit()
-          markReady()
-        },
-      },
-    }))
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    function View({
-      current,
-      includeShared,
-    }: {
-      current: typeof first
-      includeShared: boolean
-    }) {
-      useLiveQuery({
-        client,
-        query: (q) =>
-          includeShared
-            ? q
-                .from({ settings: current })
-                .join({ shared: descriptor }, ({ settings, shared }) =>
-                  eq(settings.id, shared.id),
-                )
-            : q.from({ settings: current }),
-      })
-      return <div>Query</div>
-    }
-
-    try {
-      const root = render(
-        <TestErrorBoundary>
-          <View current={first} includeShared={false} />
-        </TestErrorBoundary>,
-      )
-      await act(async () => {})
-      root.rerender(
-        <TestErrorBoundary>
-          <View current={replacement} includeShared={true} />
-        </TestErrorBoundary>,
-      )
-      expect(root.getByText(`Rejected`)).toBeDefined()
-      expect(syncStarts).toBe(0)
-
-      const shared = client.collection(descriptor)
-      const reader = renderHook(() => useLiveQuery(shared))
-      await act(async () => {})
-      expect(reader.result.current.status).toBe(`ready`)
-      expect(reader.result.current.data[0]?.value).toBe(`shared`)
-      expect(syncStarts).toBe(1)
-    } finally {
-      consoleError.mockRestore()
-    }
-  })
-
   it(`rejects two distinct source objects with one ID in a single query`, () => {
     const leftSource = source(`settings`, `first`)
     const rightSource = source(`settings`, `second`)
@@ -190,7 +125,7 @@ describe(`React source ID reuse`, () => {
               ),
         }),
       ),
-    ).toThrow(/source Collection .*same ID/i)
+    ).toThrow(SourceCollectionIdReuseError)
   })
 
   it(`permits the same ID in a new hook after unmount and cleanup`, async () => {
@@ -213,6 +148,124 @@ describe(`React source ID reuse`, () => {
     await waitFor(() =>
       expect(newHook.result.current.data[0]?.value).toBe(`second`),
     )
+  })
+
+  it(`lets a keyed query swap a source under its ID when the key changes`, async () => {
+    const first = source(`settings`, `first`)
+    const replacement = source(`settings`, `replacement`)
+    const hook = renderHook(
+      ({ current }: { current: typeof first }) =>
+        useLiveQuery({
+          queryKey: [`settings`, current === first ? 1 : 2],
+          query: (q) => q.from({ settings: current }),
+        }),
+      { initialProps: { current: first } },
+    )
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`first`),
+    )
+    hook.rerender({ current: replacement })
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`replacement`),
+    )
+  })
+
+  // A Suspense mount suspends before it commits, so its retry render may
+  // reuse the cached Suspense collection instead of compiling again. With a
+  // dependency list, that retry must still claim the source's ID.
+  it(`claims a Suspense query's source when a dependency-list retry reuses its cached collection`, async () => {
+    let markFirstReady!: () => void
+    const first = createCollection<Row>({
+      id: `suspense-settings`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `one`, value: `first`, rank: 1 },
+          })
+          commit()
+          markFirstReady = markReady
+        },
+      },
+    })
+    const replacement = source(`suspense-settings`, `replacement`)
+    const labels = new Map<object, string>([
+      [first, `first`],
+      [replacement, `replacement`],
+    ])
+    const View = ({ current }: { current: typeof first }) => {
+      // A hashable dependency keys the Suspense cache; a Collection cannot.
+      const { data } = useLiveSuspenseQuery(
+        (q) => q.from({ settings: current }),
+        [labels.get(current)],
+      )
+      return <div>{data[0]?.value}</div>
+    }
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      const root = render(
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={first} />
+          </Suspense>
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Loading`)).toBeDefined()
+      await act(async () => markFirstReady())
+      await waitFor(() => expect(root.getByText(`first`)).toBeDefined())
+
+      root.rerender(
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={replacement} />
+          </Suspense>
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Rejected`)).toBeDefined()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it(`claims a Suspense query's source when a dependency-list hook mounts from a sibling's cached collection`, async () => {
+    const first = source(`sibling-suspense`, `first`)
+    const replacement = source(`sibling-suspense`, `replacement`)
+    const labels = new Map<object, string>([
+      [first, `first`],
+      [replacement, `replacement`],
+    ])
+    const View = ({ current }: { current: typeof first }) => {
+      // A hashable dependency keys the Suspense cache; a Collection cannot.
+      const { data } = useLiveSuspenseQuery(
+        (q) => q.from({ settings: current }),
+        [labels.get(current)],
+      )
+      return <div>{data[0]?.value}</div>
+    }
+    const tree = (second: typeof first) => (
+      <>
+        <Suspense fallback={<div>Loading</div>}>
+          <View current={first} />
+        </Suspense>
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={second} />
+          </Suspense>
+        </TestErrorBoundary>
+      </>
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      const root = render(tree(first))
+      await waitFor(() => expect(root.getAllByText(`first`)).toHaveLength(2))
+      root.rerender(tree(replacement))
+      expect(root.getByText(`Rejected`)).toBeDefined()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it(`permits independent client scopes to use the same ID`, async () => {
@@ -327,80 +380,6 @@ describe(`React source ID reuse`, () => {
           <View current={replacement} />
         </DbProvider>,
       ),
-    ).toThrow(/source Collection .*same ID/i)
-  })
-})
-
-describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
-  it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
-    const client = new DbClient()
-    const first = source(`settings`, `first`)
-    const replacement = source(`settings`, `replacement`)
-    let syncStarts = 0
-    const descriptor = collectionOptions(
-      `infinite-shared-after-collision`,
-      () => ({
-        id: `infinite-shared-after-collision`,
-        getKey: (row: Row) => row.id,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            syncStarts++
-            begin()
-            write({
-              type: `insert`,
-              value: { id: `one`, value: `shared`, rank: 1 },
-            })
-            commit()
-            markReady()
-          },
-        },
-      }),
-    )
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    function View({
-      current,
-      includeShared,
-    }: {
-      current: typeof first
-      includeShared: boolean
-    }) {
-      useLiveInfiniteQuery(
-        (q) =>
-          includeShared
-            ? q
-                .from({ settings: current })
-                .join({ shared: descriptor }, ({ settings, shared }) =>
-                  eq(settings.id, shared.id),
-                )
-                .orderBy(({ settings }) => settings.rank)
-            : q
-                .from({ settings: current })
-                .orderBy(({ settings }) => settings.rank),
-        { pageSize: 1, client },
-      )
-      return <div>Query</div>
-    }
-    try {
-      const root = render(
-        <TestErrorBoundary>
-          <View current={first} includeShared={false} />
-        </TestErrorBoundary>,
-      )
-      await act(async () => {})
-      root.rerender(
-        <TestErrorBoundary>
-          <View current={replacement} includeShared={true} />
-        </TestErrorBoundary>,
-      )
-      expect(root.getByText(`Rejected`)).toBeDefined()
-      expect(syncStarts).toBe(0)
-      const shared = client.collection(descriptor)
-      const reader = renderHook(() => useLiveQuery(shared))
-      await act(async () => {})
-      expect(reader.result.current.data[0]?.value).toBe(`shared`)
-      expect(syncStarts).toBe(1)
-    } finally {
-      consoleError.mockRestore()
-    }
+    ).toThrow(SourceCollectionIdReuseError)
   })
 })

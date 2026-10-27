@@ -7,6 +7,7 @@
 import {
   createLiveQueryCollection,
   eq,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -94,7 +95,7 @@ export function createCollectionQuery(
         return {
           id: parent.id,
           group: parent.group,
-          children: childRows,
+          children: include(childRows),
           arrayChildren: toArray(
             reuseChildRelation ? childRows : createChildRows(),
           ),

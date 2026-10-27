@@ -9,6 +9,7 @@ import {
   coalesce,
   count,
   createLiveQueryCollection,
+  groupKeys,
   inArray,
 } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -33,7 +34,7 @@ describe(`aggregate select shapes`, () => {
       const query = createLiveQueryCollection((q) =>
         q
           .from({ c: source })
-          .groupBy(({ c }) => key(c))
+          .groupBy(groupKeys(({ c }) => key(c)))
           .select(({ c }) => ({ g: key(c), n: count(c.id) })),
       )
       await query.preload()

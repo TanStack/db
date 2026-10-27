@@ -6,7 +6,7 @@ import {
   getLiveQueryStatusFlags,
   isCollection,
   isSingleResultCollection,
-} from './live-query-adapter.js'
+} from './live-query-primitives.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { deepEquals } from './utils.js'
@@ -15,6 +15,7 @@ import type {
   LiveQueryObserver,
   LiveQuerySnapshot,
 } from './live-query-observer.js'
+import type { DbClient } from './client.js'
 import type { Collection } from './collection/index.js'
 import type { CollectionStatus } from './types.js'
 import type {
@@ -541,6 +542,8 @@ export interface LiveQueryWindowSnapshot<
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
 export interface CreateLiveQueryWindowControllerOptions {
+  client?: DbClient
+  queryHash?: string
   /** Rows per page (default 20). Invalid values use the default. */
   pageSize?: number
   /** Value of the first page's `pageParam` (default 0). */
@@ -555,6 +558,7 @@ export interface LiveQueryWindowController<
   TKey extends string | number,
 > {
   getSnapshot: () => LiveQueryWindowSnapshot<T, TKey>
+  getServerSnapshot: () => LiveQueryWindowSnapshot<T, TKey>
   subscribe: (listener: () => void) => () => void
   /** Load one more page, resolving only after that page is committed. */
   fetchNextPage: () => Promise<void>
@@ -651,11 +655,22 @@ class LiveQueryWindowControllerImpl<
     // only coherent observer contract and guarantees non-reentrant subscribe.
     this.observer = createLiveQueryObserver<T, TKey>(collection, {
       mode: `wholesale`,
+      client: options.client,
+      queryHash: options.queryHash,
     })
   }
 
   getSnapshot(): LiveQueryWindowSnapshot<T, TKey> {
-    const observerSnapshot = this.observer.getSnapshot()
+    return this.snapshotFrom(this.observer.getSnapshot())
+  }
+
+  getServerSnapshot(): LiveQueryWindowSnapshot<T, TKey> {
+    return this.snapshotFrom(this.observer.getServerSnapshot())
+  }
+
+  private snapshotFrom(
+    observerSnapshot: LiveQuerySnapshot<T, TKey>,
+  ): LiveQueryWindowSnapshot<T, TKey> {
     if (this.hasPaginationError && observerSnapshot.status === `ready`) {
       this.failedHasNextPage = this.getComputedHasNextPage(observerSnapshot)
     }

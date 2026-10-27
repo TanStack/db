@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { grouping } from '../../src/query/compiler/grouping.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
   Aggregate,
@@ -45,7 +46,7 @@ function createOr(...args: Array<any>) {
 }
 
 function createAgg(name: string, ...args: Array<any>) {
-  return new Aggregate(name, args)
+  return new Aggregate(name, args, grouping)
 }
 
 describe(`Query Optimizer`, () => {

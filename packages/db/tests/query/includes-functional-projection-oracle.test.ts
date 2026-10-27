@@ -3,6 +3,7 @@ import { declareOracle } from '../oracle-declaration.js'
 import {
   createLiveQueryCollection,
   eq,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -147,7 +148,7 @@ describe(`functional projection output compatibility`, () => {
                   base: parent.base,
                   children:
                     form === `collection`
-                      ? childRows
+                      ? include(childRows)
                       : form === `array`
                         ? toArray(childRows)
                         : materialize(childRows),
@@ -297,7 +298,7 @@ describe(`functional projection output compatibility`, () => {
                 id: parent.id,
                 children:
                   form === `collection`
-                    ? primary
+                    ? include(primary)
                     : form === `array`
                       ? toArray(primary)
                       : materialize(primary),
@@ -305,7 +306,7 @@ describe(`functional projection output compatibility`, () => {
                   ? {
                       sibling:
                         form === `collection`
-                          ? sibling
+                          ? include(sibling)
                           : form === `array`
                             ? toArray(sibling)
                             : materialize(sibling),
@@ -549,7 +550,7 @@ describe(`functional include projection boundary grammar`, () => {
                 total: 0,
                 children:
                   form === `collection`
-                    ? childRows
+                    ? include(childRows)
                     : form === `array`
                       ? toArray(childRows)
                       : materialize(childRows),

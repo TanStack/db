@@ -8,6 +8,7 @@ import {
   createLiveQueryCollection,
   eq,
   inArray,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -709,7 +710,9 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
               groupChildren.select(({ child }) => ({ id: child.id })),
             )
           case `collection`:
-            return groupChildren.select(({ child }) => ({ id: child.id }))
+            return include(
+              groupChildren.select(({ child }) => ({ id: child.id })),
+            )
           case `nested`:
             return materialize(
               groupChildren.select(({ child }) => ({

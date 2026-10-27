@@ -6,7 +6,7 @@
  * errors, enablement, recompilation, and teardown. Each adapter owns only the
  * bridge from its native scheduler into the small `LiveQueryDriver` language.
  * Running one shared scenario through every bridge separates engine semantics
- * from React, Vue, Solid, Angular, and Svelte timing.
+ * from React, Preact, Vue, Solid, Angular, and Svelte timing.
  *
  * Realm safety: the driver — not the scenarios — creates source collections and
  * supplies query operators, both imported from the *adapter's* copy of
@@ -19,10 +19,56 @@
  * visible after the driver's documented flush cut. Result helpers read raw
  * fields and selected rows; they do not repair malformed adapter output.
  *
+ * Query identity (1.0 law, maintainer decisions 2026-10-22 and 2026-10-23).
+ * The law depends on how a binding decides to compile again.
+ *
+ * A binding that compares query identity re-runs its query input and compiles
+ * again only when the input's identity changed. React and Preact compare it
+ * on every render. Such a binding compiles an input that has no `queryKey`
+ * only when the query IR has a stable identity; otherwise it throws
+ * `UnhashableQueryIRError`. The identity names each source by its Collection
+ * ID, so while the binding is mounted each claimed ID keeps naming one source
+ * object: a different object under a claimed ID, in a later query or in the
+ * same one, throws
+ * `SourceCollectionIdReuseError` before any row from either source is
+ * returned. Revisiting the same object is legal, and a new binding starts with
+ * no claims. An input with a nonempty `queryKey` owns its identity and skips
+ * both checks: a keyed step records no claim and checks none, so a claim
+ * made before it still binds a later derived step (maintainer decision
+ * 2026-10-23). An empty key is absent, as it is for a `DbClient` preload.
+ *
+ * A binding that compiles again whenever its reactive reads change (Vue,
+ * Solid, Angular, and Svelte without a `DbClient`) compares no identity. It
+ * compiles any query input, including one without a stable IR identity, and
+ * its rows follow the current input: after a source swap under the same
+ * Collection ID, every value it publishes holds only the new source's rows
+ * (or none while it loads) and never the old ones,
+ * and one query over two same-ID objects reads each of them.
+ * A `DbClient` matches queries by identity hash, so a binding backed by one
+ * follows the comparing law; that boundary has its own receiving witnesses.
+ *
+ * Rejection is observed at the adapter's native compile point. The driver
+ * surfaces it as a throw from `mount*`, a rejected `setParam`, or a throw from
+ * the next `current()` read. After a rejection, no later read exposes rows:
+ * each `current()` throws or holds none, so a framework whose memo throws once
+ * cannot fall back to the previous query's rows. Each driver releases any
+ * native scope that a rejected mount acquired. A reactive driver rejects
+ * after mount when its new input fails to compile, as when a re-render drops
+ * `groupKeys()`. Vue's computed serves its previous value after it throws
+ * once, so vue-db catches the error in a computed that does not throw and
+ * clears its rows before it rethrows; before that repair this check failed
+ * there. React unmounts a tree whose render throws, so its driver rethrows
+ * on later reads. Preact keeps a component whose render throws mounted, so
+ * its driver mounts the hook under an error boundary, as an application must
+ * to recover, and rethrows on later reads. A Preact component without a
+ * boundary is outside this cut. A `DbClient`-backed Svelte query also stays
+ * mounted; the Svelte descriptor release oracle reads each of its fields
+ * after a rejection.
+ *
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection } from '@tanstack/db'
+import type { Collection, PooledLiveQueries } from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -88,6 +134,7 @@ export interface DbOps {
   count: (a: any) => any
   sum: (a: any) => any
   coalesce: (...args: Array<any>) => any
+  groupKeys: (callback: (refs: any) => any) => any
   /** Build an optimistic action: onMutate applies optimistic state, mutationFn confirms. */
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void
@@ -140,7 +187,24 @@ export interface LiveQueryHandle {
  * new value and settles.
  */
 export interface ControllableHandle<P> extends LiveQueryHandle {
+  /** Rejects when the adapter rejects the reconfigured query input. */
   setParam: (param: P) => Promise<void>
+  /**
+   * The `data` value the binding left published at the end of each
+   * synchronous turn since mount, in order. Drivers record at their
+   * framework's publication points (React and Preact commits, Vue pre-flushes,
+   * Svelte pre-effects, Solid render effects, Angular effects) through
+   * `publication-log.ts`, which keeps the last value of each turn: a value
+   * replaced within one turn is never painted. A law about what a swap may
+   * show reads these, not only the value after `setParam` settles.
+   */
+  publications: () => ReadonlyArray<unknown>
+  /**
+   * The keyed `state` map's rows at the same publication points. A binding
+   * that applies row changes to its map can show rows there that `data`
+   * never holds.
+   */
+  statePublications: () => ReadonlyArray<unknown>
 }
 
 /**
@@ -160,9 +224,13 @@ export interface LiveQueryDriver {
   disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */
   ops: DbOps
-  /** Create a realm-correct source collection + mutators, keyed by `id`. */
+  /**
+   * Create a realm-correct source collection + mutators, keyed by `id`. Pass
+   * `collectionId` to create another source object under an existing ID.
+   */
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
+    collectionId?: string,
   ) => SourceHandle<T>
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
@@ -187,20 +255,45 @@ export interface LiveQueryDriver {
   /**
    * Mount a live query whose input depends on a parameter that can change after
    * mount. `build` returns a query, or `null`/`undefined` to represent disabled.
+   * With `pool`, use the adapter's config form for a parameterized query.
    */
   mountControllable: <P>(
     build: (q: any, param: P) => any,
     initial: P,
+    opts?: { pool?: PooledLiveQueries },
+  ) => ControllableHandle<P>
+  /**
+   * Mount a controllable query in the config-object form whose `queryKey` is
+   * `key(param)`, or none when that returns `undefined`. Every driver that
+   * compares query identity supplies it; a reactive binding has no keys.
+   */
+  mountKeyedControllable?: <P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
+    initial: P,
   ) => ControllableHandle<P>
   /** Mount a pre-created collection passed directly to the hook. */
   mountCollection: (collection: Collection<any, any, any>) => LiveQueryHandle
-  /** Mount via the config-object input form (`{ query: build }`). */
+  /** Mount via the config-object input form (`{ query: build, ...opts }`). */
   mountConfig: (
     build: QueryBuild,
-    opts?: { gcTime?: number },
+    opts?: {
+      gcTime?: number
+      pool?: PooledLiveQueries
+      queryKey?: ReadonlyArray<unknown>
+    },
   ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle
+  /**
+   * Whether the binding compares query identity to decide when to compile
+   * again (see the opening query-identity law). The driver declares the
+   * adapter's documented policy for the inputs it mounts; the suite does not
+   * infer it from observed output. Svelte compares identity only for a query
+   * that a `DbClient` backs, and its shared drivers mount none, so they
+   * declare `false`.
+   */
+  comparesQueryIdentity: boolean
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */
   knownGaps?: ReadonlyArray<never>
   /**
@@ -214,8 +307,10 @@ export interface LiveQueryDriver {
     serverSnapshot?: boolean
     suspense?: boolean
     /**
-     * Public sharing policy: queries filtered only by `eq` on one source share
-     * one source subscription per filtered field set, instead of one each.
+     * Public sharing policy: queries whose config passes `pooledLiveQueries`
+     * and that filter only by `eq` on one source share one source subscription
+     * per filtered field set, instead of one each. Every other query has a
+     * subscription of its own: pooling is opt-in per query.
      */
     pooledEqFilters?: boolean
   }

@@ -210,7 +210,7 @@ it(`restarts a provider session before an old subset can publish into a new cach
     await expect(collection.utils.awaitTxId(778)).resolves.toBe(true)
     await expect(collection.utils.awaitTxId(779)).resolves.toBe(true)
     old.holdSnapshots = true
-    old.ignoreUnsubscribe = true
+    old.ignoreAbort = true
     const oldWait = collection.utils.awaitTxId(801, 10_000).then(
       () => undefined,
       (error: unknown) => error,
@@ -389,7 +389,7 @@ it(`aborts one demand while its provider session restarts`, async () => {
     old.send([upToDate])
     await collection.stateWhenReady()
     old.holdSnapshots = true
-    old.ignoreUnsubscribe = true
+    old.ignoreAbort = true
     const released = Promise.resolve(
       collection._sync.loadSubset({ limit: 1, signal: aborter.signal }),
     ).then(
@@ -780,7 +780,7 @@ it(`retires a replacement Electric stream before a second cache rotation`, async
     await atCheckpoint(secondStarted, `second cache rotation starts`)
     const retiredStream = streams[1]!
     expect(retiredStream.unsubscribe).toHaveBeenCalledOnce()
-    retiredStream.ignoreUnsubscribe = true
+    retiredStream.ignoreAbort = true
     retiredStream.send([insert(7, `retired`), upToDate])
     expect(write).not.toHaveBeenCalled()
     expect(markError).not.toHaveBeenCalled()

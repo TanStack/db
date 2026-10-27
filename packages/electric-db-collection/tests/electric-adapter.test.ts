@@ -8,6 +8,7 @@ import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import { createMockStream } from './electric-stream-mock'
 import {
   change,
   createDeferred,
@@ -40,7 +41,7 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => mockStream),
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
 })
 

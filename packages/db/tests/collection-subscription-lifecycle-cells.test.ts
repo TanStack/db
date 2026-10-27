@@ -1237,6 +1237,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  // Demand created while acquisition is deferred stays logical until an
+  // explicit resumption. That resumption also releases any render start gate;
+  // retirement before it returns no acquisition lease. The phase named
+  // `deferred` here is deferred acquisition, not an already resumed owner
+  // whose provider work is still blocked by an unrelated render.
   acquisitionCase(
     [`deferred:request`, `deferred:resume`],
     `owns deferred-start acquisition only when it reaches the adapter`,
@@ -1264,6 +1269,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(collection._deferSyncStart()).toBe(true)
         const subscription = collection.subscribeChanges(() => {}, {
           includeInitialState: false,
+          deferAcquisition: true,
         })
         subscription.requestSnapshot({ where })
         reach(`deferred:request`)
@@ -1272,7 +1278,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         if (action === `release-before-resume`) {
           subscription.releaseSnapshot(where)
         }
-        collection._resumeSyncStart()
+        subscription.resumeDeferredAcquisition()
         await flushPromises()
         if (action === `resume`) reach(`deferred:resume`)
 
@@ -1778,6 +1784,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
       subscription.requestSnapshot({
         where,
@@ -1787,7 +1794,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (action === `cleanup`) await collection.cleanup()
       else if (action === `release`) subscription.releaseSnapshot(where)
       else if (action === `unsubscribe`) subscription.unsubscribe()
-      else collection._resumeSyncStart()
+      else subscription.resumeDeferredAcquisition()
       await flushPromises()
       if (action === `cleanup`) {
         observeAcquisitionInteraction(`none:cleanup`, `no-acquisition`)

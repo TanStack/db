@@ -22,6 +22,7 @@ import {
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import { createMockStream } from './electric-stream-mock'
 import {
   applyRetryModel,
   createRetryModel,
@@ -107,7 +108,9 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => mockStream),
+    // Full SDK release clears this stream's callback, including when another
+    // Collection has a separate stream using these shared request mocks.
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
 })
 
@@ -2362,7 +2365,9 @@ async function runSchedulerPermutation(
   } finally {
     await collection.cleanup()
     vi.mocked(ShapeStream).mockReset()
-    vi.mocked(ShapeStream).mockImplementation(() => mockStream as never)
+    vi.mocked(ShapeStream).mockImplementation(
+      () => createMockStream(mockStream) as never,
+    )
   }
 }
 

@@ -1,8 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
+  UnhashableQueryIRError,
   coalesce,
   collectionOptions,
   count,
@@ -11,11 +10,14 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  include,
   localOnlyCollectionOptions,
   lte,
   sum,
   toArray,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { useLiveQuery, useLiveQueryForSuspense } from '../src/useLiveQuery'
 import { getLiveQueryResultInfo } from '../src/live-query-internals'
@@ -2761,13 +2763,15 @@ describe(`Query Collections`, () => {
           q.from({ p: projectsCollection }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: q
-              .from({ i: issuesCollection })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
+            issues: include(
+              q
+                .from({ i: issuesCollection })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
           })),
         )
       })
@@ -3262,8 +3266,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).not.toBe(firstCollection)
     })
 
-    it(`warns and preserves legacy behavior when a functional query has no queryKey`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    it(`throws when a functional query has no queryKey`, () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `derived-identity-functional-missing-key`,
@@ -3283,15 +3286,50 @@ describe(`Query Collections`, () => {
             }),
           { initialProps: { minAge: 25 } },
         ),
-      ).not.toThrow()
+      ).toThrow(UnhashableQueryIRError)
+    })
 
-      const warnings = warnSpy.mock.calls.filter(([message]) =>
-        String(message).includes(`cannot derive a stable identity`),
+    // A dependency list decides reuse, so the identity is checked when the
+    // query compiles: at mount and when a dependency changes. With a
+    // DbClient, the hook also hashes the query for hydration on every render;
+    // an unhashable query there leaves hydration without a key until the
+    // query compiles again.
+    it(`rejects an unhashable dependency-list query with a DbClient only when it compiles`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `deps-client-unhashable`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
       )
-      expect(warnings).toHaveLength(1)
-      expect(warnings[0]![0]).toContain(`queryKey`)
-      expect(warnings[0]![0]).toContain(`1.0`)
-      warnSpy.mockRestore()
+      const client = new DbClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <DbProvider client={client}>{children}</DbProvider>
+      )
+      const hook = renderHook(
+        ({ functional, version }) =>
+          useLiveQuery(
+            (q) =>
+              functional
+                ? q
+                    .from({ people: collection })
+                    .fn.where(({ people }) => people.age > 25)
+                : q.from({ people: collection }),
+            [version],
+          ),
+        { initialProps: { functional: false, version: 1 }, wrapper },
+      )
+      await waitFor(() => expect(hook.result.current.data).toHaveLength(3))
+
+      // The query changed but its dependency did not, so nothing compiles.
+      expect(() =>
+        hook.rerender({ functional: true, version: 1 }),
+      ).not.toThrow()
+      expect(hook.result.current.data).toHaveLength(3)
+
+      expect(() => hook.rerender({ functional: true, version: 2 })).toThrow(
+        UnhashableQueryIRError,
+      )
     })
 
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
@@ -3326,41 +3364,6 @@ describe(`Query Collections`, () => {
       )
       expect(warnings).toHaveLength(0)
       warnSpy.mockRestore()
-    })
-
-    it(`does not emit identity warnings in production`, () => {
-      const previousNodeEnv = process.env.NODE_ENV
-      process.env.NODE_ENV = `production`
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `derived-identity-production-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      let unmount: (() => void) | undefined
-      try {
-        ;({ unmount } = renderHook(() =>
-          useLiveQuery({
-            query: (q) =>
-              q
-                .from({ people: collection })
-                .fn.where(({ people }) => people.age > 25),
-          }),
-        ))
-
-        expect(
-          warnSpy.mock.calls.some(([message]) =>
-            String(message).includes(`cannot derive a stable identity`),
-          ),
-        ).toBe(false)
-      } finally {
-        unmount?.()
-        process.env.NODE_ENV = previousNodeEnv
-        warnSpy.mockRestore()
-      }
     })
 
     it(`uses explicit queryKey for functional query variants`, async () => {

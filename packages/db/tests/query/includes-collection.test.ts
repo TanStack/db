@@ -12,6 +12,7 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   lt,
   materialize,
   multiply,
@@ -118,10 +119,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -210,10 +213,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -264,9 +269,11 @@ describe(`Collection-valued includes oracle`, () => {
       const live = createLiveQueryCollection((q) =>
         q.from({ parent: parents.collection }).select(({ parent }) => ({
           id: parent.id,
-          children: q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentGroup, parent.group)),
+          children: include(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group)),
+          ),
         })),
       )
 
@@ -412,11 +419,13 @@ describe(`Collection-valued includes oracle`, () => {
             .select(({ message }) => ({
               kind: `message` as const,
               id: message.id,
-              children: q
-                .from({ messageChild: children.collection })
-                .where(({ messageChild }) =>
-                  eq(messageChild.parentGroup, message.group),
-                ),
+              children: include(
+                q
+                  .from({ messageChild: children.collection })
+                  .where(({ messageChild }) =>
+                    eq(messageChild.parentGroup, message.group),
+                  ),
+              ),
             }))
           const toolRows = q
             .from({ tool: tools.collection })
@@ -634,10 +643,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -711,10 +722,12 @@ describe(`Collection-valued includes oracle`, () => {
           .select(({ parent }) => ({
             id: parent.id,
             value: parent.value,
-            children: q
-              .from({ child: nodes.collection })
-              .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+            children: include(
+              q
+                .from({ child: nodes.collection })
+                .where(({ child }) => eq(child.kind, `child`))
+                .where(({ child }) => eq(child.group, parent.group)),
+            ),
           })),
       )
 
@@ -868,7 +881,7 @@ describe(`Collection-valued includes oracle`, () => {
               eq(parent.active, true),
               {
                 kind: `active` as const,
-                facade: childRows(),
+                facade: include(childRows()),
                 array: toArray(childRows()),
                 materialized: materialize(childRows()),
               },
@@ -974,7 +987,7 @@ describe(`Collection-valued includes oracle`, () => {
 
             return {
               id: parent.id,
-              facade: summaries(),
+              facade: include(summaries()),
               array: toArray(summaries()),
               materialized: materialize(summaries()),
               implicit: materialize(total()),
@@ -1080,7 +1093,7 @@ describe(`Collection-valued includes oracle`, () => {
 
             return {
               id: parent.id,
-              facade: summaries(),
+              facade: include(summaries()),
               array: toArray(summaries()),
               materialized: materialize(summaries()),
             }
@@ -1153,7 +1166,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
         }
@@ -1220,7 +1233,7 @@ describe(`Collection-valued includes oracle`, () => {
 
         return {
           id: parent.id,
-          facade: childRows(),
+          facade: include(childRows()),
           array: toArray(childRows()),
           materialized: materialize(childRows()),
         }
@@ -1312,7 +1325,7 @@ describe(`Collection-valued includes oracle`, () => {
 
           return {
             id: parent.id,
-            facade: childRows(),
+            facade: include(childRows()),
             array: toArray(childRows()),
             materialized: materialize(childRows()),
           }

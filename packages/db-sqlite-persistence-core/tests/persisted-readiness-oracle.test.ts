@@ -1,4 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
 import {
   PERSISTED_READINESS,
   createCollection,
@@ -7,6 +6,7 @@ import {
   eq,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   checkWithCleanup,

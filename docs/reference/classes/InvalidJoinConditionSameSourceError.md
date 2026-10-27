@@ -3,7 +3,7 @@ id: InvalidJoinConditionSameSourceError
 title: InvalidJoinConditionSameSourceError
 ---
 
-Defined in: [packages/db/src/errors.ts:879](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L879)
+Defined in: [packages/db/src/errors.ts:899](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L899)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:879](https://github.com/TanStack/db/blob/
 new InvalidJoinConditionSameSourceError(sourceAlias): InvalidJoinConditionSameSourceError;
 ```
 
-Defined in: [packages/db/src/errors.ts:880](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L880)
+Defined in: [packages/db/src/errors.ts:900](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L900)
 
 #### Parameters
 

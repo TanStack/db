@@ -15,6 +15,7 @@ import {
   trackScenarioPromise,
   waitFor,
 } from './infinite-suite-harness'
+import type { QueryBuild } from './contract'
 import type { InfiniteQueryContext } from './infinite-suite-harness'
 
 export function registerInfiniteQueryCaseScenarios(
@@ -195,6 +196,41 @@ export function registerInfiniteQueryCaseScenarios(
       )
       expect(error).toBeInstanceOf(Error)
       expect((error as Error).message).toContain(`First argument`)
+    },
+  )
+
+  scenario(
+    `source-id-reuse-in-one-query`,
+    `rejects or pages one query that reads two sources under one Collection ID`,
+    async () => {
+      // Overlapping but different rows: ids 1-4 and 3-6.
+      const first = driver.makeSource(rows(4))
+      const reused = driver.makeSource(rows(6).slice(2), first.collection.id)
+      const build: QueryBuild = (q) =>
+        q
+          .from({ items: first.collection })
+          .join(
+            { other: reused.collection },
+            ({ items, other }: any) => driver.eq(items.id, other.id),
+            `inner`,
+          )
+          .orderBy(({ items }: any) => items.rank, `desc`)
+          .select(({ items }: any) => ({ ...items }))
+      if (driver.comparesQueryIdentity) {
+        const error = await captureError(() =>
+          driver.mount(build, { pageSize: 3 }),
+        )
+        expect(error).toMatchObject({ name: `SourceCollectionIdReuseError` })
+        return
+      }
+      // The inner join matches only ids both objects hold: 3 and 4.
+      // Reading the first object for both sides pages 1-3; the second, 3-5.
+      const handle = driver.mount(build, { pageSize: 3 })
+      await handle.flush()
+      expect(handle.current().data.map((row: any) => row.id)).toEqual([
+        `3`,
+        `4`,
+      ])
     },
   )
 }

@@ -33,7 +33,7 @@ export type StreamHarness = {
   send: (messages: Array<Message<TestRow>>) => void
   unsubscribe: ReturnType<typeof vi.fn>
   holdSnapshots: boolean
-  ignoreUnsubscribe: boolean
+  ignoreAbort: boolean
   pendingSnapshotCount: () => number
   snapshotRequested: () => Promise<void>
   completeSnapshot: (messages?: Array<Message<TestRow>>) => void
@@ -49,27 +49,36 @@ export async function createMockedElectricClient() {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn((options: { log?: string }) => {
+    ShapeStream: vi.fn((options: { log?: string; signal?: AbortSignal }) => {
       const pendingSnapshots: Array<{
         resolve: () => void
         reject: (error: Error) => void
       }> = []
       const requestObservers: Array<() => void> = []
       let snapshotRequests = 0
-      const unsubscribe = vi.fn(() => {
-        if (harness?.ignoreUnsubscribe) return
-        for (const pending of pendingSnapshots.splice(0)) {
-          pending.reject(new Error(`snapshot aborted`))
-        }
-      })
+      const unsubscribe = vi.fn()
+      // As in the SDK, abort owns snapshot cancellation. Callback release
+      // alone does not reject an in-flight HTTP request.
+      options.signal?.addEventListener(
+        `abort`,
+        () => {
+          if (harness?.ignoreAbort) return
+          for (const pending of pendingSnapshots.splice(0)) {
+            pending.reject(new Error(`snapshot aborted`))
+          }
+        },
+        { once: true },
+      )
       let harness: StreamHarness | undefined
       return {
         subscribe: (send: StreamHarness[`send`]) => {
           harness = {
+            // Deliberately retain the raw callback for late-delivery tests.
+            // Release calls are observed separately from these injections.
             send,
             unsubscribe,
             holdSnapshots: harnessState.holdNewSnapshots,
-            ignoreUnsubscribe: false,
+            ignoreAbort: false,
             pendingSnapshotCount: () => pendingSnapshots.length,
             snapshotRequested: () =>
               snapshotRequests > 0
@@ -88,6 +97,7 @@ export async function createMockedElectricClient() {
           harnessState.onStreamSubscribed?.()
           return unsubscribe
         },
+        unsubscribeAll: unsubscribe,
         // ShapeStream.requestSnapshot is legal only in changes_only mode.
         // The installed-SDK delivery oracle is the receiving witness.
         requestSnapshot: vi.fn(() => {

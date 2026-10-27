@@ -7,6 +7,7 @@ import {
   count,
   createLiveQueryCollection,
   eq,
+  groupKeys,
   gt,
   lt,
   lte,
@@ -748,7 +749,7 @@ async function runAggregationCell({
         const rows =
           grouping === `explicit`
             ? correlated
-                .groupBy(({ child }) => child.parentGroup)
+                .groupBy(groupKeys(({ child }) => child.parentGroup))
                 .select(({ child }) => ({
                   score:
                     placement === `inside-aggregate`
@@ -937,10 +938,12 @@ async function runRecursiveSourceCell({
               }))
             case `aggregate`:
               return correlated
-                .groupBy(({ candidate }) => [
-                  candidate.id,
-                  candidate.parentGroup,
-                ])
+                .groupBy(
+                  groupKeys(({ candidate }) => [
+                    candidate.id,
+                    candidate.parentGroup,
+                  ]),
+                )
                 .select(({ candidate }) => ({
                   id: candidate.id,
                   parentGroup: candidate.parentGroup,
@@ -948,10 +951,12 @@ async function runRecursiveSourceCell({
                 }))
             case `having`:
               return correlated
-                .groupBy(({ candidate }) => [
-                  candidate.id,
-                  candidate.parentGroup,
-                ])
+                .groupBy(
+                  groupKeys(({ candidate }) => [
+                    candidate.id,
+                    candidate.parentGroup,
+                  ]),
+                )
                 .having(({ candidate }) =>
                   gt(count(candidate.id), parent.parameter),
                 )
@@ -1003,10 +1008,12 @@ async function runRecursiveSourceCell({
               }))
             case `aggregate`:
               return correlated
-                .groupBy(({ leftCandidate }) => [
-                  leftCandidate.id,
-                  leftCandidate.parentGroup,
-                ])
+                .groupBy(
+                  groupKeys(({ leftCandidate }) => [
+                    leftCandidate.id,
+                    leftCandidate.parentGroup,
+                  ]),
+                )
                 .select(({ leftCandidate }) => ({
                   id: leftCandidate.id,
                   parentGroup: leftCandidate.parentGroup,
@@ -1014,10 +1021,12 @@ async function runRecursiveSourceCell({
                 }))
             case `having`:
               return correlated
-                .groupBy(({ leftCandidate }) => [
-                  leftCandidate.id,
-                  leftCandidate.parentGroup,
-                ])
+                .groupBy(
+                  groupKeys(({ leftCandidate }) => [
+                    leftCandidate.id,
+                    leftCandidate.parentGroup,
+                  ]),
+                )
                 .having(({ leftCandidate }) =>
                   gt(count(leftCandidate.id), parent.parameter),
                 )
@@ -1066,10 +1075,12 @@ async function runRecursiveSourceCell({
               }))
             case `aggregate`:
               return correlated
-                .groupBy(({ rightCandidate }) => [
-                  rightCandidate.id,
-                  rightCandidate.parentGroup,
-                ])
+                .groupBy(
+                  groupKeys(({ rightCandidate }) => [
+                    rightCandidate.id,
+                    rightCandidate.parentGroup,
+                  ]),
+                )
                 .select(({ rightCandidate }) => ({
                   id: rightCandidate.id,
                   parentGroup: rightCandidate.parentGroup,
@@ -1077,10 +1088,12 @@ async function runRecursiveSourceCell({
                 }))
             case `having`:
               return correlated
-                .groupBy(({ rightCandidate }) => [
-                  rightCandidate.id,
-                  rightCandidate.parentGroup,
-                ])
+                .groupBy(
+                  groupKeys(({ rightCandidate }) => [
+                    rightCandidate.id,
+                    rightCandidate.parentGroup,
+                  ]),
+                )
                 .having(({ rightCandidate }) =>
                   gt(count(rightCandidate.id), parent.parameter),
                 )
@@ -1735,7 +1748,9 @@ async function runNamespaceCollisionCell({
                 case `group`:
                   return includeInEveryForm(
                     correlated
-                      .groupBy(({ child }) => [child.id, child.label])
+                      .groupBy(
+                        groupKeys(({ child }) => [child.id, child.label]),
+                      )
                       .select(({ child }) => ({
                         id: child.id,
                         value: child.label,
@@ -1797,7 +1812,9 @@ async function runNamespaceCollisionCell({
                 case `group`:
                   return includeInEveryForm(
                     correlated
-                      .groupBy(({ child }) => [child.id, child.label])
+                      .groupBy(
+                        groupKeys(({ child }) => [child.id, child.label]),
+                      )
                       .select(({ child }) => ({
                         id: child.id,
                         [name]: child.label,
@@ -1947,7 +1964,7 @@ async function runPublicSurfaceCell({
 
       if (shape === `functional-having-input`) {
         const rows = correlated
-          .groupBy(({ child }) => child.parentGroup)
+          .groupBy(groupKeys(({ child }) => child.parentGroup))
           .select(({ child }) => ({
             parentGroup: child.parentGroup,
             total: count(child.id),

@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/query-core'
 import {
   BTreeIndex,
   createCollection,
@@ -8,6 +7,7 @@ import {
   isUndefined,
   not,
 } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import {

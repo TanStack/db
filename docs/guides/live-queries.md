@@ -208,9 +208,9 @@ export class UserListComponent {
 
 > **Note:** React hooks derive query identity from structured query IR by
 > default. Dependency arrays are still accepted for backwards compatibility,
-> but warn in development and will be removed in 1.0. Unhashable queries also
-> warn and keep legacy mount-stable identity until 1.0; add `queryKey` to make
-> captured opaque values reactive. See the [React Adapter
+> but warn in development and will be removed in 1.0. In React and Preact, an
+> unhashable query without `queryKey` throws `UnhashableQueryIRError`. See the
+> [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 
 For server rendering and hydration, live query preloading transports the ordered
@@ -240,12 +240,23 @@ function UserSearch({ search }: { search: string }) {
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
 
-React development builds detect both cases. Before 1.0, opaque, unhashable IR
-warns and keeps legacy mount-stable identity; repeated expensive identity
-derivation also warns once. Both warnings point to the same `queryKey` escape
-hatch.
+Query identity matters where a hook compares it to decide whether to compile
+again: React and Preact compare it on every render, and a `DbClient` matches
+preloaded and hydrated queries by it. Those hooks throw
+`UnhashableQueryIRError` when they compile an opaque, unhashable query without
+`queryKey`; an empty `queryKey` counts as none. React development builds also
+warn once when deriving identity becomes expensive, pointing to the same
+`queryKey` escape hatch. Vue, Solid, Angular, and Svelte without a `DbClient`
+compile again whenever their reactive reads change, so they need no identity
+and accept any query.
 
-For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
+The derived identity names each source by its Collection ID. While a hook that
+compares identity is mounted, each Collection ID its queries read must keep
+naming one source Collection object; a different object under an ID the hook
+already read throws `SourceCollectionIdReuseError` instead of returning rows
+from the old source.
+
+For more details on framework integration, see the [React](../framework/react/overview), [Preact](../framework/preact/overview), [Vue](../framework/vue/overview), [Solid](../framework/solid/overview), [Svelte](../framework/svelte/overview), and [Angular](../framework/angular/overview) adapter documentation.
 
 ### Using with React Suspense
 
@@ -905,7 +916,7 @@ The result type of a join will take into account the join type, with the optiona
 
 ### Method Signature
 
-```ts
+```ts nocheck
 join(
   { [alias]: Collection | Query },
   condition: (row: TRow) => Expression<boolean>, // `eq(...)` or `and(eq(...), ...)`
@@ -1194,7 +1205,7 @@ In this example, the `activeUsers` subquery is used twice but executed only once
 Build complex queries with multiple levels of nesting:
 
 ```ts
-import { count } from '@tanstack/db'
+import { count, createCollection, eq, liveQueryCollectionOptions } from '@tanstack/db'
 
 const topUsers = createCollection(liveQueryCollectionOptions({
   query: (q) => {
@@ -1218,7 +1229,7 @@ const topUsers = createCollection(liveQueryCollectionOptions({
         name: user.name,
         postCount: postCount.count,
       }))
-      .orderBy(({ userStats }) => userStats.postCount, 'desc')
+      .orderBy(({ $selected }) => $selected.postCount, 'desc')
       .limit(10)
     
     // Use the user stats subquery in the main query
@@ -1231,20 +1242,22 @@ const topUsers = createCollection(liveQueryCollectionOptions({
 
 Includes let you nest subqueries inside `.select()` to produce hierarchical results. Instead of joins that flatten 1:N relationships into repeated rows, each parent row gets a nested collection of its related items.
 
+Wrap a child query in `include()` to get a live child Collection, or in `toArray()` or `materialize()` to get inline values. A child query in `.select()` without one of these throws `IncludeOperatorRequiredError`. These functions bring the include code with them, so an app that never includes subqueries does not bundle it.
+
 ```ts
-import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { createLiveQueryCollection, eq, include } from '@tanstack/db'
 
 const projectsWithIssues = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: q
+    issues: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
       .select(({ i }) => ({
         id: i.id,
         title: i.title,
-      })),
+      }))),
   })),
 )
 ```
@@ -1277,7 +1290,7 @@ Child queries support additional `.where()` clauses beyond the correlation condi
 q.from({ p: projectsCollection }).select(({ p }) => ({
   id: p.id,
   name: p.name,
-  issues: q
+  issues: include(q
     .from({ i: issuesCollection })
     .where(({ i }) => eq(i.projectId, p.id))       // correlation
     .where(({ i }) => eq(i.createdBy, p.createdBy)) // parent-referencing filter
@@ -1285,7 +1298,7 @@ q.from({ p: projectsCollection }).select(({ p }) => ({
     .select(({ i }) => ({
       id: i.id,
       title: i.title,
-    })),
+    }))),
 }))
 ```
 
@@ -1299,7 +1312,7 @@ Child queries support `.orderBy()` and `.limit()`, applied per parent:
 q.from({ p: projectsCollection }).select(({ p }) => ({
   id: p.id,
   name: p.name,
-  issues: q
+  issues: include(q
     .from({ i: issuesCollection })
     .where(({ i }) => eq(i.projectId, p.id))
     .orderBy(({ i }) => i.createdAt, 'desc')
@@ -1307,7 +1320,7 @@ q.from({ p: projectsCollection }).select(({ p }) => ({
     .select(({ i }) => ({
       id: i.id,
       title: i.title,
-    })),
+    }))),
 }))
 ```
 
@@ -1315,7 +1328,7 @@ Each project gets its own top-5 issues, not 5 issues shared across all projects.
 
 ### toArray
 
-By default, each child result is a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
+`include()` makes each child result a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
 
 ```ts
 import { createLiveQueryCollection, eq, toArray } from '@tanstack/db'
@@ -1337,7 +1350,7 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
 )
 ```
 
-With `toArray()`, the project row is re-emitted whenever its issues change. Without it, the child `Collection` updates independently.
+With `toArray()`, the project row is re-emitted whenever its issues change. With `include()`, the child `Collection` updates independently.
 
 ### materialize
 
@@ -1388,16 +1401,16 @@ Do not return child queries, `toArray()`, `materialize()`, or query expressions 
 You can use aggregate functions in child queries. Aggregates are computed per parent:
 
 ```ts
-import { createLiveQueryCollection, eq, count } from '@tanstack/db'
+import { count, createLiveQueryCollection, eq, include } from '@tanstack/db'
 
 const projectsWithCounts = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issueCount: q
+    issueCount: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
-      .select(({ i }) => ({ total: count(i.id) })),
+      .select(({ i }) => ({ total: count(i.id) }))),
   })),
 )
 ```
@@ -1413,20 +1426,20 @@ const tree = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: q
+    issues: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
       .select(({ i }) => ({
         id: i.id,
         title: i.title,
-        comments: q
+        comments: include(q
           .from({ c: commentsCollection })
           .where(({ c }) => eq(c.issueId, i.id))
           .select(({ c }) => ({
             id: c.id,
             body: c.body,
-          })),
-      })),
+          }))),
+      }))),
   })),
 )
 ```
@@ -1439,7 +1452,7 @@ When using includes with React, each child `Collection` needs its own `useLiveQu
 
 ```tsx
 import { useLiveQuery } from '@tanstack/react-db'
-import { eq } from '@tanstack/db'
+import { eq, include } from '@tanstack/db'
 
 function ProjectList() {
   const { data: projects } = useLiveQuery({
@@ -1447,13 +1460,13 @@ function ProjectList() {
       q.from({ p: projectsCollection }).select(({ p }) => ({
         id: p.id,
         name: p.name,
-        issues: q
+        issues: include(q
           .from({ i: issuesCollection })
           .where(({ i }) => eq(i.projectId, p.id))
           .select(({ i }) => ({
             id: i.id,
             title: i.title,
-          })),
+          }))),
       })),
   })
 
@@ -1492,6 +1505,29 @@ Each `IssueList` component independently subscribes to its project's issues. Whe
 ## groupBy and Aggregations
 
 Use `groupBy` to group your data and apply aggregate functions. When you use aggregates in `select` without `groupBy`, the entire result set is treated as a single group.
+
+Aggregate functions such as `count()` bring the grouping code with them. A `groupBy` with no aggregate wraps its keys in `groupKeys()` instead; without it, the query throws `GroupingOperatorRequiredError`:
+
+```ts
+import { createLiveQueryCollection, groupKeys } from '@tanstack/db'
+
+const departments = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .groupBy(groupKeys(({ user }) => user.departmentId))
+    .select(({ user }) => ({ departmentId: user.departmentId })),
+)
+```
+
+`groupKeys()` built outside `.groupBy()` needs the query's context as a type argument. Without it, the callback is untyped:
+
+```ts
+import { groupKeys } from '@tanstack/db'
+import type { ContextFromSource } from '@tanstack/db'
+
+type UserQuery = ContextFromSource<{ user: typeof usersCollection }>
+export const byDepartment = groupKeys<UserQuery>(({ user }) => user.departmentId)
+```
 
 ### Method Signature
 
@@ -1986,6 +2022,11 @@ const topCustomers = createLiveQueryCollection((q) =>
 )
 ```
 
+An aggregate in `orderBy`, such as `.orderBy(({ order }) => sum(order.amount))`,
+reads the value of the same aggregate in `select()`, as an aggregate in
+`having` does. Select it as a field first. Otherwise the query throws
+`AggregateFunctionNotInSelectError`.
+
 ### Descending Order
 
 Use `desc` for descending order:
@@ -2020,6 +2061,31 @@ const page2Users = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+## Pooled Live Queries
+
+Apps that mount many live queries of the same shape at once, such as one per
+list row, can share their work. Pass `pooledLiveQueries` as `pool` in a hook's
+query config. Queries that filter one eager source with `eq(field, literal)`
+then read one shared partition instead of compiling a graph each:
+
+```tsx
+import { eq, pooledLiveQueries } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/react-db'
+
+function TodoRow({ listId }: { listId: string }) {
+  const { data } = useLiveQuery({
+    query: (q) =>
+      q.from({ todo: todosCollection }).where(({ todo }) => eq(todo.listId, listId)),
+    pool: pooledLiveQueries,
+  })
+  // ...
+}
+```
+
+Results are the same with or without pooling. Without `pool`, each query
+compiles its own live-query Collection, and the app does not bundle pooling.
+Suspense hooks and queries with a `DbClient` never pool.
 
 ## Composable Queries
 
@@ -2083,7 +2149,7 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 You can use the `Query` class to create reusable query definitions. This is useful for building complex queries where you want to reuse the same query builder instance multiple times throughout your application.
 
 ```ts
-import { Query, eq } from '@tanstack/db'
+import { Query, createLiveQueryCollection, eq } from '@tanstack/db'
 
 // Create a reusable query builder
 const userQuery = new Query()

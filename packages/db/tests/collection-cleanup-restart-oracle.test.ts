@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  BasicIndex,
   createCollection,
   createEffect,
   createLiveQueryCollection,
+  eq,
 } from '../src'
 import { createDeferred } from '../src/deferred'
 import { declareOracle } from './oracle-declaration.js'
@@ -10,6 +12,7 @@ import {
   cleanupError,
   completedBoundaryScenarios,
   reentryScenarios,
+  withOracleCleanup,
 } from './collection-cleanup-restart-support.js'
 import type { Row } from './collection-cleanup-restart-support.js'
 
@@ -45,7 +48,7 @@ import type { Row } from './collection-cleanup-restart-support.js'
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and every local error as an ordered secondary
  * diagnostic. A lone error keeps its identity.
- * No replacement owner is admitted until terminal publication. Concurrent
+ * No replacement sync run is admitted until terminal publication. Concurrent
  * callers share the cleanup promise. Rejection still finalizes the old run and
  * rejects every waiter. A later ordinary preload starts a new sync run.
  * A subset load still pending at cleanup ends with one `loadingSubset:change`
@@ -60,6 +63,11 @@ import type { Row } from './collection-cleanup-restart-support.js'
  * pending. The Promise settles afterward. The model does not reproduce manager
  * callbacks or adapter machinery. A status listener may restart at terminal
  * publication; adjacent event-restart histories exercise that reentry.
+ * Ordinary subscriptions and resumption of deferred acquisition obey the same
+ * restart admission boundary. Eighteen histories cross loading/ready/error cleanup,
+ * eager/on-demand sources, and admission with or without a snapshot or through
+ * deferred resumption. Rejection retains no new subscriber or acquisition;
+ * explicit admission after cleanup settlement starts the replacement run.
  *
  * The production driver calls the real cleanup, live-query, and Effect entry
  * points. Refinement checks run before releasing the controlled adapter gate
@@ -141,6 +149,129 @@ declareOracle({
 })
 
 describe(`Collection cleanup admission oracle`, () => {
+  // These paths share the three-cut model above. The held adapter promise
+  // reaches cleanup start without confusing the retained public status with
+  // permission to start another sync run. No automatic retry is requested.
+  const subscriberAdmissionCases = (
+    [`loading`, `ready`, `error`] as const
+  ).flatMap((priorStatus) =>
+    ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+      ([`subscribe`, `snapshot`, `resume`] as const).map((admission) => ({
+        priorStatus,
+        syncMode,
+        admission,
+      })),
+    ),
+  )
+
+  it.each(subscriberAdmissionCases)(
+    `closes $admission admission during $priorStatus $syncMode cleanup`,
+    async ({ priorStatus, syncMode, admission }) => {
+      const cleanupGate = createDeferred<void>()
+      let starts = 0
+      let acquisitions = 0
+      let callbackCount = 0
+      const subscriberCounts: Array<number> = []
+      const rows = new Map<number, Row>()
+      let publish = () => {}
+      const collection = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        syncMode,
+        sync: {
+          sync: ({ begin, write, commit, markReady, markError }) => {
+            starts++
+            publish = () => {
+              begin()
+              write({ type: `insert`, value: { id: 1, rank: starts } })
+              commit()
+            }
+            if (priorStatus === `ready` || starts > 1) markReady()
+            if (priorStatus === `error` && starts === 1) {
+              markError(new Error(`initial source error`))
+            }
+            return {
+              cleanup: () => cleanupGate.promise,
+              loadSubset: () => {
+                acquisitions++
+                return true
+              },
+            }
+          },
+        },
+      })
+      let subscription:
+        ReturnType<typeof collection.subscribeChanges> | undefined
+      const subscribe = () => {
+        subscription = collection.subscribeChanges(
+          (changes) => {
+            callbackCount++
+            for (const change of changes) {
+              if (change.type === `delete`) rows.delete(change.key)
+              else {
+                const { id, rank } = change.value
+                rows.set(change.key, { id, rank })
+              }
+            }
+          },
+          {
+            includeInitialState: admission !== `subscribe`,
+            deferAcquisition: admission === `resume`,
+          },
+        )
+      }
+      const admit = () => {
+        if (admission === `resume`) subscription!.resumeDeferredAcquisition()
+        else subscribe()
+      }
+      const off = collection.on(`subscribers:change`, ({ subscriberCount }) => {
+        subscriberCounts.push(subscriberCount)
+      })
+
+      await withOracleCleanup(async () => {
+        collection.startSyncImmediate()
+        const cleanup = collection.cleanup()
+        // A deferring subscription starts no source work and may keep its
+        // logical demand. Only its attempted resumption must be rejected.
+        if (admission === `resume`) subscribe()
+        // Deferred admission may report its local snapshot. The rejected
+        // resumption must add no callback to that already-observed prefix.
+        const callbacksBeforeAdmission = callbackCount
+        const atStart = expectedCleanupBoundary(priorStatus, `cleanup-start`)
+        expect(collection.status).toBe(atStart.collectionStatus)
+        expect(observeRestartAdmission(admit)).toBe(atStart.restartAdmission)
+        expect(collection.subscriberCount).toBe(0)
+        expect(subscriberCounts).toEqual([])
+        expect(callbackCount).toBe(callbacksBeforeAdmission)
+        expect(acquisitions).toBe(0)
+        expect(starts).toBe(1)
+        if (admission === `resume`) {
+          expect(subscription!.isDeferringAcquisition()).toBe(true)
+        }
+
+        cleanupGate.resolve()
+        await cleanup
+        const settled = expectedCleanupBoundary(
+          priorStatus,
+          `cleanup-settlement`,
+        )
+        expect(collection.status).toBe(settled.collectionStatus)
+        expect(starts).toBe(1)
+        expect(collection.subscriberCount).toBe(0)
+        expect(callbackCount).toBe(callbacksBeforeAdmission)
+        expect(observeRestartAdmission(admit)).toBe(settled.restartAdmission)
+        expect(collection.subscriberCount).toBe(1)
+        expect(starts).toBe(2)
+        publish()
+        expect([...rows.values()]).toEqual([{ id: 1, rank: 2 }])
+      }, [
+        () => cleanupGate.resolve(),
+        () => subscription?.unsubscribe(),
+        off,
+        () => collection.cleanup(),
+      ])
+    },
+  )
+
   it(`calibrates every declared bounded-product cell exactly once`, () => {
     expectExactCaseIds(reentryScenarios, [
       `abort:plain:1`,
@@ -475,4 +606,121 @@ describe(`Collection cleanup admission oracle`, () => {
       await source.cleanup()
     }
   })
+
+  const lateEffectCases = ([`loading`, `ready`, `error`] as const).flatMap(
+    (priorStatus) =>
+      ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+        ([`first`, `second`] as const).map((cleaningPosition) => ({
+          priorStatus,
+          syncMode,
+          cleaningPosition,
+        })),
+      ),
+  )
+
+  // Effects must retire at cleanup start, including when construction reaches
+  // a source whose adapter cleanup is already pending. The same boundary model
+  // requires a terminal dependent without partial subscription ownership.
+  it.each(lateEffectCases)(
+    `releases a late Effect during $priorStatus $syncMode cleanup of its $cleaningPosition source`,
+    async ({ priorStatus, syncMode, cleaningPosition }) => {
+      const cleanupGate = createDeferred<void>()
+      let starts = 0
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        syncMode,
+        sync: {
+          sync: ({ markReady, markError }) => {
+            starts++
+            if (priorStatus === `ready` || starts > 1) markReady()
+            if (priorStatus === `error` && starts === 1) {
+              markError(new Error(`initial source error`))
+            }
+            return {
+              cleanup: () => cleanupGate.promise,
+              loadSubset: () => true,
+            }
+          },
+        },
+      })
+      const healthySource = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        sync: { sync: ({ markReady }) => markReady() },
+      })
+      source.createIndex((row) => row.id, { indexType: BasicIndex })
+      healthySource.createIndex((row) => row.id, { indexType: BasicIndex })
+      const registerCleanupStart = source._onCleanupStart.bind(source)
+      let activeCleanupStartObservers = 0
+      source._onCleanupStart = (callback) => {
+        activeCleanupStartObservers++
+        const unsubscribe = registerCleanupStart(callback)
+        let active = true
+        return () => {
+          if (!active) return
+          active = false
+          activeCleanupStartObservers--
+          unsubscribe()
+        }
+      }
+
+      const firstSource = cleaningPosition === `first` ? source : healthySource
+      const secondSource =
+        cleaningPosition === `second` ? source : healthySource
+      const errors: Array<string> = []
+      let batches = 0
+      const create = () =>
+        createEffect({
+          query: (q) =>
+            q
+              .from({ first: firstSource })
+              .join(
+                { second: secondSource },
+                ({ first, second }) => eq(first.id, second.id),
+                `inner`,
+              ),
+          onBatch: () => {
+            batches++
+          },
+          onSourceError: (error) => {
+            errors.push(error.message)
+          },
+        })
+      let effect: ReturnType<typeof createEffect> | undefined
+      await withOracleCleanup(async () => {
+        source.startSyncImmediate()
+        const cleanup = source.cleanup()
+        effect = create()
+        const atStart = expectedCleanupBoundary(priorStatus, `cleanup-start`)
+        expect(observeDependent(!effect.disposed)).toBe(atStart.dependent)
+        expect(source.status).toBe(atStart.collectionStatus)
+        expect(source.subscriberCount).toBe(0)
+        expect(healthySource.subscriberCount).toBe(0)
+        expect(activeCleanupStartObservers).toBe(0)
+        expect(batches).toBe(0)
+        expect(errors).toEqual([
+          `Source collection '${source.id}' was cleaned up while effect depends on it`,
+        ])
+
+        cleanupGate.resolve()
+        await cleanup
+        expect(effect.disposed).toBe(true)
+        expect(source.subscriberCount).toBe(0)
+        expect(healthySource.subscriberCount).toBe(0)
+        // A later, explicit Effect construction is allowed. The retired Effect
+        // stays disposed; neither cleanup settlement nor restart revives it.
+        effect = create()
+        expect(effect.disposed).toBe(false)
+        expect(source.subscriberCount).toBe(1)
+        expect(healthySource.subscriberCount).toBe(1)
+        expect(activeCleanupStartObservers).toBeGreaterThan(0)
+        expect(errors).toHaveLength(1)
+      }, [
+        () => cleanupGate.resolve(),
+        () => effect?.dispose(),
+        () => source.cleanup(),
+        () => healthySource.cleanup(),
+      ])
+      expect(activeCleanupStartObservers).toBe(0)
+    },
+  )
 })

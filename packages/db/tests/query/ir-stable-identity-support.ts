@@ -14,6 +14,7 @@ import {
   UnionAll,
   Value,
 } from '../../src/query/ir.js'
+import { includesRuntime } from '../../src/query/live/includes-runtime.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 
 export interface User {
@@ -242,6 +243,7 @@ export function createUnionDerivedIncludesQuery(parentAlias: string): QueryIR {
     new PropRef([parentAlias, `id`]),
     new PropRef([`userId`]),
     `posts`,
+    includesRuntime,
     undefined,
     undefined,
     `array`,
@@ -286,6 +288,7 @@ export function createCorrelatedUnionIncludesQuery(
     new PropRef([parentAlias, `id`]),
     new PropRef([`userId`]),
     `posts`,
+    includesRuntime,
     undefined,
     [new PropRef([parentAlias, `age`])],
     `array`,
@@ -326,6 +329,7 @@ export function createAlphaRenamedIncludesQuery(
     new PropRef([parentAlias, `id`]),
     new PropRef([childAlias, `userId`]),
     `posts`,
+    includesRuntime,
     [
       new Func(`eq`, [
         new PropRef([parentAlias, `status`]),

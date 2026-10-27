@@ -7,7 +7,7 @@ title: UseLiveInfiniteQueryReturnWithCollection
 type UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils> = object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L81)
+Defined in: [useLiveInfiniteQuery.ts:73](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L73)
 
 ## Type Parameters
 
@@ -31,7 +31,7 @@ Defined in: [useLiveInfiniteQuery.ts:81](https://github.com/TanStack/db/blob/mai
 collection: Collection<TResult, TKey, TUtils> & NonSingleResult;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:88](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L88)
+Defined in: [useLiveInfiniteQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L80)
 
 ***
 
@@ -41,7 +41,7 @@ Defined in: [useLiveInfiniteQuery.ts:88](https://github.com/TanStack/db/blob/mai
 data: TResult[];
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L86)
+Defined in: [useLiveInfiniteQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L78)
 
 ***
 
@@ -51,7 +51,7 @@ Defined in: [useLiveInfiniteQuery.ts:86](https://github.com/TanStack/db/blob/mai
 error: unknown;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:104](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L104)
+Defined in: [useLiveInfiniteQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L96)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: [useLiveInfiniteQuery.ts:104](https://github.com/TanStack/db/blob/ma
 fetchNextPage: () => Promise<void>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:101](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L101)
+Defined in: [useLiveInfiniteQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L93)
 
 #### Returns
 
@@ -75,7 +75,7 @@ Defined in: [useLiveInfiniteQuery.ts:101](https://github.com/TanStack/db/blob/ma
 hasNextPage: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:102](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L102)
+Defined in: [useLiveInfiniteQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L94)
 
 ***
 
@@ -85,7 +85,7 @@ Defined in: [useLiveInfiniteQuery.ts:102](https://github.com/TanStack/db/blob/ma
 isCleanedUp: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:97](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L97)
+Defined in: [useLiveInfiniteQuery.ts:89](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L89)
 
 ***
 
@@ -95,7 +95,7 @@ Defined in: [useLiveInfiniteQuery.ts:97](https://github.com/TanStack/db/blob/mai
 isEnabled: true;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:98](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L98)
+Defined in: [useLiveInfiniteQuery.ts:90](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L90)
 
 ***
 
@@ -105,7 +105,7 @@ Defined in: [useLiveInfiniteQuery.ts:98](https://github.com/TanStack/db/blob/mai
 isError: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L96)
+Defined in: [useLiveInfiniteQuery.ts:88](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L88)
 
 ***
 
@@ -115,7 +115,7 @@ Defined in: [useLiveInfiniteQuery.ts:96](https://github.com/TanStack/db/blob/mai
 isFetchingNextPage: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:103](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L103)
+Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L95)
 
 ***
 
@@ -125,7 +125,7 @@ Defined in: [useLiveInfiniteQuery.ts:103](https://github.com/TanStack/db/blob/ma
 isIdle: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L95)
+Defined in: [useLiveInfiniteQuery.ts:87](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L87)
 
 ***
 
@@ -135,7 +135,7 @@ Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/mai
 isLoading: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:90](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L90)
+Defined in: [useLiveInfiniteQuery.ts:82](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L82)
 
 ***
 
@@ -145,7 +145,7 @@ Defined in: [useLiveInfiniteQuery.ts:90](https://github.com/TanStack/db/blob/mai
 isPersistedReady: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L93)
+Defined in: [useLiveInfiniteQuery.ts:85](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L85)
 
 ***
 
@@ -155,7 +155,7 @@ Defined in: [useLiveInfiniteQuery.ts:93](https://github.com/TanStack/db/blob/mai
 isReady: boolean;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L91)
+Defined in: [useLiveInfiniteQuery.ts:83](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L83)
 
 ***
 
@@ -165,7 +165,7 @@ Defined in: [useLiveInfiniteQuery.ts:91](https://github.com/TanStack/db/blob/mai
 pageParams: number[];
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:100](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L100)
+Defined in: [useLiveInfiniteQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L92)
 
 ***
 
@@ -175,7 +175,7 @@ Defined in: [useLiveInfiniteQuery.ts:100](https://github.com/TanStack/db/blob/ma
 pages: TResult[][];
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:99](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L99)
+Defined in: [useLiveInfiniteQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L91)
 
 ***
 
@@ -185,7 +185,7 @@ Defined in: [useLiveInfiniteQuery.ts:99](https://github.com/TanStack/db/blob/mai
 persistedError: unknown | undefined;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L94)
+Defined in: [useLiveInfiniteQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L86)
 
 ***
 
@@ -195,7 +195,7 @@ Defined in: [useLiveInfiniteQuery.ts:94](https://github.com/TanStack/db/blob/mai
 persistedStatus: LiveQueryPersistedStatus;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L92)
+Defined in: [useLiveInfiniteQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L84)
 
 ***
 
@@ -205,7 +205,7 @@ Defined in: [useLiveInfiniteQuery.ts:92](https://github.com/TanStack/db/blob/mai
 state: Map<TKey, TResult>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:87](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L87)
+Defined in: [useLiveInfiniteQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L79)
 
 ***
 
@@ -215,4 +215,4 @@ Defined in: [useLiveInfiniteQuery.ts:87](https://github.com/TanStack/db/blob/mai
 status: CollectionStatus;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:89](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L89)
+Defined in: [useLiveInfiniteQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L81)

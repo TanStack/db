@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
+import { BTreeIndex } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { BTreeIndex } from '../../src/index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import {
   createLiveQueryCollection,
