@@ -395,6 +395,11 @@ const ownerGroups: ReadonlyArray<
     `pairs`,
   ],
   [
+    `db/tests/query/group-result-key-oracle.property.test.ts`,
+    `group-result-key`,
+    `groups`,
+  ],
+  [
     `db/tests/query/pooled-live-query-oracle.property.test.ts`,
     `pooled-live-query`,
     `publication`,
@@ -778,6 +783,10 @@ const replayTestNames = new Map([
   [
     `index-update.custom-comparator`,
     `matches an independent custom-comparator model \\(seed undefined\\)`,
+  ],
+  [
+    `group-result-key.groups`,
+    `publishes one key of the key type per group \\(seed undefined\\)`,
   ],
 ])
 

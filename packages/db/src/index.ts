@@ -4,7 +4,6 @@
 import * as IR from './query/ir.js'
 
 export * from './collection/index.js'
-export * from './SortedMap'
 export * from './transactions'
 export * from './client.js'
 export { withCollectionConfigFactory } from './client.js'

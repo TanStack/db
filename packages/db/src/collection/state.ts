@@ -1144,7 +1144,6 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      const syncedInsertedOrUpdatedKeys = new Set<TKey>()
       const firstSyncOperations = new Map<
         TKey,
         OptimisticChangeMessage<TOutput>
@@ -1155,7 +1154,6 @@ export class CollectionStateManager<
           changedKeys.add(key)
           if (!firstSyncOperations.has(key))
             firstSyncOperations.set(key, operation)
-          if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1368,6 +1366,16 @@ export class CollectionStateManager<
             ? syncPreviousValue
             : currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
+
+        if (previousVisibleValue === undefined) {
+          if (newVisibleValue === undefined) continue
+          // Subscribers last saw this key absent, whatever a completed
+          // optimistic request held. Batching composes a buffered delete with
+          // this insert into an update.
+          events.push({ type: `insert`, key, value: newVisibleValue })
+          continue
+        }
+        // Only deletes and updates describe the previous row.
         const previousVirtualProps =
           this.preSyncVirtualState.get(key) ??
           this.getVirtualPropsSnapshotForState(key, {
@@ -1375,10 +1383,6 @@ export class CollectionStateManager<
             optimisticUpserts: previousOptimisticUpserts,
             optimisticDeletes: previousOptimisticDeletes,
           })
-        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
-        const virtualChanged =
-          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
-          previousVirtualProps.$origin !== nextVirtualProps.$origin
         const withPreviousVirtualProps = (value: TOutput) =>
           enrichRowWithVirtualProps(
             value,
@@ -1388,20 +1392,18 @@ export class CollectionStateManager<
             () => previousVirtualProps.$origin,
           )
 
-        if (previousVisibleValue === undefined) {
-          if (newVisibleValue === undefined) continue
-          // Subscribers last saw this key absent, whatever a completed
-          // optimistic request held. Batching composes a buffered delete with
-          // this insert into an update.
-          events.push({ type: `insert`, key, value: newVisibleValue })
-        } else if (newVisibleValue === undefined) {
+        if (newVisibleValue === undefined) {
           events.push({
             type: `delete`,
             key,
             value: withPreviousVirtualProps(previousVisibleValue),
           })
-        } else if (
-          virtualChanged ||
+          continue
+        }
+        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
+        if (
+          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
+          previousVirtualProps.$origin !== nextVirtualProps.$origin ||
           !deepEquals(previousVisibleValue, newVisibleValue)
         ) {
           events.push({

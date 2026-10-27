@@ -46,7 +46,10 @@ import type {
  * plus caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
- * locking, real bfcache admission, or browser process teardown.
+ * locking, real bfcache admission, or browser process teardown. The open
+ * histories begin after asset resolution. The OPFS open outcome oracle in
+ * opfs-open-outcome-oracle.ts owns how an open settles across asset lookup,
+ * worker start, WASM load, and initialization, with jsdom and Chromium drivers.
  */
 
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
@@ -285,6 +288,7 @@ function installEnvironment(behavior: WorkerBehavior): ControlledPage {
   vi.stubGlobal(`navigator`, {
     storage: { getDirectory: () => Promise.resolve({}) },
   })
+  vi.stubGlobal(`location`, { href: `https://example.test/` })
   vi.stubGlobal(`addEventListener`, page.addEventListener.bind(page))
   vi.stubGlobal(`removeEventListener`, page.removeEventListener.bind(page))
   return page
