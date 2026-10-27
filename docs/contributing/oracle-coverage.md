@@ -1932,6 +1932,13 @@ drivers; the same seam rejects a statement above 100 bindings. The original
 transaction driver exceeded the cap at 101. This Node SQLite seam does not
 execute in Workers or prove native JSON-function support.
 
+The [worker diagnostics oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts)
+drives the real worker module and also classifies a refused OPFS storage
+root, as in a private window or a browser without OPFS storage: the worker
+answers `PERSISTENCE_UNAVAILABLE` with the browser's error name and message
+before SQLite opens, and a `PersistenceUnavailableError` response carries only
+its details, which the opener prefixes once.
+
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,
 ignores a late response, and releases the deadline and abort listener after a

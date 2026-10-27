@@ -96,6 +96,20 @@ function toBindableValue(value: unknown): SQLiteCompatibleBinding {
   )
 }
 
+// The opener rebuilds a PersistenceUnavailableError from the response, which
+// adds the class's message prefix, so the response carries only the details.
+const persistenceUnavailablePrefix = new PersistenceUnavailableError(
+  `-`,
+).message.slice(0, -1)
+
+function toErrorMessage(error: unknown): string {
+  const { message } = error as Error
+  return error instanceof PersistenceUnavailableError &&
+    message.startsWith(persistenceUnavailablePrefix)
+    ? message.slice(persistenceUnavailablePrefix.length)
+    : message
+}
+
 function toErrorCode(error: unknown): BrowserOPFSWorkerErrorCode {
   if (error instanceof PersistenceUnavailableError) {
     return `PERSISTENCE_UNAVAILABLE`
@@ -149,6 +163,16 @@ async function initializeWorkerDatabase(request: {
   if (!hasWorkerOPFSSyncAccessSupport(workerGlobal)) {
     throw new PersistenceUnavailableError(
       `Browser OPFS sync access is not available in this worker runtime`,
+    )
+  }
+  // A browser can expose the OPFS API yet refuse its storage root, as in a
+  // private window. That is a capability failure, not an internal error.
+  try {
+    await navigator.storage.getDirectory()
+  } catch (error) {
+    const { name, message } = error as Error
+    throw new PersistenceUnavailableError(
+      `OPFS storage is unavailable: ${name}: ${message}`,
     )
   }
 
@@ -311,7 +335,7 @@ async function handleWorkerRequest(
       requestId: request.requestId,
       ok: false,
       code: toErrorCode(error),
-      error: (error as Error).message,
+      error: toErrorMessage(error),
     }
   }
 }

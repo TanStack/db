@@ -63,6 +63,8 @@ diff, not a timeout.
 | Lookup runs without a Vite client on the page | Bundler consumers | Assertion failure in the four Next.js cases; equivalent within the two webpack cases, because webpack emits the worker and WASM into one directory and the moved-code check skips the lookup |
 | Production builds keep the dev-only lookup (the code before the production gate) | Bundler consumers, Vite consumer | Assertion failure in the webpack production and both Next.js production cases and in the Vite consumer's production build (`shipsViteLookup`) |
 | Worker accepts an opener from another version (the code before the version check) | Install layout | Assertion failure in the three pre-bundled two-version cases: the open succeeded with the other copy's worker |
+| Worker reports a refused OPFS storage root as internal (the code before the storage check) | Worker diagnostics | Assertion failure in the storage-root examples and both campaigns: `INTERNAL` with the bare browser message |
+| Worker sends a `PersistenceUnavailableError` message with its prefix (the code before the fix) | Worker diagnostics | Assertion failure on the response text; the opener showed the prefix twice |
 
 The reject-before-lookup control shows why the observation records reach.
 Without `reached`, that history would have passed.
@@ -92,6 +94,13 @@ round. Production passed it unchanged, and a control that ignores the Worker
 | ORC-016 Law-only oracle files | The oracle files hold no unit tests; fixed checks stay in the consumer test file. |
 
 ## Limits
+
+A manual probe ran the packaged consumer under Vite development and preview in
+Playwright's Firefox 150, which opened and queried SQLite, and WebKit 26.4,
+which refuses the OPFS storage root even on a blank page. With the storage
+check, WebKit's open rejects with `PersistenceUnavailableError`; before it,
+the open reported an internal error. Real Safari was checked by hand
+separately.
 
 Both oracles cover Vite only, in Chromium. The bundler consumer checks add
 webpack 5 builds and Next.js with Turbopack and webpack, in development and
