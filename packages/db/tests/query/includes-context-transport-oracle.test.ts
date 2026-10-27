@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest'
+import { declareOracle } from '../oracle-config.js'
 import {
   add,
   and,
-  caseWhen,
   coalesce,
   count,
   createLiveQueryCollection,
@@ -10,20 +10,26 @@ import {
   gt,
   lt,
   lte,
-  materialize,
   multiply,
   sum,
-  toArray,
 } from '../../src/query/index.js'
 import {
-  attachRouteMetadata,
-  stripInternalRouteMetadata,
-} from '../../src/query/compiler/route-metadata.js'
-import { createControlledCollection } from './includes-oracle-helpers.js'
+  createGrammarCollection,
+  expectEveryForm,
+  expectNoPrivateSymbolsDeep,
+  ids,
+  includeInEveryForm,
+  materializationForms,
+  readEveryForm,
+  runWithCleanup,
+} from './includes-context-transport-helpers.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { Collection } from '../../src/collection/index.js'
-import type { Context, QueryBuilder } from '../../src/query/builder/index.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
+import type {
+  MaterializationForm,
+  MaterializedForms,
+} from './includes-context-transport-helpers.js'
 
 /**
  * # How can a parent value cross a nested query without becoming user data?
@@ -58,213 +64,22 @@ import type { ControlledCollection } from './includes-oracle-helpers.js'
  * oracle owns demand lifetime. The publication oracle owns coherent callbacks.
  * The Collection oracle owns facade identity and retirement.
  *
- * The focused path witnesses below model a property path as its sequence of
- * segments: a parent field named `a.b` and a nested field `a.b` are distinct
- * values, as are a dotted ancestor alias and two ordinary path segments. Their
- * public checks cover initial materialization and source updates. The include
- * result-path witness also checks that two different child routes stay separate.
- * These fixed fixtures do not claim arbitrary path segments or materialization
- * forms beyond the displayed `toArray` queries.
+ * The fixed path witnesses, which check dotted and nested parent fields and
+ * distinct include result paths, are unit tests in
+ * `includes-context-transport.test.ts`. They model a property path as its
+ * sequence of segments: a parent field named `a.b` and a nested field `a.b`
+ * are distinct values, as are a dotted ancestor alias and two ordinary path
+ * segments. These fixed fixtures do not claim arbitrary path segments or
+ * materialization forms beyond the displayed `toArray` queries.
  */
 
-type Cleanable = { cleanup: () => Promise<void> }
-
-test('carries dotted and nested parent fields through one include', async () => {
-  const parents = createGrammarCollection('path-parent', [
-    { id: 1, 'a.b': 11, a: { b: 22 } },
-  ])
-  const children = createGrammarCollection('path-child', [
-    { id: 10, parentId: 1 },
-  ])
-  const live = createLiveQueryCollection((q) =>
-    q.from({ parent: parents.collection }).select(({ parent }) => ({
-      id: parent.id,
-      children: toArray(
-        q
-          .from({ child: children.collection })
-          .where(({ child }) => eq(child.parentId, parent.id))
-          .select(({ child }) => ({
-            id: child.id,
-            flat: parent['a.b'],
-            nested: parent.a.b,
-          })),
-      ),
-    })),
-  )
-  await runWithCleanup(live, [parents, children], async () => {
-    await live.preload()
-    expect(live.get(1)?.children).toEqual([{ id: 10, flat: 11, nested: 22 }])
-
-    parents.write(`update`, { id: 1, 'a.b': 33, a: { b: 44 } })
-    expect(live.get(1)?.children).toEqual([{ id: 10, flat: 33, nested: 44 }])
-  })
-})
-
-test('carries both parent paths through nested includes', async () => {
-  const parents = createGrammarCollection('nested-path-parent', [
-    { id: 1, 'a.b': 11, a: { b: 22 } },
-  ])
-  const children = createGrammarCollection('nested-path-child', [
-    { id: 10, parentId: 1 },
-  ])
-  const grandchildren = createGrammarCollection('nested-path-grandchild', [
-    { id: 100, childId: 10 },
-  ])
-  const live = createLiveQueryCollection((q) =>
-    q.from({ parent: parents.collection }).select(({ parent }) => ({
-      id: parent.id,
-      children: toArray(
-        q
-          .from({ child: children.collection })
-          .where(({ child }) => eq(child.parentId, parent.id))
-          .select(({ child }) => ({
-            id: child.id,
-            grandchildren: toArray(
-              q
-                .from({ grandchild: grandchildren.collection })
-                .where(({ grandchild }) => eq(grandchild.childId, child.id))
-                .select(({ grandchild }) => ({
-                  id: grandchild.id,
-                  flat: parent['a.b'],
-                  nested: parent.a.b,
-                })),
-            ),
-          })),
-      ),
-    })),
-  )
-  await runWithCleanup(live, [parents, children, grandchildren], async () => {
-    await live.preload()
-    expect(live.toArray).toHaveLength(1)
-    expect(live.toArray[0]?.children).toEqual([
-      { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
-    ])
-  })
-})
-
-test('keeps dotted ancestor aliases distinct in nested includes', async () => {
-  const dotted = createGrammarCollection('dotted-alias-parent', [
-    { id: 1, x: 11 },
-  ])
-  const nested = createGrammarCollection('nested-alias-parent', [
-    { id: 1, q: { x: 22 } },
-  ])
-  const children = createGrammarCollection('alias-path-child', [
-    { id: 10, parentId: 1 },
-  ])
-  const grandchildren = createGrammarCollection('alias-path-grandchild', [
-    { id: 100, childId: 10 },
-  ])
-  const live = createLiveQueryCollection((q) =>
-    q
-      .from({ 'p.q': dotted.collection })
-      .innerJoin({ p: nested.collection }, ({ 'p.q': left, p }) =>
-        eq(left.id, p.id),
-      )
-      .select(({ 'p.q': left, p }) => ({
-        id: left.id,
-        children: toArray(
-          q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentId, left.id))
-            .select(({ child }) => ({
-              id: child.id,
-              grandchildren: toArray(
-                q
-                  .from({ grandchild: grandchildren.collection })
-                  .where(({ grandchild }) => eq(grandchild.childId, child.id))
-                  .select(({ grandchild }) => ({
-                    id: grandchild.id,
-                    flat: left.x,
-                    nested: p.q.x,
-                  })),
-              ),
-            })),
-        ),
-      })),
-  )
-  await runWithCleanup(
-    live,
-    [dotted, nested, children, grandchildren],
-    async () => {
-      await live.preload()
-      expect(live.toArray).toHaveLength(1)
-      expect(live.toArray[0]?.children).toEqual([
-        { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
-      ])
-    },
-  )
-})
-
-test('routes dotted and nested include result paths independently', async () => {
-  const parents = createGrammarCollection('route-path-parent', [
-    { id: 1, flatKey: 1, nestedKey: 2 },
-  ])
-  const flatChildren = createGrammarCollection('route-path-flat', [
-    { id: 10, parentId: 1 },
-  ])
-  const nestedChildren = createGrammarCollection('route-path-nested', [
-    { id: 20, parentId: 2 },
-  ])
-  const live = createLiveQueryCollection((q) =>
-    q.from({ parent: parents.collection }).select(({ parent }) => ({
-      id: parent.id,
-      'a.b': toArray(
-        q
-          .from({ child: flatChildren.collection })
-          .where(({ child }) => eq(child.parentId, parent.flatKey))
-          .select(({ child }) => ({ id: child.id })),
-      ),
-      a: caseWhen(
-        eq(parent.id, 1),
-        {
-          b: toArray(
-            q
-              .from({ child: nestedChildren.collection })
-              .where(({ child }) => eq(child.parentId, parent.nestedKey))
-              .select(({ child }) => ({ id: child.id })),
-          ),
-        },
-        { b: [] as Array<{ id: number }> },
-      ),
-    })),
-  )
-  await runWithCleanup(
-    live,
-    [parents, flatChildren, nestedChildren],
-    async () => {
-      await live.preload()
-      expect(live.toArray).toHaveLength(1)
-      expect(live.toArray[0]?.['a.b']).toEqual([{ id: 10 }])
-      expect(live.toArray[0]?.a.b).toEqual([{ id: 20 }])
-
-      parents.write(`update`, { id: 1, flatKey: 2, nestedKey: 1 })
-      expect(live.toArray[0]?.['a.b']).toEqual([])
-      expect(live.toArray[0]?.a.b).toEqual([])
-
-      flatChildren.write(`insert`, { id: 11, parentId: 2 })
-      nestedChildren.write(`insert`, { id: 21, parentId: 1 })
-      expect(live.toArray[0]?.['a.b']).toEqual([{ id: 11 }])
-      expect(live.toArray[0]?.a.b).toEqual([{ id: 21 }])
-    },
-  )
-})
-
-type MaterializationForm = (typeof materializationForms)[number]
-
-type MaterializedForms<T> = {
-  collection: { values: () => Iterable<T> }
-  array: Iterable<T>
-  materialized: Iterable<T>
-}
-
-const materializationForms = [`collection`, `array`, `materialized`] as const
 const checkpoints = [`initial`, `parent-update`, `child-update`] as const
 
 // These axes name semantic boundaries, not implementation functions. Adding a
 // compiler feature means adding its boundary here or stating why it cannot
 // carry correlated context. Each declared tuple gets one named test below;
-// the path-specific witnesses above reconstruct the separate dotted-path cases.
+// the path-specific witnesses in `includes-context-transport.test.ts`
+// reconstruct the separate dotted-path cases.
 //
 // Removing a family loses a distinct question: field versus whole-parent
 // projection; unmatched versus null correlation; immediate versus ancestor
@@ -338,12 +153,6 @@ const routeContextGrammar = {
     ] as const,
   },
 } as const
-
-const queryRefMetadataGrammar = {
-  routeModes: [`plain`, `routed`] as const,
-} as const
-
-type QueryRefMetadataMode = (typeof queryRefMetadataGrammar.routeModes)[number]
 
 type ParentProjectionCell = {
   family: `parent-projection`
@@ -493,104 +302,6 @@ const grammarCells: Array<GrammarCell> = [
   ),
 ]
 
-async function cleanup(
-  live: Cleanable,
-  sources: Array<{ collection: Cleanable }>,
-): Promise<Array<Error>> {
-  const failures: Array<Error> = []
-  try {
-    await live.cleanup()
-  } catch (error) {
-    failures.push(
-      new Error(`live-query Collection cleanup failed`, { cause: error }),
-    )
-  }
-  const sourceResults = await Promise.allSettled(
-    sources.map(({ collection }) =>
-      Promise.resolve().then(() => collection.cleanup()),
-    ),
-  )
-  for (const [index, result] of sourceResults.entries()) {
-    if (result.status === `rejected`) {
-      failures.push(
-        new Error(`source Collection ${index} cleanup failed`, {
-          cause: result.reason,
-        }),
-      )
-    }
-  }
-  return failures
-}
-
-async function runWithCleanup(
-  live: Cleanable,
-  sources: Array<{ collection: Cleanable }>,
-  run: () => Promise<void>,
-): Promise<void> {
-  const outcome = await Promise.resolve()
-    .then(run)
-    .then(
-      () => ({ ok: true }) as const,
-      (error: unknown) => ({ ok: false, error }) as const,
-    )
-  const cleanupFailures = await cleanup(live, sources)
-  if (!outcome.ok) {
-    if (cleanupFailures.length > 0) {
-      throw new AggregateError(cleanupFailures, `Oracle cleanup also failed`, {
-        cause: outcome.error,
-      })
-    }
-    throw outcome.error
-  }
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(cleanupFailures, `Oracle cleanup failed`)
-  }
-}
-
-function createGrammarCollection<T extends { id: number }>(
-  name: string,
-  rows: ReadonlyArray<T>,
-): ControlledCollection<T> {
-  return createControlledCollection(name, rows, { autoIndex: `eager` })
-}
-
-function includeInEveryForm<TContext extends Context>(
-  query: QueryBuilder<TContext>,
-) {
-  return {
-    collection: query,
-    array: toArray(query),
-    materialized: materialize(query),
-  }
-}
-
-// Read each public form through the same projection. This keeps normalization
-// outside the production query while preserving exact row counts and values.
-function readEveryForm<T, U>(
-  forms: MaterializedForms<T>,
-  project: (rows: Iterable<T>) => U,
-): Record<MaterializationForm, U> {
-  return {
-    collection: project(forms.collection.values()),
-    array: project(forms.array),
-    materialized: project(forms.materialized),
-  }
-}
-
-function expectEveryForm<T, U>(
-  forms: MaterializedForms<T>,
-  project: (rows: Iterable<T>) => U,
-  expected: U,
-): void {
-  expect(readEveryForm(forms, project)).toEqual(
-    Object.fromEntries(materializationForms.map((form) => [form, expected])),
-  )
-}
-
-function ids(rows: Iterable<{ id: number }>): Array<number> {
-  return [...rows].map((row) => row.id)
-}
-
 function grammarCellName(cell: GrammarCell): string {
   switch (cell.family) {
     case `parent-projection`:
@@ -614,6 +325,25 @@ function grammarCellName(cell: GrammarCell): string {
     case `public-surface`:
       return `${cell.family} / ${cell.shape}`
   }
+}
+
+// Law: a child row carries each parent snapshot in the form its projection
+// selected, read from the current parent row, so a parent update changes every
+// form.
+function expectedParentSnapshots(
+  parents: ControlledCollection<{ id: number; group: number; token: string }>,
+  children: ControlledCollection<{ id: number; parentGroup: number }>,
+  shape: (typeof routeContextGrammar.parentProjection.shapes)[number],
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  return children.collection.toArray
+    .filter((child) => child.parentGroup === parent.group)
+    .map(({ id }) => ({
+      id,
+      parentSnapshot:
+        shape === `field` ? { token: parent.token } : { ...parent },
+    }))
 }
 
 async function runParentProjectionCell({
@@ -653,21 +383,15 @@ async function runParentProjectionCell({
       }),
   )
 
-  const expected = (parentId: number) => {
-    const parent = parents.collection.get(parentId)!
-    return children.collection.toArray
-      .filter((child) => child.parentGroup === parent.group)
-      .map(({ id }) => ({
-        id,
-        parentSnapshot:
-          shape === `field` ? { token: parent.token } : { ...parent },
-      }))
-  }
   const project = (rows: Iterable<{ id: number; parentSnapshot: unknown }>) =>
     [...rows].map(({ id, parentSnapshot }) => ({ id, parentSnapshot }))
   const assertParents = () => {
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedParentSnapshots(parents, children, shape, parent.id),
+      )
     }
   }
 
@@ -682,6 +406,23 @@ async function runParentProjectionCell({
     children.write(`insert`, { id: 30, parentGroup: 1 })
     assertParents()
   })
+}
+
+// Law: a child correlates with a parent only when both correlation values are
+// equal and non-null; a null value on either side matches no child.
+function expectedCorrelatedIds(
+  parents: ControlledCollection<{ id: number; group: number | null }>,
+  children: ControlledCollection<{ id: number; parentGroup: number | null }>,
+) {
+  const parentGroup = parents.collection.get(1)!.group
+  return children.collection.toArray
+    .filter(
+      (child) =>
+        parentGroup != null &&
+        child.parentGroup != null &&
+        child.parentGroup === parentGroup,
+    )
+    .map(({ id }) => id)
 }
 
 async function runCorrelationDomainCell({
@@ -711,18 +452,8 @@ async function runCorrelationDomainCell({
     }),
   )
 
-  const expected = () => {
-    const parentGroup = parents.collection.get(1)!.group
-    return children.collection.toArray
-      .filter(
-        (child) =>
-          parentGroup != null &&
-          child.parentGroup != null &&
-          child.parentGroup === parentGroup,
-      )
-      .map(({ id }) => id)
-  }
-  const assertResult = () => expectEveryForm(live.get(1)!, ids, expected())
+  const assertResult = () =>
+    expectEveryForm(live.get(1)!, ids, expectedCorrelatedIds(parents, children))
 
   await runWithCleanup(live, [parents, children], async () => {
     await live.preload()
@@ -734,6 +465,95 @@ async function runCorrelationDomainCell({
     children.write(`insert`, { id: 30, parentGroup: 1 })
     assertResult()
   })
+}
+
+// Law: an immediate parent includes the children of its group whose value is
+// below that parent threshold, in ascending id order.
+function expectedThresholdChildIds(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    threshold: number
+  }>,
+  children: ControlledCollection<{
+    id: number
+    parentGroup: number
+    group: number
+    value: number
+  }>,
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  return children.collection.toArray
+    .filter(
+      (child) =>
+        child.parentGroup === parent.group && child.value < parent.threshold,
+    )
+    .map(({ id }) => id)
+    .sort((left, right) => left - right)
+}
+
+// Law: a lexical ancestor's threshold filters the grandchildren whose parent
+// group equals the given child group.
+function expectedGrandchildIds(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    threshold: number
+  }>,
+  grandchildren: ControlledCollection<{
+    id: number
+    parentGroup: number
+    value: number
+  }>,
+  parentId: number,
+  childGroup: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  return grandchildren.collection.toArray
+    .filter(
+      (grandchild) =>
+        grandchild.parentGroup === childGroup &&
+        grandchild.value < parent.threshold,
+    )
+    .map(({ id }) => id)
+    .sort((left, right) => left - right)
+}
+
+// Law: each child of the parent carries the grandchild ids of its group,
+// computed by the grandchild model, in every public form.
+function expectedNestedRows(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    threshold: number
+  }>,
+  children: ControlledCollection<{
+    id: number
+    parentGroup: number
+    group: number
+    value: number
+  }>,
+  grandchildren: ControlledCollection<{
+    id: number
+    parentGroup: number
+    value: number
+  }>,
+  parentId: number,
+) {
+  return children.collection.toArray
+    .filter(
+      (child) => child.parentGroup === parents.collection.get(parentId)!.group,
+    )
+    .map((child) => ({
+      id: child.id,
+      grandchildren: Object.fromEntries(
+        materializationForms.map((form) => [
+          form,
+          expectedGrandchildIds(parents, grandchildren, parentId, child.group),
+        ]),
+      ),
+    }))
 }
 
 async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
@@ -769,27 +589,27 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
         }),
     )
 
-    const expected = (parentId: number) => {
-      const parent = parents.collection.get(parentId)!
-      return children.collection.toArray
-        .filter(
-          (child) =>
-            child.parentGroup === parent.group &&
-            child.value < parent.threshold,
-        )
-        .map(({ id }) => id)
-        .sort((left, right) => left - right)
-    }
-
     await runWithCleanup(live, [parents, children, grandchildren], async () => {
       await live.preload()
       for (const parent of parents.collection.toArray) {
-        expectEveryForm(live.get(parent.id)!, ids, expected(parent.id))
+        expectEveryForm(
+          live.get(parent.id)!,
+          ids,
+          expectedThresholdChildIds(parents, children, parent.id),
+        )
       }
 
       parents.write(`update`, { id: 1, group: 1, threshold: 4 })
-      expectEveryForm(live.get(1)!, ids, expected(1))
-      expectEveryForm(live.get(2)!, ids, expected(2))
+      expectEveryForm(
+        live.get(1)!,
+        ids,
+        expectedThresholdChildIds(parents, children, 1),
+      )
+      expectEveryForm(
+        live.get(2)!,
+        ids,
+        expectedThresholdChildIds(parents, children, 2),
+      )
 
       children.write(`insert`, {
         id: 30,
@@ -798,7 +618,11 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
         value: 2,
       })
       for (const parent of parents.collection.toArray) {
-        expectEveryForm(live.get(parent.id)!, ids, expected(parent.id))
+        expectEveryForm(
+          live.get(parent.id)!,
+          ids,
+          expectedThresholdChildIds(parents, children, parent.id),
+        )
       }
     })
     return
@@ -832,18 +656,6 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
       }),
   )
 
-  const expected = (parentId: number, childGroup: number) => {
-    const parent = parents.collection.get(parentId)!
-    return grandchildren.collection.toArray
-      .filter(
-        (grandchild) =>
-          grandchild.parentGroup === childGroup &&
-          grandchild.value < parent.threshold,
-      )
-      .map(({ id }) => id)
-      .sort((left, right) => left - right)
-  }
-
   const projectOuterForm = (
     parentId: number,
     outerForm: MaterializationForm,
@@ -860,20 +672,12 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
   }
 
   const assertNestedProduct = (parentId: number) => {
-    const expectedRows = children.collection.toArray
-      .filter(
-        (child) =>
-          child.parentGroup === parents.collection.get(parentId)!.group,
-      )
-      .map((child) => ({
-        id: child.id,
-        grandchildren: Object.fromEntries(
-          materializationForms.map((form) => [
-            form,
-            expected(parentId, child.group),
-          ]),
-        ),
-      }))
+    const expectedRows = expectedNestedRows(
+      parents,
+      children,
+      grandchildren,
+      parentId,
+    )
     for (const outerForm of materializationForms) {
       expect(projectOuterForm(parentId, outerForm)).toEqual(expectedRows)
     }
@@ -892,6 +696,32 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
     assertNestedProduct(1)
     assertNestedProduct(2)
   })
+}
+
+// Law: an aggregate score is the children values plus the parent factor, added
+// once per child inside the aggregate or once in total outside it.
+function expectedAggregateScores(
+  parents: ControlledCollection<{ id: number; group: number; factor: number }>,
+  children: ControlledCollection<{
+    id: number
+    parentGroup: number
+    value: number
+  }>,
+  placement: (typeof routeContextGrammar.aggregation.placements)[number],
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  const total = children.collection.toArray
+    .filter((child) => child.parentGroup === parent.group)
+    .reduce((result, child) => result + child.value, 0)
+  const childCount = children.collection.toArray.filter(
+    (child) => child.parentGroup === parent.group,
+  ).length
+  return [
+    placement === `inside-aggregate`
+      ? total + childCount * parent.factor
+      : total + parent.factor,
+  ]
 }
 
 async function runAggregationCell({
@@ -935,37 +765,38 @@ async function runAggregationCell({
       }),
   )
 
-  const expected = (parentId: number) => {
-    const parent = parents.collection.get(parentId)!
-    const total = children.collection.toArray
-      .filter((child) => child.parentGroup === parent.group)
-      .reduce((result, child) => result + child.value, 0)
-    const childCount = children.collection.toArray.filter(
-      (child) => child.parentGroup === parent.group,
-    ).length
-    return [
-      placement === `inside-aggregate`
-        ? total + childCount * parent.factor
-        : total + parent.factor,
-    ]
-  }
-
   const project = (rows: Iterable<{ score: number }>) =>
     [...rows].map(({ score }) => score)
 
   await runWithCleanup(live, [parents, children], async () => {
     await live.preload()
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedAggregateScores(parents, children, placement, parent.id),
+      )
     }
 
     parents.write(`update`, { id: 2, group: 1, factor: 3 })
-    expectEveryForm(live.get(2)!, project, expected(2))
-    expectEveryForm(live.get(1)!, project, expected(1))
+    expectEveryForm(
+      live.get(2)!,
+      project,
+      expectedAggregateScores(parents, children, placement, 2),
+    )
+    expectEveryForm(
+      live.get(1)!,
+      project,
+      expectedAggregateScores(parents, children, placement, 1),
+    )
 
     children.write(`insert`, { id: 30, parentGroup: 1, value: 4 })
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedAggregateScores(parents, children, placement, parent.id),
+      )
     }
   })
 }
@@ -974,6 +805,65 @@ type CandidateRow = {
   id: number
   parentGroup: number
   value: number
+}
+
+// Law: each phase selects, for each parent, the candidate rows of its
+// correlated group that the phase admits; the phase value uses the parent
+// parameter.
+function expectedCandidateRows(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    parameter: number
+  }>,
+  modelRows: ReadonlyMap<number, CandidateRow>,
+  leftModelIds: ReadonlySet<number>,
+  { boundary, phase }: Pick<RecursiveSourceCell, `boundary` | `phase`>,
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  const correlated = [...modelRows.values()].filter(
+    (candidate) => candidate.parentGroup === parent.group,
+  )
+  switch (phase) {
+    case `filter`:
+      return correlated
+        .filter((candidate) => candidate.value <= parent.parameter)
+        .map((candidate) => ({ id: candidate.id, value: candidate.id }))
+    case `projection`:
+      return correlated.map((candidate) => ({
+        id: candidate.id,
+        value: candidate.value + parent.parameter,
+      }))
+    case `aggregate`:
+      return correlated.map((candidate) => ({
+        id: candidate.id,
+        value: 1 + parent.parameter,
+      }))
+    case `having`:
+      return parent.parameter < 1
+        ? correlated.map((candidate) => ({ id: candidate.id, value: 1 }))
+        : []
+    case `order-window`: {
+      const partitions =
+        boundary === `union-branch`
+          ? [
+              correlated.filter(({ id }) => leftModelIds.has(id)),
+              correlated.filter(({ id }) => !leftModelIds.has(id)),
+            ]
+          : [correlated]
+      return partitions.flatMap((partition) =>
+        partition
+          .sort(
+            (leftRow, rightRow) =>
+              leftRow.value * parent.parameter -
+                rightRow.value * parent.parameter || leftRow.id - rightRow.id,
+          )
+          .slice(0, 1)
+          .map((candidate) => ({ id: candidate.id, value: candidate.id })),
+      )
+    }
+  }
 }
 
 async function runRecursiveSourceCell({
@@ -1257,51 +1147,6 @@ async function runRecursiveSourceCell({
   const leftModelIds = new Set(
     initialCandidates.filter(({ id }) => id % 20 === 10).map(({ id }) => id),
   )
-  const expected = (parentId: number) => {
-    const parent = parents.collection.get(parentId)!
-    const correlated = [...modelRows.values()].filter(
-      (candidate) => candidate.parentGroup === parent.group,
-    )
-    switch (phase) {
-      case `filter`:
-        return correlated
-          .filter((candidate) => candidate.value <= parent.parameter)
-          .map((candidate) => ({ id: candidate.id, value: candidate.id }))
-      case `projection`:
-        return correlated.map((candidate) => ({
-          id: candidate.id,
-          value: candidate.value + parent.parameter,
-        }))
-      case `aggregate`:
-        return correlated.map((candidate) => ({
-          id: candidate.id,
-          value: 1 + parent.parameter,
-        }))
-      case `having`:
-        return parent.parameter < 1
-          ? correlated.map((candidate) => ({ id: candidate.id, value: 1 }))
-          : []
-      case `order-window`: {
-        const partitions =
-          boundary === `union-branch`
-            ? [
-                correlated.filter(({ id }) => leftModelIds.has(id)),
-                correlated.filter(({ id }) => !leftModelIds.has(id)),
-              ]
-            : [correlated]
-        return partitions.flatMap((partition) =>
-          partition
-            .sort(
-              (leftRow, rightRow) =>
-                leftRow.value * parent.parameter -
-                  rightRow.value * parent.parameter || leftRow.id - rightRow.id,
-            )
-            .slice(0, 1)
-            .map((candidate) => ({ id: candidate.id, value: candidate.id })),
-        )
-      }
-    }
-  }
 
   const project = (rows: Iterable<{ id: number; value: number }>) =>
     [...rows]
@@ -1309,7 +1154,17 @@ async function runRecursiveSourceCell({
       .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
   const assertParents = () => {
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedCandidateRows(
+          parents,
+          modelRows,
+          leftModelIds,
+          { boundary, phase },
+          parent.id,
+        ),
+      )
     }
   }
 
@@ -1348,6 +1203,28 @@ async function runRecursiveSourceCell({
       assertParents()
     },
   )
+}
+
+// Law: a unionAll of two candidate branches yields each correlated candidate
+// value plus the parent parameter, sorted by id.
+function expectedUnionRows(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    parameter: number
+  }>,
+  left: ControlledCollection<CandidateRow>,
+  right: ControlledCollection<CandidateRow>,
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  return [...left.collection.toArray, ...right.collection.toArray]
+    .filter((candidate) => candidate.parentGroup === parent.group)
+    .map((candidate) => ({
+      id: candidate.id,
+      value: candidate.value + parent.parameter,
+    }))
+    .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
 }
 
 async function runUnionIdentityCell({
@@ -1423,16 +1300,6 @@ async function runUnionIdentityCell({
     [...rows]
       .map(({ id, value }) => ({ id, value }))
       .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
-  const expected = (parentId: number) => {
-    const parent = parents.collection.get(parentId)!
-    return [...left.collection.toArray, ...right.collection.toArray]
-      .filter((candidate) => candidate.parentGroup === parent.group)
-      .map((candidate) => ({
-        id: candidate.id,
-        value: candidate.value + parent.parameter,
-      }))
-      .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
-  }
   const keys = (parentId: number) => {
     const collection = live.get(parentId)!.collection
     return new Map(
@@ -1441,7 +1308,11 @@ async function runUnionIdentityCell({
   }
   const assertParents = () => {
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedUnionRows(parents, left, right, parent.id),
+      )
     }
   }
   const assertRouteIndependentKeys = () => expect(keys(2)).toEqual(keys(1))
@@ -1467,6 +1338,33 @@ async function runUnionIdentityCell({
 type DerivedCandidateRow = {
   id: number
   value: number | null
+}
+
+// Law: a derived value joins each anchor whose value equals a non-null
+// candidate value and whose parent group is the parent group.
+function expectedDerivedRows(
+  parents: ControlledCollection<{ id: number; group: number }>,
+  modelRows: ReadonlyMap<number, DerivedCandidateRow>,
+  anchors: ControlledCollection<{
+    id: number
+    parentGroup: number
+    value: number
+  }>,
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  return [...modelRows.values()]
+    .flatMap((candidate) =>
+      anchors.collection.toArray
+        .filter(
+          (anchor) =>
+            candidate.value != null &&
+            anchor.value === candidate.value &&
+            anchor.parentGroup === parent.group,
+        )
+        .map((anchor) => ({ id: anchor.id, value: candidate.value })),
+    )
+    .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
 }
 
 async function runDerivedResultCell({
@@ -1589,21 +1487,6 @@ async function runDerivedResultCell({
   )
 
   const modelRows = new Map(initialCandidates.map((row) => [row.id, row]))
-  const expected = (parentId: number) => {
-    const parent = parents.collection.get(parentId)!
-    return [...modelRows.values()]
-      .flatMap((candidate) =>
-        anchors.collection.toArray
-          .filter(
-            (anchor) =>
-              candidate.value != null &&
-              anchor.value === candidate.value &&
-              anchor.parentGroup === parent.group,
-          )
-          .map((anchor) => ({ id: anchor.id, value: candidate.value })),
-      )
-      .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
-  }
   const project = (
     rows: Iterable<{ id: number; value: number | null | undefined }>,
   ) =>
@@ -1612,7 +1495,11 @@ async function runDerivedResultCell({
       .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
   const assertParents = () => {
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedDerivedRows(parents, modelRows, anchors, parent.id),
+      )
     }
   }
 
@@ -1635,140 +1522,44 @@ async function runDerivedResultCell({
   )
 }
 
-function expectNoRouteMetadata(row: object): void {
-  expect(Object.hasOwn(row, `__correlationKey`)).toBe(false)
-  expect(Object.hasOwn(row, `__parentContext`)).toBe(false)
-}
-
-// Public VirtualRowProps names these five keys, not arbitrary $-prefixed data.
-const publicMetadataKeys = new Set([
-  `$hasPendingWrites`,
-  `$synced`,
-  `$origin`,
-  `$key`,
-  `$collectionId`,
-])
-
-function expectSelectedOwnKeys(
-  row: object,
-  selected: ReadonlyArray<string>,
-): void {
-  expect(
-    new Set(
-      Reflect.ownKeys(row).filter(
-        (key) => typeof key !== `string` || !publicMetadataKeys.has(key),
-      ),
-    ),
-  ).toEqual(new Set(selected))
-}
-
-function captureMetadataRows(
-  rows: Iterable<{ id: number; label: string }>,
-): Array<{ id: number; label: string }> {
-  if (Array.isArray(rows)) {
-    expect(new Set(Reflect.ownKeys(rows))).toEqual(
-      new Set([
-        `length`,
-        ...Array.from({ length: rows.length }, (_, index) => String(index)),
-      ]),
+// Law: a join pairs a child with each tag whose key matches under the join side
+// and whose route attachment matches the parent group.
+function expectedJoinRows(
+  parents: ControlledCollection<{ id: number; group: number; offset: number }>,
+  children: ControlledCollection<{
+    id: number
+    parentGroup: number
+    tagId: number
+  }>,
+  tags: ControlledCollection<{
+    id: number
+    parentGroup: number
+    label: string
+  }>,
+  {
+    keySide,
+    correlationAttachment,
+  }: Pick<JoinCell, `keySide` | `correlationAttachment`>,
+  parentId: number,
+) {
+  const parent = parents.collection.get(parentId)!
+  return children.collection.toArray
+    .flatMap((child) =>
+      tags.collection.toArray
+        .filter((tag) => {
+          const keyMatches =
+            keySide === `main`
+              ? tag.id === child.tagId + parent.offset
+              : tag.id + parent.offset === child.tagId
+          const routeMatches =
+            correlationAttachment === `main`
+              ? child.parentGroup === parent.group
+              : tag.parentGroup === parent.group
+          return keyMatches && routeMatches
+        })
+        .map((tag) => ({ id: child.id, value: tag.label })),
     )
-  }
-  return [...rows].map((row) => {
-    expectNoRouteMetadata(row)
-    expectSelectedOwnKeys(row, [`id`, `label`])
-    return { id: row.id, label: row.label }
-  })
-}
-
-async function runQueryRefMetadataCell(
-  routeMode: QueryRefMetadataMode,
-): Promise<void> {
-  const anchors = createGrammarCollection(`metadata-${routeMode}-anchors`, [
-    { id: 1, candidateId: 10, parentGroup: 1 },
-  ])
-  const candidates = createGrammarCollection(
-    `metadata-${routeMode}-candidates`,
-    [{ id: 10, label: `ten` }],
-  )
-
-  if (routeMode === `plain`) {
-    const live = createLiveQueryCollection((q) => {
-      const projectedCandidates = q
-        .from({ candidate: candidates.collection })
-        .select(({ candidate }) => ({
-          id: candidate.id,
-          label: candidate.label,
-        }))
-      return q
-        .from({ anchor: anchors.collection })
-        .innerJoin(
-          { candidateResult: projectedCandidates },
-          ({ anchor, candidateResult }) =>
-            eq(anchor.candidateId, candidateResult.id),
-        )
-        .select(({ candidateResult }) => candidateResult)
-    })
-
-    await runWithCleanup(live, [anchors, candidates], async () => {
-      await live.preload()
-      expect(captureMetadataRows(live.toArray)).toEqual([
-        { id: 10, label: `ten` },
-      ])
-
-      candidates.write(`update`, { id: 10, label: `updated` })
-      expect(captureMetadataRows(live.toArray)).toEqual([
-        { id: 10, label: `updated` },
-      ])
-    })
-    return
-  }
-
-  const parents = createGrammarCollection(`metadata-routed-parents`, [
-    { id: 1, group: 1 },
-  ])
-  const live = createLiveQueryCollection((q) =>
-    q.from({ parent: parents.collection }).select(({ parent }) => {
-      const projectedCandidates = q
-        .from({ candidate: candidates.collection })
-        .select(({ candidate }) => ({
-          id: candidate.id,
-          label: candidate.label,
-        }))
-      const rows = q
-        .from({ anchor: anchors.collection })
-        .innerJoin(
-          { candidateResult: projectedCandidates },
-          ({ anchor, candidateResult }) =>
-            eq(anchor.candidateId, candidateResult.id),
-        )
-        .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
-        .select(({ candidateResult }) => candidateResult)
-      return { id: parent.id, ...includeInEveryForm(rows) }
-    }),
-  )
-  const assertClean = (expected: Array<{ id: number; label: string }>) => {
-    expect(live.toArray.map(({ id }) => id)).toEqual([1])
-    const forms = live.get(1)!
-    expectSelectedOwnKeys(forms, [`id`, `collection`, `array`, `materialized`])
-    for (const rows of [
-      forms.collection.values(),
-      forms.array,
-      forms.materialized,
-    ]) {
-      expect(captureMetadataRows(rows)).toEqual(expected)
-    }
-  }
-
-  await runWithCleanup(live, [parents, anchors, candidates], async () => {
-    await live.preload()
-    assertClean([{ id: 10, label: `ten` }])
-
-    parents.write(`update`, { id: 1, group: 2 })
-    assertClean([])
-
-    anchors.write(`update`, { id: 1, candidateId: 10, parentGroup: 2 })
-    assertClean([{ id: 10, label: `ten` }])
-  })
+    .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
 }
 
 async function runJoinCell({
@@ -1817,32 +1608,21 @@ async function runJoinCell({
       }),
   )
 
-  const expected = (parentId: number) => {
-    const parent = parents.collection.get(parentId)!
-    return children.collection.toArray
-      .flatMap((child) =>
-        tags.collection.toArray
-          .filter((tag) => {
-            const keyMatches =
-              keySide === `main`
-                ? tag.id === child.tagId + parent.offset
-                : tag.id + parent.offset === child.tagId
-            const routeMatches =
-              correlationAttachment === `main`
-                ? child.parentGroup === parent.group
-                : tag.parentGroup === parent.group
-            return keyMatches && routeMatches
-          })
-          .map((tag) => ({ id: child.id, value: tag.label })),
-      )
-      .sort((leftRow, rightRow) => leftRow.id - rightRow.id)
-  }
-
   const project = (rows: Iterable<{ id: number; value: string }>) =>
     [...rows].map(({ id, value }) => ({ id, value }))
   const assertParents = () => {
     for (const parent of parents.collection.toArray) {
-      expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
+      expectEveryForm(
+        live.get(parent.id)!,
+        project,
+        expectedJoinRows(
+          parents,
+          children,
+          tags,
+          { keySide, correlationAttachment },
+          parent.id,
+        ),
+      )
     }
   }
 
@@ -1856,6 +1636,27 @@ async function runJoinCell({
     children.write(`insert`, { id: 30, parentGroup: 1, tagId: 2 })
     assertParents()
   })
+}
+
+// Law: the parent group and token select the children whose label is the
+// included value under the parent alias or field name.
+function expectedCollisionRows(
+  parents: ControlledCollection<{ id: number; group: number; token: string }>,
+  children: ControlledCollection<{
+    id: number
+    parentGroup: number
+    token: string
+    label: string
+  }>,
+) {
+  const group = parents.collection.get(1)!.group
+  return children.collection.toArray
+    .filter(
+      (child) =>
+        child.parentGroup === group &&
+        child.token === parents.collection.get(1)!.token,
+    )
+    .map((child) => ({ id: child.id, value: child.label }))
 }
 
 async function runNamespaceCollisionCell({
@@ -2008,16 +1809,6 @@ async function runNamespaceCollisionCell({
           }),
         )
 
-  const expected = () => {
-    const group = parents.collection.get(1)!.group
-    return children.collection.toArray
-      .filter(
-        (child) =>
-          child.parentGroup === group &&
-          child.token === parents.collection.get(1)!.token,
-      )
-      .map((child) => ({ id: child.id, value: child.label }))
-  }
   const project = (rows: Iterable<Record<string, unknown>>) =>
     [...rows].map((row) => ({
       id: row.id,
@@ -2027,7 +1818,7 @@ async function runNamespaceCollisionCell({
     expectEveryForm(
       live.get(1)! as MaterializedForms<Record<string, unknown>>,
       project,
-      expected(),
+      expectedCollisionRows(parents, children),
     )
 
   await runWithCleanup(live, [parents, children, tags], async () => {
@@ -2054,42 +1845,6 @@ class PublicSurfaceBox {
   constructor(readonly row: unknown) {
     this.map = new Map([[`row`, row]])
     this.set = new Set([row])
-  }
-}
-
-// Public-surface cells deliberately retain callback values and opaque wrappers.
-// A cleaner that only fixes the final array will still fail these observations.
-function expectNoPrivateSymbolsDeep(
-  value: unknown,
-  allowedSymbols: ReadonlySet<symbol>,
-  seen = new WeakSet<object>(),
-): void {
-  if (value == null || typeof value !== `object` || seen.has(value)) return
-  seen.add(value)
-
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key === `symbol`) {
-      expect(
-        allowedSymbols.has(key),
-        `unexpected private symbol in public query output`,
-      ).toBe(true)
-    }
-    expectNoPrivateSymbolsDeep(
-      (value as Record<PropertyKey, unknown>)[key],
-      allowedSymbols,
-      seen,
-    )
-  }
-
-  if (value instanceof Map) {
-    for (const [key, entry] of value) {
-      expectNoPrivateSymbolsDeep(key, allowedSymbols, seen)
-      expectNoPrivateSymbolsDeep(entry, allowedSymbols, seen)
-    }
-  } else if (value instanceof Set) {
-    for (const entry of value) {
-      expectNoPrivateSymbolsDeep(entry, allowedSymbols, seen)
-    }
   }
 }
 
@@ -2437,114 +2192,27 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
   }
 }
 
+// Each grammar cell is checked against the models below. Each expectation is
+// computed from the source Collections, not written as a value.
+declareOracle({
+  check: [runGrammarCell],
+  model: [
+    expectedParentSnapshots,
+    expectedCorrelatedIds,
+    expectedThresholdChildIds,
+    expectedGrandchildIds,
+    expectedNestedRows,
+    expectedAggregateScores,
+    expectedCandidateRows,
+    expectedUnionRows,
+    expectedDerivedRows,
+    expectedJoinRows,
+    expectedCollisionRows,
+  ],
+  grammar: [grammarCells],
+})
+
 describe(`correlated include route-context transport grammar`, () => {
-  test(`public result comparison rejects wrong routes, omissions, and duplicates`, () => {
-    const expected = [{ id: 10, value: `one` }]
-    const forms: MaterializedForms<{ id: number; value: string }> = {
-      collection: { values: () => expected },
-      array: expected,
-      materialized: expected,
-    }
-    const project = (rows: Iterable<{ id: number; value: string }>) => [...rows]
-
-    expectEveryForm(forms, project, expected)
-    expect(() =>
-      expectEveryForm(
-        { ...forms, array: [{ id: 20, value: `two` }] },
-        project,
-        expected,
-      ),
-    ).toThrow()
-    expect(() =>
-      expectEveryForm(
-        { ...forms, collection: { values: () => [] } },
-        project,
-        expected,
-      ),
-    ).toThrow()
-    expect(() =>
-      expectEveryForm(
-        { ...forms, materialized: [...expected, ...expected] },
-        project,
-        expected,
-      ),
-    ).toThrow()
-  })
-
-  test(`cleanup retains the primary failure and releases every source`, async () => {
-    const primary = new Error(`route mismatch`)
-    const liveCleanupFailure = new Error(`live cleanup failed`)
-    const sourceCleanupFailure = new Error(`source cleanup failed`)
-    const released: Array<string> = []
-    const live: Cleanable = {
-      cleanup: async () => {
-        released.push(`live`)
-        throw liveCleanupFailure
-      },
-    }
-    const sources = [
-      {
-        collection: {
-          cleanup: async () => {
-            released.push(`first source`)
-            throw sourceCleanupFailure
-          },
-        },
-      },
-      {
-        collection: {
-          cleanup: async () => {
-            released.push(`second source`)
-          },
-        },
-      },
-    ]
-
-    let caught: unknown
-    try {
-      await runWithCleanup(live, sources, async () => {
-        throw primary
-      })
-    } catch (error) {
-      caught = error
-    }
-    expect(caught).toBeInstanceOf(AggregateError)
-    const failure = caught as AggregateError
-    expect(failure.cause).toBe(primary)
-    expect(failure.errors).toHaveLength(2)
-    expect((failure.errors[0] as Error).cause).toBe(liveCleanupFailure)
-    expect((failure.errors[1] as Error).cause).toBe(sourceCleanupFailure)
-    expect(released).toEqual([`live`, `first source`, `second source`])
-  })
-
-  test(`metadata observations reject vacuity, extra rows, and unknown own keys`, () => {
-    const expected = [{ id: 10, label: `ten` }]
-    const valid = { id: 10, label: `ten` }
-    for (const key of publicMetadataKeys) {
-      Object.defineProperty(valid, key, { value: undefined })
-    }
-    expect(captureMetadataRows([valid])).toEqual(expected)
-    expect(captureMetadataRows([])).toEqual([])
-    const check = (rows: Array<{ id: number; label: string }>) =>
-      expect(captureMetadataRows(rows)).toEqual(expected)
-    for (const rows of [
-      [],
-      [...expected, ...expected],
-      [{ id: 10, label: `wrong` }],
-    ])
-      expect(() => check(rows)).toThrow()
-    for (const key of [`extra`, `$unknown`, Symbol(`private`)] as const) {
-      const row = { id: 10, label: `ten` }
-      Object.defineProperty(row, key, { value: undefined })
-      expect(() => check([row])).toThrow()
-    }
-    const rows = [...expected]
-    Object.defineProperty(rows, Symbol(`private array carrier`), {
-      value: undefined,
-    })
-    expect(() => check(rows)).toThrow()
-  })
-
   test(`expands every declared product without duplicate cells`, () => {
     const expectedCellCount =
       routeContextGrammar.parentProjection.shapes.length +
@@ -2573,64 +2241,40 @@ describe(`correlated include route-context transport grammar`, () => {
     ).toBe(819)
   })
 
-  test(`preserves cycles while removing nested route metadata`, () => {
-    const routed = attachRouteMetadata({ id: 1 }, 1, null)
-    const value: Record<string, unknown> = { routed }
-    value.self = value
-
-    const cleaned = stripInternalRouteMetadata(value) as typeof value
-
-    expect(cleaned).not.toBe(value)
-    expect(cleaned.self).toBe(cleaned)
-    expectNoPrivateSymbolsDeep(cleaned, new Set())
-  })
-
-  test(`does not evaluate unused accessors while cleaning routed callback rows`, async () => {
-    let reads = 0
-    const payload = {}
-    Object.defineProperty(payload, `unused`, {
-      get() {
-        reads++
-        throw new Error(`unused getter evaluated`)
-      },
-      enumerable: true,
-    })
-    const parents = createGrammarCollection(`getter-parents`, [
-      { id: 1, group: 1 },
-    ])
-    const children = createGrammarCollection(`getter-children`, [
-      { id: 10, parentGroup: 1, payload },
-    ])
-    const live = createLiveQueryCollection((q) =>
-      q.from({ parent: parents.collection }).select(({ parent }) => ({
-        id: parent.id,
-        children: toArray(
-          q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentGroup, parent.group))
-            .fn.where(() => true)
-            .fn.select(({ child }) => ({ id: child.id })),
-        ),
-      })),
-    )
-
-    await runWithCleanup(live, [parents, children], async () => {
-      await live.preload()
-      expect(live.get(1)?.children).toEqual([{ id: 10 }])
-      expect(reads).toBe(0)
-    })
-  })
-
   for (const cell of grammarCells) {
     test(`${grammarCellName(cell)} × every materialization form × parent/child updates`, () =>
       runGrammarCell(cell))
   }
-
-  for (const routeMode of queryRefMetadataGrammar.routeModes) {
-    test(`query-ref metadata / ${routeMode}`, () =>
-      runQueryRefMetadataCell(routeMode))
-  }
 })
+
+// Law: a compound join pairs a child with a peer when the first equality holds
+// and the second equality holds with the parent parameter on the chosen side.
+function expectedCompoundRows(
+  children: ControlledCollection<{
+    id: number
+    group: number
+    a: number
+    b: number
+  }>,
+  peers: ControlledCollection<{ id: number; a: number; b: number }>,
+  parentSide: `main` | `joined`,
+  parent: { group: number; parameter: number },
+) {
+  return children.collection.toArray.flatMap((child) =>
+    peers.collection.toArray
+      .filter(
+        (peer) =>
+          child.group === parent.group &&
+          child.a === peer.a &&
+          (parentSide === `main`
+            ? child.b + parent.parameter === peer.b
+            : child.b === peer.b + parent.parameter),
+      )
+      .map((peer) => ({ id: child.id, peerId: peer.id })),
+  )
+}
+
+declareOracle({ model: [expectedCompoundRows] })
 
 /**
  * A parent value used only in the second join equality is still route context.
@@ -2715,17 +2359,11 @@ describe(`compound join parent context`, () => {
                 .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!)
             const check = () => {
               for (const parent of parents.collection.toArray) {
-                const expected = children.collection.toArray.flatMap((child) =>
-                  peers.collection.toArray
-                    .filter(
-                      (peer) =>
-                        child.group === parent.group &&
-                        child.a === peer.a &&
-                        (parentSide === `main`
-                          ? child.b + parent.parameter === peer.b
-                          : child.b === peer.b + parent.parameter),
-                    )
-                    .map((peer) => ({ id: child.id, peerId: peer.id })),
+                const expected = expectedCompoundRows(
+                  children,
+                  peers,
+                  parentSide,
+                  parent,
                 )
                 expectEveryForm(
                   live.get(parent.id)!,
