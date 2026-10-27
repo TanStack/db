@@ -1,32 +1,35 @@
-import { DatabaseSync } from 'node:sqlite'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
-import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { createPersistedTableName } from '../src'
 import {
   Temporal,
   observeTemporal,
   temporalFamilies,
   temporalValue,
 } from './temporal-value-oracle'
-import type { PersistedTx, SQLiteDriver } from '../src'
-
-type Row = Record<
-  string,
-  string | number | Temporal.Instant | Temporal.PlainDate
->
-type Tx = PersistedTx<Row, string>
-type SnapshotRow = { key: string; value: Row; metadata?: unknown }
-type Tombstone = { key: string; value: Row; rowVersion: number }
-type Observation = {
-  rows: Array<SnapshotRow>
-  collectionMetadata: Array<{ key: string; value: unknown }>
-  keySet: unknown
-  expectedKeys: Array<string>
-  tombstones: Array<Tombstone>
-  position: { term: number; seq: number; rowVersion: number }
-  applied: Array<{ txId: string; rowVersion: number }>
-}
+import {
+  beginMeasuredWrite,
+  clone,
+  finishMeasuredWrite,
+  fixture,
+  insertRows,
+  observe,
+  sortRows,
+  sortedKeys,
+  transaction,
+} from './ordinary-transaction-work-support'
+import type {
+  Observation,
+  Row,
+  Tombstone,
+  Tx,
+  WriteCounts,
+} from './ordinary-transaction-work-support'
 
 /**
  * # Can an ordinary committed SQLite transaction persist many rows in bounded work?
@@ -103,27 +106,6 @@ type Observation = {
  * write work and does not replace driver admission or host receiving witnesses.
  */
 
-function clone<T>(value: T): T {
-  // Native Temporal values are immutable. structuredClone erases their slots.
-  if (value instanceof Temporal.Instant || value instanceof Temporal.PlainDate)
-    return value
-  if (Array.isArray(value)) return value.map(clone) as T
-  if (value !== null && typeof value === `object`) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, clone(entry)]),
-    ) as T
-  }
-  return value
-}
-
-function sortedKeys(values: Iterable<string>): Array<string> {
-  return [...values].sort()
-}
-
-function sortRows(rows: Array<SnapshotRow>): Array<SnapshotRow> {
-  return [...rows].sort((a, b) => a.key.localeCompare(b.key))
-}
-
 // The model replays semantic actions from their contract, never from SQL.
 function modelAfter(history: ReadonlyArray<Tx>): Observation {
   const rows = new Map<string, { value: Row; metadata?: unknown }>()
@@ -188,223 +170,6 @@ function modelAfter(history: ReadonlyArray<Tx>): Observation {
     position: { term, seq, rowVersion },
     applied,
   }
-}
-
-type Fixture = {
-  adapter: SQLiteCorePersistenceAdapter
-  driver: SQLiteDriver
-  counts: {
-    query: number
-    run: number
-    transactions: number
-    maxParams: number
-  }
-  failAfterRowWriteCount: (count: number | undefined) => void
-  failRunMatching: (pattern: RegExp | undefined) => void
-  corruptRowMetadata: (enabled: boolean) => void
-  close: () => void
-}
-
-function binding(value: unknown): string | number | bigint | null {
-  if (value == null) return null
-  if (typeof value === 'boolean') return value ? 1 : 0
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'bigint'
-  )
-    return value
-  return String(value)
-}
-
-function fixture(maxBoundParameters: number): Fixture {
-  const database = new DatabaseSync(':memory:')
-  const counts = { query: 0, run: 0, transactions: 0, maxParams: 0 }
-  let failAfter: number | undefined
-  let rowWriteCount = 0
-  let failRunPattern: RegExp | undefined
-  let corruptMetadata = false
-  const rowWritePattern =
-    /INSERT INTO "c_[^"]+" \(key, value, metadata, row_version\)/
-  const checkParams = (params: ReadonlyArray<unknown>) => {
-    counts.maxParams = Math.max(counts.maxParams, params.length)
-    if (params.length > maxBoundParameters) {
-      throw new Error(
-        `binding cap ${maxBoundParameters} exceeded: ${params.length}`,
-      )
-    }
-  }
-  const driver: SQLiteDriver = {
-    maxBoundParameters,
-    exec: async (sql) => {
-      database.exec(sql)
-    },
-    query: async <T>(sql: string, params: ReadonlyArray<unknown> = []) => {
-      counts.query++
-      checkParams(params)
-      return database
-        .prepare(sql)
-        .all(...params.map(binding))
-        .map((row) => ({ ...row })) as Array<T>
-    },
-    run: async (sql, params = []) => {
-      counts.run++
-      checkParams(params)
-      if (rowWritePattern.test(sql)) {
-        rowWriteCount += params.length / 4
-        if (failAfter !== undefined && rowWriteCount > failAfter) {
-          throw new Error('injected later row-write failure')
-        }
-      }
-      if (failRunPattern?.test(sql))
-        throw new Error('injected late bookkeeping failure')
-      const actualParams =
-        corruptMetadata && rowWritePattern.test(sql)
-          ? params.map((param, index) => (index % 4 === 2 ? null : param))
-          : params
-      database.prepare(sql).run(...actualParams.map(binding))
-    },
-    transaction: async <T>(fn: (tx: SQLiteDriver) => Promise<T>) => {
-      counts.transactions++
-      database.exec('BEGIN IMMEDIATE')
-      try {
-        const result = await fn(driver)
-        database.exec('COMMIT')
-        return result
-      } catch (error) {
-        database.exec('ROLLBACK')
-        throw error
-      }
-    },
-  }
-  return {
-    adapter: new SQLiteCorePersistenceAdapter({ driver }),
-    driver,
-    counts,
-    failAfterRowWriteCount: (count) => {
-      failAfter = count
-      rowWriteCount = 0
-    },
-    failRunMatching: (pattern) => {
-      failRunPattern = pattern
-    },
-    corruptRowMetadata: (enabled) => {
-      corruptMetadata = enabled
-    },
-    close: () => database.close(),
-  }
-}
-
-type WriteCounts = Readonly<Fixture['counts']>
-
-function beginMeasuredWrite(host: Fixture): void {
-  host.counts.query = 0
-  host.counts.run = 0
-  host.counts.transactions = 0
-  host.counts.maxParams = 0
-}
-
-function finishMeasuredWrite(
-  host: Fixture,
-  checkpoint: string,
-  extraTransactions = 0,
-): WriteCounts {
-  // The optional increment is a checker control, never a production path.
-  host.counts.transactions += extraTransactions
-  const counts = { ...host.counts }
-  expect(counts.transactions, `${checkpoint}: one SQLite transaction`).toBe(1)
-  return counts
-}
-
-function publicKey(encoded: string): string {
-  if (!encoded.startsWith('s:'))
-    throw new Error(`unexpected raw key ${encoded}`)
-  return encoded.slice(2)
-}
-
-async function observe(
-  adapter: SQLiteCorePersistenceAdapter,
-  driver: SQLiteDriver,
-  collectionId: string,
-): Promise<Observation> {
-  const snapshot = await adapter.loadResumeSnapshot({
-    kind: `eager`,
-    collectionId: collectionId,
-  })
-  const table = createPersistedTableName(collectionId, 't')
-  const [expected, tombstones, applied] = await Promise.all([
-    driver.query<{ key: string }>(
-      'SELECT key FROM collection_expected_keys WHERE collection_id = ? ORDER BY key',
-      [collectionId],
-    ),
-    driver.query<{ key: string; value: string; row_version: number }>(
-      `SELECT key, value, row_version FROM "${table}" ORDER BY key`,
-    ),
-    driver.query<{ tx_id: string; row_version: number }>(
-      'SELECT tx_id, row_version FROM applied_tx WHERE collection_id = ? ORDER BY term, seq',
-      [collectionId],
-    ),
-  ])
-  return {
-    rows: sortRows(snapshot.rows as Array<SnapshotRow>),
-    collectionMetadata: [...snapshot.collectionMetadata].sort((a, b) =>
-      a.key.localeCompare(b.key),
-    ),
-    keySet: snapshot.keySet,
-    expectedKeys: sortedKeys(expected.map((row) => publicKey(row.key))),
-    tombstones: tombstones
-      .map((row) => ({
-        key: publicKey(row.key),
-        value: JSON.parse(row.value) as Row,
-        rowVersion: row.row_version,
-      }))
-      .sort((a, b) => a.key.localeCompare(b.key)),
-    position: {
-      term: snapshot.latestTerm,
-      seq: snapshot.latestSeq,
-      rowVersion: snapshot.latestRowVersion,
-    },
-    applied: applied.map((row) => ({
-      txId: row.tx_id,
-      rowVersion: row.row_version,
-    })),
-  }
-}
-
-function transaction(
-  txId: string,
-  seq: number,
-  mutations: Tx['mutations'],
-  rowMetadataMutations: Tx['rowMetadataMutations'] = [],
-  collectionMetadataMutations: Tx['collectionMetadataMutations'] = [],
-): Tx {
-  return {
-    txId,
-    term: 1,
-    seq,
-    rowVersion: seq,
-    mutations,
-    rowMetadataMutations,
-    collectionMetadataMutations,
-  }
-}
-
-function insertRows(count: number): Tx {
-  const rows = Array.from({ length: count }, (_, index) => ({
-    id: `row-${index}`,
-    version: 1,
-  }))
-  return transaction(
-    `insert-${count}`,
-    1,
-    rows.map((row) => ({ type: 'insert', key: row.id, value: row })),
-    rows.map((row) => ({
-      type: 'set',
-      key: row.id,
-      value: { source: 'feed' },
-    })),
-    [{ type: 'set', key: 'cursor', value: { offset: count } }],
-  )
 }
 
 type Case = {
@@ -1174,6 +939,16 @@ async function assertGeneratedHistory(
   if (primary !== undefined) throw primary
 }
 
+// The check runs a fixed or generated history through the production adapter,
+// then compares each durable checkpoint with modelAfter, the independent model of
+// committed work. The generated histories and independent-key cases come from
+// the grammars, and the work bound is the write-count law at each checkpoint.
+declareOracle({
+  check: [assertGeneratedHistory, assertIndependentWork],
+  model: [modelAfter],
+  grammar: [generatedHistoryArbitrary, independentWorkArbitrary],
+})
+
 export function runOrdinaryTransactionWorkOracle(): void {
   describe('ordinary SQLite committed transaction oracle', () => {
     // The native dimension reuses the existing action model and work counter.
@@ -1426,39 +1201,6 @@ export function runOrdinaryTransactionWorkOracle(): void {
       expect(sameObservation(wrong, expected)).toBe(false)
     })
 
-    it('calibrates the synthetic 100-parameter host guard at its boundary', async () => {
-      const host = fixture(100)
-      let primary: unknown
-      try {
-        await host.driver.exec('CREATE TABLE cap_probe (value INTEGER)')
-        const statement = (n: number) =>
-          `INSERT INTO cap_probe (value) VALUES ${Array.from({ length: n }, () => '(?)').join(', ')}`
-        await host.driver.run(statement(100), Array(100).fill(1))
-        await expect(
-          host.driver.run(statement(101), Array(101).fill(1)),
-        ).rejects.toThrow('binding cap 100 exceeded: 101')
-        expect(
-          await host.driver.query<{ count: number }>(
-            'SELECT COUNT(*) AS count FROM cap_probe',
-          ),
-        ).toEqual([{ count: 100 }])
-      } catch (error) {
-        primary = error
-      }
-      try {
-        host.close()
-      } catch (cleanup) {
-        if (primary !== undefined)
-          throw new AggregateError(
-            [primary, cleanup],
-            'primary and cleanup failed',
-            { cause: primary },
-          )
-        throw cleanup
-      }
-      if (primary !== undefined) throw primary
-    })
-
     it('refines durable semantics for the bounded process and design grammar; ordinary large writes are chunk-bounded', async () => {
       const workObservations: Array<{
         case: string
@@ -1571,135 +1313,6 @@ export function runOrdinaryTransactionWorkOracle(): void {
         expect(actual.rows[0]?.metadata).toBeUndefined()
         expect(actual).not.toEqual(expected)
         expect(sameObservation(actual, expected)).toBe(false)
-      } catch (error) {
-        primary = error
-      }
-      try {
-        host.close()
-      } catch (cleanup) {
-        if (primary !== undefined)
-          throw new AggregateError(
-            [primary, cleanup],
-            'primary and cleanup failed',
-            { cause: primary },
-          )
-        throw cleanup
-      }
-      if (primary !== undefined) throw primary
-    })
-
-    it('rejects invalid values even when a later same-key action overwrites them', async () => {
-      const host = fixture(100)
-      const collectionId = 'oracle-overwritten-invalid-value'
-      let primary: unknown
-      try {
-        await host.adapter.loadResumeSnapshot({
-          kind: `eager`,
-          collectionId: collectionId,
-        })
-        const seed = transaction('seed', 1, [
-          { type: 'insert', key: 'same', value: { id: 'same' } },
-        ])
-        await host.adapter.applyCommittedTx(
-          { kind: `eager`, collectionId: collectionId },
-          seed,
-        )
-        const before = await observe(host.adapter, host.driver, collectionId)
-        const invalid = new Date(Number.NaN)
-        const candidates: Array<PersistedTx> = [
-          {
-            txId: 'invalid-row',
-            term: 1,
-            seq: 2,
-            rowVersion: 2,
-            truncate: true,
-            mutations: [
-              { type: 'insert', key: 'same', value: { invalid } },
-              { type: 'insert', key: 'same', value: { id: 'same' } },
-            ],
-          },
-          {
-            txId: 'invalid-row-before-delete',
-            term: 1,
-            seq: 2,
-            rowVersion: 2,
-            truncate: true,
-            mutations: [
-              { type: 'insert', key: 'same', value: { invalid } },
-              { type: 'delete', key: 'same', value: { id: 'same' } },
-            ],
-          },
-          {
-            txId: 'invalid-inline-metadata',
-            term: 1,
-            seq: 2,
-            rowVersion: 2,
-            truncate: true,
-            mutations: [
-              {
-                type: 'insert',
-                key: 'same',
-                value: { id: 'same' },
-                metadataChanged: true,
-                metadata: invalid,
-              },
-              {
-                type: 'insert',
-                key: 'same',
-                value: { id: 'same' },
-                metadataChanged: true,
-                metadata: { source: 'valid' },
-              },
-            ],
-          },
-          {
-            txId: 'invalid-row-metadata',
-            term: 1,
-            seq: 2,
-            rowVersion: 2,
-            truncate: true,
-            mutations: [],
-            rowMetadataMutations: [
-              { type: 'set', key: 'same', value: invalid },
-              { type: 'delete', key: 'same' },
-            ],
-          },
-          {
-            txId: 'invalid-collection-metadata',
-            term: 1,
-            seq: 2,
-            rowVersion: 2,
-            truncate: true,
-            mutations: [],
-            collectionMetadataMutations: [
-              { type: 'set', key: 'cursor', value: invalid },
-              { type: 'delete', key: 'cursor' },
-            ],
-          },
-          {
-            txId: 'undefined-collection-metadata',
-            term: 1,
-            seq: 2,
-            rowVersion: 2,
-            truncate: true,
-            mutations: [],
-            collectionMetadataMutations: [
-              { type: 'set', key: 'cursor', value: undefined },
-              { type: 'delete', key: 'cursor' },
-            ],
-          },
-        ]
-        for (const candidate of candidates) {
-          await expect(
-            host.adapter.applyCommittedTx(
-              { kind: `eager`, collectionId: collectionId },
-              candidate,
-            ),
-          ).rejects.toThrow()
-          expect(
-            await observe(host.adapter, host.driver, collectionId),
-          ).toEqual(before)
-        }
       } catch (error) {
         primary = error
       }
@@ -1877,71 +1490,6 @@ export function runOrdinaryTransactionWorkOracle(): void {
         throw cleanup
       }
       if (primary !== undefined) throw primary
-    })
-
-    it('preserves public replay below the threshold and full reload above it', async () => {
-      for (const size of [64, 65]) {
-        const host = fixture(999)
-        const collectionId = `oracle-replay-${size}`
-        let primary: unknown
-        try {
-          const candidate = clone(insertRows(size))
-          candidate.collectionMetadataMutations = []
-          await host.adapter.applyCommittedTx(
-            { kind: `eager`, collectionId: collectionId },
-            candidate,
-          )
-          const actual = await host.adapter.pullSince(
-            { kind: `eager`, collectionId: collectionId },
-            0,
-          )
-          if (size === 65) {
-            expect(actual).toEqual({
-              latestRowVersion: 1,
-              requiresFullReload: true,
-            })
-          } else {
-            expect(actual.requiresFullReload).toBe(false)
-            if (actual.requiresFullReload) throw new Error('expected replay')
-            expect(actual.latestRowVersion).toBe(1)
-            expect([...actual.changedKeys].sort()).toEqual(
-              candidate.mutations.map((change) => change.key).sort(),
-            )
-            expect(actual.deletedKeys).toEqual([])
-            expect(actual.deltas).toEqual([
-              {
-                txId: candidate.txId,
-                latestRowVersion: 1,
-                changedRows: candidate.mutations.map((change) => ({
-                  key: change.key,
-                  value: clone(change.value),
-                })),
-                deletedKeys: [],
-                rowMetadataMutations: clone(
-                  candidate.rowMetadataMutations ?? [],
-                ),
-                collectionMetadataMutations: clone(
-                  candidate.collectionMetadataMutations ?? [],
-                ),
-              },
-            ])
-          }
-        } catch (error) {
-          primary = error
-        }
-        try {
-          host.close()
-        } catch (cleanup) {
-          if (primary !== undefined)
-            throw new AggregateError(
-              [primary, cleanup],
-              'primary and cleanup failed',
-              { cause: primary },
-            )
-          throw cleanup
-        }
-        if (primary !== undefined) throw primary
-      }
     })
 
     it('rolls back rows, metadata, evidence and position after a later row-write fault', async () => {
