@@ -6,13 +6,15 @@ import type {
   SQLiteCorePersistenceAdapter,
   SQLiteDriver,
 } from '../../src/index.js'
+import type { SourceEvent } from '../persisted-demand-coverage-model-oracle.js'
 
 /**
  * The production driver shared by the persisted demand coverage oracle
  * (`tests/persisted-demand-coverage-oracle.test.ts`) and its generated
  * campaign (`tests/persisted-demand-coverage-campaign-oracle.test.ts`). It
- * drives the real persisted wrapper over a generic on-demand source; it holds
- * no model and no expected result.
+ * drives the real persisted wrapper over a generic on-demand source and
+ * records the source's own log for the shared judgment; it holds no model and
+ * no expected result.
  */
 
 export type Row = { id: string; group: string; rank: number; value: string }
@@ -110,7 +112,20 @@ export type Upstream = {
   remove: (rows: ReadonlyArray<Row>) => Promise<void>
   // Updates rows in one sync transaction.
   update: (rows: ReadonlyArray<Row>) => Promise<void>
+  // The source's own log of what it did, for the shared judgment in
+  // `tests/persisted-demand-coverage-model-oracle.ts`. A load is current
+  // when no truncate or generation change came between the source receiving
+  // it and settling it.
+  events: Array<SourceEvent>
+  // When the source received each load (`Date.now()`, so the fake clock
+  // where a history installs one).
+  arrivedAt: Map<LoadSubsetOptions, number>
 }
+
+const rowEvent = (rows: ReadonlyArray<Row>): SourceEvent => ({
+  type: `rows`,
+  rows: rows.map((row) => [row.id, { group: row.group, rank: row.rank }]),
+})
 
 // A generic on-demand source. Each load waits until the test answers or
 // fails it. An answer writes the rows in one sync transaction and settles
@@ -123,7 +138,19 @@ export function onDemandSource(
   const pending: Array<{
     resolve: () => void
     reject: (error: unknown) => void
+    options: LoadSubsetOptions
+    epoch: number
   }> = []
+  // How many truncates and generation changes the source has seen.
+  let epoch = 0
+  const settle = (load: (typeof pending)[number]) => {
+    upstream.events.push({
+      type: `settled`,
+      load: load.options,
+      current: load.epoch === epoch,
+    })
+    load.resolve()
+  }
   let write: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   let truncate: (() => unknown) | undefined
   let startScopedRecovery: (() => Promise<void>) | undefined
@@ -131,29 +158,48 @@ export function onDemandSource(
   let update: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   const upstream: Upstream = {
     calls: [],
+    events: [],
+    arrivedAt: new Map(),
     visibleAtCall: [],
     rejectAtOnce: false,
     pendingCount: () => pending.length,
     answer: async (rows) => {
       await write?.(rows)
-      for (const load of pending.splice(0)) load.resolve()
+      upstream.events.push(rowEvent(rows))
+      for (const load of pending.splice(0)) settle(load)
     },
     fail: (error) => {
-      for (const load of pending.splice(0)) load.reject(error)
+      for (const load of pending.splice(0)) {
+        upstream.events.push({ type: `failed`, load: load.options })
+        load.reject(error)
+      }
     },
     truncate: async () => {
+      epoch++
       await truncate?.()
+      upstream.events.push({ type: `truncate` })
     },
     write: async (rows) => {
       await write?.(rows)
+      upstream.events.push(rowEvent(rows))
     },
-    settleOldest: () => pending.shift()?.resolve(),
-    startScopedRecovery: () => startScopedRecovery?.() ?? Promise.resolve(),
+    settleOldest: () => {
+      const load = pending.shift()
+      if (load) settle(load)
+    },
+    startScopedRecovery: async () => {
+      epoch++
+      await (startScopedRecovery?.() ?? Promise.resolve())
+      upstream.events.push({ type: `generation ends` })
+    },
     remove: async (rows) => {
       await remove?.(rows)
+      for (const row of rows)
+        upstream.events.push({ type: `delete`, id: row.id })
     },
     update: async (rows) => {
       await update?.(rows)
+      upstream.events.push(rowEvent(rows))
     },
   }
   const collection = createCollection(
@@ -192,14 +238,16 @@ export function onDemandSource(
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               upstream.calls.push(options)
+              upstream.arrivedAt.set(options, Date.now())
               upstream.visibleAtCall.push(
                 collection.toArray.map((row) => row.id).sort(),
               )
               if (upstream.rejectAtOnce) {
+                upstream.events.push({ type: `failed`, load: options })
                 return Promise.reject(new Error(`offline at once`))
               }
               return new Promise<void>((resolve, reject) => {
-                pending.push({ resolve, reject })
+                pending.push({ resolve, reject, options, epoch })
               })
             },
           }

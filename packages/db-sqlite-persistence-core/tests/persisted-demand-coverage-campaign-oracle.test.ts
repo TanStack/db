@@ -227,6 +227,9 @@ function campaignSource(
   honorsAbort = true,
 ) {
   const pending = new Map<Demand, Array<Pending>>()
+  // When the source received each load. The wrapper starts a load before it
+  // forwards it, so a load's wait has surely passed once this much time has.
+  const arrivedAt = new Map<LoadSubsetOptions, number>()
   const sent: Record<Demand, Array<LoadSubsetOptions>> = { a: [], b: [], w: [] }
   const events: Array<SourceEvent> = []
   let epoch = 0
@@ -253,6 +256,7 @@ function campaignSource(
             loadSubset: (options: LoadSubsetOptions) => {
               const demand = demandOf(options)
               sent[demand].push(options)
+              arrivedAt.set(options, Date.now())
               if (online === `fails at once`) {
                 return Promise.reject(new Error(`offline`))
               }
@@ -301,6 +305,7 @@ function campaignSource(
   return {
     collection,
     sent,
+    arrivedAt,
     events,
     started: () => params !== undefined,
     hasPending: (demand: Demand) => (pending.get(demand)?.length ?? 0) > 0,
@@ -450,8 +455,9 @@ async function runHistory(
     ])
   }
 
-  // Session 2 is offline. Checkpoints sit well clear of the deadline: at
-  // 300 ms, and after a nonzero wait, at 1500 ms.
+  // Session 2 is offline. Checkpoints at 300 ms and, after a nonzero wait,
+  // at 1500 and 2600 ms. A window's tie-boundary load arrives after its
+  // limited load settles, so at 1500 ms its own wait may still run.
   const { waitMs, upstream } = history.offline
   const source = campaignSource(driver, upstream, waitMs)
   const queries = DEMANDS.map((demand) => queryFor(source.collection, demand))
@@ -461,7 +467,7 @@ async function runHistory(
       ? { status: `ready`, rows: query.toArray.map((row) => row.id) }
       : { status: query.status === `error` ? `error` : `loading` }
   }
-  const checkpoint = (waitPassed: boolean): CoverageRecord => ({
+  const checkpoint = (at = Date.now()): CoverageRecord => ({
     events,
     queries: Object.fromEntries(
       DEMANDS.map((demand, index) => [
@@ -474,16 +480,19 @@ async function runHistory(
       ]),
     ),
     upstream,
-    waitPassed,
+    waitPassed: (load) =>
+      at - (source.arrivedAt.get(load) ?? Infinity) >= waitMs,
   })
   return withCleanup(async () => {
     for (const query of queries) void query.preload().catch(() => undefined)
     const records: Array<CoverageRecord> = []
     await settle(300)
-    records.push(checkpoint(waitMs === 0))
+    records.push(checkpoint())
     if (waitMs > 0) {
       await settle(1200)
-      records.push(checkpoint(true))
+      records.push(checkpoint())
+      await settle(1100)
+      records.push(checkpoint())
     }
     return records
   }, [
@@ -1044,9 +1053,10 @@ describe(`persisted demand coverage over generated histories`, () => {
       w: QueryObservation,
     ): CoverageRecord => ({
       events,
+      // The offline session's own loads of the same demands.
       queries: {
-        a: { spec: SPECS.a, sent: [loadA], observed: a },
-        w: { spec: SPECS.w, sent: [loadW], observed: w },
+        a: { spec: SPECS.a, sent: [{ ...loadA }], observed: a },
+        w: { spec: SPECS.w, sent: [{ ...loadW }], observed: w },
       },
       upstream: `never answers`,
       waitPassed: true,

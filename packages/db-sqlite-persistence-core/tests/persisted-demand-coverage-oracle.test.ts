@@ -25,7 +25,15 @@ import {
   withCleanup,
   withMacrotaskReads,
 } from './helpers/demand-coverage-driver.js'
+import { coverageViolations } from './persisted-demand-coverage-model-oracle.js'
 import type { Row, Upstream } from './helpers/demand-coverage-driver.js'
+import type {
+  CoverageRecord,
+  QueryObservation,
+  QuerySpec,
+  SourceEvent,
+  WaitPremise,
+} from './persisted-demand-coverage-model-oracle.js'
 import type { Collection, LoadSubsetOptions } from '@tanstack/db'
 import type { SQLiteDriver } from '../src/index.js'
 
@@ -72,6 +80,15 @@ import type { SQLiteDriver } from '../src/index.js'
  *
  * Coverage is bookkeeping: a coverage read that fails, or a release during
  * it, does not change the load's own outcome or lifetime (Part 2c).
+ *
+ * Two judgments live here. Part 1 is a bounded enumeration with its own trace
+ * model, which predicts status, `preload()` state, and rows at five
+ * checkpoints. Parts 2 to 4 are fixed histories judged by the model shared
+ * with the generated campaign and every receiving driver,
+ * `tests/persisted-demand-coverage-model-oracle.ts`. They record the
+ * source's log and each query's loads and observation, and state no expected
+ * answer (ORC-016). Two pinned checks whose laws other owners hold live in
+ * `persisted-demand-coverage-supplemental.test.ts`.
  *
  * Limits: Electric, Query DB, React, and Solid have receiving witnesses in
  * their packages, not here. Resets are a source truncate, scoped recovery,
@@ -741,6 +758,12 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
 // ===========================================================================
 // Part 2: load lifecycle within one session
 //
+// Parts 2 to 4 are fixed histories. Each records what happened at the real
+// wrapper (the source's log, each query's sent loads and observation, and the
+// premises it injected) and passes that record to the shared judgment in
+// `tests/persisted-demand-coverage-model-oracle.ts`. None states an expected
+// answer (ORC-016); the model predicts each observation from the record.
+//
 // Two covered demands, D (`group = 'a'`) and E (`group = 'b'`), and an
 // offline network in session 2 with a 1000 ms wait. Fixed history:
 //
@@ -749,70 +772,65 @@ async function runCell(cell: Cell): Promise<Partial<Trace>> {
 // - t = 400: query 2 starts a new load of D.
 // - t = 600: query 3 starts E's load.
 //
-// Model: each load settles from SQLite at its own start plus the wait, so
-// query 2 at 1400 and query 3 at 1600. Release keeps coverage. Checkpoints
-// sit 1 ms either side of 1000, 1400, and 1600 to reject a deadline measured
-// from the sync run, carried over from the released load, or dropped with
-// coverage on release. Each query's rows are compared when it is ready, so a
-// load cannot settle on rows from a sibling demand's restore.
-//
-// Ablation: removing the release removes the "release clears coverage" and
-// "deadline carried over" distinctions; removing query 3 removes the second
-// independent deadline; removing the 1 ms offsets lets a displaced deadline
-// pass.
+// Each load measures its wait from its own start, so query 2 settles at 1400
+// and query 3 at 1600, and release keeps coverage. Checkpoints sit 1 ms
+// either side of 1000, 1400, and 1600, so a deadline measured from the sync
+// run, carried over from the released load, or dropped with coverage on
+// release changes an observation the judgment checks. Each query's rows are
+// compared when it is ready, so a load cannot settle on rows from a sibling
+// demand's restore.
 // ===========================================================================
 
-type LifecycleDesign = {
-  name: string
-  deadlineFrom: `load` | `sync-run`
-  releaseKeepsCoverage: boolean
+// The shared comparison. Every fixed history below is an input to it.
+function judge(records: ReadonlyArray<CoverageRecord>): void {
+  expect(records.length).toBeGreaterThan(0)
+  for (const record of records) expect(coverageViolations(record)).toEqual([])
 }
 
-const LIFECYCLE_LAW: LifecycleDesign = {
-  name: `persisted demand coverage`,
-  deadlineFrom: `load`,
-  releaseKeepsCoverage: true,
+function observed(query: Collection<any, any, any>): QueryObservation {
+  return query.status === `ready`
+    ? {
+        status: `ready`,
+        rows: (query.toArray as Array<Row>).map((row) => row.id),
+      }
+    : { status: query.status === `error` ? `error` : `loading` }
+}
+
+// A load's wait has passed once this much time passed since its source
+// received it; the wrapper starts the load before it forwards it.
+function waitPassedAt(
+  upstream: { arrivedAt: ReadonlyMap<LoadSubsetOptions, number> },
+  waitMs: number,
+  at = Date.now(),
+): WaitPremise {
+  return (load) => at - (upstream.arrivedAt.get(load) ?? Infinity) >= waitMs
+}
+
+const D: QuerySpec = { group: `a` }
+const E: QuerySpec = { group: `b` }
+
+// Marks the source's last settled load as one whose coverage read the
+// history failed, a premise the driver injected.
+function coverageReadFailed(events: Array<SourceEvent>): void {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]!
+    if (event.type === `settled`) {
+      event.coverage = `read fails`
+      return
+    }
+  }
+  throw new Error(`no settled load to mark`)
 }
 
 const LIFECYCLE_CHECKPOINTS = [999, 1000, 1399, 1400, 1599, 1600] as const
 
-type LifecycleObservation = {
-  query2: ReadonlyArray<string> | `loading`
-  query3: ReadonlyArray<string> | `loading`
-}
-
-const QUERY2_ROWS = rowLabels([A1, A2])
-const QUERY3_ROWS = [`b1:v1`]
-
-function expectedLifecycle(
-  design: LifecycleDesign = LIFECYCLE_LAW,
-): Record<number, LifecycleObservation> {
-  const waitMs = 1000
-  const readyAt = (startAt: number, releasedEarlier: boolean) => {
-    if (releasedEarlier && !design.releaseKeepsCoverage) return Infinity
-    return (design.deadlineFrom === `load` ? startAt : 0) + waitMs
-  }
-  const query2At = readyAt(400, true)
-  const query3At = readyAt(600, false)
-  return Object.fromEntries(
-    LIFECYCLE_CHECKPOINTS.map((t) => [
-      t,
-      {
-        query2: t >= query2At ? QUERY2_ROWS : `loading`,
-        query3: t >= query3At ? QUERY3_ROWS : `loading`,
-      },
-    ]),
-  )
-}
-
-async function runLifecycle(): Promise<{
-  query1Aborted: boolean | undefined
-  observations: Record<number, LifecycleObservation>
-}> {
+async function runLifecycle(): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
+  let session1: ReadonlyArray<SourceEvent> = []
   {
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
     const { collection, upstream } = onDemandSource(adapter, 0)
+    session1 = upstream.events
     const d = filterQuery(collection, `a`)
     const e = filterQuery(collection, `b`)
     await withCleanup(async () => {
@@ -835,8 +853,7 @@ async function runLifecycle(): Promise<{
   const query1 = filterQuery(collection, `a`)
   let query2: ReturnType<typeof filterQuery> | undefined
   let query3: ReturnType<typeof filterQuery> | undefined
-  const observations: Record<number, LifecycleObservation> = {}
-  let query1Aborted: boolean | undefined
+  const records: Array<CoverageRecord> = []
   return withCleanup(async () => {
     let now = 0
     const advanceTo = async (t: number) => {
@@ -844,22 +861,13 @@ async function runLifecycle(): Promise<{
       now = t
       await drain()
     }
-    const record = () => {
-      const rowsWhenReady = (query: typeof query2) =>
-        query?.status === `ready`
-          ? rowLabels(query.toArray as Array<Row>)
-          : (`loading` as const)
-      observations[now] = {
-        query2: rowsWhenReady(query2),
-        query3: rowsWhenReady(query3),
-      }
-    }
     void query1.preload().catch(() => undefined)
     await untilUpstreamCalled(upstream, 1)
     await advanceTo(300)
     await query1.cleanup()
     await drain()
-    query1Aborted = upstream.calls[0]!.signal?.aborted
+    // Positive witness: the release aborted query 1's upstream load.
+    expect(upstream.calls[0]!.signal?.aborted).toBe(true)
     await advanceTo(400)
     query2 = filterQuery(collection, `a`)
     void query2.preload()
@@ -870,9 +878,25 @@ async function runLifecycle(): Promise<{
     await untilUpstreamCalled(upstream, 3)
     for (const t of LIFECYCLE_CHECKPOINTS) {
       await advanceTo(t)
-      record()
+      records.push({
+        events: [...session1, ...upstream.events],
+        queries: {
+          query2: {
+            spec: D,
+            sent: [upstream.calls[1]!],
+            observed: observed(query2),
+          },
+          query3: {
+            spec: E,
+            sent: [upstream.calls[2]!],
+            observed: observed(query3),
+          },
+        },
+        upstream: `never answers`,
+        waitPassed: waitPassedAt(upstream, 1000),
+      })
     }
-    return { query1Aborted, observations }
+    return records
   }, [
     () => vi.useRealTimers(),
     () => query2?.cleanup(),
@@ -884,63 +908,32 @@ async function runLifecycle(): Promise<{
 // ===========================================================================
 // Part 2b: resets and refetch within one session
 //
-// Two fixed histories, both offline in session 2 after session 1 covered D.
+// Session 1 covers D online. Then, in session 2:
 //
 // - Rotation: a load of D settles from SQLite, its query is released, and
-//   the source starts scoped recovery, which rotates the persisted cache
-//   generation. Coverage belongs to one generation (the law record's
-//   "Invalidation" section), and the new generation holds no rows, so a new
-//   load of D waits for the network: it is still loading after the wait.
-// - Refetch: a load of D with `refetch: true`. A refetch starts a new
-//   acquisition whose promise waits for its own applied rows
-//   (`ARCHITECTURE.md`, "Demand grouping and ownership"), so coverage cannot
-//   settle it: it is still pending after the wait. A positive witness checks
-//   that the refetch load reached the source with D's demand key.
+//   the source starts scoped recovery, which ends the persisted cache
+//   generation. A new load of D must wait for the network.
+// - Refetch: a load of D with `refetch: true`, which never settles from
+//   SQLite (`ARCHITECTURE.md`, "Demand grouping and ownership").
+// - Schema reset: session 2 opens the database with another `schemaVersion`,
+//   which deletes the rows and their metadata: a generation change.
+// - Cache-claim expiry before the coverage record, and before the coverage
+//   check. A read under an expired claim proves nothing, so the first load
+//   records nothing yet settles as its upstream load did, and the second
+//   load waits for the network. Both are premises the driver injects and
+//   marks in the record.
 //
-// The wrong designs "coverage outlives a rotation in the same sync run" and
-// "a refetch settles on coverage" make each history settle instead.
-//
-// Two more histories cover a schema reset and an optimistic write:
-//
-// - Schema reset: session 2 opens the same database with an adapter whose
-//   `schemaVersion` differs. The reset deletes the rows and their collection
-//   metadata, so D has no coverage and waits for the network.
-// - Optimistic write: offline, D settles from SQLite, then the app inserts a
-//   row of D whose mutation handler rejects. The row shows while the handler
-//   runs and leaves when it rejects (optimistic overlay rules), and the query
-//   stays ready throughout. Coverage never undoes or replaces optimistic
-//   state.
-//
-// A claim history covers cache-claim expiry. Session 1's load writes its
-// rows, then the adapter clock passes the cache claim's lifetime, and only
-// then does the load settle. Recording coverage reads SQLite under that
-// expired claim. Rows that applied cannot turn into a failed load, so the
-// query must not enter `error`, and the wrapper must recover the claim. In
-// a second claim history, session 2's claim expires after its restore read
-// and before its coverage check. An expired claim cannot vouch for the
-// restored rows, so D waits for the network instead of settling or failing.
-//
-// A further history checks that opting in keeps a synchronous answer
-// synchronous. The source writes its rows and returns `true`. A second request
-// for D, while D is already hydrated in this sync run, must report `true` to
-// core, as it did before the opt-in existed, rather than a promise that waits
-// for a coverage record.
+// An empty covered demand isolates the generation check in the rotation
+// history: no row count can end its coverage, so only the generation does.
 // ===========================================================================
-
-type SessionResetObservation = {
-  firstLoadReady: boolean
-  laterLoadSettled: boolean
-}
-
-const SESSION_RESET_LAW: SessionResetObservation = {
-  firstLoadReady: true,
-  laterLoadSettled: false,
-}
 
 async function coverD(
   driver: SQLiteDriver,
   rows: ReadonlyArray<Row> = [A1, A2],
-): Promise<ReturnType<typeof getLoadSubsetDemandKey>> {
+): Promise<{
+  key: ReturnType<typeof getLoadSubsetDemandKey>
+  events: Array<SourceEvent>
+}> {
   const { collection, upstream } = onDemandSource(
     new SQLiteCorePersistenceAdapter({ driver }),
     0,
@@ -951,34 +944,49 @@ async function coverD(
     await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
     await upstream.answer(rows)
     await preload
-    return getLoadSubsetDemandKey(upstream.calls[0]!)
+    return {
+      key: getLoadSubsetDemandKey(upstream.calls[0]!),
+      events: upstream.events,
+    }
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-// An empty covered demand isolates the generation check: no row count can
-// end its coverage after a rotation, so only the generation does.
 async function runSessionReset(
   kind: `rotation` | `refetch`,
   rows: ReadonlyArray<Row> = [A1, A2],
-): Promise<SessionResetObservation> {
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  const keyD = await coverD(driver, rows)
+  const session1 = await coverD(driver, rows)
   useFakeClock()
   const waitMs = kind === `rotation` ? 0 : 1000
   const { collection, upstream } = onDemandSource(
     new SQLiteCorePersistenceAdapter({ driver }),
     waitMs,
   )
+  const events = () => [...session1.events, ...upstream.events]
   const first = filterQuery(collection, `a`)
   let second: ReturnType<typeof filterQuery> | undefined
   let subscription: { unsubscribe: () => void } | undefined
+  const records: Array<CoverageRecord> = []
   return withCleanup(async () => {
     void first.preload().catch(() => undefined)
     await untilUpstreamCalled(upstream, 1)
     await drain()
     await vi.advanceTimersByTimeAsync(waitMs)
     await drain()
-    const firstLoadReady = first.status === `ready`
+    records.push({
+      events: events(),
+      queries: {
+        first: {
+          spec: D,
+          sent: [upstream.calls[0]!],
+          observed: observed(first),
+        },
+      },
+      upstream: `never answers`,
+      waitPassed: waitPassedAt(upstream, waitMs),
+    })
+    const callsBefore = upstream.calls.length
     const later = { settled: false }
     if (kind === `rotation`) {
       await first.cleanup()
@@ -991,7 +999,6 @@ async function runSessionReset(
         () => (later.settled = true),
       )
     } else {
-      const callsBefore = upstream.calls.length
       const changes = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
@@ -1015,18 +1022,39 @@ async function runSessionReset(
             )
         },
       })
-      await vi.waitFor(() =>
-        expect(upstream.calls.length).toBeGreaterThan(callsBefore),
-      )
+    }
+    await vi.waitFor(() =>
+      expect(upstream.calls.length).toBeGreaterThan(callsBefore),
+    )
+    if (kind === `refetch`) {
       // Positive witness: the refetch reached the source as D's demand.
       const refetchLoad = upstream.calls[upstream.calls.length - 1]!
       expect(refetchLoad.refetch).toBe(true)
-      expect(getLoadSubsetDemandKey(refetchLoad)).toBe(keyD)
+      expect(getLoadSubsetDemandKey(refetchLoad)).toBe(session1.key)
     }
     await drain()
     await vi.advanceTimersByTimeAsync(waitMs + 1)
     await drain()
-    return { firstLoadReady, laterLoadSettled: later.settled }
+    records.push({
+      events: events(),
+      queries: {
+        later: {
+          spec: D,
+          sent: upstream.calls.slice(callsBefore),
+          observed: later.settled
+            ? {
+                status: `ready`,
+                rows: collection.toArray
+                  .filter((row) => row.group === `a`)
+                  .map((row) => row.id),
+              }
+            : { status: `loading` },
+        },
+      },
+      upstream: `never answers`,
+      waitPassed: waitPassedAt(upstream, waitMs),
+    })
+    return records
   }, [
     () => vi.useRealTimers(),
     () => subscription?.unsubscribe(),
@@ -1036,11 +1064,11 @@ async function runSessionReset(
   ])
 }
 
-async function runSchemaReset(): Promise<{ settledAfterWait: boolean }> {
+async function runSchemaReset(): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   // An empty covered demand: no row count can end its coverage, so only the
   // reset's removal of collection metadata does.
-  await coverD(driver, [])
+  const session1 = await coverD(driver, [])
   useFakeClock()
   // The SQLite adapter owns the schema version; a new one resets the rows.
   const { collection, upstream } = onDemandSource(
@@ -1048,13 +1076,27 @@ async function runSchemaReset(): Promise<{ settledAfterWait: boolean }> {
     0,
   )
   const query = filterQuery(collection, `a`)
-  const state = trackPreload(query)
+  void query.preload().catch(() => undefined)
   return withCleanup(async () => {
     await untilUpstreamCalled(upstream, 1)
     await drain()
     await vi.advanceTimersByTimeAsync(1)
     await drain()
-    return { settledAfterWait: state() !== `pending` }
+    return [
+      {
+        // The new schema version is the premise: a generation change.
+        events: [
+          ...session1.events,
+          { type: `generation ends` },
+          ...upstream.events,
+        ],
+        queries: {
+          d: { spec: D, sent: upstream.calls, observed: observed(query) },
+        },
+        upstream: `never answers`,
+        waitPassed: waitPassedAt(upstream, 0),
+      },
+    ]
   }, [
     () => vi.useRealTimers(),
     () => query.cleanup(),
@@ -1062,68 +1104,7 @@ async function runSchemaReset(): Promise<{ settledAfterWait: boolean }> {
   ])
 }
 
-type OptimisticObservation = {
-  settledBeforeWrite: Array<string>
-  duringWrite: Array<string>
-  afterRollback: Array<string>
-  readyThroughout: boolean
-}
-
-async function runOptimisticWrite(): Promise<OptimisticObservation> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverD(driver)
-  useFakeClock()
-  let rejectWrite!: (error: unknown) => void
-  const { collection, upstream } = onDemandSource(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    0,
-    {
-      onInsert: () =>
-        new Promise<void>((_resolve, reject) => {
-          rejectWrite = reject
-        }),
-    },
-  )
-  const query = filterQuery(collection, `a`)
-  return withCleanup(async () => {
-    void query.preload().catch(() => undefined)
-    await untilUpstreamCalled(upstream, 1)
-    await drain()
-    await vi.advanceTimersByTimeAsync(1)
-    await drain()
-    const ids = () => query.toArray.map((row) => row.id).sort()
-    let readyThroughout = query.status === `ready`
-    const settledBeforeWrite = ids()
-    const transaction = collection.insert({
-      id: `a9`,
-      group: `a`,
-      rank: 9,
-      value: `local`,
-    })
-    void transaction.isPersisted.promise.catch(() => undefined)
-    await drain()
-    readyThroughout &&= query.status === `ready`
-    const duringWrite = ids()
-    rejectWrite(new Error(`offline write`))
-    await drain()
-    readyThroughout &&= query.status === `ready`
-    return {
-      settledBeforeWrite,
-      duringWrite,
-      afterRollback: ids(),
-      readyThroughout,
-    }
-  }, [
-    () => vi.useRealTimers(),
-    () => query.cleanup(),
-    () => collection.cleanup(),
-  ])
-}
-
-async function runClaimExpiredBeforeRecord(): Promise<{
-  queryStatus: string
-  rows: Array<string>
-}> {
+async function runClaimExpiredBeforeRecord(): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   const clock = { now: Date.now() }
   const adapter = new SQLiteCorePersistenceAdapter({
@@ -1140,20 +1121,27 @@ async function runClaimExpiredBeforeRecord(): Promise<{
     // The claim expires after the rows committed and before the load settles.
     clock.now += 10 * 60_000
     upstream.settleOldest()
+    coverageReadFailed(upstream.events)
     await new Promise((resolve) => setTimeout(resolve, 300))
-    return {
-      queryStatus: query.status,
-      rows: query.toArray.map((row) => row.id).sort(),
-    }
+    return [
+      {
+        events: upstream.events,
+        queries: {
+          d: {
+            spec: D,
+            sent: upstream.calls.slice(0, 1),
+            observed: observed(query),
+          },
+        },
+        waitPassed: true,
+      },
+    ]
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-async function runClaimExpiredBeforeCheck(): Promise<{
-  status: string
-  reacquired: boolean
-}> {
+async function runClaimExpiredBeforeCheck(): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverD(driver)
+  const session1 = await coverD(driver)
   const clock = { now: Date.now() }
   const base = new SQLiteCorePersistenceAdapter({
     driver,
@@ -1183,70 +1171,28 @@ async function runClaimExpiredBeforeCheck(): Promise<{
   const query = filterQuery(collection, `a`)
   return withCleanup(async () => {
     void query.preload().catch(() => undefined)
-    // Claim recovery may rotate the cache and reacquire D, a second load.
     await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
     await new Promise((resolve) => setTimeout(resolve, 300))
-    // Positive witness: the coverage check read D after the claim expired.
+    // Positive witnesses: the coverage check read D after the claim expired,
+    // and claim recovery, which rotates the cache, loaded D again.
     expect(reads.afterRestore).toBeGreaterThan(0)
-    // Claim recovery rotates the cache, so D loads again.
-    return { status: query.status, reacquired: upstream.calls.length > 1 }
-  }, [() => query.cleanup(), () => collection.cleanup()])
-}
-
-async function runSynchronousAnswer(): Promise<{
-  sourceCalls: number
-  secondResult: `true` | `promise` | `none`
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  let sourceCalls = 0
-  const collection = createCollection(
-    persistedCollectionOptions<Row, string>({
-      id: `demand-coverage-synchronous`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
-      persistence: { adapter: new SQLiteCorePersistenceAdapter({ driver }) },
-      sync: {
-        sync: ({ begin, write, commit }) => ({
-          loadSubset: () => {
-            sourceCalls++
-            begin()
-            for (const value of [A1, A2]) write({ type: `insert`, value })
-            commit()
-            return true
+    expect(upstream.calls.length).toBeGreaterThan(1)
+    return [
+      {
+        events: [...session1.events, ...upstream.events],
+        queries: {
+          d: {
+            spec: D,
+            sent: upstream.calls,
+            observed: observed(query),
+            checkFails: true,
           },
-        }),
+        },
+        upstream: `never answers`,
+        waitPassed: true,
       },
-    }),
-  )
-  const first = filterQuery(collection, `a`)
-  let subscription: { unsubscribe: () => void } | undefined
-  return withCleanup(async () => {
-    await first.preload()
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    const callsBefore = sourceCalls
-    const second = { result: `none` as `true` | `promise` | `none` }
-    const changes = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-    subscription = changes
-    ;(
-      changes as unknown as { requestSnapshot: (options: object) => unknown }
-    ).requestSnapshot({
-      where: new IR.Func(`eq`, [new IR.PropRef([`group`]), new IR.Value(`a`)]),
-      onLoadSubsetResult: (result: true | Promise<void>) => {
-        second.result = result === true ? `true` : `promise`
-      },
-    })
-    return {
-      sourceCalls: sourceCalls - callsBefore,
-      secondResult: second.result,
-    }
-  }, [
-    () => subscription?.unsubscribe(),
-    () => first.cleanup(),
-    () => collection.cleanup(),
-  ])
+    ]
+  }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
 // ===========================================================================
@@ -1260,12 +1206,17 @@ async function runSynchronousAnswer(): Promise<{
 // - A coverage read that fails during the coverage check proves nothing, so
 //   the load waits for its upstream load, as an uncovered load does.
 // - A source that answers synchronously writes its rows before it returns.
-//   The coverage record must count those rows, so a later deletion of one of
-//   them ends coverage. The wrong design "count before the rows are durable"
-//   records too few rows, and the demand then settles from SQLite after the
-//   deletion.
-// - A load released during the coverage check owns no wait: the source
-//   Collection stops loading at release, not when the wait would have ended.
+//   Its coverage must count those rows, so a later deletion of one ends it.
+//   The durable write lands a few macrotasks late, so a coverage read that
+//   does not wait behind it would count too few rows.
+// - An unordered demand that loses one row and gains another keeps its row
+//   count, so it stays covered (maintainer decision, 2026-10-26).
+// - A truncate during an empty load's coverage read leaves no coverage.
+// - A coverage read or a cache-claim renewal that outlasts the wait lets D
+//   settle as soon as it returns: the wait runs from the load's start.
+//
+// The release laws (a released load owns no wait and starts no upstream
+// load) are swept over every step of a load in Part 3 of the campaign file.
 // ===========================================================================
 
 // An adapter whose reads the test can fail or hold. `next` applies to the
@@ -1300,67 +1251,6 @@ function controlledReads(
   return { adapter: proxy, reads }
 }
 
-async function runCoverageReadFailsAfterLoad(): Promise<{
-  status: string
-  rows: Array<string>
-  failedReads: number
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  const state = { armed: false }
-  const { adapter, reads } = controlledReads(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    () => state.armed,
-    `fail`,
-  )
-  const { collection, upstream } = onDemandSource(adapter, 0)
-  const query = filterQuery(collection, `a`)
-  return withCleanup(async () => {
-    void query.preload().catch(() => undefined)
-    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
-    // The next read after the answer is the coverage read.
-    state.armed = true
-    await upstream.answer([A1, A2])
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    return {
-      status: query.status,
-      rows: query.toArray.map((row) => row.id).sort(),
-      failedReads: reads.failed,
-    }
-  }, [() => query.cleanup(), () => collection.cleanup()])
-}
-
-async function runCoverageReadFailsDuringCheck(): Promise<{
-  beforeAnswer: string
-  afterAnswer: string
-  failedReads: number
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverD(driver)
-  const holder: { collection?: Collection<Row, string, any> } = {}
-  // The first read after the restore published D's rows is the check.
-  const { adapter, reads } = controlledReads(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    () => (holder.collection?.toArray.length ?? 0) > 0,
-    `fail`,
-  )
-  const { collection, upstream } = onDemandSource(adapter, 0)
-  holder.collection = collection
-  const query = filterQuery(collection, `a`)
-  return withCleanup(async () => {
-    void query.preload().catch(() => undefined)
-    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    const beforeAnswer = query.status
-    await upstream.answer([A1, A2])
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    return {
-      beforeAnswer,
-      afterAnswer: query.status,
-      failedReads: reads.failed,
-    }
-  }, [() => query.cleanup(), () => collection.cleanup()])
-}
-
 // Each durable write lands a few macrotasks late, as with a worker driver,
 // so a coverage read that does not wait behind it would count too few rows.
 function slowDurableWrites(adapter: SQLiteCorePersistenceAdapter) {
@@ -1380,12 +1270,88 @@ function slowDurableWrites(adapter: SQLiteCorePersistenceAdapter) {
   })
 }
 
+async function runCoverageReadFailsAfterLoad(): Promise<Array<CoverageRecord>> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const state = { armed: false }
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => state.armed,
+    `fail`,
+  )
+  const { collection, upstream } = onDemandSource(adapter, 0)
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+    // The next read after the answer is the coverage read.
+    state.armed = true
+    await upstream.answer([A1, A2])
+    coverageReadFailed(upstream.events)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    // Positive witness: the coverage read failed.
+    expect(reads.failed).toBe(1)
+    return [
+      {
+        events: upstream.events,
+        queries: {
+          d: { spec: D, sent: upstream.calls, observed: observed(query) },
+        },
+        waitPassed: true,
+      },
+    ]
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+async function runCoverageReadFailsDuringCheck(): Promise<
+  Array<CoverageRecord>
+> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const session1 = await coverD(driver)
+  const holder: { collection?: Collection<Row, string, any> } = {}
+  // The first read after the restore published D's rows is the check.
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => (holder.collection?.toArray.length ?? 0) > 0,
+    `fail`,
+  )
+  const { collection, upstream } = onDemandSource(adapter, 0)
+  holder.collection = collection
+  const query = filterQuery(collection, `a`)
+  const record = (): CoverageRecord => ({
+    events: [...session1.events, ...upstream.events],
+    queries: {
+      d: {
+        spec: D,
+        sent: upstream.calls.slice(0, 1),
+        observed: observed(query),
+        checkFails: true,
+      },
+    },
+    waitPassed: true,
+  })
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const beforeAnswer = record()
+    await upstream.answer([A1, A2])
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    // Positive witness: the coverage check read failed.
+    expect(reads.failed).toBe(1)
+    return [beforeAnswer, record()]
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
 async function runSynchronousAnswerThenDelete(
   deleteAfterwards: boolean,
-): Promise<{ settledOffline: boolean }> {
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
+  // This source answers synchronously, so the driver records its log here.
+  const session1: Array<SourceEvent> = []
+  const records: Array<CoverageRecord> = []
   {
     const handles: { remove?: (row: Row) => void } = {}
+    const sent: Array<LoadSubsetOptions> = []
     // Same ID as `onDemandSource`, so session 2 restores these rows.
     const collection = createCollection(
       persistedCollectionOptions<Row, string>({
@@ -1404,12 +1370,24 @@ async function runSynchronousAnswerThenDelete(
               begin()
               write({ type: `delete`, value: row })
               commit()
+              session1.push({ type: `delete`, id: row.id })
             }
             return {
-              loadSubset: () => {
+              loadSubset: (options: LoadSubsetOptions) => {
+                sent.push(options)
                 begin()
                 for (const value of [A1, A2]) write({ type: `insert`, value })
                 commit()
+                session1.push(
+                  {
+                    type: `rows`,
+                    rows: [A1, A2].map(
+                      (row) =>
+                        [row.id, { group: row.group, rank: row.rank }] as const,
+                    ),
+                  },
+                  { type: `settled`, load: options, current: true },
+                )
                 return true
               },
             }
@@ -1421,8 +1399,11 @@ async function runSynchronousAnswerThenDelete(
     await withCleanup(async () => {
       await query.preload()
       await new Promise((resolve) => setTimeout(resolve, 100))
-      // Positive witness: the synchronous answer applied both rows.
-      expect(query.toArray.map((row) => row.id).sort()).toEqual([`a1`, `a2`])
+      records.push({
+        events: [...session1],
+        queries: { d: { spec: D, sent: [...sent], observed: observed(query) } },
+        waitPassed: true,
+      })
       if (deleteAfterwards) {
         handles.remove!(A1)
         await new Promise((resolve) => setTimeout(resolve, 100))
@@ -1434,89 +1415,73 @@ async function runSynchronousAnswerThenDelete(
     0,
   )
   const query = filterQuery(collection, `a`)
-  const state = trackPreload(query)
+  void query.preload().catch(() => undefined)
   return withCleanup(async () => {
     await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
     await new Promise((resolve) => setTimeout(resolve, 300))
-    return { settledOffline: state() === `resolved` }
+    records.push({
+      events: [...session1, ...upstream.events],
+      queries: {
+        d: { spec: D, sent: upstream.calls, observed: observed(query) },
+      },
+      upstream: `never answers`,
+      waitPassed: true,
+    })
+    return records
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-// An unordered demand keeps its row count when the source deletes one of
-// its rows and adds another, so it stays covered (maintainer decision,
-// 2026-10-26: unordered demands keep the row-count rule). This rejects the
-// wrong design "every demand must hold the keys it held", which the window
-// law needs and unordered demands do not.
-async function runUnorderedRowReplaced(): Promise<{
-  settledOffline: boolean
-  rows?: Array<string>
-}> {
+// Session 1 of D, followed by tail events from the source while D is still
+// active, then an offline session 2 with a wait of 0. The judgment checks D
+// at the end of session 1's answer and again offline.
+async function runTailHistory(
+  rows: ReadonlyArray<Row>,
+  tail: (upstream: Upstream) => Promise<void>,
+  options: { holdCoverageRead?: boolean } = {},
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  {
-    const { collection, upstream } = onDemandSource(
-      new SQLiteCorePersistenceAdapter({ driver }),
-      0,
-    )
-    const query = filterQuery(collection, `a`)
-    await withCleanup(async () => {
-      const preload = query.preload()
-      await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
-      await upstream.answer([A1, A2])
-      await preload
-      await upstream.remove([A1])
-      await upstream.write([{ id: `a3`, group: `a`, rank: 3, value: `v1` }])
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      // Positive witness: D lost a1 and gained a3 while it was active.
-      expect(query.toArray.map((row) => row.id).sort()).toEqual([`a2`, `a3`])
-    }, [() => query.cleanup(), () => collection.cleanup()])
-  }
-  const { collection, upstream } = onDemandSource(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    0,
-  )
-  const query = filterQuery(collection, `a`)
-  const state = trackPreload(query)
-  return withCleanup(async () => {
-    await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    return state() === `resolved`
-      ? {
-          settledOffline: true,
-          rows: query.toArray.map((row) => row.id).sort(),
-        }
-      : { settledOffline: false }
-  }, [() => query.cleanup(), () => collection.cleanup()])
-}
-
-// A truncate while the coverage read of an empty load is in flight. The
-// load is obsolete when its record would be written, so it records nothing,
-// and an offline load of D waits. Only an empty demand shows a late record:
-// for one with rows, the truncate leaves fewer rows than it would record.
-async function runTruncateDuringCoverageRead(): Promise<{
-  settledOffline: boolean
-  heldReads: number
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const records: Array<CoverageRecord> = []
   const state = { armed: false }
   const { adapter, reads } = controlledReads(
     new SQLiteCorePersistenceAdapter({ driver }),
     () => state.armed,
     `hold`,
   )
+  let session1: ReadonlyArray<SourceEvent> = []
   {
-    const { collection, upstream } = onDemandSource(adapter, 0)
+    const { collection, upstream } = onDemandSource(
+      options.holdCoverageRead
+        ? adapter
+        : new SQLiteCorePersistenceAdapter({ driver }),
+      0,
+    )
+    session1 = upstream.events
     const query = filterQuery(collection, `a`)
     await withCleanup(async () => {
       void query.preload().catch(() => undefined)
       await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
-      // The next read after the answer is the coverage read.
-      state.armed = true
-      await upstream.answer([])
-      await vi.waitFor(() => expect(reads.held).toBe(1))
-      // The truncate commits behind the held read, so do not await it yet.
-      const truncated = upstream.truncate()
-      reads.release()
-      await truncated
+      if (options.holdCoverageRead) {
+        // The next read after the answer is the coverage read.
+        state.armed = true
+        await upstream.answer(rows)
+        await vi.waitFor(() => expect(reads.held).toBe(1))
+      } else {
+        await upstream.answer(rows)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        records.push({
+          events: [...upstream.events],
+          queries: {
+            d: {
+              spec: D,
+              sent: upstream.calls.slice(0, 1),
+              observed: observed(query),
+            },
+          },
+          waitPassed: true,
+        })
+      }
+      await tail(upstream)
+      if (options.holdCoverageRead) reads.release()
       await new Promise((resolve) => setTimeout(resolve, 100))
     }, [() => query.cleanup(), () => collection.cleanup()])
   }
@@ -1525,83 +1490,84 @@ async function runTruncateDuringCoverageRead(): Promise<{
     0,
   )
   const query = filterQuery(collection, `a`)
-  const preload = trackPreload(query)
+  void query.preload().catch(() => undefined)
   return withCleanup(async () => {
     await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
     await new Promise((resolve) => setTimeout(resolve, 300))
-    return { settledOffline: preload() === `resolved`, heldReads: reads.held }
+    records.push({
+      events: [...session1, ...upstream.events],
+      queries: {
+        d: { spec: D, sent: upstream.calls, observed: observed(query) },
+      },
+      upstream: `never answers`,
+      waitPassed: true,
+    })
+    return records
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-// The wait runs from the load's start, not from the end of the coverage
-// check. A coverage read that outlasts the wait therefore settles D as soon
-// as it returns.
-async function runCoverageReadOutlastsWait(): Promise<{
-  settledWhenReadReturns: boolean
-  heldReads: number
-}> {
+// An unordered demand that loses `a1` and gains `a3` while it is active.
+const runUnorderedRowReplaced = () =>
+  runTailHistory([A1, A2], async (upstream) => {
+    await upstream.remove([A1])
+    await upstream.write([{ id: `a3`, group: `a`, rank: 3, value: `v1` }])
+  })
+
+// A truncate while the coverage read of an empty load is in flight. The
+// truncate commits behind the held read, so the history does not await it
+// until the read is released.
+const runTruncateDuringCoverageRead = () =>
+  runTailHistory(
+    [],
+    async (upstream) => {
+      void upstream.truncate()
+      await Promise.resolve()
+    },
+    { holdCoverageRead: true },
+  )
+
+// A held step in session 2 (the coverage read, or the load's cache-claim
+// renewal) that outlasts the 1000 ms wait. Once it returns, D must settle.
+async function runHeldPastTheWait(
+  held: `coverage read` | `claim renewal`,
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverD(driver)
+  const session1 = await coverD(driver)
   useFakeClock()
   const holder: { collection?: Collection<Row, string, any> } = {}
-  const { adapter, reads } = controlledReads(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    () => (holder.collection?.toArray.length ?? 0) > 0,
+  const hold = { count: 0, release: () => {} }
+  const reads = controlledReads(
+    new SQLiteCorePersistenceAdapter({
+      driver,
+      // A claim that lasts 30 s is inside the 60 s renewal window from the
+      // start, so the load renews it.
+      ...(held === `claim renewal`
+        ? { cacheGenerationClaimTtlMs: 30_000 }
+        : {}),
+    }),
+    () =>
+      held === `coverage read` && (holder.collection?.toArray.length ?? 0) > 0,
     `hold`,
   )
-  const { collection, upstream } = onDemandSource(adapter, 1000)
-  holder.collection = collection
-  const query = filterQuery(collection, `a`)
-  const preload = trackPreload(query)
-  return withCleanup(async () => {
-    await untilUpstreamCalled(upstream, 1)
-    for (let i = 0; i < 200 && reads.held === 0; i++) await drain()
-    await vi.advanceTimersByTimeAsync(1000)
-    reads.release()
-    await drain()
-    return {
-      settledWhenReadReturns: preload() === `resolved`,
-      heldReads: reads.held,
-    }
-  }, [
-    () => vi.useRealTimers(),
-    () => query.cleanup(),
-    () => collection.cleanup(),
-  ])
-}
-
-// The wait also runs from before the load's cache-claim renewal. A renewal
-// held past the wait lets D settle as soon as the coverage check passes.
-async function runClaimRenewalOutlastsWait(): Promise<{
-  settledAfterRenewal: boolean
-  heldRenewals: number
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverD(driver)
-  useFakeClock()
-  // A claim that lasts 30 s is inside the 60 s renewal window from the
-  // start, so the first load renews it.
-  const base = new SQLiteCorePersistenceAdapter({
-    driver,
-    cacheGenerationClaimTtlMs: 30_000,
-  })
-  // Startup renews the claim before any load; the load's own renewal is
-  // the next one, so hold that.
-  const renewals = { seen: 0, held: 0, release: () => {} }
-  const adapter = new Proxy(base, {
+  // Startup renews the claim before any load; the load's own renewal is the
+  // next one, so hold that.
+  let renewalsSeen = 0
+  const adapter = new Proxy(reads.adapter, {
     get(target, property) {
-      if (property === `renewCacheGenerationClaim`) {
+      if (
+        held === `claim renewal` &&
+        property === `renewCacheGenerationClaim`
+      ) {
         return (
           ...args: Parameters<
             NonNullable<typeof target.renewCacheGenerationClaim>
           >
         ) => {
-          if (++renewals.seen !== 2) {
+          if (++renewalsSeen !== 2)
             return target.renewCacheGenerationClaim(...args)
-          }
-          renewals.held++
+          hold.count++
           return new Promise<void>((resolve) => {
-            renewals.release = resolve
+            hold.release = resolve
           }).then(() => target.renewCacheGenerationClaim(...args))
         }
       }
@@ -1610,59 +1576,32 @@ async function runClaimRenewalOutlastsWait(): Promise<{
     },
   })
   const { collection, upstream } = onDemandSource(adapter, 1000)
-  const query = filterQuery(collection, `a`)
-  const preload = trackPreload(query)
-  return withCleanup(async () => {
-    for (let i = 0; i < 200 && renewals.held === 0; i++) await drain()
-    // Positive witness: the load had started, and its renewal held it
-    // before it reached the source.
-    expect(collection.isLoadingSubset).toBe(true)
-    expect(upstream.calls.length).toBe(0)
-    await vi.advanceTimersByTimeAsync(1000)
-    renewals.release()
-    await drain()
-    return {
-      settledAfterRenewal: preload() === `resolved`,
-      heldRenewals: renewals.held,
-    }
-  }, [
-    () => vi.useRealTimers(),
-    () => query.cleanup(),
-    () => collection.cleanup(),
-  ])
-}
-
-async function runReleaseDuringCoverageCheck(): Promise<{
-  loadingAfterRelease: boolean
-  heldReads: number
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  await coverD(driver)
-  useFakeClock()
-  const holder: { collection?: Collection<Row, string, any> } = {}
-  const { adapter, reads } = controlledReads(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    () => (holder.collection?.toArray.length ?? 0) > 0,
-    `hold`,
-  )
-  const { collection, upstream } = onDemandSource(adapter, 1000)
   holder.collection = collection
   const query = filterQuery(collection, `a`)
+  void query.preload().catch(() => undefined)
   return withCleanup(async () => {
-    void query.preload().catch(() => undefined)
-    await untilUpstreamCalled(upstream, 1)
-    for (let i = 0; i < 200 && reads.held === 0; i++) await drain()
-    // The coverage check is in flight; release the demand now.
-    await query.cleanup()
+    const isHeld = () =>
+      (held === `coverage read` ? reads.reads.held : hold.count) > 0
+    for (let i = 0; i < 200 && !isHeld(); i++) await drain()
+    // Positive witness: the load started and is held at the named step.
+    expect(isHeld()).toBe(true)
+    expect(collection.isLoadingSubset).toBe(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    if (held === `coverage read`) reads.reads.release()
+    else hold.release()
     await drain()
-    reads.release()
-    await drain()
-    await vi.advanceTimersByTimeAsync(1)
-    await drain()
-    return {
-      loadingAfterRelease: collection.isLoadingSubset,
-      heldReads: reads.held,
-    }
+    return [
+      {
+        events: [...session1.events, ...upstream.events],
+        queries: {
+          d: { spec: D, sent: upstream.calls, observed: observed(query) },
+        },
+        upstream: `never answers`,
+        // The load started at t = 0, before the held step; the clock is now
+        // past 1000 ms.
+        waitPassed: true,
+      },
+    ]
   }, [
     () => vi.useRealTimers(),
     () => query.cleanup(),
@@ -1679,10 +1618,12 @@ async function runReleaseDuringCoverageCheck(): Promise<{
 // session 1. Collection readiness stays false: P's Collection never becomes
 // ready offline.
 //
-// Model: released exactly when C is covered; `isReady` is false in both
-// cases; the released rows are the joined row from session 1. The wrong
-// design "an on-demand opt-in permits fallback on its own" releases without
-// coverage.
+// The shared judgment reads C's loads from session 2's record: the wait
+// releases exactly when every one of them has settled, and then shows P's
+// rows joined with C's restored rows. The wrong design "an on-demand opt-in
+// permits fallback on its own" releases without coverage; each
+// never-requested history feeds that wrong observation to the judgment as a
+// calibration.
 //
 // The rows are read when the wait releases, because that is the snapshot a
 // Suspense render shows. Session 2 also reads the joined query through an
@@ -1721,36 +1662,16 @@ type ChildHistory =
   | `never requested`
 type JoinedShape = `flat` | `nested` | `two-readers`
 type JoinedFailure = `none` | `on-demand source fails` | `eager source fails`
-// A failure history observes before and after C's 1000 ms wait.
-type JoinedCheckpoint = `before the wait` | `after the wait`
-
-// `initialRenderReleased` is the network-first wait; `collectionReady` is the
-// live query's own readiness, which needs P's Collection to be ready.
-type JoinedObservation = {
-  initialRenderReleased: boolean
-  initialRenderRejected: boolean
-  initialRenderReady: boolean
-  collectionReady: boolean
-  rows: unknown
-}
-
-const JOINED_ROW = { id: `p1`, parentValue: `parent`, childValue: `child` }
-
-function expectedJoined(
-  history: ChildHistory,
-  optInPermitsAlone = false,
-  checkpoint: JoinedCheckpoint = `after the wait`,
-): JoinedObservation {
-  const covered = history === `covered by the same joined query`
-  const released =
-    checkpoint === `after the wait` && (covered || optInPermitsAlone)
-  return {
-    initialRenderReleased: released,
-    initialRenderRejected: false,
-    initialRenderReady: released,
-    collectionReady: false,
-    rows: released ? (covered ? [JOINED_ROW] : []) : undefined,
-  }
+// What the joined query reads: P's rows joined with C's rows on `parentId`.
+// The judgment treats a released network-first wait as `ready`, a rejected
+// one as `error`, and a pending one as `loading`.
+const JOINED: QuerySpec = {
+  join: { parents: `parents`, children: `children`, on: `parentId` },
+  select: (parent, child) => ({
+    id: parent.id,
+    parentValue: parent.value,
+    childValue: child.value,
+  }),
 }
 
 type Parent = { id: string; value: string }
@@ -1758,6 +1679,8 @@ type Child = { id: string; parentId: string; value: string }
 
 function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
   const source = { markError: (_error: unknown) => {} }
+  // The source's own log, for the shared judgment.
+  const events: Array<SourceEvent> = []
   const collection = createCollection(
     persistedCollectionOptions<Parent, string>({
       id: `demand-coverage-parents`,
@@ -1771,6 +1694,11 @@ function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
             begin()
             write({ type: `insert`, value: { id: `p1`, value: `parent` } })
             commit()
+            events.push({
+              type: `rows`,
+              collection: `parents`,
+              rows: [[`p1`, { value: `parent` }]],
+            })
             markReady()
           }
           return {}
@@ -1778,7 +1706,7 @@ function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
       },
     }),
   )
-  return { collection, source }
+  return { collection, source, events }
 }
 
 function onDemandChildren(
@@ -1788,6 +1716,10 @@ function onDemandChildren(
 ) {
   const calls: Array<LoadSubsetOptions> = []
   const source = { markError: (_error: unknown) => {} }
+  // The source's own log, for the shared judgment, and when it received
+  // each load.
+  const events: Array<SourceEvent> = []
+  const arrivedAt = new Map<LoadSubsetOptions, number>()
   const collection = createCollection(
     persistedCollectionOptions<Child, string>({
       id: `demand-coverage-children`,
@@ -1801,6 +1733,7 @@ function onDemandChildren(
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               calls.push(options)
+              arrivedAt.set(options, Date.now())
               if (!online) return new Promise<void>(() => {})
               // The source may return more rows than requested.
               begin()
@@ -1808,14 +1741,28 @@ function onDemandChildren(
                 type: `insert`,
                 value: { id: `c1`, parentId: `p1`, value: `child` },
               })
-              return Promise.resolve(commit()).then(() => undefined)
+              return Promise.resolve(commit()).then(() => {
+                events.push(
+                  {
+                    type: `rows`,
+                    collection: `children`,
+                    rows: [[`c1`, { parentId: `p1`, value: `child` }]],
+                  },
+                  {
+                    type: `settled`,
+                    collection: `children`,
+                    load: options,
+                    current: true,
+                  },
+                )
+              })
             },
           }
         },
       },
     }),
   )
-  return { collection, calls, source }
+  return { collection, calls, source, events, arrivedAt }
 }
 
 function shapedQuery(
@@ -1872,23 +1819,25 @@ async function runJoined(
   history: ChildHistory,
   shape: JoinedShape,
   failure: JoinedFailure = `none`,
-): Promise<Record<JoinedCheckpoint, JoinedObservation>> {
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
+  const session1: Array<SourceEvent> = []
 
   // Session 1 is online. Both Collections share one adapter, as an
   // application does. The children load only through the session-1 query.
   {
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
-    const { collection: parents } = eagerParents(adapter, true)
+    const eagerOnline = eagerParents(adapter, true)
+    const parents = eagerOnline.collection
     const children = onDemandChildren(adapter, true)
-    const session1 =
+    const session1Query =
       history === `never requested`
         ? undefined
         : history === `covered by the inner query only`
           ? shapedQuery(`flat`, parents, children.collection)
           : shapedQuery(shape, parents, children.collection)
     await withCleanup(async () => {
-      if (session1) await session1.query.preload()
+      if (session1Query) await session1Query.query.preload()
       else await parents.preload()
       // Positive witness: session 1 sent each demand that the history
       // covers, and only those.
@@ -1901,9 +1850,10 @@ async function runJoined(
             ? 2
             : 1,
       )
+      session1.push(...eagerOnline.events, ...children.events)
     }, [
-      () => session1?.query.cleanup(),
-      () => session1?.inner.cleanup(),
+      () => session1Query?.query.cleanup(),
+      () => session1Query?.inner.cleanup(),
       () => children.collection.cleanup(),
       () => parents.cleanup(),
     ])
@@ -1916,6 +1866,7 @@ async function runJoined(
   const waitMs = failure === `none` ? 0 : 1000
   const children = onDemandChildren(adapter, false, waitMs)
   const { inner, query } = shapedQuery(shape, parents, children.collection)
+
   const observer = createLiveQueryObserver(query)
   const unsubscribe = observer.subscribe(() => {})
   // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
@@ -1937,13 +1888,27 @@ async function runJoined(
     },
     () => (initialRender.rejected = true),
   )
-  const observe = (): JoinedObservation => ({
-    initialRenderReleased: initialRender.released,
-    initialRenderRejected: initialRender.rejected,
-    initialRenderReady: observer.isInitialRenderReady(),
-    collectionReady: observer.getSnapshot().isReady,
-    rows: initialRender.rows,
-  })
+  const observe = (): CoverageRecord => {
+    // The observer's synchronous gate must agree with the wait.
+    expect(observer.isInitialRenderReady()).toBe(initialRender.released)
+    return {
+      events: [...session1, ...children.events],
+      queries: {
+        joined: {
+          spec: JOINED,
+          sent: [...children.calls],
+          observed: initialRender.released
+            ? {
+                status: `ready`,
+                rows: initialRender.rows as QueryObservation[`rows`],
+              }
+            : { status: initialRender.rejected ? `error` : `loading` },
+        },
+      },
+      upstream: `never answers`,
+      waitPassed: waitPassedAt(children, waitMs),
+    }
+  }
   return withCleanup(async () => {
     for (let i = 0; i < 200 && children.calls.length === 0; i++) {
       await vi.advanceTimersByTimeAsync(0)
@@ -1965,7 +1930,7 @@ async function runJoined(
     // A late checkpoint: nothing else is scheduled to change the outcome.
     await vi.advanceTimersByTimeAsync(10_000)
     await drain()
-    return { 'before the wait': beforeWait, 'after the wait': observe() }
+    return [beforeWait, observe()]
   }, [
     () => vi.useRealTimers(),
     unsubscribe,
@@ -1983,9 +1948,12 @@ async function runJoined(
 // W is the window `group = 'a' orderBy rank limit 2`. An ordered window
 // reaches the source as a limited load plus a tie-boundary load whose key is
 // built from the restored boundary row, so both must be covered for W to
-// settle from SQLite. Session 1 loads W online over `a1` (rank 1), `a2`
-// (rank 2), and `a3` (rank 3), so W holds `a1` and `a2`. Then one tail event
-// happens:
+// settle from SQLite. The judgment reads both loads from session 2's record
+// and judges each against its own demand's record: a limited load must hold
+// the same rows (the window law, maintainer decision 2026-10-26); the
+// unordered tie-boundary load must hold at least as many rows.
+//
+// Session 1 loads W online, and one tail event follows while W is active:
 //
 // - `unchanged`: nothing.
 // - `row-deleted`: the source deletes `a1`.
@@ -1996,15 +1964,15 @@ async function runJoined(
 //   W keeps its size and its boundary row `a2`.
 // - `row-gained-under-limit`: session 1 has only `a1`, so W is not full.
 //   The source then adds `a0` at rank 0, and `a1` stays the boundary row.
+// - Ties at the boundary: session 1 has `a2` and `a2b` at rank 2, so W holds
+//   one of them and its tie-boundary demand holds both. The source then
+//   deletes the tie row outside W, deletes the one inside W, or adds `a2c` at
+//   rank 2.
 //
-// Law: W settles from SQLite only when its restore holds the same rows that
-// it held when it settled. Coverage proves that window complete; a window
-// that lost, gained, or replaced a row is not the proven one. A swap keeps
-// the same rows in a new order, so W stays covered and shows the new order.
-// The wrong designs "a window counts only rows" and "a window ignores its
-// tie-boundary" accept a row moved out or in. The last two histories keep
-// the boundary row, so its tie-boundary load key does not change; they
-// reject "a window counts only rows" by the row count alone.
+// The last two plain histories keep the boundary row, so the tie-boundary
+// key does not change; they reject "a window counts only rows" by the row
+// count alone. The tie histories reject "a window ignores its tie-boundary
+// load" and "every demand must hold the keys it held".
 //
 // Two more histories move the window to its next page offline. Page 2 is
 // covered only when session 1 loaded it too. Each runs with and without an
@@ -2015,52 +1983,73 @@ async function runJoined(
 // positive witness checks which load the move sent.
 // ===========================================================================
 
-type WindowHistory =
-  | `unchanged`
-  | `row-deleted`
-  | `row-moved-out`
-  | `row-moved-in`
-  | `rows-swapped`
-  | `row-replaced`
-  | `row-gained-under-limit`
-const WINDOW_HISTORIES: ReadonlyArray<WindowHistory> = [
-  `unchanged`,
-  `row-deleted`,
-  `row-moved-out`,
-  `row-moved-in`,
-  `rows-swapped`,
-  `row-replaced`,
-  `row-gained-under-limit`,
-]
-
+const A0: Row = { id: `a0`, group: `a`, rank: 0, value: `v1` }
+const A15: Row = { id: `a15`, group: `a`, rank: 1.5, value: `v1` }
+const A2B: Row = { id: `a2b`, group: `a`, rank: 2, value: `v1` }
+const A2C: Row = { id: `a2c`, group: `a`, rank: 2, value: `v1` }
 const A3: Row = { id: `a3`, group: `a`, rank: 3, value: `v1` }
+const A4: Row = { id: `a4`, group: `a`, rank: 4, value: `v1` }
 
-// The rows W held when it settled in session 1.
-const windowHeld = (history: WindowHistory): ReadonlyArray<string> =>
-  history === `row-gained-under-limit` ? [`a1`] : [`a1`, `a2`]
+const W: QuerySpec = { group: `a`, orderByRank: true, limit: 2 }
 
-// Each history's restored rows, in rank order. The window is covered exactly
-// when these are the rows it held when it settled, in any order.
-const WINDOW_RESTORED: Record<WindowHistory, ReadonlyArray<string>> = {
-  unchanged: [`a1`, `a2`],
-  'row-deleted': [`a2`, `a3`],
-  'row-moved-out': [`a1`, `a3`],
-  'row-moved-in': [`a0`, `a1`],
-  'rows-swapped': [`a2`, `a1`],
-  'row-replaced': [`a15`, `a2`],
-  'row-gained-under-limit': [`a0`, `a1`],
-}
-
-function expectedWindow(history: WindowHistory): {
-  ready: boolean
-  rows?: ReadonlyArray<string>
-} {
-  const restored = WINDOW_RESTORED[history]
-  const held = windowHeld(history)
-  const sameRows =
-    restored.length === held.length && held.every((id) => restored.includes(id))
-  return sameRows ? { ready: true, rows: restored } : { ready: false }
-}
+// Each history: the rows session 1 answers W with, and the tail event. A tie
+// tail receives the rows W showed, to pick the tie row inside or outside it.
+const WINDOW_HISTORIES = {
+  unchanged: { rows: [A1, A2, A3], tail: async () => {} },
+  'row-deleted': {
+    rows: [A1, A2, A3],
+    tail: (upstream: Upstream) => upstream.remove([A1]),
+  },
+  'row-moved-out': {
+    rows: [A1, A2, A3],
+    tail: (upstream: Upstream) => upstream.update([{ ...A2, rank: 10 }]),
+  },
+  'row-moved-in': {
+    rows: [A1, A2, A3],
+    tail: (upstream: Upstream) => upstream.write([A0]),
+  },
+  'rows-swapped': {
+    rows: [A1, A2, A3],
+    tail: (upstream: Upstream) =>
+      upstream.update([
+        { ...A1, rank: 2 },
+        { ...A2, rank: 1 },
+      ]),
+  },
+  'row-replaced': {
+    rows: [A1, A2, A3],
+    tail: async (upstream: Upstream) => {
+      await upstream.remove([A1])
+      await upstream.write([A15])
+    },
+  },
+  'row-gained-under-limit': {
+    rows: [A1],
+    tail: (upstream: Upstream) => upstream.write([A0]),
+  },
+  'tie-unchanged': { rows: [A1, A2, A2B, A3], tail: async () => {} },
+  'tie-row-outside-deleted': {
+    rows: [A1, A2, A2B, A3],
+    tail: (upstream: Upstream, shown: ReadonlyArray<string>) =>
+      upstream.remove([A2, A2B].filter((row) => !shown.includes(row.id))),
+  },
+  'tie-row-inside-deleted': {
+    rows: [A1, A2, A2B, A3],
+    tail: (upstream: Upstream, shown: ReadonlyArray<string>) =>
+      upstream.remove([A2, A2B].filter((row) => shown.includes(row.id))),
+  },
+  'tie-row-added': {
+    rows: [A1, A2, A2B, A3],
+    tail: (upstream: Upstream) => upstream.write([A2C]),
+  },
+} satisfies Record<
+  string,
+  {
+    rows: ReadonlyArray<Row>
+    tail: (upstream: Upstream, shown: ReadonlyArray<string>) => Promise<void>
+  }
+>
+type WindowHistory = keyof typeof WINDOW_HISTORIES
 
 function windowQuery(source: Collection<Row, string, any>) {
   return createLiveQueryCollection((q) =>
@@ -2093,45 +2082,39 @@ async function answerUntil(
 
 async function runWindow(
   history: WindowHistory,
-): Promise<{ ready: boolean; rows?: ReadonlyArray<string> }> {
+): Promise<Array<CoverageRecord>> {
+  const { rows, tail } = WINDOW_HISTORIES[history]
   const driver = createDriver(new DatabaseSync(`:memory:`))
+  const records: Array<CoverageRecord> = []
+  let session1: ReadonlyArray<SourceEvent> = []
   {
     const { collection, upstream } = onDemandSource(
       new SQLiteCorePersistenceAdapter({ driver }),
       0,
     )
+    session1 = upstream.events
     const query = windowQuery(collection)
     await withCleanup(async () => {
-      await answerUntil(
+      await answerUntil(upstream, rows, query.preload())
+      records.push({
+        events: [...upstream.events],
+        queries: {
+          w: { spec: W, sent: [...upstream.calls], observed: observed(query) },
+        },
+        waitPassed: true,
+      })
+      // Positive witness: when the window ends at a tie, W sent a
+      // tie-boundary load.
+      if (rows.includes(A2B)) {
+        expect(upstream.calls.some((call) => call.limit === undefined)).toBe(
+          true,
+        )
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await tail(
         upstream,
-        history === `row-gained-under-limit` ? [A1] : [A1, A2, A3],
-        query.preload(),
+        query.toArray.map((row) => row.id),
       )
-      // Positive witness: W holds the rows of this history online.
-      expect(query.toArray.map((row) => row.id)).toEqual(windowHeld(history))
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      if (history === `row-deleted`) await upstream.remove([A1])
-      if (history === `row-moved-out`) {
-        await upstream.update([{ ...A2, rank: 10 }])
-      }
-      if (history === `row-moved-in`) {
-        await upstream.write([{ id: `a0`, group: `a`, rank: 0, value: `v1` }])
-      }
-      if (history === `rows-swapped`) {
-        await upstream.update([
-          { ...A1, rank: 2 },
-          { ...A2, rank: 1 },
-        ])
-      }
-      if (history === `row-replaced`) {
-        await upstream.remove([A1])
-        await upstream.write([
-          { id: `a15`, group: `a`, rank: 1.5, value: `v1` },
-        ])
-      }
-      if (history === `row-gained-under-limit`) {
-        await upstream.write([{ id: `a0`, group: `a`, rank: 0, value: `v1` }])
-      }
       await new Promise((resolve) => setTimeout(resolve, 50))
     }, [() => query.cleanup(), () => collection.cleanup()])
   }
@@ -2147,126 +2130,15 @@ async function runWindow(
     await drain()
     await vi.advanceTimersByTimeAsync(1)
     await drain()
-    return query.status === `ready`
-      ? { ready: true, rows: query.toArray.map((row) => row.id) }
-      : { ready: false }
-  }, [
-    () => vi.useRealTimers(),
-    () => query.cleanup(),
-    () => collection.cleanup(),
-  ])
-}
-
-// Ties at the boundary. Session 1 loads W over `a1` (rank 1), `a2` and `a2b`
-// (both rank 2), and `a3` (rank 3), so W holds `a1` and `a2`, and its
-// tie-boundary load is the demand "group a, rank 2", which held `a2` and
-// `a2b`. Model: W is a limited demand and a tie-boundary demand, and it
-// settles only when both are covered. The window must hold the same rows
-// (the window law); the tie-boundary demand is unordered, so it must hold at
-// least the rows it held (the row-count rule). The model orders ties by key.
-//
-// - `tie-unchanged`: nothing; W settles on `a1`, `a2`.
-// - `tie-row-outside-deleted`: the source deletes `a2b`. W keeps its rows,
-//   but its tie-boundary demand lost one, so W waits. This rejects "a window
-//   ignores its tie-boundary load".
-// - `tie-row-added`: the source adds `a2c` at rank 2. W keeps its rows, and
-//   its tie-boundary demand gained one, so W settles. This rejects "every
-//   demand must hold the keys it held".
-// - `tie-row-inside-deleted`: the source deletes `a2`, so W holds `a1` and
-//   `a2b`, a different window, and waits.
-type TieHistory =
-  | `tie-unchanged`
-  | `tie-row-outside-deleted`
-  | `tie-row-added`
-  | `tie-row-inside-deleted`
-const TIE_HISTORIES: ReadonlyArray<TieHistory> = [
-  `tie-unchanged`,
-  `tie-row-outside-deleted`,
-  `tie-row-added`,
-  `tie-row-inside-deleted`,
-]
-const A2B: Row = { id: `a2b`, group: `a`, rank: 2, value: `v1` }
-
-function expectedTieWindow(history: TieHistory): {
-  ready: boolean
-  rows?: ReadonlyArray<string>
-} {
-  const held = [`a1`, `a2`]
-  const tieRowsHeld = 2
-  const rows = [
-    [`a1`, 1],
-    [`a2`, 2],
-    [`a2b`, 2],
-    [`a3`, 3],
-    ...(history === `tie-row-added` ? [[`a2c`, 2] as const] : []),
-  ].filter(
-    ([id]) =>
-      !(history === `tie-row-outside-deleted` && id === `a2b`) &&
-      !(history === `tie-row-inside-deleted` && id === `a2`),
-  ) as Array<readonly [string, number]>
-  rows.sort(([a, x], [b, y]) => x - y || (a < b ? -1 : 1))
-  const window = rows.slice(0, 2).map(([id]) => id)
-  const boundary = rows[1]![1]
-  const tieRows = rows.filter(([, rank]) => rank === boundary).length
-  const sameRows = held.every((id) => window.includes(id))
-  return sameRows && tieRows >= tieRowsHeld
-    ? { ready: true, rows: window }
-    : { ready: false }
-}
-
-async function runTieWindow(history: TieHistory): Promise<{
-  held: ReadonlyArray<string>
-  tieLoads: number
-  ready: boolean
-  rows?: ReadonlyArray<string>
-}> {
-  const driver = createDriver(new DatabaseSync(`:memory:`))
-  let held: ReadonlyArray<string> = []
-  let tieLoads = 0
-  {
-    const { collection, upstream } = onDemandSource(
-      new SQLiteCorePersistenceAdapter({ driver }),
-      0,
-    )
-    const query = windowQuery(collection)
-    await withCleanup(async () => {
-      await answerUntil(upstream, [A1, A2, A2B, A3], query.preload())
-      held = query.toArray.map((row) => row.id)
-      tieLoads = upstream.calls.filter(
-        (call) => call.limit === undefined,
-      ).length
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      const tieRows = [A2, A2B]
-      const inside = tieRows.find((row) => held.includes(row.id))!
-      const outside = tieRows.find((row) => !held.includes(row.id))!
-      if (history === `tie-row-outside-deleted`)
-        await upstream.remove([outside])
-      if (history === `tie-row-inside-deleted`) await upstream.remove([inside])
-      if (history === `tie-row-added`) {
-        await upstream.write([{ id: `a2c`, group: `a`, rank: 2, value: `v1` }])
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }, [() => query.cleanup(), () => collection.cleanup()])
-  }
-  useFakeClock()
-  const { collection, upstream } = onDemandSource(
-    new SQLiteCorePersistenceAdapter({ driver }),
-    0,
-  )
-  const query = windowQuery(collection)
-  return withCleanup(async () => {
-    void query.preload().catch(() => undefined)
-    await untilUpstreamCalled(upstream, 1)
-    await drain()
-    await vi.advanceTimersByTimeAsync(1)
-    await drain()
-    return {
-      held,
-      tieLoads,
-      ...(query.status === `ready`
-        ? { ready: true, rows: query.toArray.map((row) => row.id) }
-        : { ready: false }),
-    }
+    records.push({
+      events: [...session1, ...upstream.events],
+      queries: {
+        w: { spec: W, sent: upstream.calls, observed: observed(query) },
+      },
+      upstream: `never answers`,
+      waitPassed: true,
+    })
+    return records
   }, [
     () => vi.useRealTimers(),
     () => query.cleanup(),
@@ -2276,16 +2148,19 @@ async function runTieWindow(history: TieHistory): Promise<{
 
 async function runNextPage(
   session1LoadsPageTwo: boolean,
-  indexed = true,
-): Promise<{ pageTwoSettled: boolean; rows?: ReadonlyArray<string> }> {
+  indexed: boolean,
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  const A4: Row = { id: `a4`, group: `a`, rank: 4, value: `v1` }
   const all = [A1, A2, A3, A4]
+  const PAGE_TWO: QuerySpec = { ...W, offset: 2 }
+  const records: Array<CoverageRecord> = []
+  let session1: ReadonlyArray<SourceEvent> = []
   {
     const { collection, upstream } = onDemandSource(
       new SQLiteCorePersistenceAdapter({ driver }),
       0,
     )
+    session1 = upstream.events
     if (indexed) {
       collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
     }
@@ -2298,8 +2173,17 @@ async function runNextPage(
           all,
           Promise.resolve(query.utils.setWindow({ offset: 2, limit: 2 })),
         )
-        // Positive witness: session 1 reached page 2.
-        expect(query.toArray.map((row) => row.id)).toEqual([`a3`, `a4`])
+        records.push({
+          events: [...upstream.events],
+          queries: {
+            w: {
+              spec: PAGE_TWO,
+              sent: [...upstream.calls],
+              observed: observed(query),
+            },
+          },
+          waitPassed: true,
+        })
       }
       await new Promise((resolve) => setTimeout(resolve, 50))
     }, [() => query.cleanup(), () => collection.cleanup()])
@@ -2313,14 +2197,21 @@ async function runNextPage(
     collection.createIndex((row) => row.rank, { indexType: BTreeIndex })
   }
   const query = windowQuery(collection)
+  const events = () => [...session1, ...upstream.events]
   return withCleanup(async () => {
     void query.preload().catch(() => undefined)
     await untilUpstreamCalled(upstream, 1)
     await drain()
     await vi.advanceTimersByTimeAsync(1)
     await drain()
-    // Positive witness: page 1 settled from SQLite.
-    expect(query.status).toBe(`ready`)
+    records.push({
+      events: events(),
+      queries: {
+        w: { spec: W, sent: [...upstream.calls], observed: observed(query) },
+      },
+      upstream: `never answers`,
+      waitPassed: true,
+    })
     const callsBefore = upstream.calls.length
     const moved = { settled: false }
     void Promise.resolve(query.utils.setWindow({ offset: 2, limit: 2 })).then(
@@ -2341,12 +2232,20 @@ async function runNextPage(
     ).toBe(true)
     await vi.advanceTimersByTimeAsync(1)
     await drain()
-    return moved.settled
-      ? {
-          pageTwoSettled: true,
-          rows: query.toArray.map((row) => row.id),
-        }
-      : { pageTwoSettled: false }
+    // The move's settlement is the observation for page 2.
+    records.push({
+      events: events(),
+      queries: {
+        w: {
+          spec: PAGE_TWO,
+          sent: [...upstream.calls],
+          observed: moved.settled ? observed(query) : { status: `loading` },
+        },
+      },
+      upstream: `never answers`,
+      waitPassed: true,
+    })
+    return records
   }, [
     () => vi.useRealTimers(),
     () => query.cleanup(),
@@ -2561,30 +2460,6 @@ describe(`persisted demand coverage oracle`, () => {
     },
   )
 
-  it.each([
-    {
-      ...LIFECYCLE_LAW,
-      name: `deadline from the sync run`,
-      deadlineFrom: `sync-run`,
-    },
-    {
-      ...LIFECYCLE_LAW,
-      name: `release clears coverage`,
-      releaseKeepsCoverage: false,
-    },
-  ] satisfies ReadonlyArray<LifecycleDesign>)(
-    `distinguishes the lifecycle law from the wrong design: $name`,
-    (design) => {
-      expect(expectedLifecycle(design)).not.toEqual(expectedLifecycle())
-    },
-  )
-
-  it(`distinguishes the joined law from an opt-in that permits fallback alone`, () => {
-    expect(expectedJoined(`never requested`, true)).not.toEqual(
-      expectedJoined(`never requested`),
-    )
-  })
-
   it(`enumerates every declared cell once`, () => {
     const names = ALL_CELLS.map(cellName)
     expect(new Set(names).size).toBe(names.length)
@@ -2606,215 +2481,139 @@ describe(`persisted demand coverage oracle`, () => {
     },
   )
 
+  // -------------------------------------------------------------------------
+  // Parts 2 to 4: fixed histories judged by the shared model.
+  // -------------------------------------------------------------------------
+
   it(`gives each load of a covered demand its own wait and keeps coverage across release`, async () => {
     quietConsole()
-    const actual = await runLifecycle()
-    expect(actual.query1Aborted).toBe(true)
-    expect(actual.observations).toEqual(expectedLifecycle())
+    const records = await runLifecycle()
+    judge(records)
+    // Checker calibration: a deadline measured from the sync run would show
+    // query 2 ready at 1000 ms. The judgment must reject that observation.
+    const at1000 = records[LIFECYCLE_CHECKPOINTS.indexOf(1000)]!
+    const early = {
+      ...at1000,
+      queries: {
+        ...at1000.queries,
+        query2: {
+          ...at1000.queries.query2!,
+          observed: { status: `ready`, rows: [`a1`, `a2`] },
+        },
+      },
+    } satisfies CoverageRecord
+    expect(coverageViolations(early)).toHaveLength(1)
   })
 
   it.each([
     ...([`flat`, `nested`, `two-readers`] as const).flatMap(
       (shape: JoinedShape) =>
         ([`covered by the same joined query`, `never requested`] as const).map(
-          (history: ChildHistory) => [history, shape] as const,
+          (history: ChildHistory) => [history, shape, `none`] as const,
         ),
     ),
     // The inner-only history differs from full coverage only when the query
     // reaches C through two live queries.
-    [`covered by the inner query only`, `two-readers`] as const,
-  ])(
-    `releases the joined network-first wait only when the on-demand side is covered: %s, %s`,
-    async (history, shape) => {
-      quietConsole()
-      const actual = await runJoined(history, shape)
-      expect(actual[`after the wait`]).toEqual(expectedJoined(history))
-    },
-  )
-
-  it.each(
-    ([`on-demand source fails`, `eager source fails`] as const).flatMap(
+    [`covered by the inner query only`, `two-readers`, `none`] as const,
+    ...([`on-demand source fails`, `eager source fails`] as const).flatMap(
       (failure) =>
         ([`covered by the same joined query`, `never requested`] as const).map(
-          (history) => [failure, history] as const,
+          (history) => [history, `flat`, failure] as const,
         ),
     ),
-  )(
-    `releases the joined wait after a source failure only when the on-demand demand settles: %s, %s`,
-    async (failure, history) => {
+  ])(
+    `releases the joined network-first wait only when the on-demand demand settles: %s, %s, %s`,
+    async (history, shape, failure) => {
       quietConsole()
-      expect(await runJoined(history, `flat`, failure)).toEqual({
-        'before the wait': expectedJoined(history, false, `before the wait`),
-        'after the wait': expectedJoined(history),
-      })
-    },
-  )
-
-  it(`does not settle D from SQLite after a schema reset`, async () => {
-    quietConsole()
-    expect(await runSchemaReset()).toEqual({ settledAfterWait: false })
-  })
-
-  it(`keeps an optimistic write's overlay rules on a demand settled from SQLite`, async () => {
-    quietConsole()
-    expect(await runOptimisticWrite()).toEqual({
-      settledBeforeWrite: [`a1`, `a2`],
-      duringWrite: [`a1`, `a2`, `a9`],
-      afterRollback: [`a1`, `a2`],
-      readyThroughout: true,
-    })
-  })
-
-  it(`does not fail a load whose rows applied when the cache claim expires before its coverage record`, async () => {
-    quietConsole()
-    expect(await runClaimExpiredBeforeRecord()).toEqual({
-      queryStatus: `ready`,
-      rows: [`a1`, `a2`],
-    })
-  })
-
-  it(`waits for the network when the cache claim expires before the coverage check`, async () => {
-    quietConsole()
-    expect(await runClaimExpiredBeforeCheck()).toEqual({
-      status: `loading`,
-      reacquired: true,
-    })
-  })
-
-  it(`keeps a synchronous answer for an already hydrated demand synchronous`, async () => {
-    quietConsole()
-    // Positive witness: the second request reached the source.
-    expect(await runSynchronousAnswer()).toEqual({
-      sourceCalls: 1,
-      secondResult: `true`,
-    })
-  })
-
-  it(`settles a load as its upstream load did when the coverage read after it fails`, async () => {
-    quietConsole()
-    expect(await runCoverageReadFailsAfterLoad()).toEqual({
-      status: `ready`,
-      rows: [`a1`, `a2`],
-      failedReads: 1,
-    })
-  })
-
-  it(`waits for the upstream load when the coverage check read fails`, async () => {
-    quietConsole()
-    expect(await runCoverageReadFailsDuringCheck()).toEqual({
-      beforeAnswer: `loading`,
-      afterAnswer: `ready`,
-      failedReads: 1,
-    })
-  })
-
-  it.each([
-    [false, { settledOffline: true }],
-    [true, { settledOffline: false }],
-  ] as const)(
-    `counts a synchronous answer's rows in its coverage (row deleted afterwards: %s)`,
-    async (deleteAfterwards, expected) => {
-      quietConsole()
-      expect(await runSynchronousAnswerThenDelete(deleteAfterwards)).toEqual(
-        expected,
-      )
-    },
-  )
-
-  it(`keeps an unordered demand covered when it loses one row and gains another`, async () => {
-    quietConsole()
-    expect(await runUnorderedRowReplaced()).toEqual({
-      settledOffline: true,
-      rows: [`a2`, `a3`],
-    })
-  })
-
-  it(`records nothing for an empty load that a truncate makes obsolete during its coverage read`, async () => {
-    quietConsole()
-    expect(await runTruncateDuringCoverageRead()).toEqual({
-      settledOffline: false,
-      heldReads: 1,
-    })
-  })
-
-  it(`measures the wait from the load's start, not the end of the coverage read`, async () => {
-    quietConsole()
-    expect(await runCoverageReadOutlastsWait()).toEqual({
-      settledWhenReadReturns: true,
-      heldReads: 1,
-    })
-  })
-
-  it(`measures the wait from before the load's cache-claim renewal`, async () => {
-    quietConsole()
-    expect(await runClaimRenewalOutlastsWait()).toEqual({
-      settledAfterRenewal: true,
-      heldRenewals: 1,
-    })
-  })
-
-  it(`stops loading at release during the coverage check`, async () => {
-    quietConsole()
-    expect(await runReleaseDuringCoverageCheck()).toEqual({
-      loadingAfterRelease: false,
-      heldReads: 1,
-    })
-  })
-
-  it.each([`rotation`, `refetch`] as const)(
-    `does not settle a later load of D from SQLite after a %s in the same session`,
-    async (kind) => {
-      quietConsole()
-      expect(await runSessionReset(kind)).toEqual(SESSION_RESET_LAW)
-      expect(await runSessionReset(kind, [])).toEqual(SESSION_RESET_LAW)
-    },
-  )
-  it(`distinguishes the window law from "a window counts only rows"`, () => {
-    // Counting rows accepts every history that keeps at least the held count.
-    const countOnly = (history: WindowHistory) =>
-      WINDOW_RESTORED[history].length >= windowHeld(history).length
-    expect(
-      WINDOW_HISTORIES.filter(
-        (history) => countOnly(history) !== expectedWindow(history).ready,
-      ),
-    ).toEqual([
-      `row-deleted`,
-      `row-moved-out`,
-      `row-moved-in`,
-      `row-replaced`,
-      `row-gained-under-limit`,
-    ])
-  })
-
-  it.each(WINDOW_HISTORIES)(
-    `settles an ordered window from SQLite only while it holds its covered rows: %s`,
-    async (history) => {
-      quietConsole()
-      expect(await runWindow(history)).toEqual(expectedWindow(history))
-    },
-  )
-
-  it.each(TIE_HISTORIES)(
-    `settles a window with a tie at its boundary only while both of its demands are covered: %s`,
-    async (history) => {
-      quietConsole()
-      const { held, tieLoads, ...observed } = await runTieWindow(history)
-      // Positive witness: W held a1 and a2 and sent a tie-boundary load.
-      expect(held).toEqual([`a1`, `a2`])
-      expect(tieLoads).toBeGreaterThan(0)
-      expect(observed).toEqual(expectedTieWindow(history))
+      const records = await runJoined(history, shape, failure)
+      judge(records)
+      // Checker calibration: an opt-in that permits fallback alone would
+      // release a never-requested demand. The judgment must reject it.
+      if (history === `never requested`) {
+        const last = records[records.length - 1]!
+        const released = {
+          ...last,
+          queries: {
+            joined: {
+              ...last.queries.joined!,
+              observed: { status: `ready`, rows: [] },
+            },
+          },
+        } satisfies CoverageRecord
+        expect(coverageViolations(released)).toHaveLength(1)
+      }
     },
   )
 
   it.each([
-    [true, { pageTwoSettled: true, rows: [`a3`, `a4`] }],
-    [false, { pageTwoSettled: false }],
-  ] as const)(
-    `moves a window offline to a page only when that page is covered (session 1 loaded page 2: %s)`,
-    async (session1LoadsPageTwo, expected) => {
+    [`a rotation`, () => runSessionReset(`rotation`)],
+    [`a rotation of an empty demand`, () => runSessionReset(`rotation`, [])],
+    [`a refetch`, () => runSessionReset(`refetch`)],
+    [`a refetch of an empty demand`, () => runSessionReset(`refetch`, [])],
+    [`a schema reset`, runSchemaReset],
+    [
+      `a cache claim that expires before the coverage record`,
+      runClaimExpiredBeforeRecord,
+    ],
+    [
+      `a cache claim that expires before the coverage check`,
+      runClaimExpiredBeforeCheck,
+    ],
+  ] as const)(`judges a reset in the same session: %s`, async (_name, run) => {
+    quietConsole()
+    judge(await run())
+  })
+
+  it.each([
+    [
+      `a coverage read that fails after the load`,
+      runCoverageReadFailsAfterLoad,
+    ],
+    [`a coverage check read that fails`, runCoverageReadFailsDuringCheck],
+    [`a synchronous answer`, () => runSynchronousAnswerThenDelete(false)],
+    [
+      `a synchronous answer, then a deletion`,
+      () => runSynchronousAnswerThenDelete(true),
+    ],
+    [
+      `an unordered demand that loses a row and gains another`,
+      runUnorderedRowReplaced,
+    ],
+    [
+      `a truncate during an empty load's coverage read`,
+      runTruncateDuringCoverageRead,
+    ],
+    [
+      `a coverage read that outlasts the wait`,
+      () => runHeldPastTheWait(`coverage read`),
+    ],
+    [
+      `a cache-claim renewal that outlasts the wait`,
+      () => runHeldPastTheWait(`claim renewal`),
+    ],
+  ] as const)(`judges coverage bookkeeping: %s`, async (_name, run) => {
+    quietConsole()
+    judge(await run())
+  })
+
+  it.each(Object.keys(WINDOW_HISTORIES) as Array<WindowHistory>)(
+    `settles an ordered window from SQLite only while its demands are covered: %s`,
+    async (history) => {
       quietConsole()
-      expect(await runNextPage(session1LoadsPageTwo)).toEqual(expected)
-      expect(await runNextPage(session1LoadsPageTwo, false)).toEqual(expected)
+      judge(await runWindow(history))
+    },
+  )
+
+  it.each([
+    [true, true],
+    [true, false],
+    [false, true],
+    [false, false],
+  ] as const)(
+    `moves a window offline to a page only when that page is covered (session 1 loaded page 2: %s, indexed: %s)`,
+    async (session1LoadsPageTwo, indexed) => {
+      quietConsole()
+      judge(await runNextPage(session1LoadsPageTwo, indexed))
     },
   )
 })

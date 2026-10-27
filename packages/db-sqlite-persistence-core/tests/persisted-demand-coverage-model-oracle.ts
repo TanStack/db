@@ -5,68 +5,115 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * # The persisted demand coverage model
  *
  * Law (`docs/contributing/oracle-reviews/2026-10-20-on-demand-network-first-law.md`,
- * the glossary's "persisted demand coverage", and law 6 in
- * `packages/db/src/query/live/ARCHITECTURE.md`): an opted-in persisted wrapper
- * over an on-demand source settles a load from SQLite only when its exact
- * demand has coverage. A current load of that demand recorded coverage when it
- * settled; no truncate or reset ended it since; SQLite still holds at least as
- * many of the demand's rows as it recorded; and a limited load still holds the
- * same rows. A covered load settles from SQLite once the wait has passed or
- * its upstream load has failed. Any other load waits for its upstream load,
- * and fails with it.
+ * the glossary's "persisted demand coverage" and "network-first initial
+ * render", and law 6 in `packages/db/src/query/live/ARCHITECTURE.md`): an
+ * opted-in persisted wrapper over an on-demand source settles a load from
+ * SQLite only when its exact demand has coverage. A current load of that
+ * demand recorded coverage when it settled; no truncate or generation change
+ * ended it since; SQLite still holds at least as many of the demand's rows
+ * as it recorded; and a limited load still holds the same rows. A covered
+ * load settles from SQLite once its wait has passed or its upstream load has
+ * failed. A load with `refetch: true` is never covered. Any other load waits
+ * for its upstream load, and fails with it. A query is ready when every load
+ * it sent has settled; a network-first initial render over an eager and an
+ * on-demand source releases on the same condition for the on-demand loads.
  *
- * This module is the one judgment that the generated campaign and every
- * receiving driver share (ORC-014, ORC-016). A driver records what happened at
- * its own production boundary and passes that record here. No driver states
- * an expected result.
+ * This module is the one judgment that the fixed oracle, the generated
+ * campaign, and every receiving driver share (ORC-014, ORC-016). A driver
+ * records what happened at its own production boundary and passes that record
+ * here. No driver states an expected result.
  *
  * ## The record a driver supplies
  *
- * - The online session's source log: the rows the source wrote or deleted,
- *   its truncates, and each load it settled, with whether a truncate came
- *   between the source receiving that load and settling it. A load with a
- *   truncate in between is obsolete and records nothing.
- * - For each live query of the offline session: what it reads (`QuerySpec`),
- *   the loads the source received for it, and what it showed.
- * - How the offline session's source answered, and whether the checkpoint is
- *   after the wait.
+ * - The source log of every session so far, in order: the rows each source
+ *   wrote or deleted, its truncates, the ends of a persisted cache generation
+ *   (a cache rotation or a schema reset), and each load it settled or
+ *   failed. A settled load is current when no truncate or generation change
+ *   came between the source receiving it and settling it, and obsolete
+ *   otherwise. A driver that injected a failed coverage read marks the
+ *   settled load whose coverage read failed.
+ * - For each live query at the checkpoint: what it reads (`QuerySpec`), the
+ *   loads the source received for it in this session, and what it showed.
+ *   A driver that injected a failed coverage check marks the query.
+ * - Premises at the checkpoint: whether each load's wait has passed since
+ *   that load started, and, for loads the log does not settle or fail, how
+ *   the source answers. Each load measures its own wait: a window's
+ *   tie-boundary load starts only after its limited load settles, so its
+ *   wait ends later.
  *
- * The model reads which loads the offline session sent from that record
- * rather than predicting them. When core sends a window's tie-boundary load,
- * and for which boundary, is core's scheduling, which the law leaves open.
+ * The model reads which loads a session sent from that record rather than
+ * predicting them. When core sends a window's tie-boundary load, and when the
+ * wrapper asks for a demand again after a reset, is scheduling that the law
+ * leaves open.
  *
  * ## Abstractions (ORC-009)
  *
- * - The model's SQLite rows are every row the source wrote since its last
- *   truncate. A source write reaches SQLite whether or not a load asked for
- *   it.
- * - To read a load's rows, the model evaluates the load's own filter, order,
- *   and limit over those rows. Ties break by key, as the SQLite adapter's
- *   `ORDER BY ..., key ASC` does.
+ * - The model's SQLite rows for a Collection are every row its source wrote
+ *   since the last truncate or generation change. A source write reaches
+ *   SQLite whether or not a load asked for it.
+ * - To read a load's rows, the model evaluates the load's own filter, cursor,
+ *   order, and limit over those rows. Ties break by key, as the SQLite
+ *   adapter's `ORDER BY ..., key ASC` does.
  * - A record holds a row count and, for a limited load, its row keys. The
  *   production record holds the same facts; the model computes them itself.
+ * - Coverage is judged with the records at the checkpoint, not at the instant
+ *   the load checked. No supplied history records a demand while another load
+ *   of it waits to check.
  *
- * Limits: no cursor or offset loads, no joins, and one opted-in Collection.
+ * Limits: a join reads one eager and one on-demand Collection, and the
+ * evaluator knows only the expression forms these histories send.
  */
 
-export type RowState = { group: string; rank: number }
+export type RowState = { group?: string; rank?: number } & Readonly<
+  Record<string, unknown>
+>
 
-/** One fact from the online session's source. */
-export type SourceEvent =
-  | { type: `rows`; rows: ReadonlyArray<readonly [string, RowState]> }
-  | { type: `delete`; id: string }
-  | { type: `truncate` }
-  | { type: `settled`; load: LoadSubsetOptions; current: boolean }
+/** The Collection a fact belongs to; most records have one, `source`. */
+type InCollection = { collection?: string }
 
-/** What a live query reads: one group, optionally ordered by rank and limited. */
-export type QuerySpec = { group: string; orderByRank?: boolean; limit?: number }
+/** One fact from a source. */
+export type SourceEvent = InCollection &
+  (
+    | { type: `rows`; rows: ReadonlyArray<readonly [string, RowState]> }
+    | { type: `delete`; id: string }
+    | { type: `truncate` }
+    | { type: `generation ends` }
+    | {
+        type: `settled`
+        load: LoadSubsetOptions
+        current: boolean
+        coverage?: `recorded` | `read fails`
+      }
+    | { type: `failed`; load: LoadSubsetOptions }
+  )
 
-/** How the offline session's source answered its loads. */
+/**
+ * What a live query reads: one group, optionally ordered by rank, and a
+ * window of `limit` rows from `offset`.
+ */
+export type FilterSpec = {
+  group: string
+  orderByRank?: boolean
+  limit?: number
+  offset?: number
+  collection?: string
+}
+/** An eager parent Collection joined with an on-demand child Collection. */
+export type JoinSpec = {
+  join: { parents: string; children: string; on: string }
+  select: (
+    parent: Readonly<Record<string, unknown>>,
+    child: Readonly<Record<string, unknown>>,
+  ) => Record<string, unknown>
+}
+export type QuerySpec = FilterSpec | JoinSpec
+
+/** How a source answers the loads that its log neither settles nor fails. */
 export type OfflineUpstream = `never answers` | `fails at once`
 
 export type QueryObservation = {
   status: `ready` | `loading` | `error`
-  rows?: ReadonlyArray<string>
+  rows?: ReadonlyArray<string | Readonly<Record<string, unknown>>>
 }
 
 export type CoverageReach =
@@ -83,20 +130,24 @@ export type CoverageReach =
   | `covered load waits for the deadline`
   | `uncovered load fails with its upstream`
 
+/** Whether a load's wait has passed: for every load, or per load. */
+export type WaitPremise = boolean | ((load: LoadSubsetOptions) => boolean)
+
+export type CoverageQuery = {
+  spec: QuerySpec
+  sent: ReadonlyArray<LoadSubsetOptions>
+  observed: QueryObservation
+  /** Overrides the record's premise for this query. */
+  waitPassed?: WaitPremise
+  /** The driver failed this query's coverage check read. */
+  checkFails?: boolean
+}
+
 export type CoverageRecord = {
   events: ReadonlyArray<SourceEvent>
-  queries: Readonly<
-    Record<
-      string,
-      {
-        spec: QuerySpec
-        sent: ReadonlyArray<LoadSubsetOptions>
-        observed: QueryObservation
-      }
-    >
-  >
-  upstream: OfflineUpstream
-  waitPassed: boolean
+  queries: Readonly<Record<string, CoverageQuery>>
+  upstream?: OfflineUpstream
+  waitPassed: WaitPremise
 }
 
 // The expression forms these loads carry (`packages/db/src/query/ir.ts`).
@@ -110,15 +161,15 @@ type Expr = {
 type ModelRow = { id: string } & RowState
 
 function evaluate(expr: Expr, row: ModelRow): unknown {
-  if (expr.type === `ref`) {
-    return row[expr.path![expr.path!.length - 1] as keyof ModelRow]
-  }
+  if (expr.type === `ref`) return row[expr.path![expr.path!.length - 1]!]
   if (expr.type === `val`) return expr.value
   const args = (expr.args ?? []).map((arg) => evaluate(arg, row))
   const [left, right] = args as [never, never]
   switch (expr.name) {
     case `eq`:
       return left === right
+    case `in`:
+      return (right as ReadonlyArray<unknown>).includes(left)
     case `gt`:
       return left > right
     case `gte`:
@@ -137,28 +188,32 @@ function evaluate(expr: Expr, row: ModelRow): unknown {
   throw new Error(`unmodelled expression ${JSON.stringify(expr)}`)
 }
 
-const byRankThenKey = (x: ModelRow, y: ModelRow) =>
-  x.rank - y.rank || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)
 const byKey = (x: ModelRow, y: ModelRow) =>
   x.id < y.id ? -1 : x.id > y.id ? 1 : 0
+const byRankThenKey = (x: ModelRow, y: ModelRow) =>
+  Number(x.rank) - Number(y.rank) || byKey(x, y)
+const modelRows = (rows: ReadonlyMap<string, RowState>): Array<ModelRow> =>
+  [...rows].map(([id, state]) => ({ ...state, id }))
 
 // The rows a load reads from SQLite, in its order.
 function readLoad(
   load: LoadSubsetOptions,
-  sqlite: ReadonlyMap<string, RowState>,
+  rows: ReadonlyMap<string, RowState>,
 ): Array<string> {
-  if (load.cursor !== undefined || load.offset !== undefined) {
-    throw new Error(`unmodelled load ${demandKey(load)}`)
-  }
+  // A cursor and an offset describe the same continuation; a load that
+  // carries both is read by its cursor (`LoadSubsetOptions`).
   const where = load.where as Expr | undefined
-  const rows = [...sqlite]
-    .map(([id, state]): ModelRow => ({ id, ...state }))
-    .filter((row) => where === undefined || evaluate(where, row) === true)
+  const from = load.cursor?.whereFrom as Expr | undefined
+  const matching = modelRows(rows).filter(
+    (row) =>
+      (where === undefined || evaluate(where, row) === true) &&
+      (from === undefined || evaluate(from, row) === true),
+  )
   const orderBy = (load.orderBy ?? []) as unknown as ReadonlyArray<{
     expression: Expr
     compareOptions?: { direction?: `asc` | `desc` }
   }>
-  rows.sort((x, y) => {
+  matching.sort((x, y) => {
     for (const { expression, compareOptions } of orderBy) {
       const a = evaluate(expression, x) as number
       const b = evaluate(expression, y) as number
@@ -170,21 +225,38 @@ function readLoad(
     }
     return byKey(x, y)
   })
-  const ids = rows.map((row) => row.id)
-  return load.limit === undefined ? ids : ids.slice(0, load.limit)
+  const ids = matching.map((row) => row.id)
+  const offset = from === undefined ? (load.offset ?? 0) : 0
+  return load.limit === undefined
+    ? ids.slice(offset)
+    : ids.slice(offset, offset + load.limit)
 }
 
-// The rows a live query shows over the given rows.
+// The rows a live query shows over the restored rows.
 function readQuery(
   spec: QuerySpec,
-  sqlite: ReadonlyMap<string, RowState>,
-): Array<string> {
-  const rows = [...sqlite]
-    .map(([id, state]): ModelRow => ({ id, ...state }))
+  sqlite: (collection: string) => ReadonlyMap<string, RowState>,
+): Array<string | Record<string, unknown>> {
+  if (`join` in spec) {
+    const { parents, children, on } = spec.join
+    const childRows = modelRows(sqlite(children))
+    return modelRows(sqlite(parents))
+      .sort(byKey)
+      .flatMap((parent) =>
+        childRows
+          .filter((child) => child[on] === parent.id)
+          .sort(byKey)
+          .map((child) => spec.select(parent, child)),
+      )
+  }
+  const ids = modelRows(sqlite(spec.collection ?? `source`))
     .filter((row) => row.group === spec.group)
     .sort(spec.orderByRank ? byRankThenKey : byKey)
-  const ids = rows.map((row) => row.id)
-  return spec.limit === undefined ? ids : ids.slice(0, spec.limit)
+    .map((row) => row.id)
+  const offset = spec.offset ?? 0
+  return spec.limit === undefined
+    ? ids.slice(offset)
+    : ids.slice(offset, offset + spec.limit)
 }
 
 // The demand identity the law uses: two loads cover each other only with the
@@ -192,95 +264,133 @@ function readQuery(
 const demandKey = (load: LoadSubsetOptions): string =>
   String(getLoadSubsetDemandKey(load))
 const rowsKey = (ids: ReadonlyArray<string>) => JSON.stringify([...ids].sort())
+const isWindow = (spec: QuerySpec) =>
+  !(`join` in spec) && spec.limit !== undefined
+const loadsOf = (spec: QuerySpec) =>
+  `join` in spec ? spec.join.children : (spec.collection ?? `source`)
 
 /**
- * The model: replay the online session's source log, then judge each query of
- * the offline session from the loads it sent.
+ * The model: replay the source log, then judge each query at the checkpoint
+ * from the loads it sent.
  */
 export function expectedObservations(
   record: CoverageRecord,
   reach: (state: CoverageReach) => void = () => {},
 ): Record<string, QueryObservation> {
-  const sqlite = new Map<string, RowState>()
+  const sqlite = new Map<string, Map<string, RowState>>()
+  const rowsIn = (collection = `source`) => {
+    let rows = sqlite.get(collection)
+    if (!rows) sqlite.set(collection, (rows = new Map()))
+    return rows
+  }
   const records = new Map<string, { count: number; rows?: string }>()
+  const recordKey = (collection: string, load: LoadSubsetOptions) =>
+    `${collection} ${demandKey(load)}`
+  const settledByUpstream = new Set<LoadSubsetOptions>()
+  const failed = new Set<LoadSubsetOptions>()
   for (const event of record.events) {
+    const collection = event.collection ?? `source`
     switch (event.type) {
       case `rows`:
         for (const [id, state] of event.rows) {
-          const before = sqlite.get(id)
+          const before = rowsIn(collection).get(id)
           if (before !== undefined && before.group !== state.group) {
             reach(`row moved between demands`)
           }
-          sqlite.set(id, state)
+          rowsIn(collection).set(id, state)
         }
         break
       case `delete`:
-        sqlite.delete(event.id)
+        rowsIn(collection).delete(event.id)
         break
       case `truncate`:
-        if (records.size > 0) reach(`coverage ended by a truncate`)
-        sqlite.clear()
-        records.clear()
+      case `generation ends`:
+        if (
+          [...records.keys()].some((key) => key.startsWith(`${collection} `))
+        ) {
+          reach(`coverage ended by a truncate`)
+        }
+        rowsIn(collection).clear()
+        for (const key of [...records.keys()]) {
+          if (key.startsWith(`${collection} `)) records.delete(key)
+        }
         break
       case `settled`: {
+        settledByUpstream.add(event.load)
         if (!event.current) {
           reach(`obsolete load settled`)
           break
         }
-        const key = demandKey(event.load)
+        if (event.coverage === `read fails`) break
+        const key = recordKey(collection, event.load)
         if (records.has(key)) reach(`coverage recorded twice`)
-        const rows = readLoad(event.load, sqlite)
+        const rows = readLoad(event.load, rowsIn(collection))
         records.set(key, {
           count: rows.length,
           rows: event.load.limit === undefined ? undefined : rowsKey(rows),
         })
+        break
       }
+      case `failed`:
+        failed.add(event.load)
     }
-  }
-  const covered = (load: LoadSubsetOptions): boolean => {
-    const stored = records.get(demandKey(load))
-    if (stored === undefined) return false
-    const rows = readLoad(load, sqlite)
-    if (rows.length < stored.count) {
-      reach(`covered but short of rows`)
-      return false
-    }
-    if (stored.rows !== undefined && stored.rows !== rowsKey(rows)) {
-      reach(`window holds other rows`)
-      return false
-    }
-    return true
   }
   const expected: Record<string, QueryObservation> = {}
   for (const [name, query] of Object.entries(record.queries)) {
-    // Positive witness: the offline session asked its source for the query.
-    if (query.sent.length === 0) {
-      throw new Error(`the offline session sent no load for query ${name}`)
+    const collection = loadsOf(query.spec)
+    const covered = (load: LoadSubsetOptions): boolean => {
+      if (load.refetch === true || query.checkFails) return false
+      const stored = records.get(recordKey(collection, load))
+      if (stored === undefined) return false
+      const rows = readLoad(load, rowsIn(collection))
+      if (rows.length < stored.count) {
+        reach(`covered but short of rows`)
+        return false
+      }
+      if (stored.rows !== undefined && stored.rows !== rowsKey(rows)) {
+        reach(`window holds other rows`)
+        return false
+      }
+      return true
     }
-    const coverage = query.sent.map(covered)
-    const window = query.spec.limit !== undefined
-    if (window && coverage[0] && coverage.includes(false)) {
+    // Positive witness: the query asked its source for data.
+    if (query.sent.length === 0) {
+      throw new Error(`no load was sent for query ${name}`)
+    }
+    const premise = query.waitPassed ?? record.waitPassed
+    const waitPassed = (load: LoadSubsetOptions) =>
+      typeof premise === `function` ? premise(load) : premise
+    const loads = query.sent.map((load) => {
+      if (settledByUpstream.has(load)) return `settled` as const
+      const upstreamFailed =
+        failed.has(load) || record.upstream === `fails at once`
+      const isCovered = covered(load)
+      if (isCovered) {
+        reach(
+          isWindow(query.spec) ? `window covered offline` : `covered offline`,
+        )
+        if (upstreamFailed || waitPassed(load)) return `settled` as const
+        reach(`covered load waits for the deadline`)
+        return `waiting` as const
+      }
+      reach(`uncovered offline`)
+      if (upstreamFailed) {
+        reach(`uncovered load fails with its upstream`)
+        return `failed` as const
+      }
+      return `waiting` as const
+    })
+    if (
+      isWindow(query.spec) &&
+      loads[0] === `settled` &&
+      loads.includes(`waiting`)
+    ) {
       reach(`tie-boundary load uncovered`)
     }
-    if (!coverage.every(Boolean)) {
-      reach(`uncovered offline`)
-      if (record.upstream === `fails at once`) {
-        reach(`uncovered load fails with its upstream`)
-      }
-      // An uncovered load waits for its upstream load and fails with it.
-      expected[name] = {
-        status: record.upstream === `fails at once` ? `error` : `loading`,
-      }
-      continue
-    }
-    reach(window ? `window covered offline` : `covered offline`)
-    if (!record.waitPassed && record.upstream === `never answers`) {
-      reach(`covered load waits for the deadline`)
-    }
-    // A covered load settles once the wait has passed or its upstream failed.
-    expected[name] =
-      record.waitPassed || record.upstream === `fails at once`
-        ? { status: `ready`, rows: readQuery(query.spec, sqlite) }
+    expected[name] = loads.includes(`failed`)
+      ? { status: `error` }
+      : loads.every((load) => load === `settled`)
+        ? { status: `ready`, rows: readQuery(query.spec, rowsIn) }
         : { status: `loading` }
   }
   return expected
@@ -299,16 +409,14 @@ export function coverageViolations(
   for (const [name, query] of Object.entries(record.queries)) {
     const want = expected[name]!
     const got = query.observed
-    const rows = (observation: QueryObservation) =>
-      observation.rows === undefined
-        ? undefined
-        : query.spec.orderByRank
-          ? [...observation.rows]
-          : [...observation.rows].sort()
+    const ordered = !(`join` in query.spec) && query.spec.orderByRank === true
+    const rows = (observation: QueryObservation) => {
+      const list = (observation.rows ?? []).map((row) => JSON.stringify(row))
+      return JSON.stringify(ordered ? list : list.sort())
+    }
     const same =
       want.status === got.status &&
-      (want.status !== `ready` ||
-        JSON.stringify(rows(want)) === JSON.stringify(rows(got)))
+      (want.status !== `ready` || rows(want) === rows(got))
     if (!same) {
       violations.push(
         `query ${name}: expected ${JSON.stringify(want)}, observed ${JSON.stringify(got)}`,
