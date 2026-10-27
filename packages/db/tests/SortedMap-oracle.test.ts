@@ -4,25 +4,37 @@ import { SortedMap } from '../src/SortedMap'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { createOracleReach } from './oracle-reach'
 import type { SyncConfig } from '../src/types.js'
 
 /**
- * SortedMap is an ordered view over ordinary map semantics.
+ * SortedMap is the ordered map behind Collection state: synced rows, ordered
+ * by the Collection's compare option or by key, and active transactions. It
+ * promises what those callers use, not every Map behavior.
  *
- * The contract has two independent parts. Keys still have Map ownership:
- * setting a key replaces its value, deleting reports whether the key existed,
- * and clearing removes everything. Iteration then presents the surviving
- * entries in either key order or the caller's value order. Equal values use
- * key order as a stable tie-breaker, so no entry disappears inside a tie.
- * Deferred writes may postpone ordering within one synchronous batch, but
- * point reads remain current and ordered reads restore the same view.
+ * Keys have Map ownership: setting a key replaces its value, deleting reports
+ * whether the key existed, and clearing removes everything. Iteration presents
+ * the surviving entries in either key order or the caller's value order. Equal
+ * values use key order as a stable tie-breaker, so no entry disappears inside
+ * a tie. Key order is total over the keys Collections produce: `undefined`,
+ * then `null` (grouped Collections can produce these at runtime even though
+ * the key type excludes them), then strings, then numbers. Deferred writes may
+ * postpone ordering within one synchronous batch, but point reads remain
+ * current and ordered reads restore the same view.
+ *
+ * One mutation during iteration is promised, because pruning settled
+ * transactions relies on it: deleting entries with deferOrder while iterating
+ * yields each entry of the order the iteration began with exactly once. Other
+ * mutation during iteration, NaN and -0 keys, values mutated in place without
+ * a write, and a comparator that throws are not promised; the coverage map
+ * records these limits.
  *
  * The reference model is deliberately dull: a native Map owns the values and
  * a fresh full sort derives every observation. The production structure may
- * update its ordered index incrementally, but it must refine that recomputation
- * after every generated command. The driver observes size, point lookup, every
- * iterator, and forEach; checking only the final values would miss stale keys,
- * lost ties, and inconsistent views of the same state.
+ * update its ordered index incrementally, but it must refine that
+ * recomputation after every generated command. The driver observes size,
+ * point lookup, and every iterator; checking only the final values would miss
+ * stale keys, lost ties, and inconsistent views of the same state.
  */
 
 type Order = `key` | `ascending` | `descending`
@@ -50,28 +62,66 @@ async function countDisplacedSlots(
   return displaced
 }
 
+type RuntimeKey = undefined | null
+type ModelKey = number | RuntimeKey
+
+const isRuntimeKey = (key: unknown): key is RuntimeKey => key == null
+const asKey = (key: ModelKey) => key as number
+
+// A burst writes more keys than one small batch holds, in an order derived
+// from its seed value, so ordered restoration has many pending keys to place.
+function burstEntries(seed: number): Array<[number, number]> {
+  const count = 17 + (seed + 3) * 4
+  const keys = Array.from({ length: count }, (_, index) => 10 + index)
+  if (seed % 2 !== 0) keys.reverse()
+  return keys.map((key) => [key, ((key * 7) % 5) - 2])
+}
+
+const probeKeys: Array<ModelKey> = [
+  -3,
+  -2,
+  -1,
+  0,
+  1,
+  2,
+  3,
+  undefined,
+  null,
+  10,
+  26,
+  50,
+]
+
+// The promised total key order: undefined, null, then numbers (the generated
+// keys hold no strings).
+function compareModelKeys(a: ModelKey, b: ModelKey): number {
+  const rank = (key: ModelKey) => (key === undefined ? 0 : key === null ? 1 : 2)
+  return rank(a) - rank(b) || (rank(a) === 2 ? a! - b! : 0)
+}
+
+function modelOrder(model: Map<ModelKey, number>, order: Order) {
+  return [...model].sort(
+    ([ka, va], [kb, vb]) =>
+      (order === `key` ? 0 : order === `ascending` ? va - vb : vb - va) ||
+      compareModelKeys(ka, kb),
+  )
+}
+
 function expectMap(
   actual: SortedMap<number, number>,
-  model: Map<number, number>,
+  model: Map<ModelKey, number>,
   order: Order,
 ) {
   // Recompute from a plain Map; do not copy SortedMap's binary insertion logic.
-  const expected = [...model].sort(
-    ([ka, va], [kb, vb]) =>
-      (order === `key` ? 0 : order === `ascending` ? va - vb : vb - va) ||
-      ka - kb,
-  )
+  const expected = modelOrder(model, order)
   expect(actual.size).toBe(model.size)
   expect([...actual]).toEqual(expected)
   expect([...actual.entries()]).toEqual(expected)
   expect([...actual.keys()]).toEqual(expected.map(([key]) => key))
   expect([...actual.values()]).toEqual(expected.map(([, value]) => value))
-  const visited: Array<[number, number]> = []
-  actual.forEach((value, key) => visited.push([key, value]))
-  expect(visited).toEqual(expected)
-  for (let key = -3; key <= 3; key++) {
-    expect(actual.has(key)).toBe(model.has(key))
-    expect(actual.get(key)).toBe(model.get(key))
+  for (const key of probeKeys) {
+    expect(actual.has(asKey(key))).toBe(model.has(key))
+    expect(actual.get(asKey(key))).toBe(model.get(key))
   }
 }
 
@@ -86,19 +136,43 @@ describe.each([`key`, `ascending`, `descending`] as const)(
     it.each([20260912, undefined])(
       `agrees with full recomputation (seed %s)`,
       async (seed) => {
+        const reach = createOracleReach(
+          property,
+          [
+            `placed-runtime-key-deleted`,
+            `runtime-key-observed`,
+            `deferred-burst-observed`,
+            `entry-yielded-after-pruning`,
+          ],
+          { minimum: 5 },
+        )
         await fc.assert(
           fc.asyncProperty(
             fc.array(
               fc.record({
-                kind: fc.constantFrom(`set`, `set`, `delete`, `clear`),
-                key: fc.integer({ min: -3, max: 3 }),
+                kind: fc.constantFrom(
+                  `set`,
+                  `set`,
+                  `set`,
+                  `delete`,
+                  `delete`,
+                  `delete`,
+                  `clear`,
+                  `burst`,
+                  `prune`,
+                ),
+                key: fc.oneof(
+                  { arbitrary: fc.integer({ min: -3, max: 3 }), weight: 3 },
+                  { arbitrary: fc.constantFrom(undefined, null), weight: 3 },
+                ),
                 value: fc.integer({ min: -3, max: 3 }),
                 deferOrder: fc.boolean(),
                 observe: fc.boolean(),
               }),
-              { maxLength: 40 },
+              { minLength: 6, maxLength: 40 },
             ),
             (actions) => {
+              reach.beginHistory()
               const actual = new SortedMap<number, number>(
                 order === `key`
                   ? undefined
@@ -106,33 +180,95 @@ describe.each([`key`, `ascending`, `descending`] as const)(
                     ? (a, b) => a - b
                     : (a, b) => b - a,
               )
-              const model = new Map<number, number>()
-              expectMap(actual, model, order)
+              const model = new Map<ModelKey, number>()
+              // Keys written with deferOrder since the last ordered read or
+              // ordering write; an ordered read must place all of them.
+              const deferred = new Set<ModelKey>()
+              // Keys whose ordered slot reflects their current value: written
+              // without deferral, or read in order since their last write.
+              const placed = new Set<ModelKey>()
+              const observe = () => {
+                for (const key of model.keys()) placed.add(key)
+                if (deferred.size > 16) reach.reach(`deferred-burst-observed`)
+                if ([...model.keys()].some(isRuntimeKey))
+                  reach.reach(`runtime-key-observed`)
+                expectMap(actual, model, order)
+                deferred.clear()
+              }
+              observe()
               for (const action of actions) {
+                const key = action.key
                 if (action.kind === `set`) {
                   expect(
-                    actual.set(action.key, action.value, action.deferOrder),
+                    actual.set(asKey(key), action.value, action.deferOrder),
                   ).toBe(actual)
-                  model.set(action.key, action.value)
+                  model.set(key, action.value)
+                  if (action.deferOrder) {
+                    deferred.add(key)
+                    placed.delete(key)
+                  } else {
+                    deferred.clear()
+                    for (const modelKey of model.keys()) placed.add(modelKey)
+                  }
                 } else if (action.kind === `delete`) {
-                  expect(actual.delete(action.key, action.deferOrder)).toBe(
-                    model.delete(action.key),
+                  if (isRuntimeKey(key) && placed.has(key))
+                    reach.reach(`placed-runtime-key-deleted`)
+                  expect(actual.delete(asKey(key), action.deferOrder)).toBe(
+                    model.delete(key),
                   )
+                  placed.delete(key)
+                  if (action.deferOrder) deferred.add(key)
+                  else {
+                    deferred.clear()
+                    for (const modelKey of model.keys()) placed.add(modelKey)
+                  }
+                } else if (action.kind === `burst`) {
+                  for (const [burstKey, value] of burstEntries(action.value)) {
+                    actual.set(burstKey, value, true)
+                    model.set(burstKey, value)
+                    deferred.add(burstKey)
+                    placed.delete(burstKey)
+                  }
+                } else if (action.kind === `prune`) {
+                  // Iterate in order, deleting each entry whose value has the
+                  // action's parity with deferOrder, as settled transactions
+                  // are pruned. The iteration yields the order it began with.
+                  const expected = modelOrder(model, order)
+                  const yielded: Array<[number, number]> = []
+                  let pruned = false
+                  for (const [entryKey, value] of actual) {
+                    if (pruned) reach.reach(`entry-yielded-after-pruning`)
+                    yielded.push([entryKey, value])
+                    if ((value - action.value) % 2 === 0) {
+                      expect(actual.delete(entryKey, true)).toBe(true)
+                      pruned = true
+                    }
+                  }
+                  expect(yielded).toEqual(expected)
+                  for (const [entryKey, value] of expected) {
+                    if ((value - action.value) % 2 !== 0) continue
+                    model.delete(entryKey)
+                    deferred.add(entryKey)
+                    placed.delete(entryKey)
+                  }
                 } else {
                   actual.clear()
                   model.clear()
+                  deferred.clear()
+                  placed.clear()
                 }
                 expect(actual.size).toBe(model.size)
-                expect(actual.has(action.key)).toBe(model.has(action.key))
-                expect(actual.get(action.key)).toBe(model.get(action.key))
+                expect(actual.has(asKey(key))).toBe(model.has(key))
+                expect(actual.get(asKey(key))).toBe(model.get(key))
                 if (
                   action.kind === `clear` ||
-                  !action.deferOrder ||
+                  ((action.kind === `set` || action.kind === `delete`) &&
+                    !action.deferOrder) ||
                   action.observe
                 )
-                  expectMap(actual, model, order)
+                  observe()
               }
-              expectMap(actual, model, order)
+              observe()
               return Promise.resolve()
             },
           ),
@@ -190,6 +326,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
             ],
           },
         )
+        reach.assertReached()
       },
     )
   },
@@ -340,6 +477,60 @@ describe(`SortedMap`, () => {
     expect([...map.keys()]).toEqual(
       Array.from({ length: 128 }, (_, i) => i + 1),
     )
+  })
+
+  it(`keeps ordered-key movement bounded during deferred bulk deletes and reorders`, async () => {
+    // A bulk commit can remove or reorder many existing keys, not only add
+    // new ones. Moving every later key once per removed or reordered key is
+    // quadratic; the bound allows a constant number of passes.
+    const size = 2048
+    const map = new SortedMap<number, number>((a, b) => a - b)
+    for (let key = 0; key < size; key++) map.set(key, key, true)
+    map.restoreOrder()
+    const deleted = await countDisplacedSlots(() => {
+      for (let key = 0; key < size; key += 2) map.delete(key, true)
+      map.restoreOrder()
+    })
+    expect(deleted).toBeLessThan(size * 64)
+    const reordered = await countDisplacedSlots(() => {
+      for (let key = 1; key < size; key += 4) map.set(key, -key, true)
+      map.restoreOrder()
+    })
+    expect(reordered).toBeLessThan(size * 64)
+    const expected = Array.from(
+      { length: size / 2 },
+      (_, index) => 2 * index + 1,
+    )
+      .map((key) => [key, key % 4 === 1 ? -key : key] as const)
+      .sort(([, a], [, b]) => a - b)
+      .map(([key]) => key)
+    expect([...map.keys()]).toEqual(expected)
+  })
+
+  it(`keeps Map ownership when a placed comparator value was mutated in place`, () => {
+    // A sync source may reuse a row object it already wrote. Where the mutated
+    // row sorts is not promised, but deleting or rewriting it must affect only
+    // its own key: a binary search guided by the stale order would otherwise
+    // remove a neighbor.
+    for (const deferOrder of [false, true]) {
+      const map = new SortedMap<string, { rank: number }>(
+        (left, right) => left.rank - right.rank,
+      )
+      const rows = [`a`, `b`, `c`, `d`, `e`].map((key, rank) => {
+        const row = { rank }
+        map.set(key, row)
+        return row
+      })
+      rows[1]!.rank = 10
+      expect(map.delete(`b`, deferOrder)).toBe(true)
+      map.restoreOrder()
+      expect([...map.keys()]).toEqual([`a`, `c`, `d`, `e`])
+      rows[3]!.rank = -10
+      map.set(`d`, { rank: 1.5 }, deferOrder)
+      map.restoreOrder()
+      expect([...map.keys()]).toEqual([`a`, `d`, `c`, `e`])
+      expect(map.size).toBe(4)
+    }
   })
 
   it(`orders mutable comparator values at the batch checkpoint`, () => {
@@ -608,11 +799,6 @@ describe(`SortedMap`, () => {
     // Test values()
     const values = Array.from(map.values())
     expect(values).toEqual([1, 2, 3])
-
-    // Test forEach
-    const forEachResults: Array<number> = []
-    map.forEach((value) => forEachResults.push(value))
-    expect(forEachResults).toEqual([1, 2, 3])
   })
 
   it(`orders string keys when no custom comparator is provided`, () => {
