@@ -330,9 +330,12 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
 // Settled failure is not an authoritative replacement. Keep subsequent reads
 // private until the failed owner retires or a new replay succeeds. A held
 // replacement whose own acquisition did not fail covers the owners it
-// replaces, so their failure does not fail the replay. An owner without a
-// current acquisition attempt owes nothing, as before, and so does one whose
-// attempt was aborted: the abort ended its load, so it decides nothing.
+// replaces, so their failure does not fail the replay; a replacement whose
+// attempt an abort ended before it settled loaded nothing, so it covers
+// nothing (law 10: an obsolete replacement cannot retire coverage). An owner
+// without a current acquisition attempt owes nothing, as before, and so does
+// one whose attempt was aborted: the abort ended its load, so it decides
+// nothing.
 function replacementSucceeded(model: LifecycleModel): boolean {
   const loaded = ({ attemptId }: LifecycleOwner) =>
     attemptId === undefined ||

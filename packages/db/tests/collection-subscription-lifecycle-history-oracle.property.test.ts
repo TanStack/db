@@ -316,9 +316,12 @@ function updateCallerOutcomes(
     )
       continue
     // A failed owner that a held replacement covers does not fail the
-    // replay (law 10): the replacement loaded the whole key union.
+    // replay (law 10): the replacement loaded the whole key union. One that
+    // an abort ended before it settled loaded nothing.
     const loaded = ({ attemptId }: (typeof model.owners)[number]) =>
-      attemptId === undefined || !failedAttempts.has(attemptId)
+      attemptId === undefined ||
+      (!failedAttempts.has(attemptId) &&
+        !model.attempts[attemptId]!.endedByAbort)
     const current = new Set(
       model.owners
         .filter(
