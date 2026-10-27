@@ -45,9 +45,11 @@ jobs:
       - name: Check private-member mangle cache
         run: pnpm run check:mangle
       - name: Build DB packages
-        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db --filter @tanstack/react-db build
       - name: Check minified public API
         run: pnpm run test:minified-db
+      - name: Check client-only query bundles
+        run: pnpm run test:ssr-bundle
       - name: Check production error text
         run: pnpm run test:production-errors
       - name: Check DB tests against built dist
