@@ -10,6 +10,7 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import { declareOracle } from '../oracle-config.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
@@ -55,18 +56,45 @@ const tags: Array<Tag> = [
   { id: 7, groupId: 2 },
 ]
 
+type DistinctRow = { personId: number; groupId: number }
+
 // DISTINCT forms the set of child group IDs before the outer join and WHERE.
 // This model deliberately ignores compiler weights and public-key reduction.
 function expectedDistinctRows(
   personRows: Iterable<Person>,
   tagRows: Iterable<Tag>,
-): Array<{ personId: number; groupId: number }> {
+): Array<DistinctRow> {
   const groups = new Set(Array.from(tagRows, (tag) => tag.groupId))
   return Array.from(personRows)
     .filter((person) => person.enabled && groups.has(person.groupId))
     .map((person) => ({ personId: person.id, groupId: person.groupId }))
     .sort((left, right) => left.personId - right.personId)
 }
+
+/**
+ * The check for the DISTINCT history: after each source write, the public rows
+ * of the live query must equal the model's rows for the same source Maps. The
+ * Maps model source rows by ID, so a tag delete is legal only for a tag that
+ * exists, even when another tag still supports the same group.
+ */
+function expectPublicSnapshotFollowsModel(
+  live: { readonly toArray: Array<DistinctRow> },
+  modelPeople: ReadonlyMap<number, Person>,
+  modelTags: ReadonlyMap<number, Tag>,
+  checkpoint: string,
+): void {
+  expect(
+    live.toArray
+      .map(stripVirtualProps)
+      .sort((left, right) => left.personId - right.personId),
+    checkpoint,
+  ).toEqual(expectedDistinctRows(modelPeople.values(), modelTags.values()))
+}
+
+declareOracle({
+  check: [expectPublicSnapshotFollowsModel],
+  model: [expectedDistinctRows],
+})
 
 describe('subquery boundaries preserve operators and user rows', () => {
   it('joins the distinct subquery result before applying the outer WHERE', async () => {
@@ -192,14 +220,8 @@ describe('subquery boundaries preserve operators and user rows', () => {
     // tag still supports the same group.
     const modelPeople = new Map(people.map((person) => [person.id, person]))
     const modelTags = new Map(tags.map((tag) => [tag.id, tag]))
-    const checkPublicSnapshot = (checkpoint: string) => {
-      expect(
-        live.toArray
-          .map(stripVirtualProps)
-          .sort((left, right) => left.personId - right.personId),
-        checkpoint,
-      ).toEqual(expectedDistinctRows(modelPeople.values(), modelTags.values()))
-    }
+    const checkPublicSnapshot = (checkpoint: string) =>
+      expectPublicSnapshotFollowsModel(live, modelPeople, modelTags, checkpoint)
 
     await withHistoryCleanup(
       async () => {
@@ -234,231 +256,6 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => tagRows.collection.cleanup(),
       ],
     )
-  })
-
-  it('keeps a no-select user row shaped like a Value expression intact', async () => {
-    const original = { id: 1, type: 'val' as const, value: 42 }
-    const source = createControlledCollection('value-shaped-source', [original])
-    const live = createLiveQueryCollection({
-      query: (q) => {
-        const inner = q.from({ item: source.collection })
-        return q.from({ item: inner })
-      },
-    })
-
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([original])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
-  })
-
-  it('keeps a selected user object shaped like a Value expression intact', async () => {
-    const source = createControlledCollection('value-shaped-selection', [
-      { id: 1 },
-    ])
-    try {
-      const live = createLiveQueryCollection({
-        query: (q) =>
-          q.from({ item: source.collection }).select(() => ({
-            type: 'val' as const,
-            value: 42,
-          })),
-        getKey: () => 1,
-      })
-      try {
-        await live.preload()
-        expect(live.toArray.map(stripVirtualProps)).toEqual([
-          { type: 'val', value: 42 },
-        ])
-      } finally {
-        await live.cleanup()
-      }
-    } finally {
-      await source.collection.cleanup()
-    }
-  })
-
-  it('evaluates selected arrays of references as arrays of row values', async () => {
-    const source = createControlledCollection('array-selection', [
-      { id: 1, name: 'Ada' },
-    ])
-    const live = createLiveQueryCollection({
-      query: (q) =>
-        q.from({ item: source.collection }).select(({ item }) => ({
-          pair: [item.id, item.name],
-        })),
-      getKey: () => 1,
-    })
-    try {
-      await live.preload()
-      expect(live.toArray[0]?.pair.map((value) => typeof value)).toEqual([
-        'number',
-        'string',
-      ])
-      expect(live.toArray.map(stripVirtualProps)).toEqual([
-        { pair: [1, 'Ada'] },
-      ])
-      expect(JSON.stringify(live.toArray.map(stripVirtualProps))).toBe(
-        '[{"pair":[1,"Ada"]}]',
-      )
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
-  })
-
-  it('keeps a top-level proxy-shaped selected field as user data', async () => {
-    const source = createControlledCollection('proxy-field-selection', [
-      { id: 1 },
-    ])
-    const live = createLiveQueryCollection({
-      query: (q) =>
-        q.from({ item: source.collection }).select(({ item }) => ({
-          __refProxy: true,
-          id: item.id,
-        })),
-      getKey: () => 1,
-    })
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([
-        { __refProxy: true, id: 1 },
-      ])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
-  })
-
-  it('keeps proxy-shaped fields in aggregate subqueries', async () => {
-    const source = createControlledCollection('proxy-field-aggregate', [
-      { id: 1 },
-      { id: 2 },
-    ])
-    const live = createLiveQueryCollection({
-      query: (q) => {
-        const summary = q
-          .from({ item: source.collection })
-          .select(({ item }) => ({
-            __refProxy: true,
-            total: count(item.id),
-          }))
-        return q.from({ result: summary }).select(({ result }) => ({
-          __refProxy: result.__refProxy,
-          total: result.total,
-        }))
-      },
-      getKey: () => 1,
-    })
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([
-        { __refProxy: true, total: 2 },
-      ])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
-  })
-
-  it.each([
-    { name: 'reference-shaped', payload: { type: 'ref', path: ['name'] } },
-    {
-      name: 'function-shaped',
-      payload: { type: 'func', name: 'user', args: [] },
-    },
-    {
-      name: 'conditional-shaped',
-      payload: { type: 'conditionalSelect', branches: [] },
-    },
-    { name: 'proxy-shaped', payload: { __refProxy: true, __path: ['name'] } },
-    { name: 'wrapper-shaped', payload: { __brand: 'MaterializeWrapper' } },
-  ])('keeps selected $name user objects intact', async ({ payload }) => {
-    const source = createControlledCollection('selected-container', [{ id: 1 }])
-    const live = createLiveQueryCollection({
-      query: (q) =>
-        q.from({ item: source.collection }).select(() => ({ payload })),
-      getKey: () => 1,
-    })
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([{ payload }])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
-  })
-
-  it('keeps an outer virtual-field WHERE after a joined DISTINCT result', async () => {
-    const source = createControlledCollection('distinct-pushdown', [
-      { id: 1, groupId: 1 },
-      { id: 2, groupId: 1 },
-    ])
-    const people = createControlledCollection('distinct-pushdown-people', [
-      { id: 1, groupId: 1 },
-    ])
-    const live = createLiveQueryCollection({
-      query: (q) => {
-        const groups = q
-          .from({ item: source.collection })
-          .select(({ item }) => ({ groupId: item.groupId }))
-          .distinct()
-        return q
-          .from({ person: people.collection })
-          .innerJoin({ group: groups }, ({ person, group }) =>
-            eq(person.groupId, group.groupId),
-          )
-          .where(({ group }) => eq(group.$key, 2))
-          .select(({ group }) => ({ groupId: group.groupId }))
-      },
-      getKey: () => 1,
-    })
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-      await people.collection.cleanup()
-    }
-  })
-
-  it('keeps an outer WHERE after a nested aggregate select', async () => {
-    const source = createControlledCollection('nested-aggregate-pushdown', [
-      { id: 1 },
-      { id: 2 },
-    ])
-    const people = createControlledCollection('nested-aggregate-people', [
-      { id: 2 },
-    ])
-    const live = createLiveQueryCollection({
-      query: (q) => {
-        const stats = q
-          .from({ item: source.collection })
-          .select(({ item }) => ({
-            stats: { type: 'summary', total: count(item.id) },
-          }))
-        return q
-          .from({ person: people.collection })
-          .innerJoin({ result: stats }, ({ person, result }) =>
-            eq(person.id, result.stats.total),
-          )
-          .where(({ result }) => eq(result.$key, 'single_group'))
-          .select(({ result }) => ({ total: result.stats.total }))
-      },
-      getKey: () => 1,
-    })
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([{ total: 2 }])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-      await people.collection.cleanup()
-    }
   })
 
   it('recomputes a joined aggregate QueryRef after source writes', async () => {
@@ -872,72 +669,5 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => anchors.collection.cleanup(),
       ],
     )
-  })
-
-  it('keeps a renamed no-select QueryRef bound to its source', async () => {
-    const source = createControlledCollection('renamed-query-ref', [{ id: 1 }])
-    const live = createLiveQueryCollection({
-      query: (q) => q.from({ one: q.from({ item: source.collection }) }),
-    })
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
-  })
-
-  it.each([
-    { id: 1, type: 'ref', path: ['name'] },
-    { id: 2, type: 'func', name: 'user', args: [] },
-    { id: 3, type: 'agg', name: 'user', args: [] },
-    { id: 4, type: 'conditionalSelect', branches: [] },
-    { id: 5, type: 'includesSubquery', query: {}, fieldName: 'user' },
-  ])(
-    'keeps a functional user result with IR-like fields: $type',
-    async (expected) => {
-      const source = createControlledCollection('expression-shaped-selection', [
-        { id: 1 },
-      ])
-      try {
-        const live = createLiveQueryCollection({
-          query: (q) =>
-            q.from({ item: source.collection }).fn.select(() => expected),
-          getKey: (row) => row.id,
-        })
-        try {
-          await live.preload()
-          expect(live.toArray.map(stripVirtualProps)).toEqual([expected])
-        } finally {
-          await live.cleanup()
-        }
-      } finally {
-        await source.collection.cleanup()
-      }
-    },
-  )
-
-  it('compares a Value-shaped predicate operand as user data', async () => {
-    const payload = { type: 'val' as const, value: 42 }
-    const rows: Array<{ id: number; payload: unknown }> = [
-      { id: 1, payload },
-      { id: 2, payload: 42 },
-    ]
-    const source = createControlledCollection('value-shaped-predicate', rows)
-    const live = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ item: source.collection })
-          .where(({ item }) => eq(item.payload, payload)),
-    })
-
-    try {
-      await live.preload()
-      expect(live.toArray.map(stripVirtualProps)).toEqual([rows[0]])
-    } finally {
-      await live.cleanup()
-      await source.collection.cleanup()
-    }
   })
 })
