@@ -3096,11 +3096,11 @@ writes nothing from a snapshot that answers after release. React
 from a real persisted on-demand Collection on `node:sqlite`. Vue
 (`useLiveQuery-persisted-on-demand.test.ts`), Svelte
 (`useLiveQuery-persisted-on-demand.svelte.test.ts`), and Angular
-(`injectLiveQuery-persisted-on-demand.test.ts`) witnesses check the same two
-histories through `isReady`, `isLoading`, and rows after a 100 ms settle. They
-do not witness a framework initial-render gate: only `react-db` and `solid-db`
-call `preloadForInitialRender` or `isInitialRenderReady`, so those three check
-the wrapper's settlement, not a render gate. Mutants that drop
+(`injectLiveQuery-persisted-on-demand.test.ts`) witnesses observe `isReady`,
+`isLoading`, and rows. They do not witness a framework initial-render gate:
+only `react-db` and `solid-db` call `preloadForInitialRender` or
+`isInitialRenderReady`, so those three check the wrapper's settlement, not a
+render gate. All five run the shared receiving contract described below. Mutants that drop
 the early rejection handler, keep collection metadata across a schema reset,
 key coverage without cursor and offset, ignore coverage, or let a coverage
 read under an expired claim fail the load each fail these cases.
@@ -3159,49 +3159,42 @@ load's cache-claim renewal past the wait and kills the last survivor, a wait
 measured from after that renewal. No survivor of the sweep remains open in
 this owner.
 
-Native SQLite receiving witnesses run five of the primary oracle's histories
-(covered settles, never-loaded stays loading, covered then a source delete
-stays loading, covered ordered window settles, and a window with a row
-replaced below the boundary stays loading) over two sessions on one file,
-with session 2's upstream never answering. The Node witness
-(`packages/node-db-sqlite-persistence/tests/node-persisted-on-demand-coverage.test.ts`)
-runs better-sqlite3 through `createNodeSQLitePersistence` and passes all five.
-With session 2's wait at 60 000 ms, its two covered settlements stay loading
-and fail. The Chromium OPFS witness
-(`packages/browser-db-sqlite-persistence/e2e/persisted-on-demand-coverage.opfs.spec.ts`,
-part of `playwright.opfs.config.ts`, which the browser E2E job runs) runs wa-sqlite over
-OPFS in two page loads with the default single-process coordinator. It passes
-all five law histories, and its 60 000 ms mutant fails the two covered
-settlements. A sixth history passes `BrowserCollectionCoordinator` and pins the
-guide's out-of-scope statement (`docs/guides/sqlite-persistence.md`): a covered
-demand stays loading and waits for the network. That history pins the guide,
-not the law; it changes if the guide does.
-The Electron witness (`packages/electron-db-sqlite-persistence/tests/persisted-demand-coverage.electron.e2e.test.ts`,
-driver under `tests/e2e/persisted-demand-coverage/`) runs the five histories in a
-real Electron renderer over IPC to a `node:sqlite` main process, in two app
-launches over the same database files. It passes all five; its 60 000 ms mutant
-fails the two covered settlements. The Cloudflare witness
-(`packages/cloudflare-durable-objects-db-sqlite-persistence/e2e/cloudflare-persisted-demand-coverage.e2e.test.ts`)
-runs the five histories inside local workerd, restarting `wrangler dev` over the
-same persist directory between sessions. It passes all five, and its mutant
-fails the two covered settlements. The React Native, Expo, Tauri, and Capacitor
-witnesses run the five histories through their package wrapper over a
-better-sqlite3 stand-in, in one process with two driver instances over one file
-(`packages/react-native-db-sqlite-persistence/e2e/react-native-persisted-demand-coverage.e2e.test.ts`,
-`packages/expo-db-sqlite-persistence/e2e/expo-persisted-demand-coverage.e2e.test.ts`,
-`packages/tauri-db-sqlite-persistence/tests/tauri-persisted-demand-coverage.test.ts`,
-`packages/capacitor-db-sqlite-persistence/tests/capacitor-persisted-demand-coverage.test.ts`).
-Each passes all five and fails its two covered settlements at 60 000 ms. The
-Expo witness is skipped on the emulator runtime lane, as its conformance suite
-is; the React Native witness runs there only through the runtime factory the
-lane supplies. No CI job runs the Expo, Capacitor, or Tauri e2e suites, and the
-Electron, React Native, and Cloudflare witnesses run in the existing e2e CI jobs.
-No host has a witness on its native runtime. The Capacitor device e2e needs an iOS simulator
-or Android emulator, and `adb` is not installed here. Its Node e2e fails at file
-load (`SqliteError: cannot start a transaction within a transaction` at
-`tests/helpers/capacitor-sqlite-test-db.ts:22`), so its 113 tests report as
-skipped. The Tauri native e2e needs `cargo`, which is not installed here
-(`failed to run 'cargo metadata'`).
+Every receiving witness is a production driver for the same judgment
+(ORC-014). The shared contract,
+`packages/db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract.ts`,
+holds six histories as data (session-1 steps and session-2 premises only):
+covered, never loaded, covered then a source delete, a covered window, a
+window with a row replaced below the boundary, and a covered demand whose
+upstream fails at once. Each host records the source log, the session-2 loads,
+and two checkpoint observations, and the shared model in
+`tests/persisted-demand-coverage-model-oracle.ts` judges them; no witness
+states an expected result. The histories module imports nothing, so the
+Playwright spec can load it.
+
+The hosts run all six through their own entry point: Node (better-sqlite3
+through `createNodeSQLitePersistence`), Chromium OPFS (wa-sqlite in two page
+loads, in `playwright.opfs.config.ts`, which the browser E2E job runs),
+Electron (a renderer over IPC to a `node:sqlite` main process, two app
+launches, in the desktop E2E job), Cloudflare Durable Objects (`wrangler dev`
+restarted over one persist directory, in the cloud-mobile job), React Native
+(an op-sqlite-shaped driver, in the cloud-mobile job), Expo (an expo-sqlite
+shim), and Tauri and Capacitor (their unit-suite SQLite stand-ins). The React,
+Solid, Vue, Svelte, and Angular witnesses run the covered, never-loaded, and
+failure histories through their own hook or primitive. With the contract's
+session-2 source forced to a 60 s wait and an upstream that never answers,
+every host and framework reports violations on its covered histories. The
+OPFS witness also pins the guide's statement that a multi-tab coordinator
+waits for the network; that run is recorded, not judged, because it pins the
+guide rather than the law.
+
+Limits: no CI job runs the Expo, Capacitor, or Tauri e2e suites, and no host
+runs on its native runtime here. The Capacitor device e2e needs an iOS
+simulator or Android emulator, and `adb` is not installed here; its Node e2e
+fails at file load (`SqliteError: cannot start a transaction within a
+transaction` at `tests/helpers/capacitor-sqlite-test-db.ts:22`). The Tauri
+native e2e needs `cargo`. React Suspense reveals a covered failure about 300 ms
+late (its fallback throttle), so the contract's before-wait checkpoint sits at
+450 ms.
 
 ## Deferred contracts and evidence
 

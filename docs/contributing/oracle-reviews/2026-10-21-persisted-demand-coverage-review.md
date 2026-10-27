@@ -506,3 +506,49 @@ Starting head: `0db1fa68b` (CI green). No production change.
   Capacitor paths need `cargo` or a device here. The Expo witness failed once
   on its first local run, under concurrent load, and passed the next ten
   runs; the cause is unknown.
+
+## 2026-10-27: one judgment for every fixed history and receiving witness
+
+Starting head: `4855c67e9`. No production change. The maintainer asked for a
+shared receiving contract, a committed mutation harness with a nightly run,
+and more campaign grammar; reading the current `oracle-authoring` skill and
+oracle guide then showed that the fixed oracle and the witnesses broke
+ORC-016 and ORC-014 by stating their own expected answers.
+
+- **Shared judgment** (`696d319a8`, `86efc7f7f`):
+  `tests/persisted-demand-coverage-model-oracle.ts` holds the model and
+  comparison. It replays the source's own log and judges each load of a
+  query against its exact demand's record. It covers:
+  - per-load waits, generation ends, and refetch loads;
+  - failed coverage reads and checks;
+  - settlement by the upstream load, cursors, and offsets;
+  - an eager-and-on-demand join.
+
+  Parts 2 to 4 of the fixed oracle now record and pass their histories to
+  it. Their hand-written expectation tables are gone, and two pinned checks
+  owned elsewhere moved to `persisted-demand-coverage-supplemental.test.ts`.
+  Part 1 keeps its own bounded trace model.
+- **A model error found on the way:** a window's tie-boundary load starts only
+  after its limited load settles and measures its own wait. A single wait
+  premise per query predicted the window ready at 1500 ms, while production
+  correctly still waited. The premise is now per load. Production was right.
+- **Campaign grammar** (`696d319a8`): session 2 generates a 0 or 1000 ms
+  wait and a source that never answers or fails at once, with checkpoints
+  before and after each load's deadline. A mutant that settles a covered
+  load without waiting fails both campaigns.
+- **Receiving contract** (`544c64340`): `tests/contracts/` holds six
+  histories as data. Every host and framework records and passes its
+  observations to the shared judgment. All pass. With the contract's session-2
+  source forced to a 60 s wait and a silent upstream, every host and
+  framework reports violations.
+- **Mutation harness and nightly job** (`cd9544ce5`):
+  `scripts/demand-coverage-mutants.mjs` applies 66 mutants in memory through
+  `vitest.mutants.config.ts`. The full run on `cd9544ce5` matched every
+  expected outcome. The 22 mutants tied to the converted histories are each
+  killed, nearly all by the converted fixed histories themselves.
+  `.github/workflows/oracle-nightly.yml` runs the campaign with ten times its
+  PR budget and the full mutant list.
+
+Limits: the campaign generates no joins and no page moves, which the fixed
+oracle and the shared model cover; native-runtime witnesses remain blocked
+here as the coverage map records.
