@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { Temporal } from 'temporal-polyfill'
+import { expect } from 'vitest'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import { harnessScope } from './contracts/harness-scope'
 import type { SQLInputValue } from 'node:sqlite'
@@ -11,6 +13,34 @@ import type { SQLiteDriver } from '../src'
 // oracle in `sqlite-temporal-value-oracle.test.ts` owns the typed-value law.
 
 export const collectionId = `typed-values`
+
+// Explicit native-type observations catch same-class objects whose enumerable
+// fields are empty. Deep equality alone can miss a changed Temporal value.
+export function observe(value: unknown): unknown {
+  if (value instanceof Date) return { kind: `Date`, text: value.toISOString() }
+  if (value instanceof Temporal.Instant) {
+    return { kind: `Instant`, text: value.toString() }
+  }
+  if (value instanceof Temporal.PlainDate) {
+    return { kind: `PlainDate`, text: value.toString() }
+  }
+  if (Array.isArray(value)) return value.map(observe)
+  if (value !== null && typeof value === `object`) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, observe(entry)]),
+    )
+  }
+  return value
+}
+
+export function check(
+  actual: unknown,
+  expected: unknown,
+  checkpoint: string,
+  assertion: typeof expect.soft = expect,
+): void {
+  assertion(observe(actual), checkpoint).toStrictEqual(expected)
+}
 
 export function binding(value: unknown): SQLInputValue {
   if (value === undefined || value === null) return null

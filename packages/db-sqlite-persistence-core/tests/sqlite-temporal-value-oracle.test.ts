@@ -51,7 +51,7 @@ import {
   temporalQueryCases,
   temporalValue,
 } from './temporal-value-oracle'
-import { collectionId, scope } from './sqlite-temporal-value-support'
+import { check, collectionId, scope } from './sqlite-temporal-value-support'
 import type { PersistedTx } from '../src'
 
 type Kind = `Date` | `ISO string` | `Instant` | `PlainDate`
@@ -85,34 +85,6 @@ function inputValue(kind: Kind, ordinal: Ordinal): unknown {
 function expectedValue(kind: Kind, ordinal: Ordinal): unknown {
   const text = textFor(kind, ordinal)
   return kind === `ISO string` ? text : { kind, text }
-}
-
-// Explicit native-type observations catch same-class objects whose enumerable
-// fields are empty. Deep equality alone can miss a changed Temporal value.
-function observe(value: unknown): unknown {
-  if (value instanceof Date) return { kind: `Date`, text: value.toISOString() }
-  if (value instanceof Temporal.Instant) {
-    return { kind: `Instant`, text: value.toString() }
-  }
-  if (value instanceof Temporal.PlainDate) {
-    return { kind: `PlainDate`, text: value.toString() }
-  }
-  if (Array.isArray(value)) return value.map(observe)
-  if (value !== null && typeof value === `object`) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, observe(entry)]),
-    )
-  }
-  return value
-}
-
-function check(
-  actual: unknown,
-  expected: unknown,
-  checkpoint: string,
-  assertion: typeof expect.soft = expect,
-): void {
-  assertion(observe(actual), checkpoint).toStrictEqual(expected)
 }
 
 beforeEach(() => vi.stubGlobal(`Temporal`, Temporal))
@@ -179,7 +151,7 @@ const cases = kinds.flatMap((kind) =>
   ),
 )
 
-declareOracle({ check: [check], model: [expectedValue, expectedRows] })
+declareOracle({ grammar: [cases], model: [expectedValue, expectedRows] })
 
 describe(`SQLite typed-value preservation after reopen`, () => {
   it.each(cases)(
@@ -484,111 +456,5 @@ describe(`native Temporal query refinement`, () => {
         expect.soft,
       )
     }
-  })
-
-  it(`preserves marker-shaped records and rejects missing or unsupported constructors atomically`, async () => {
-    const { adapter } = scope.create().open()
-    const marker = {
-      __tanstack_db_persisted_type__: `Temporal.Instant`,
-      value: `2026-01-02T00:00:00Z`,
-      order: `unused`,
-    }
-    const tx: PersistedTx = {
-      txId: `record`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `record`,
-          value: { marker, stamp: Temporal.Instant.from(marker.value) },
-        },
-      ],
-    }
-    await adapter.applyCommittedTx(
-      { kind: `eager`, collectionId: collectionId },
-      tx,
-    )
-    const before = await adapter.loadResumeSnapshot({
-      kind: `eager`,
-      collectionId: collectionId,
-    })
-    expect(before.rows[0]?.value.marker).toEqual(marker)
-    const nested = await adapter.loadSubset(
-      { kind: `eager`, collectionId: collectionId },
-      {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`marker`, `value`]),
-          new IR.Value(marker.value),
-        ]),
-      },
-    )
-    expect(
-      nested.map((row) => row.key),
-      `escaped record query`,
-    ).toEqual([`record`])
-    vi.stubGlobal(`Temporal`, undefined)
-    await expect(
-      adapter.loadSubset({ kind: `eager`, collectionId: collectionId }, {}),
-    ).rejects.toThrow(/Temporal/)
-    await expect(
-      adapter.applyCommittedTx(
-        { kind: `eager`, collectionId: collectionId },
-        {
-          ...tx,
-          txId: `missing`,
-          seq: 2,
-          rowVersion: 2,
-        },
-      ),
-    ).rejects.toThrow(/Temporal/)
-    vi.stubGlobal(`Temporal`, Temporal)
-    await expect(
-      adapter.applyCommittedTx(
-        { kind: `eager`, collectionId: collectionId },
-        {
-          ...tx,
-          txId: `unsupported`,
-          seq: 2,
-          rowVersion: 2,
-          mutations: [
-            {
-              type: `insert`,
-              key: `unsupported`,
-              value: { stamp: Temporal.Duration.from(`P1D`) },
-            },
-          ],
-        },
-      ),
-    ).rejects.toThrow(/Temporal/)
-    await expect(
-      adapter.applyCommittedTx(
-        { kind: `eager`, collectionId: collectionId },
-        {
-          ...tx,
-          txId: `invalid-brand`,
-          seq: 2,
-          rowVersion: 2,
-          mutations: [
-            {
-              type: `insert`,
-              key: `fake`,
-              value: {
-                stamp: Object.create(Temporal.Instant.prototype) as unknown,
-              },
-            },
-          ],
-        },
-      ),
-    ).rejects.toThrow(/Invalid Temporal/)
-    check(
-      await adapter.loadResumeSnapshot({
-        kind: `eager`,
-        collectionId: collectionId,
-      }),
-      observe(before),
-      `rollback`,
-    )
   })
 })

@@ -7,8 +7,14 @@
  */
 import { IR } from '@tanstack/db'
 import { Temporal } from 'temporal-polyfill'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { collectionId, scope } from './sqlite-temporal-value-support'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  check,
+  collectionId,
+  observe,
+  scope,
+} from './sqlite-temporal-value-support'
+import type { PersistedTx } from '../src'
 
 beforeEach(() => vi.stubGlobal(`Temporal`, Temporal))
 afterEach(() => vi.unstubAllGlobals())
@@ -106,3 +112,111 @@ it.sequential.each([`Instant`, `PlainDate`] as const)(
     }
   },
 )
+
+describe(`native Temporal query refinement`, () => {
+  it(`preserves marker-shaped records and rejects missing or unsupported constructors atomically`, async () => {
+    const { adapter } = scope.create().open()
+    const marker = {
+      __tanstack_db_persisted_type__: `Temporal.Instant`,
+      value: `2026-01-02T00:00:00Z`,
+      order: `unused`,
+    }
+    const tx: PersistedTx = {
+      txId: `record`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `record`,
+          value: { marker, stamp: Temporal.Instant.from(marker.value) },
+        },
+      ],
+    }
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      tx,
+    )
+    const before = await adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
+    expect(before.rows[0]?.value.marker).toEqual(marker)
+    const nested = await adapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`marker`, `value`]),
+          new IR.Value(marker.value),
+        ]),
+      },
+    )
+    expect(
+      nested.map((row) => row.key),
+      `escaped record query`,
+    ).toEqual([`record`])
+    vi.stubGlobal(`Temporal`, undefined)
+    await expect(
+      adapter.loadSubset({ kind: `eager`, collectionId: collectionId }, {}),
+    ).rejects.toThrow(/Temporal/)
+    await expect(
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          ...tx,
+          txId: `missing`,
+          seq: 2,
+          rowVersion: 2,
+        },
+      ),
+    ).rejects.toThrow(/Temporal/)
+    vi.stubGlobal(`Temporal`, Temporal)
+    await expect(
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          ...tx,
+          txId: `unsupported`,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `unsupported`,
+              value: { stamp: Temporal.Duration.from(`P1D`) },
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow(/Temporal/)
+    await expect(
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          ...tx,
+          txId: `invalid-brand`,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `fake`,
+              value: {
+                stamp: Object.create(Temporal.Instant.prototype) as unknown,
+              },
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow(/Invalid Temporal/)
+    check(
+      await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      }),
+      observe(before),
+      `rollback`,
+    )
+  })
+})
