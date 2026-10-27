@@ -494,14 +494,14 @@ export class OrderedSourceLoader {
       }
       // A filter after the read dropped rows, so the prefix doubles: each read
       // stays bounded by twice the last one, and none reads the full source.
-      // A short prefix can hide optimistic rows from this count, so it grows
-      // while growing still adds rows. Once growing adds none, the source
-      // holds no more rows.
+      // A pending optimistic departure can hide a row from this count, so the
+      // prefix grows while growing still adds rows. Once growing adds none,
+      // the source holds no more rows.
       const rows = this.subscription.readOrderedSnapshot({
         orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
         limit: last,
       }).length
-      if (rows < last && rows <= (this.grownPrefixRows ?? -1)) {
+      if (rows <= (this.grownPrefixRows ?? -1)) {
         if (continuesOrderedPrefixRepair) {
           this.finishOrderedPrefixRepair(windowOperationGeneration)
         }

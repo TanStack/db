@@ -1189,9 +1189,8 @@ relation filter remotely.
 Finite continuation still requires an order index; an underfilled unindexed
 prefix grows. Each growth reads a prefix twice as long as the last one, so
 every read stays bounded and none reads the full source. The prefix grows
-while growing still adds rows to the source. When the source holds fewer rows
-than the last prefix asked for and the last growth added none, the source
-holds no more rows and the window stays short.
+while growing still adds rows to the source. When the last growth added
+none, the source holds no more rows and the window stays short.
 
 A custom string comparator is a local ordering contract. If any resolved
 source order term uses `stringSort: 'custom'`, bounded and unbounded queries
