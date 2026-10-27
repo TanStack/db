@@ -33,3 +33,12 @@ export async function checkWithCleanup(
   }
   if (checkFailed) throw primaryFailure
 }
+
+// The virtual row fields that every published row root carries.
+export const virtualFieldNames = [
+  `$key`,
+  `$hasPendingWrites`,
+  `$synced`,
+  `$origin`,
+  `$collectionId`,
+] as const

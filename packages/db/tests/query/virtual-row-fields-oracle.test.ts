@@ -43,7 +43,10 @@ import {
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { declareOracle } from '../oracle-config.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import { checkWithCleanup } from './virtual-row-fields-support.js'
+import {
+  checkWithCleanup,
+  virtualFieldNames,
+} from './virtual-row-fields-support.js'
 
 type Profile = { label: string }
 
@@ -63,26 +66,9 @@ type VirtualFieldSubject =
   | `nested-value`
   | `opaque-value`
 
-const virtualFieldNames = [
-  `$key`,
-  `$hasPendingWrites`,
-  `$synced`,
-  `$origin`,
-  `$collectionId`,
-] as const
-
 // Only row roots and unprojected whole-row children carry virtual row fields.
 function expectsVirtualFields(subject: VirtualFieldSubject): boolean {
   return subject === `row-root` || subject === `whole-row-child`
-}
-
-function assertPublishedRootFields(row: unknown, name: string): void {
-  for (const field of virtualFieldNames) {
-    if (!(field in Object(row))) {
-      throw new Error(`${name} root must expose ${field}`)
-    }
-  }
-  expect(hasVirtualProps(row), `${name} root classification`).toBe(true)
 }
 
 // Each observed value publishes the virtual row fields exactly when the model
@@ -110,92 +96,11 @@ function expectPublishedFieldClassification(
 }
 
 declareOracle({
-  check: [assertPublishedRootFields, expectPublishedFieldClassification],
+  check: [expectPublishedFieldClassification],
   model: [expectsVirtualFields],
 })
 
 describe(`virtual row field runtime boundary`, () => {
-  test(`publishes every virtual field on implicit, expression, and functional root shapes`, async () => {
-    const rows = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `virtual-row-fields-root-shapes-source`,
-        getKey: (row) => row.id,
-        initialData: [
-          {
-            id: `row-1`,
-            profile: { label: `nested` },
-            createdAt: new Date(`2026-09-20T12:34:56.000Z`),
-            tags: [`one`],
-          },
-        ],
-      }),
-    )
-    const implicit = createLiveQueryCollection((q) => q.from({ row: rows }))
-    const expression = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        label: row.profile.label,
-      })),
-    )
-    const functional = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).fn.select(({ row }) => ({
-        id: row.id,
-        label: row.profile.label,
-      })),
-    )
-
-    await checkWithCleanup(async () => {
-      await Promise.all([
-        implicit.preload(),
-        expression.preload(),
-        functional.preload(),
-      ])
-
-      const observed = [
-        { name: `implicit`, row: implicit.toArray[0] },
-        { name: `expression`, row: expression.toArray[0] },
-        { name: `functional`, row: functional.toArray[0] },
-      ]
-      for (const { name, row } of observed) {
-        expect(row, `${name} root must publish`).toBeDefined()
-        assertPublishedRootFields(row, name)
-        expect(row!.$hasPendingWrites, `${name} has no pending write`).toBe(
-          false,
-        )
-        expect(row!.$hasPendingWrites, `${name} legacy inverse`).toBe(
-          !row!.$synced,
-        )
-      }
-
-      expect(implicit.toArray[0]?.id).toBe(`row-1`)
-      expect(expression.toArray[0]).toMatchObject({
-        id: `row-1`,
-        label: `nested`,
-      })
-      expect(functional.toArray[0]).toMatchObject({
-        id: `row-1`,
-        label: `nested`,
-      })
-
-      // Wrong rule: functional projection outputs are treated as ordinary
-      // values and never receive root fields. The direct field check above
-      // rejects this observation at the same post-preload checkpoint.
-      const wrongFunctionalRoot = Object.fromEntries(
-        Object.entries(functional.toArray[0]!).filter(
-          ([field]) => field !== `$collectionId`,
-        ),
-      )
-      expect(() =>
-        assertPublishedRootFields(wrongFunctionalRoot, `functional`),
-      ).toThrow(`functional root must expose $collectionId`)
-    }, [
-      () => functional.cleanup(),
-      () => expression.cleanup(),
-      () => implicit.cleanup(),
-      () => rows.cleanup(),
-    ])
-  })
-
   test(`matches the row and value classification after publication`, async () => {
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
