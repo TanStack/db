@@ -19,8 +19,11 @@
  * An inner join has a separate boundary: the global aggregate joins when its
  * computed total matches an anchor. A materialized aggregate Collection
  * supplies a second formulation for matching and nonmatching controls.
+ * The fixed matching and nonmatching scenarios are ordinary tests in
+ * optimizer-semantics.test.ts.
  * The nested matching cases also reject an all-empty QueryRef implementation.
  */
+
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
@@ -34,122 +37,23 @@ import {
   or,
   sum,
 } from '../../src/query/builder/functions.js'
-import {
-  CollectionRef,
-  Func,
-  PropRef,
-  QueryRef,
-  Value,
-  createResidualWhere,
-} from '../../src/query/ir.js'
+import { CollectionRef, Func, PropRef } from '../../src/query/ir.js'
+import { declareOracle } from '../oracle-config.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
-import type { CollectionImpl } from '../../src/collection/index.js'
-import type {
-  BasicExpression,
-  From,
-  QueryIR,
-  Where,
-} from '../../src/query/ir.js'
-
-type Row = { id: number; k: number; v: number }
-
-const rows: Array<Row> = [
-  { id: 1, k: 1, v: 10 },
-  { id: 2, k: 2, v: 20 },
-]
+import {
+  expectedTerms,
+  inertCollection,
+  members,
+  observedTerms,
+  predicate,
+  rows,
+  sourceTerms,
+  teams,
+} from './optimizer-semantics-support.js'
+import type { Member, Row, Team } from './optimizer-semantics-support.js'
+import type { QueryIR, Where } from '../../src/query/ir.js'
 
 describe('optimizer aggregate semantics', () => {
-  for (const scenario of [
-    {
-      name: `matching without outer filter`,
-      target: 30,
-      filter: `none`,
-      expected: [{ total: 30 }],
-    },
-    {
-      name: `matching with accepting outer filter`,
-      target: 30,
-      filter: `accept`,
-      expected: [{ total: 30 }],
-    },
-    {
-      name: `matching with rejecting outer filter`,
-      target: 30,
-      filter: `reject`,
-      expected: [],
-    },
-    {
-      name: `nonmatching without outer filter`,
-      target: 31,
-      filter: `none`,
-      expected: [],
-    },
-  ] as const) {
-    test(`inner join of a global aggregate ${scenario.name}`, () => {
-      const source = createCollection(
-        mockSyncCollectionOptions<Row>({
-          id: `optimizer-inner-source-${scenario.name}`,
-          getKey: (row) => row.id,
-          initialData: rows,
-        }),
-      )
-      const anchor = createCollection(
-        mockSyncCollectionOptions({
-          id: `optimizer-inner-anchor-${scenario.name}`,
-          getKey: (row: { id: number; target: number }) => row.id,
-          initialData: [{ id: 1, target: scenario.target }],
-        }),
-      )
-      const result = createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const summary = q.from({ b: source }).select(({ b }) => ({
-            k: max(b.k),
-            total: sum(b.v),
-          }))
-          const joined = q
-            .from({ s: summary })
-            .innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-          if (scenario.filter === `accept`) {
-            return joined
-              .where(({ s }) => eq(s.k, 2))
-              .select(({ s }) => ({ total: s.total }))
-          }
-          if (scenario.filter === `reject`) {
-            return joined
-              .where(({ s }) => eq(s.k, 1))
-              .select(({ s }) => ({ total: s.total }))
-          }
-          return joined.select(({ s }) => ({ total: s.total }))
-        },
-      })
-
-      // The first synchronous public snapshot must follow aggregate, join,
-      // then outer-filter semantics. This compares complete rows, not counts.
-      const actual = result.toArray.map(stripVirtualProps)
-      expect(actual).toEqual(scenario.expected)
-
-      if (scenario.filter === `none`) {
-        const aggregate = createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q.from({ b: source }).select(({ b }) => ({ total: sum(b.v) })),
-        })
-        const materialized = createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q
-              .from({ s: aggregate })
-              .innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-              .select(({ s }) => ({ total: s.total })),
-        })
-        expect(materialized.toArray.map(stripVirtualProps)).toEqual(
-          scenario.expected,
-        )
-      }
-    })
-  }
-
   for (const shape of [
     `direct`,
     `wrapped`,
@@ -172,9 +76,7 @@ describe('optimizer aggregate semantics', () => {
         }),
       )
       const modelTotal = rows.reduce((total, row) => total + row.v, 0)
-      const expected = [
-        { total: shape === `caseWhenCondition` ? 1 : modelTotal },
-      ]
+      const expected = expectedAggregateTotals(shape, rows)
 
       const aggregate = createLiveQueryCollection({
         startSync: true,
@@ -256,11 +158,6 @@ describe('optimizer aggregate semantics', () => {
         initialData: [{ id: 1, target: 1 }],
       }),
     )
-    const total = (filter: (row: Row) => boolean) =>
-      rows.filter(filter).reduce((n, row) => n + row.v, 0)
-    const keys = [...new Set(rows.map((row) => row.k))].sort((a, b) =>
-      a < b ? -1 : 1,
-    )
     for (const grouped of [false, true]) {
       const query = createLiveQueryCollection({
         startSync: true,
@@ -283,11 +180,7 @@ describe('optimizer aggregate semantics', () => {
           .map(stripVirtualProps)
           .sort((a: any, b: any) => (a.k < b.k ? -1 : 1)),
         grouped ? `grouped` : `single group`,
-      ).toEqual(
-        grouped
-          ? keys.map((k) => ({ k, total: total((row) => row.k === k) }))
-          : [{ k: 1, total: total(() => true) }],
-      )
+      ).toEqual(expectedLiteralFieldRows(grouped, rows))
     }
   })
 
@@ -320,14 +213,9 @@ describe('optimizer aggregate semantics', () => {
           .select(({ s }) => ({ k: s.k, total: s.total }))
       },
     })
-    expect(grouped.toArray.map(stripVirtualProps)).toEqual([
-      {
-        k: 1,
-        total: rows
-          .filter((row) => row.k === 1)
-          .reduce((n, row) => n + row.v, 0),
-      },
-    ])
+    expect(grouped.toArray.map(stripVirtualProps)).toEqual(
+      expectedGroupKeyRows(rows),
+    )
   })
 })
 
@@ -350,7 +238,9 @@ describe('optimizer aggregate semantics', () => {
  * pushdown check preservation of regular predicates. Re-optimizing output
  * checks the later-pass boundary. The public driver includes matched and
  * unmatched rows, an OR predicate that accepts an unmatched row, and a
- * source-free false predicate that rejects every row.
+ * source-free false predicate that rejects every row. The fixed source-free,
+ * namespace, ordered-QueryRef, and later-pass witnesses are ordinary tests in
+ * optimizer-semantics.test.ts.
  *
  * The structural checkpoint is `optimizeQuery` return: each source and outer
  * predicate has its expected exact multiplicity and marker, and the extracted
@@ -359,111 +249,8 @@ describe('optimizer aggregate semantics', () => {
  * checks do not claim incremental histories, arbitrary functions, UNIONs, or
  * a maximum wall-clock runtime.
  */
-type ObservedTerm = { key: string; residual: boolean }
-
-function observedTerms(where: Array<Where> | undefined): Array<ObservedTerm> {
-  const terms: Array<ObservedTerm> = []
-  for (const clause of where ?? []) {
-    const residual = `expression` in clause && clause.residual === true
-    const expression = `expression` in clause ? clause.expression : clause
-    const visit = (current: BasicExpression): void => {
-      if (current instanceof Func && current.name === `and`) {
-        current.args.forEach(visit)
-        return
-      }
-      if (current instanceof Func && current.name === `or`) {
-        const keys = current.args.map((arg) => {
-          if (
-            !(arg instanceof Func) ||
-            arg.name !== `eq` ||
-            !(arg.args[0] instanceof PropRef) ||
-            !(arg.args[1] instanceof Value)
-          ) {
-            throw new Error(`Unexpected OR term in residual oracle`)
-          }
-          return `${arg.args[0].path.join(`.`)}=${JSON.stringify(arg.args[1].value)}`
-        })
-        terms.push({ key: `or(${keys.join(`,`)})`, residual })
-        return
-      }
-      if (
-        !(current instanceof Func) ||
-        ![`eq`, `gt`, `isUndefined`].includes(current.name) ||
-        !(current.args[0] instanceof PropRef)
-      ) {
-        throw new Error(`Unexpected optimizer predicate in residual oracle`)
-      }
-      const path = current.args[0].path.join(`.`)
-      const compared = current.args[1]
-      let key: string
-      if (current.name === `isUndefined`) {
-        key = `isUndefined(${path})`
-      } else if (compared instanceof Value) {
-        key =
-          current.name === `gt`
-            ? `gt(${path},${JSON.stringify(compared.value)})`
-            : `${path}=${JSON.stringify(compared.value)}`
-      } else if (current.name === `eq` && compared instanceof PropRef) {
-        key = `${path}=${compared.path.join(`.`)}`
-      } else {
-        throw new Error(`Unexpected compared value in residual oracle`)
-      }
-      terms.push({ key, residual })
-    }
-    visit(expression)
-  }
-  return terms.sort(
-    (a, b) =>
-      a.key.localeCompare(b.key) || Number(a.residual) - Number(b.residual),
-  )
-}
-
-function sourceTerms(source: From): Array<ObservedTerm> {
-  if (source.type === `collectionRef`) return []
-  if (source.type !== `queryRef`) {
-    throw new Error(`Unexpected optimizer source in residual oracle`)
-  }
-  return observedTerms(source.query.where)
-}
-
-function predicate(
-  alias: string,
-  field: string,
-  value: unknown,
-): Func<boolean> {
-  return new Func(`eq`, [new PropRef([alias, field]), new Value(value)])
-}
-
-function inertCollection(id: string): CollectionImpl {
-  // The optimizer uses Collection identity but does not read Collection methods.
-  return { id } as unknown as CollectionImpl
-}
-
-function expectedTerms(
-  keys: Array<string>,
-  residual: boolean,
-): Array<ObservedTerm> {
-  return keys
-    .map((key) => ({ key, residual }))
-    .sort((a, b) => a.key.localeCompare(b.key))
-}
 
 describe(`optimizer residual convergence`, () => {
-  test(`structural recorder distinguishes changed predicate values`, () => {
-    expect(observedTerms([predicate(`team`, `active`, true)])).not.toEqual(
-      observedTerms([predicate(`team`, `active`, false)]),
-    )
-    expect(
-      observedTerms([
-        new Func(`gt`, [new PropRef([`team`, `score`]), new Value(5)]),
-      ]),
-    ).not.toEqual(
-      observedTerms([
-        new Func(`gt`, [new PropRef([`team`, `score`]), new Value(6)]),
-      ]),
-    )
-  })
-
   const joins = [
     { type: `left`, teamPush: true, memberPush: false, residual: true },
     { type: `right`, teamPush: false, memberPush: true, residual: true },
@@ -512,11 +299,9 @@ describe(`optimizer residual convergence`, () => {
 
             const result = optimizeQuery(query)
             const optimized = result.optimizedQuery
+            const shape = expectedPushdownShape(join, teamKeys, memberKeys)
             expect([...result.sourceWhereClauses.keys()].sort()).toEqual(
-              [
-                ...(join.teamPush ? [`team`] : []),
-                ...(join.memberPush ? [`member`] : []),
-              ].sort(),
+              shape.sourceAliases,
             )
             for (const [alias, keys] of [
               [`team`, teamKeys],
@@ -531,400 +316,18 @@ describe(`optimizer residual convergence`, () => {
             }
             const laterPass = optimizeQuery(optimized).optimizedQuery
             for (const actual of [optimized, laterPass]) {
-              expect(sourceTerms(actual.from)).toEqual(
-                join.teamPush ? expectedTerms(teamKeys, false) : [],
-              )
+              expect(sourceTerms(actual.from)).toEqual(shape.teamSource)
               expect(sourceTerms(actual.join![0]!.from)).toEqual(
-                join.memberPush ? expectedTerms(memberKeys, false) : [],
+                shape.memberSource,
               )
-              expect(observedTerms(actual.where)).toEqual(
-                [
-                  ...(!join.teamPush || join.residual
-                    ? expectedTerms(teamKeys, join.teamPush)
-                    : []),
-                  ...(!join.memberPush || join.residual
-                    ? expectedTerms(memberKeys, join.memberPush)
-                    : []),
-                ].sort((a, b) => a.key.localeCompare(b.key)),
-              )
-              expect(actual.where).toHaveLength(
-                join.type === `inner` ? 0 : join.type === `full` ? 1 : 2,
-              )
+              expect(observedTerms(actual.where)).toEqual(shape.where)
+              expect(actual.where).toHaveLength(shape.whereLength)
             }
           })
         }
       }
     }
   }
-
-  test(`two active sources retain both residual predicates across passes`, () => {
-    const collection = inertCollection(`residual-multi-source`)
-    const query: QueryIR = {
-      from: new CollectionRef(collection, `team`),
-      join: [
-        {
-          type: `left`,
-          from: new CollectionRef(collection, `member`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`member`, `teamId`]),
-          ]),
-        },
-        {
-          type: `inner`,
-          from: new CollectionRef(collection, `tag`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`tag`, `teamId`]),
-          ]),
-        },
-      ],
-      where: [
-        predicate(`member`, `userId`, 100),
-        predicate(`team`, `active`, true),
-        predicate(`tag`, `region`, `west`),
-      ],
-    }
-    const optimized = optimizeQuery(query).optimizedQuery
-    for (const actual of [optimized, optimizeQuery(optimized).optimizedQuery]) {
-      expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`team.active=true`], false),
-      )
-      expect(sourceTerms(actual.join![0]!.from)).toEqual([])
-      expect(sourceTerms(actual.join![1]!.from)).toEqual(
-        expectedTerms([`tag.region="west"`], false),
-      )
-      expect(observedTerms(actual.where)).toEqual([
-        { key: `member.userId=100`, residual: false },
-        { key: `tag.region="west"`, residual: true },
-        { key: `team.active=true`, residual: true },
-      ])
-    }
-  })
-
-  for (const joinType of [`left`, `right`] as const) {
-    test(`${joinType} keeps an OR clause residual and a cross-source clause regular`, () => {
-      const collection = inertCollection(`residual-clause-forms`)
-      const activeAlias = joinType === `left` ? `team` : `member`
-      const active = new Func(`or`, [
-        predicate(activeAlias, `active`, true),
-        predicate(activeAlias, `region`, `west`),
-      ])
-      const cross = new Func(`eq`, [
-        new PropRef([`team`, `id`]),
-        new PropRef([`member`, `teamId`]),
-      ])
-      const query: QueryIR = {
-        from: new CollectionRef(collection, `team`),
-        join: [
-          {
-            type: joinType,
-            from: new CollectionRef(collection, `member`),
-            on: new Func('eq', [
-              new PropRef([`team`, `id`]),
-              new PropRef([`member`, `teamId`]),
-            ]),
-          },
-        ],
-        where: [cross, active],
-      }
-      const optimized = optimizeQuery(query).optimizedQuery
-      const activeKey = `or(${activeAlias}.active=true,${activeAlias}.region="west")`
-      const activeSource =
-        joinType === `left` ? optimized.from : optimized.join![0]!.from
-      expect(sourceTerms(activeSource)).toEqual(
-        expectedTerms([activeKey], false),
-      )
-      expect(observedTerms(optimized.where)).toEqual(
-        [
-          { key: activeKey, residual: true },
-          { key: `team.id=member.teamId`, residual: false },
-        ].sort((a, b) => a.key.localeCompare(b.key)),
-      )
-    })
-  }
-
-  test(`non-equality pushdown retains its residual while nullable checks remain regular`, () => {
-    const collection = inertCollection(`residual-predicate-kinds`)
-    const query: QueryIR = {
-      from: new CollectionRef(collection, `team`),
-      join: [
-        {
-          type: `left`,
-          from: new CollectionRef(collection, `member`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`member`, `teamId`]),
-          ]),
-        },
-      ],
-      where: [
-        new Func(`gt`, [new PropRef([`team`, `score`]), new Value(5)]),
-        new Func(`isUndefined`, [new PropRef([`member`, `optional`])]),
-      ],
-    }
-
-    const optimized = optimizeQuery(query).optimizedQuery
-    for (const actual of [optimized, optimizeQuery(optimized).optimizedQuery]) {
-      expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`gt(team.score,5)`], false),
-      )
-      expect(sourceTerms(actual.join![0]!.from)).toEqual([])
-      expect(observedTerms(actual.where)).toEqual([
-        { key: `gt(team.score,5)`, residual: true },
-        { key: `isUndefined(member.optional)`, residual: false },
-      ])
-    }
-  })
-
-  test(`a source-free false predicate survives optimization passes`, () => {
-    const collection = inertCollection(`residual-constant`)
-    const query: QueryIR = {
-      from: new CollectionRef(collection, `team`),
-      join: [
-        {
-          type: `left`,
-          from: new CollectionRef(collection, `member`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`member`, `teamId`]),
-          ]),
-        },
-      ],
-      where: [predicate(`team`, `active`, true), new Value(false)],
-    }
-
-    for (const actual of [
-      optimizeQuery(query).optimizedQuery,
-      optimizeQuery(optimizeQuery(query).optimizedQuery).optimizedQuery,
-    ]) {
-      expect(
-        actual.where?.some(
-          (clause) => clause instanceof Value && clause.value === false,
-        ),
-      ).toBe(true)
-    }
-  })
-
-  test(`a namespace predicate stays outside a nullable source`, () => {
-    const collection = inertCollection(`residual-namespace`)
-    const query: QueryIR = {
-      from: new CollectionRef(collection, `team`),
-      join: [
-        {
-          type: `left`,
-          from: new CollectionRef(collection, `member`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`member`, `teamId`]),
-          ]),
-        },
-      ],
-      where: [
-        predicate(`team`, `active`, true),
-        new Func(`isUndefined`, [new PropRef([`member`])]),
-      ],
-    }
-
-    const result = optimizeQuery(query)
-    expect([...result.sourceWhereClauses.keys()]).toEqual([`team`])
-    for (const actual of [
-      result.optimizedQuery,
-      optimizeQuery(result.optimizedQuery).optimizedQuery,
-    ]) {
-      expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`team.active=true`], false),
-      )
-      expect(sourceTerms(actual.join![0]!.from)).toEqual([])
-      expect(observedTerms(actual.where)).toEqual([
-        { key: `isUndefined(member)`, residual: false },
-        { key: `team.active=true`, residual: true },
-      ])
-    }
-  })
-
-  for (const laterJoin of [`right`, `full`] as const) {
-    test(`a later ${laterJoin} join keeps earlier aliases nullable`, () => {
-      const collection = inertCollection(`residual-later-${laterJoin}`)
-      const query: QueryIR = {
-        from: new CollectionRef(collection, `team`),
-        join: [
-          {
-            type: `left`,
-            from: new CollectionRef(collection, `member`),
-            on: new Func('eq', [
-              new PropRef([`team`, `id`]),
-              new PropRef([`member`, `teamId`]),
-            ]),
-          },
-          {
-            type: laterJoin,
-            from: new CollectionRef(collection, `tag`),
-            on: new Func('eq', [
-              new PropRef([`team`, `id`]),
-              new PropRef([`tag`, `teamId`]),
-            ]),
-          },
-        ],
-        where: [
-          predicate(`team`, `active`, true),
-          predicate(`member`, `userId`, 100),
-          predicate(`tag`, `region`, `west`),
-        ],
-      }
-
-      const result = optimizeQuery(query)
-      expect([...result.sourceWhereClauses.keys()]).toEqual(
-        laterJoin === `right` ? [`tag`] : [],
-      )
-      for (const actual of [
-        result.optimizedQuery,
-        optimizeQuery(result.optimizedQuery).optimizedQuery,
-      ]) {
-        expect(sourceTerms(actual.from)).toEqual([])
-        expect(sourceTerms(actual.join![0]!.from)).toEqual([])
-        expect(sourceTerms(actual.join![1]!.from)).toEqual(
-          laterJoin === `right`
-            ? expectedTerms([`tag.region="west"`], false)
-            : [],
-        )
-        expect(observedTerms(actual.where)).toEqual([
-          { key: `member.userId=100`, residual: false },
-          { key: `tag.region="west"`, residual: laterJoin === `right` },
-          { key: `team.active=true`, residual: false },
-        ])
-      }
-    })
-  }
-
-  test(`an ordered QueryRef that declines pushdown keeps its outer predicate`, () => {
-    const collection = inertCollection(`residual-declined-queryref`)
-    const query: QueryIR = {
-      from: new QueryRef(
-        {
-          from: new CollectionRef(collection, `team`),
-          orderBy: [
-            {
-              expression: new PropRef([`team`, `id`]),
-              compareOptions: {
-                direction: `desc`,
-                nulls: `first`,
-                stringSort: `locale`,
-              },
-            },
-          ],
-          limit: 1,
-        },
-        `team`,
-      ),
-      join: [
-        {
-          type: `left`,
-          from: new CollectionRef(collection, `member`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`member`, `teamId`]),
-          ]),
-        },
-      ],
-      where: [
-        predicate(`team`, `active`, true),
-        predicate(`member`, `userId`, 100),
-      ],
-    }
-
-    const result = optimizeQuery(query)
-    expect(result.sourceWhereClauses.size).toBe(0)
-    for (const actual of [
-      result.optimizedQuery,
-      optimizeQuery(result.optimizedQuery).optimizedQuery,
-    ]) {
-      expect(sourceTerms(actual.from)).toEqual([])
-      expect(observedTerms(actual.where)).toEqual(
-        expectedTerms([`member.userId=100`, `team.active=true`], false),
-      )
-    }
-  })
-
-  test(`a later pass keeps existing residuals while pushing a new predicate`, () => {
-    const collection = inertCollection(`residual-later-pass`)
-    const prior = predicate(`team`, `region`, `west`)
-    const newlyPushable = predicate(`team`, `active`, true)
-    const nullable = predicate(`member`, `userId`, 100)
-    const query: QueryIR = {
-      from: new QueryRef(
-        { from: new CollectionRef(collection, `team`), where: [prior] },
-        `team`,
-      ),
-      join: [
-        {
-          type: `left`,
-          from: new CollectionRef(collection, `member`),
-          on: new Func('eq', [
-            new PropRef([`team`, `id`]),
-            new PropRef([`member`, `teamId`]),
-          ]),
-        },
-      ],
-      where: [createResidualWhere(prior), nullable, newlyPushable],
-    }
-    const optimized = optimizeQuery(query).optimizedQuery
-    for (const actual of [optimized, optimizeQuery(optimized).optimizedQuery]) {
-      expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`team.active=true`, `team.region="west"`], false),
-      )
-      expect(observedTerms(actual.where)).toEqual([
-        { key: `member.userId=100`, residual: false },
-        { key: `team.active=true`, residual: true },
-        { key: `team.region="west"`, residual: true },
-      ])
-      expect(actual.where).toHaveLength(2)
-    }
-  })
-
-  type Team = { id: number; active: boolean }
-  type Member = { id: number; teamId: number; userId: number }
-  const teams: Array<Team> = [
-    { id: 1, active: true },
-    { id: 2, active: false },
-    { id: 3, active: true },
-  ]
-  const members: Array<Member> = [
-    { id: 10, teamId: 1, userId: 100 },
-    { id: 11, teamId: 1, userId: 200 },
-    { id: 12, teamId: 2, userId: 100 },
-    { id: 13, teamId: 4, userId: 100 },
-  ]
-
-  test(`a source-free false predicate publishes no joined rows`, () => {
-    const teamCollection = createCollection(
-      mockSyncCollectionOptions<Team>({
-        id: `optimizer-residual-constant-team`,
-        getKey: (row) => row.id,
-        initialData: teams,
-      }),
-    )
-    const memberCollection = createCollection(
-      mockSyncCollectionOptions<Member>({
-        id: `optimizer-residual-constant-member`,
-        getKey: (row) => row.id,
-        initialData: members,
-      }),
-    )
-    const result = createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ team: teamCollection })
-          .leftJoin({ member: memberCollection }, ({ team, member }) =>
-            eq(team.id, member.teamId),
-          )
-          .where(({ team }) => eq(team.active, true))
-          .where(() => new Value(false)),
-    })
-
-    expect(result.toArray).toEqual([])
-  })
 
   for (const joinType of [`left`, `right`] as const) {
     test(`${joinType} join publishes the independently joined rows`, () => {
@@ -943,31 +346,7 @@ describe(`optimizer residual convergence`, () => {
         }),
       )
 
-      // The model fully joins arrays, including the unmatched preserved side,
-      // then applies the WHERE rule to each joined occurrence.
-      const pairs: Array<{ team?: Team; member?: Member }> = []
-      for (const team of teams) {
-        const matching = members.filter((member) => member.teamId === team.id)
-        for (const member of matching) pairs.push({ team, member })
-        if (matching.length === 0 && joinType === `left`) pairs.push({ team })
-      }
-      if (joinType === `right`) {
-        for (const member of members) {
-          if (teams.every((team) => team.id !== member.teamId)) {
-            pairs.push({ member })
-          }
-        }
-      }
-      const expected = pairs
-        .filter(({ team, member }) =>
-          joinType === `left`
-            ? team?.active === true &&
-              (member === undefined || member.userId === 100)
-            : member?.userId === 100 &&
-              (team === undefined || team.active === true),
-        )
-        .map(({ team, member }) => [team?.id ?? null, member?.id ?? null])
-        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+      const expected = expectedPreservedJoinRows(joinType, teams, members)
 
       const result =
         joinType === `left`
@@ -1045,26 +424,7 @@ describe(`optimizer residual convergence`, () => {
       }),
     )
 
-    const expected = teams
-      .flatMap((team) => {
-        if (!team.active) return []
-        const matchingMembers = members.filter(
-          (member) => member.teamId === team.id,
-        )
-        const acceptedMembers = matchingMembers.length
-          ? matchingMembers.filter((member) => member.userId === 100)
-          : [undefined]
-        return tags
-          .filter((tag) => tag.teamId === team.id && tag.region === `west`)
-          .flatMap((tag) =>
-            acceptedMembers.map((member) => [
-              team.id,
-              member?.id ?? null,
-              tag.id,
-            ]),
-          )
-      })
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+    const expected = expectedChainRows(teams, members, tags)
 
     const result = createLiveQueryCollection({
       startSync: true,
@@ -1096,4 +456,154 @@ describe(`optimizer residual convergence`, () => {
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
     expect(actual).toEqual(expected)
   })
+})
+
+/**
+ * The aggregate law: a nested global aggregate publishes one total row, and an
+ * accepting outer predicate keeps it. The caseWhenCondition shape publishes the
+ * condition's value, 1, rather than the total.
+ */
+function expectedAggregateTotals(shape: string, sourceRows: Array<Row>) {
+  const modelTotal = sourceRows.reduce((total, row) => total + row.v, 0)
+  return [{ total: shape === `caseWhenCondition` ? 1 : modelTotal }]
+}
+
+/**
+ * The literal-field law: a literal select field has one value per group, so a
+ * predicate on it stays outside the aggregate. Ungrouped, the one row sums the
+ * whole source.
+ */
+function expectedLiteralFieldRows(grouped: boolean, sourceRows: Array<Row>) {
+  const total = (filter: (row: Row) => boolean) =>
+    sourceRows.filter(filter).reduce((n, row) => n + row.v, 0)
+  const keys = [...new Set(sourceRows.map((row) => row.k))].sort((a, b) =>
+    a < b ? -1 : 1,
+  )
+  return grouped
+    ? keys.map((k) => ({ k, total: total((row) => row.k === k) }))
+    : [{ k: 1, total: total(() => true) }]
+}
+
+/** The group-key law: filtering on the grouping key keeps that group's total. */
+function expectedGroupKeyRows(sourceRows: Array<Row>) {
+  return [
+    {
+      k: 1,
+      total: sourceRows
+        .filter((row) => row.k === 1)
+        .reduce((n, row) => n + row.v, 0),
+    },
+  ]
+}
+
+type JoinRole = {
+  readonly type: string
+  readonly teamPush: boolean
+  readonly memberPush: boolean
+  readonly residual: boolean
+}
+
+/**
+ * The pushdown law: a side's predicates enter its source only when that side
+ * is nonnullable. A residual copy stays in the outer WHERE where the join keeps
+ * it. The predicate multiset is the same before and after each pass.
+ */
+function expectedPushdownShape(
+  join: JoinRole,
+  teamKeys: Array<string>,
+  memberKeys: Array<string>,
+) {
+  return {
+    sourceAliases: [
+      ...(join.teamPush ? [`team`] : []),
+      ...(join.memberPush ? [`member`] : []),
+    ].sort(),
+    teamSource: join.teamPush ? expectedTerms(teamKeys, false) : [],
+    memberSource: join.memberPush ? expectedTerms(memberKeys, false) : [],
+    where: [
+      ...(!join.teamPush || join.residual
+        ? expectedTerms(teamKeys, join.teamPush)
+        : []),
+      ...(!join.memberPush || join.residual
+        ? expectedTerms(memberKeys, join.memberPush)
+        : []),
+    ].sort((a, b) => a.key.localeCompare(b.key)),
+    whereLength: join.type === `inner` ? 0 : join.type === `full` ? 1 : 2,
+  }
+}
+
+/**
+ * The preserved-join law: the model joins the arrays fully, including the
+ * unmatched preserved side, then applies the WHERE rule to each joined occurrence.
+ */
+function expectedPreservedJoinRows(
+  joinType: `left` | `right`,
+  teamRows: Array<Team>,
+  memberRows: Array<Member>,
+) {
+  const pairs: Array<{ team?: Team; member?: Member }> = []
+  for (const team of teamRows) {
+    const matching = memberRows.filter((member) => member.teamId === team.id)
+    for (const member of matching) pairs.push({ team, member })
+    if (matching.length === 0 && joinType === `left`) pairs.push({ team })
+  }
+  if (joinType === `right`) {
+    for (const member of memberRows) {
+      if (teamRows.every((team) => team.id !== member.teamId)) {
+        pairs.push({ member })
+      }
+    }
+  }
+  return pairs
+    .filter(({ team, member }) =>
+      joinType === `left`
+        ? team?.active === true &&
+          (member === undefined || member.userId === 100)
+        : member?.userId === 100 &&
+          (team === undefined || team.active === true),
+    )
+    .map(({ team, member }) => [team?.id ?? null, member?.id ?? null])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+}
+
+/**
+ * The chain law: a left join of memberRows and an inner join of tags keep a team
+ * with no accepted member as one row with a null member.
+ */
+function expectedChainRows(
+  teamRows: Array<Team>,
+  memberRows: Array<Member>,
+  tags: Array<{ id: number; teamId: number; region: string }>,
+) {
+  return teamRows
+    .flatMap((team) => {
+      if (!team.active) return []
+      const matchingMembers = memberRows.filter(
+        (member) => member.teamId === team.id,
+      )
+      const acceptedMembers = matchingMembers.length
+        ? matchingMembers.filter((member) => member.userId === 100)
+        : [undefined]
+      return tags
+        .filter((tag) => tag.teamId === team.id && tag.region === `west`)
+        .flatMap((tag) =>
+          acceptedMembers.map((member) => [
+            team.id,
+            member?.id ?? null,
+            tag.id,
+          ]),
+        )
+    })
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+}
+
+declareOracle({
+  model: [
+    expectedAggregateTotals,
+    expectedLiteralFieldRows,
+    expectedGroupKeyRows,
+    expectedPushdownShape,
+    expectedPreservedJoinRows,
+    expectedChainRows,
+  ],
 })
