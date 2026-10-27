@@ -79,6 +79,7 @@ import {
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
@@ -895,6 +896,23 @@ async function runHistory(history: History): Promise<void> {
   ])
 }
 
+// The pooled observer publishes the status and keys that a live-query
+// Collection compiled for the same query publishes.
+function expectSnapshotMatchesReference(
+  snapshot: ReturnType<
+    ReturnType<typeof createLiveQueryObserver>[`getSnapshot`]
+  >,
+  reference: ReturnType<typeof createLiveQueryCollection>,
+): void {
+  expect(snapshot.status).toBe(reference.status)
+  expect([...snapshot.state!.keys()]).toEqual([...reference.keys()])
+}
+
+declareOracle({
+  check: [runHistory, expectSnapshotMatchesReference],
+  model: [expectedKeys, expectedRows],
+})
+
 describe(`pooled live query oracle`, () => {
   // The pinned histories and the fixed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
@@ -931,8 +949,7 @@ describe(`pooled live query oracle`, () => {
       const reference = createLiveQueryCollection({ query, startSync: true })
       await reference.preload()
       const snapshot = pooled.getSnapshot()
-      expect(snapshot.status).toBe(reference.status)
-      expect([...snapshot.state!.keys()]).toEqual([...reference.keys()])
+      expectSnapshotMatchesReference(snapshot, reference)
       stop()
       await source.cleanup()
     })
