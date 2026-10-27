@@ -26,12 +26,13 @@
  * map's eventual-consistency note for persisted multi-tab Collections
  * (docs/contributing/oracle-coverage.md, issue #2209): a lagging tab may
  * briefly store an older transaction, and every tab converges once the
- * streams catch up. The law judged here is narrower and observable: a tab
- * whose own stream has applied the server head shows the head once the hosts
- * are quiet. When the lagging tab closes before it catches up, nothing
- * redelivers the head to the faster tab, so this law fails today. That
- * history is pinned with `it.fails` until #2209 orders source writes by
- * server position.
+ * streams catch up. The generated histories below judge it: after every
+ * open tab catches up, the durable rows and every open tab show the server
+ * head, however earlier lagging commits left them. When a lagging tab
+ * commits an older row and then closes for good, nothing redelivers the head
+ * to the faster tab, so this law fails today. That history is pinned with
+ * `it.fails` until #2209 orders source writes by server position; generated
+ * histories never close a tab for good.
  *
  * Model: the server is a log of snapshots. A history names which snapshot
  * each tab's stream has delivered; the expected public rows of a tab whose
@@ -784,7 +785,10 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | { kind: `server change`; key: number; pick: number }
     | { kind: `deploy` }
     | { kind: `advance`; tab: number; pick: number }
-    | { kind: `catch up`; tab: number }
+    | { kind: `catch up`; tab: number; pick: number }
+    // A tab that closes for good. Generated histories never close a tab;
+    // only the pinned #2209 replay does (see below).
+    | { kind: `close`; tab: number }
     | { kind: `stop`; tab: number; pick: number }
     | { kind: `recover`; tab: number; pick: number }
   const historyStep: fc.Arbitrary<HistoryStep> = fc.oneof(
@@ -813,6 +817,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
       arbitrary: fc.record({
         kind: fc.constant(`catch up` as const),
         tab: fc.nat(2),
+        // 0 delivers everything owed; n commits only the next n changes, as
+        // a server answering at an earlier moment does.
+        pick: fc.nat(3),
       }),
     },
     {
@@ -868,6 +875,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     // The stop that ended an open transaction, until the tab recovers. A
     // peer commit in that interval is the premise of the abandon law.
     stoppedMidTransaction: StreamStop | undefined
+    closed: boolean
   }
   const stops: ReadonlyArray<StreamStop> = [
     `error without retry`,
@@ -922,6 +930,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       failedInitialSync: false,
       resumed: false,
       stoppedMidTransaction: undefined,
+      closed: false,
     }))
     let serverVersion = 0
     generatedReach.beginHistory()
@@ -943,7 +952,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
     }
     // What the server sends one tab next: must-refetch for a stale handle,
     // the snapshot for a full-snapshot request, or the changes it owes.
-    const deliver = async (index: number, upTo: number | `all`) => {
+    const deliver = async (
+      index: number,
+      upTo: number | `all`,
+      commits: boolean,
+    ) => {
       const tab = tabs[index]!
       const model = models[index]!
       if (model.handle !== undefined && model.handle !== log.handle) {
@@ -958,7 +971,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
         model.handle = undefined
         model.version = -1
         await activeHost.quiesce(`tab ${tab.tab} must-refetch`)
-        if (upTo !== `all`) return
+        if (!commits) return
       }
       const messages: Array<Message<Item>> = []
       if (model.handle === undefined) {
@@ -998,7 +1011,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
         }
       }
       model.open?.push(...messages)
-      const complete = upTo === `all`
+      const complete = commits
       if (messages.length === 0 && !complete) return
       tab.deliver(
         complete ? [...messages, upToDate] : messages,
@@ -1036,13 +1049,15 @@ describe(`multi-tab Electric over one persisted database`, () => {
       await activeHost.quiesce(`tab ${recovered.tab} recovered`)
     }
 
-    const check = async (label: string) => {
-      const expectedDurable = rowsOf(durable)
+    const check = async (label: string, head?: Array<Item>) => {
+      const expectedDurable = head ?? rowsOf(durable)
+      // A tab closed for good is a cleaned-up Collection with no rows.
       const judgesRows = (index: number) =>
         models[index]!.open === undefined &&
-        models[index]!.stopped !== `cleanup`
+        models[index]!.stopped !== `cleanup` &&
+        !models[index]!.closed
       const expectedStatus = (index: number) =>
-        models[index]!.stopped === `cleanup`
+        models[index]!.stopped === `cleanup` || models[index]!.closed
           ? `cleaned-up`
           : models[index]!.failedInitialSync
             ? `error`
@@ -1084,7 +1099,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     }
 
     // Warm start: every tab delivers the snapshot and commits it.
-    for (const index of tabs.keys()) await deliver(index, `all`)
+    for (const index of tabs.keys()) await deliver(index, `all`, true)
     await check(`warm`)
 
     for (const [stepIndex, step] of steps.entries()) {
@@ -1114,6 +1129,12 @@ describe(`multi-tab Electric over one persisted database`, () => {
             headers: { operation },
           },
         })
+      } else if (step.kind === `close`) {
+        const index = step.tab % tabs.length
+        await tabs[index]!.close()
+        abandon(models[index]!)
+        models[index]!.closed = true
+        await activeHost.quiesce(`tab ${tabs[index]!.tab} closed for good`)
       } else if (step.kind === `deploy`) {
         log.handle++
         serverVersion = 0
@@ -1164,7 +1185,15 @@ describe(`multi-tab Electric over one persisted database`, () => {
           model.failedInitialSync = how !== `cleanup` && !model.ready
           await activeHost.quiesce(`tab ${tabs[index]!.tab} stopped`)
         } else {
-          await deliver(index, step.kind === `catch up` ? `all` : step.pick + 1)
+          await deliver(
+            index,
+            step.kind === `catch up`
+              ? step.pick === 0
+                ? `all`
+                : step.pick
+              : step.pick + 1,
+            step.kind === `catch up`,
+          )
         }
       }
       if (activeHost.commitNotices() > noticesBefore) {
@@ -1196,13 +1225,16 @@ describe(`multi-tab Electric over one persisted database`, () => {
       await check(`after step ${stepIndex}: ${JSON.stringify(step)}`)
     }
 
-    // Every tab recovers and catches up; then every tab shows the durable
-    // rows, and those are the head unless a lagging commit left them behind.
+    // Law 2: every open tab recovers and catches up, and then the durable
+    // rows and every open tab show the server head. Each tab's last batch
+    // rewrites every row that changed after its position, so no lagging
+    // commit survives the catch-up.
     for (const index of tabs.keys()) {
+      if (models[index]!.closed) continue
       if (models[index]!.stopped !== undefined) await recover(index, `restart`)
-      await deliver(index, `all`)
+      await deliver(index, `all`, true)
     }
-    await check(`after every tab caught up`)
+    await check(`after every tab caught up`, rowsOf(log.rows))
   }
 
   type GeneratedReach =
@@ -1280,59 +1312,29 @@ describe(`multi-tab Electric over one persisted database`, () => {
     60_000,
   )
 
-  // Law 2 histories: tab A's stream applies v1 and v2; tab B's lagging stream
-  // applies v1 later. B then either catches up or closes. The checkpoint is
-  // host quiescence after the last delivery.
-  const lagging = async (bEnds: `catches up` | `closes`) => {
-    host = openHost()
-    const [a, b] = await openWarmTabs(host, 2, `eager`)
-    for (const tab of [a!, b!]) {
-      tab.deliver([insert({ id: 1, label: `v0` }), upToDate], {
-        handle: `h1`,
-        offset: `10_0`,
-      })
-      await host.quiesce(`tab ${tab.tab} warm`)
-    }
-    a!.deliver([update({ id: 1, label: `v1` }), upToDate], {
-      handle: `h1`,
-      offset: `20_0`,
-    })
-    await host.quiesce(`A applied v1`)
-    a!.deliver([update({ id: 1, label: `v2` }), upToDate], {
-      handle: `h1`,
-      offset: `30_0`,
-    })
-    await host.quiesce(`A applied the head`)
-    b!.deliver([update({ id: 1, label: `v1` }), upToDate], {
-      handle: `h1`,
-      offset: `20_0`,
-    })
-    await host.quiesce(`lagging B applied v1`)
-    if (bEnds === `catches up`) {
-      b!.deliver([update({ id: 1, label: `v2` }), upToDate], {
-        handle: `h1`,
-        offset: `30_0`,
-      })
-    } else {
-      await b!.close()
-    }
-    await host.quiesce(`B ${bEnds}`)
-    // A's own stream applied the head, so A must show it.
-    expect(a!.publicRows()).toEqual([{ id: 1, label: `v2` }])
-  }
-
-  it.each([`catches up`] as const)(
-    `converges a tab that applied the head when the lagging tab %s`,
-    (bEnds) => lagging(bEnds),
-    30_000,
-  )
-
-  // Known gap (#2209): nothing redelivers the head to tab A after the lagging
-  // tab stored v1 and closed. Ordering source writes by server position fixes
-  // it; move `closes` into the passing values with that change.
-  it.fails.each([`closes`] as const)(
-    `converges a tab that applied the head when the lagging tab %s`,
-    (bEnds) => lagging(bEnds),
-    30_000,
+  // Known gap #2209, pinned: tab A commits v1 and v2; tab B's lagging stream
+  // then commits only v1, so the durable row falls back to v1, and B closes
+  // for good. Nothing redelivers the head to A, so Law 2's final check fails.
+  // Generated histories never close a tab for good, which leaves this
+  // history out of them; it replays through the same driver and checks.
+  // Remove `fails` when source writes are ordered by server position.
+  it.fails(
+    `converges an open tab to the head after a lagging tab commits an older row and closes`,
+    () =>
+      runGeneratedHistory(
+        {
+          tabCount: 2,
+          steps: [
+            { kind: `server change`, key: 1, pick: 1 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `server change`, key: 1, pick: 1 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `catch up`, tab: 1, pick: 1 },
+            { kind: `close`, tab: 1 },
+          ],
+        },
+        () => undefined,
+      ),
+    60_000,
   )
 })

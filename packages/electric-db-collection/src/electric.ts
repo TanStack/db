@@ -2624,8 +2624,9 @@ function createElectricSync<T extends Row<unknown>>(
             if (!isResettingSnapshot || finishesReset) {
               stageResumeMetadata()
             }
-            applied = commitSourceTransaction()
+            // The commit consumes the transaction even if it throws.
             transactionStarted = false
+            applied = commitSourceTransaction()
           } else if (commitPoint === `up-to-date` && metadata) {
             beginSourceTransaction()
             stageResumeMetadata()

@@ -2896,8 +2896,12 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       A second registration crosses the routes with the reserving timings,
       ending, and follow-up dimensions. The routes are subset, complete
       subset, a follower's routed subset, the source's own baseline,
-      reset, full reload, sequence gap with or without pullSince, and a
-      targeted change that starts no hydration. The reserving timings are
+      reset, full reload, sequence gap with or without pullSince, sequence
+      gap whose pullSince deltas reload partway through (a targeted delta,
+      then one past the targeted-invalidation limit), and a targeted change
+      that starts no hydration. Gap recovery is one hydration cycle from its
+      first step, so a reservation that opens at its scope entry straddles
+      it. The reserving timings are
       across the mutex turn, across scope entry, during the read, in the
       route's first publication, and across startup. The ending is commits,
       abandoned, cleanup, an aborted demand, or the source awaiting its own
@@ -2908,8 +2912,8 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       events before it. Every cell declares reach (ORC-015).
       | Evidence | Result |
       | --- | --- |
-      | Row-algebra cross | 360 cells pass. |
-      | Reservation cross | 188 cells pass. |
+      | Row-algebra cross and reservation cross | 649 cells pass. |
+      | Gap recovery that reloads partway through, on `851e8d9da` | 28 cells fail: recovery advanced the stream position and applied a targeted delta before it deferred, so its retry skipped the reload. A gate only at recovery start still fails 15 scope-entry cells; reloads that start their own cycle inside recovery fail 61. |
       | `5649a07d4` | The open cells fail with `a persisted sync transaction cannot cross a hydration cycle`. Three `after read` reset follow-up cells also fail, because `main` applied a pre-reset commit before the reset set its term fence. Queueing resets with notices fixes this pre-existing defect. |
       | Hostile mutants | Each mutant fails its cells, and every failure is an assertion. Deferring every notice fails the targeted change. Dropping the follower reply's wait fails the routed subset. Reporting hydration start before the check fails the aborted demand. A reset reload that starts its own cycle fails the first-publication reset. Applying a reset outside the notice queue fails the reset follow-ups. Retrying a waited notice while the reservation is open fails the follow-up and routed cells (repeated pullSince). Checking only at the mutex turn fails every scope-entry cell. Gating subset hydration only fails every reset, reload, and gap cell. Requeueing a waited notice behind later notices fails 12 reset follow-up cells: the pre-reset commit is published before its reset, and a reload is lost. |
       Not covered: `forceReloadSubset`, which only a sync-absent Collection
@@ -2970,6 +2974,13 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       generated histories and pinned with `it.fails`: a resumed tab that lags
       behind a peer can receive an update for a row the peer already
       deleted, and Electric's resume check puts it in `error`.
+      A delivery may also commit only a prefix of what a stream owes, as a
+      server answering at an earlier moment does, so lagging commits are
+      generated. The final checkpoint requires the server head (Law 2).
+      Known gap #2209 is the one history that breaks it: a lagging tab
+      commits an older row and closes for good. Generated histories never
+      close a tab for good, and an `it.fails` replay through the same driver
+      and checks pins that history.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in

@@ -17599,8 +17599,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // - `routed subset`: a follower's demand, which the owner serves by
   //   committing a row, broadcasting it, then replying;
   // - `source baseline`: the source's own `hydrateBaseline` request;
-  // - `collection-reset`, `full-reload`, `seq-gap`, `seq-gap pull`: peer
-  //   notices (`seq-gap pull` recovers through pullSince);
+  // - `collection-reset`, `full-reload`, `seq-gap`, `seq-gap pull`,
+  //   `seq-gap deltas`: peer notices (`seq-gap pull` recovers through a
+  //   pullSince full reload; `seq-gap deltas` through pullSince deltas, a
+  //   targeted row change and then a delta too large to apply in place,
+  //   which reloads partway through the recovery);
   // - `targeted`: a peer change for a key that is not public, which starts
   //   no hydration.
   // The commit timing places the first sync transaction against the route:
@@ -17641,6 +17644,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     | `full-reload`
     | `seq-gap`
     | `seq-gap pull`
+    | `seq-gap deltas`
     | `targeted`
   type PersistedReadTiming =
     | `after read`
@@ -17732,6 +17736,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       commitTiming === `open in the first publication`
     const reserves =
       waits || straddles || commitTiming === `open across startup`
+    // Gap recovery is one hydration cycle from its first step, which comes
+    // before it enters its hydration scope. A reservation that opens at scope
+    // entry therefore straddles the recovery instead of waiting for it
+    // (law: a transaction opened after a hydration began straddles it). Every
+    // other route begins its hydration inside the scope.
+    const recoveryStraddles =
+      commitTiming === `open across scope entry` &&
+      (route === `seq-gap` ||
+        route === `seq-gap pull` ||
+        route === `seq-gap deltas`)
+    const hydrationWaits = waits && !recoveryStraddles
+    const hydrationStraddles = straddles || recoveryStraddles
     const sourceSteps =
       truncateReplay === `none`
         ? [`network`]
@@ -17747,7 +17763,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     // Rows the route adds durably. The owner's row for a routed subset lands
     // after the follower's own read, so reads never see it.
     const routeRows =
-      route === `targeted`
+      route === `targeted` || route === `seq-gap deltas`
         ? [peerRow]
         : route === `routed subset`
           ? [remoteRow]
@@ -17834,12 +17850,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     const startupStepCommitted =
       commitTiming === `open across startup` && abandonedStep === undefined
-    const noWaitPullSinceCalls = route === `seq-gap pull` ? 1 : 0
+    const noWaitPullSinceCalls =
+      route === `seq-gap pull` || route === `seq-gap deltas` ? 1 : 0
     // A route notice waits in the waiting timings; a follower's owner notice
     // arrives during a straddled reservation and waits there. Each notice
     // that waited may ask the leader once more; nothing else may.
     const waitedNotices =
-      (waits && (route === `full-reload` || route === `seq-gap pull`)) ||
+      (hydrationWaits &&
+        (route === `full-reload` ||
+          route === `seq-gap pull` ||
+          route === `seq-gap deltas`)) ||
       (straddles && route === `routed subset`)
         ? 1
         : 0
@@ -17866,6 +17886,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       waits,
       straddles,
       reserves,
+      hydrationWaits,
+      hydrationStraddles,
       sourceSteps,
       demandRoute,
       readBaselineRows,
@@ -17901,8 +17923,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } = fixtureRows
     const {
       waits,
-      straddles,
       reserves,
+      hydrationWaits,
+      hydrationStraddles,
       sourceSteps,
       demandRoute,
       readBaselineRows,
@@ -18003,6 +18026,39 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ? undefined
         : () => {
             pullSinceCalls++
+            if (route === `seq-gap deltas`) {
+              // A targeted delta for the row the peer stored at the skipped
+              // position, then a delta past the targeted-invalidation limit.
+              const bulkKeys = Array.from(
+                { length: 129 },
+                (_, index) => `absent-${index}`,
+              )
+              return Promise.resolve({
+                type: `rpc:pullSince:res`,
+                rpcId: `gap-deltas`,
+                ok: true,
+                latestTerm: 1,
+                latestSeq: leaderPosition.seq,
+                latestRowVersion: leaderPosition.rowVersion,
+                requiresFullReload: false,
+                changedKeys: [peerRow.id],
+                deletedKeys: bulkKeys,
+                deltas: [
+                  {
+                    txId: `gap-delta-row`,
+                    latestRowVersion: leaderPosition.rowVersion - 1,
+                    changedRows: [{ key: peerRow.id, value: peerRow }],
+                    deletedKeys: [],
+                  },
+                  {
+                    txId: `gap-delta-bulk`,
+                    latestRowVersion: leaderPosition.rowVersion,
+                    changedRows: [],
+                    deletedKeys: bulkKeys,
+                  },
+                ],
+              } as never)
+            }
             return Promise.resolve({
               type: `rpc:pullSince:res`,
               rpcId: `gap-pull`,
@@ -18332,8 +18388,21 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         // Sequence gap, with or without pullSince. A peer commit this tab has
         // not observed arrives past a sequence gap and carries no rows, as a
         // peer's must-refetch reset commit does in a multi-tab refetch storm.
-        // Recovery rereads durable rows.
-        nextPeerPosition()
+        // Recovery rereads durable rows. For `seq-gap deltas` the skipped
+        // position holds a peer row that only pullSince reports.
+        const skipped = nextPeerPosition()
+        if (route === `seq-gap deltas`) {
+          await applyCommittedTx(
+            { kind: `eager`, collectionId: `persisted-read-precedence` },
+            {
+              txId: `gap-row`,
+              term: 1,
+              seq: skipped.seq,
+              rowVersion: skipped.rowVersion,
+              mutations: [{ type: `insert`, key: peerRow.id, value: peerRow }],
+            } as never,
+          )
+        }
         const position = nextPeerPosition()
         coordinator.emit({
           type: `tx:committed`,
@@ -18576,9 +18645,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const stepIndexes = trace.flatMap((event, index) =>
         event === `network` || event === `replacement` ? [index] : [],
       )
-      const observedReadOrder = waits
+      const observedReadOrder = hydrationWaits
         ? `may interleave`
-        : straddles
+        : hydrationStraddles
           ? readIndexes.length === 0 ||
             stepIndexes.every((step) => readIndexes[0]! < step)
             ? `straddled read before every step`
@@ -18598,7 +18667,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               : `other`
       const observed = {
         outcomes: outcomes.map(({ status }) => status),
-        readsDuringReservation: straddles ? [] : readsDuringReservation,
+        readsDuringReservation: hydrationStraddles
+          ? []
+          : readsDuringReservation,
         stepOrder: trace.filter(
           (event) => event === `network` || event === `replacement`,
         ),
@@ -18629,8 +18700,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
         publicCursor: sourceParams.metadata!.collection.get(`cursor`),
         durableCursor: adapter.collectionMetadata.get(`cursor`),
-        ...(waits && route !== `targeted` ? { rowsWhileReserved } : {}),
-        ...(straddles ? { rowsWhileReserved } : {}),
+        ...(hydrationWaits && route !== `targeted`
+          ? { rowsWhileReserved }
+          : {}),
+        ...(hydrationStraddles ? { rowsWhileReserved } : {}),
         ...(route === `targeted` && waits ? { peerWhileReserved } : {}),
         ...(followUp !== `none`
           ? { publishedSuperseded: published.has(supersededRow.id) }
@@ -18651,9 +18724,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           { length: expectedReadCount },
           () => true,
         ),
-        readOrder: waits
+        readOrder: hydrationWaits
           ? `may interleave`
-          : straddles
+          : hydrationStraddles
             ? `straddled read before every step`
             : startupStepCommitted
               ? `after the startup step`
@@ -18671,10 +18744,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         durableCursor: expectedCursor,
         // While a hydration waits, readers keep the rows from before it; a
         // straddled read has published the pre-source durable rows.
-        ...(waits && route !== `targeted`
+        ...(hydrationWaits && route !== `targeted`
           ? { rowsWhileReserved: rowsAtAdmission }
           : {}),
-        ...(straddles
+        ...(hydrationStraddles
           ? {
               rowsWhileReserved: byKey(
                 exposesSourceRowsOnly ? [gateRow] : readBaselineRows,
@@ -18732,10 +18805,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         { syncMode: `on-demand`, route: `full-reload` },
         { syncMode: `on-demand`, route: `seq-gap` },
         { syncMode: `on-demand`, route: `seq-gap pull` },
+        { syncMode: `on-demand`, route: `seq-gap deltas` },
         { syncMode: `eager`, route: `collection-reset` },
         { syncMode: `eager`, route: `full-reload` },
         { syncMode: `eager`, route: `seq-gap` },
         { syncMode: `eager`, route: `seq-gap pull` },
+        { syncMode: `eager`, route: `seq-gap deltas` },
       ] as const
     ).flatMap(({ syncMode, route }) =>
       ([`insert`, `update`, `delete`] as const).flatMap((operation) =>
@@ -18779,10 +18854,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     { syncMode: `on-demand`, route: `full-reload` },
     { syncMode: `on-demand`, route: `seq-gap` },
     { syncMode: `on-demand`, route: `seq-gap pull` },
+    { syncMode: `on-demand`, route: `seq-gap deltas` },
     { syncMode: `eager`, route: `collection-reset` },
     { syncMode: `eager`, route: `full-reload` },
     { syncMode: `eager`, route: `seq-gap` },
     { syncMode: `eager`, route: `seq-gap pull` },
+    { syncMode: `eager`, route: `seq-gap deltas` },
     { syncMode: `eager`, route: `targeted` },
   ] as const
   const reservationHistories = reservationRoutes.flatMap(

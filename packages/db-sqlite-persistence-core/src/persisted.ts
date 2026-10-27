@@ -4903,6 +4903,11 @@ class PersistedCollectionRuntime<
     lifecycleGeneration: number,
   ): Promise<boolean> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return false
+    // Gap recovery is one hydration cycle from its first step. It waits for
+    // a reserved commit before it asks the leader or moves the stream
+    // position; a sync transaction that begins later straddles it.
+    this.throwIfReservedCommitOpen()
+    this.hydrationSequence++
     if (this.persistence.coordinator.pullSince && this.latestRowVersion >= 0) {
       let pullResponse: PullSinceResponse | undefined
       try {
@@ -4939,7 +4944,13 @@ class PersistedCollectionRuntime<
           )
           if (pullResponse.requiresFullReload) {
             await this.runInHydrationScope((adapter) =>
-              this.reloadActiveSubsetsUnsafe(adapter),
+              this.reloadActiveSubsetsUnsafe(
+                adapter,
+                false,
+                false,
+                false,
+                true,
+              ),
             )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
@@ -4950,7 +4961,13 @@ class PersistedCollectionRuntime<
           const deltas = pullResponse.deltas
           if (!deltas) {
             await this.runInHydrationScope((adapter) =>
-              this.reloadActiveSubsetsUnsafe(adapter),
+              this.reloadActiveSubsetsUnsafe(
+                adapter,
+                false,
+                false,
+                false,
+                true,
+              ),
             )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
@@ -4977,6 +4994,7 @@ class PersistedCollectionRuntime<
                     delta.collectionMetadataMutations,
                 },
                 adapter,
+                true,
               )
               if (lifecycleGeneration !== this.lifecycleGeneration) return
             }
@@ -4994,7 +5012,7 @@ class PersistedCollectionRuntime<
     // A gap is not a schema reset. Replace the durable snapshot in one
     // publication so readers never see an empty intermediate Collection.
     await this.runInHydrationScope((adapter) =>
-      this.reloadActiveSubsetsUnsafe(adapter),
+      this.reloadActiveSubsetsUnsafe(adapter, false, false, false, true),
     )
     this.publicRowVersion = Math.max(
       this.publicRowVersion,
@@ -5122,6 +5140,7 @@ class PersistedCollectionRuntime<
   private async invalidateFromCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
+    continuesHydrationCycle = false,
   ): Promise<void> {
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
@@ -5130,7 +5149,13 @@ class PersistedCollectionRuntime<
     const reloadActiveSubsets = (skipUnchangedReplace = false) =>
       this.runInHydrationScope(
         (scopedAdapter) =>
-          this.reloadActiveSubsetsUnsafe(scopedAdapter, skipUnchangedReplace),
+          this.reloadActiveSubsetsUnsafe(
+            scopedAdapter,
+            skipUnchangedReplace,
+            false,
+            false,
+            continuesHydrationCycle,
+          ),
         adapter,
       )
 
@@ -6007,8 +6032,7 @@ function createWrappedSyncConfig<
 
       const findReservedTransaction = () =>
         transactionStack.find(
-          (transaction) =>
-            transaction.reservesCommitTurn === true && !transaction.internal,
+          (transaction) => transaction.reservesCommitTurn === true,
         )
       runtime.setWaitForReservedCommit(() => {
         const transaction = findReservedTransaction()
@@ -6739,9 +6763,8 @@ function createWrappedSyncConfig<
             }
           }
 
-          const openTransaction = getOpenTransaction()
           const needsPublicationAdmission =
-            openTransaction?.reservesCommitTurn === true
+            findReservedTransaction() !== undefined
           let hydrationStarted = false
           const raceRetainedLoad = (
             work: Promise<void>,
@@ -6802,14 +6825,14 @@ function createWrappedSyncConfig<
             ) {
               return
             }
-            const currentTransaction = getOpenTransaction()
+            const currentTransaction = findReservedTransaction()
             // A sync transaction that reserved its FIFO turn commits before
             // subset hydration advances the generation it was built against.
             // A load admitted during the reservation waits here, before it
             // takes an apply-mutex turn, so it runs after the commit's durable
             // write. The runtime's deferral covers hydrations whose turn
             // began earlier; it cannot keep that FIFO order.
-            if (currentTransaction?.reservesCommitTurn) {
+            if (currentTransaction) {
               await waitForPublicationAdmission(
                 currentTransaction,
                 options,
