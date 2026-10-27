@@ -1490,8 +1490,8 @@ the first ready there is no complete publication to keep, so the failure is an
 initial load failure and ends the query. A lazy demand load that fails outside
 a replay ends the query (error 228): the parent rows it serves may already be
 public, and no barrier keeps their incomplete join side or bucket private. A
-synchronous `loadSubset` throw rolls its logical owner back, so it fails no
-replay that could reacquire the demand, and it ends the query too.
+synchronous `loadSubset` throw follows the same rules as a rejection: inside an
+open replay it fails that replay, and outside one it ends the query.
 
 ### Mutation boundaries and initial readiness
 

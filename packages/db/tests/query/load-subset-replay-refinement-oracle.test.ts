@@ -1568,6 +1568,12 @@ async function checkOrderedReplay(
   // threw, may fall outside the replay the model still holds open, so it may
   // end the query (see Limits).
   let ambiguousFailure = false
+  // A failed demand whose recovery the model cannot place (see Limits).
+  let unplacedFailure = false
+  // A failed lazy demand that belongs to no recovery, which must end the
+  // query. Adapter callbacks set the flags, so read them through a call.
+  const failedOutsideRecovery = () =>
+    demandFailed && !ambiguousFailure && !unplacedFailure
   const fatalLoadFailed = () =>
     demandFailed || failedWhileLoading || ambiguousFailure
   // Lazy join demand asks for keys; ordered and full-source loads do not.
@@ -1769,7 +1775,19 @@ async function checkOrderedReplay(
                   )
                   load.outcome = `failed`
                   anyLoadFailed = true
-                  if (demand) demandFailed = true
+                  // An aborted request's rejection is obsolete demand, and a
+                  // segment that newer coverage replaced settles, so neither
+                  // is a failed load (ARCHITECTURE.md).
+                  if (
+                    demand &&
+                    !options.signal?.aborted &&
+                    (acquired.get(options) ?? 0) > 0
+                  ) {
+                    demandFailed = true
+                    // With a peer, a load that joined a replay may belong to either
+                    // query's recovery, so the model cannot place it.
+                    if (participant && scenario.peer) unplacedFailure = true
+                  }
                   // A demand the graph started after the commit fails inside
                   // the replay.
                   if (
@@ -1881,7 +1899,19 @@ async function checkOrderedReplay(
                 )
                 load.outcome = `failed`
                 anyLoadFailed = true
-                if (demand) demandFailed = true
+                // An aborted request's rejection is obsolete demand, and a
+                // segment that newer coverage replaced settles, so neither
+                // is a failed load (ARCHITECTURE.md).
+                if (
+                  demand &&
+                  !options.signal?.aborted &&
+                  (acquired.get(options) ?? 0) > 0
+                ) {
+                  demandFailed = true
+                  // With a peer, a load that joined a replay may belong to either
+                  // query's recovery, so the model cannot place it.
+                  if (participant && scenario.peer) unplacedFailure = true
+                }
                 // A demand the graph started after the commit, failing
                 // while its replay still loads.
                 if (
@@ -2328,6 +2358,18 @@ async function checkOrderedReplay(
     const revalidated = live.utils.setWindow(window)
     if (revalidated !== true) await revalidated.catch(swallow)
     await settleAll()
+    // A failed lazy demand outside every recovery is fatal: the join side
+    // can no longer be complete, so the query must end rather than show a
+    // window without that demand's rows. Only a failure the model cannot
+    // place, after a load threw, is excused.
+    // With a peer, the adapter cannot tell which query issued the load, so
+    // either query may be the one that ends.
+    if (failedOutsideRecovery()) {
+      expect(
+        [live, peer].some((query) => query?.status === `error`),
+        `terminal error: a failed demand outside recovery`,
+      ).toBe(true)
+    }
     for (const [shown, label, expected] of [
       [live, `convergence`, window],
       ...(peer ? [[peer, `peer convergence`, peerWindow] as const] : []),
