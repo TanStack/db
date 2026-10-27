@@ -12,3 +12,13 @@ export function expectEqualHashes(
 ): void {
   expect(hashValue(value)).toBe(hashValue(equivalent))
 }
+
+export function expectFailureCut(
+  error: unknown,
+  reads: Array<number>,
+  expectedError: Error,
+  expectedReads: Array<number>,
+): void {
+  expect(error).toBe(expectedError)
+  expect(reads).toEqual(expectedReads)
+}
