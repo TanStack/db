@@ -290,7 +290,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
-    `generation-notice follower-remote-demand`,
+    `follower-remote-demand`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-reset-startup.test.ts`,
+    `persistence`,
+    `generation-notice`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts`,
@@ -404,6 +409,7 @@ const ownerGroups: ReadonlyArray<
     `db/tests/proxy-native-methods-oracle.property.test.ts`,
     `proxy`,
     `native-array-methods native-typed-methods`,
+    `db/tests/proxy-native-methods-fixture.ts`,
   ],
   [
     `db-ivm/tests/hash-identity-oracle.property.test.ts`,
@@ -423,7 +429,12 @@ const ownerGroups: ReadonlyArray<
   [
     `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
     `pg-serializer`,
-    `array-determinism bigint-round-trip bigint-text boolean-array-contents boolean-round-trip boolean-tokens date-iso date-round-trip double-round-trip integer-array-contents integer-array-format integer-round-trip integer-text mixed-array-contents nullish-array-contents nullish-empty scalar-determinism string-array-contents string-escaping string-idempotent string-passthrough`,
+    `array-determinism bigint-round-trip bigint-text boolean-array-contents boolean-round-trip boolean-tokens date-iso date-round-trip double-round-trip integer-array-contents integer-array-format integer-round-trip integer-text mixed-array-contents nullish-array-contents scalar-determinism string-array-contents string-escaping string-idempotent string-passthrough`,
+  ],
+  [
+    `electric-db-collection/tests/pg-serializer.test.ts`,
+    `pg-serializer`,
+    `nullish-empty`,
   ],
   [
     `db-ivm/tests/index-refinement-oracle.property.test.ts`,
