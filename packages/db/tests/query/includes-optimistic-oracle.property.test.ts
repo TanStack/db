@@ -14,7 +14,15 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleReplayTest,
+} from '../oracle-config.js'
+import {
+  assertCanStartOptimisticChange,
+  assertMatchingConfirmation,
+} from './includes-optimistic-support.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
@@ -206,35 +214,6 @@ function releaseRuntimeMutation(
   release()
   entry.syncReleased = true
   if (entry.settled) context.runtimePending.delete(entry)
-}
-
-function assertCanStartOptimisticChange(
-  pending: ReadonlyMap<string, Pick<PendingOptimisticChange, `level`>>,
-  level: ChildLevel,
-  handle?: string,
-): void {
-  if (handle !== undefined && pending.has(handle)) {
-    throw new Error(`Duplicate optimistic handle ${handle}`)
-  }
-  const sameLevel = [...pending.entries()].find(
-    ([, change]) => change.level === level,
-  )
-  if (sameLevel) {
-    throw new Error(
-      `Level ${level} already has pending optimistic handle ${sameLevel[0]}`,
-    )
-  }
-}
-
-function assertMatchingConfirmation(
-  pending: Pick<PendingOptimisticChange, `id`>,
-  authoritative: Pick<ChildRow, `id`>,
-): void {
-  if (authoritative.id !== pending.id) {
-    throw new Error(
-      `Confirmation row ${authoritative.id} does not match pending row ${pending.id}`,
-    )
-  }
 }
 
 type RouteValues = {
@@ -629,6 +608,16 @@ async function expectHistoryMatches(
   const { roots, levels } = fixture(routes)
   await runTrace({ steps, driver: createDriver(roots, levels), projection })
 }
+
+// The check is `expectHistoryMatches`: it runs a generated relationship history
+// through the trace driver, and at each checkpoint the live query's rows are
+// compared with `recompute`, the model's rows for the same context. The
+// projection that the fixed traces use also calls `recompute`, so those traces
+// reach the model.
+declareOracle({
+  check: [expectHistoryMatches],
+  model: [recompute],
+})
 
 const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
   // Routes are equality keys. Disjoint ranges preserve distinctness while
@@ -1236,23 +1225,6 @@ describe(`optimistic relationship-transition oracle`, () => {
         },
         projection,
       })
-    },
-  )
-
-  fcTest(
-    `rejects optimistic handles the sync mock cannot settle independently`,
-    () => {
-      const pending = new Map([[`first`, { level: 1 as const }]])
-
-      expect(() => assertCanStartOptimisticChange(pending, 2, `first`)).toThrow(
-        /Duplicate optimistic handle first/,
-      )
-      expect(() =>
-        assertCanStartOptimisticChange(pending, 1, `second`),
-      ).toThrow(/Level 1 already has pending optimistic handle first/)
-      expect(() => assertMatchingConfirmation({ id: 11 }, { id: 12 })).toThrow(
-        /Confirmation row 12 does not match pending row 11/,
-      )
     },
   )
 
