@@ -137,7 +137,12 @@ export function rxdbCollectionOptions(
          */
         let cursor: RxDocumentData<Row> | undefined = undefined
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
-        begin()
+        // The initial fetch reads every document. When the Collection holds
+        // rows, such as a reload's kept rows, it is a snapshot that replaces
+        // them, so a row RxDB no longer has goes.
+        begin({
+          snapshot: !collection._state.acceptedSyncedEntries().next().done,
+        })
 
         while (!initialFetchComplete) {
           let query: FilledMangoQuery<Row>
@@ -276,18 +281,13 @@ export function rxdbCollectionOptions(
           }
         }
 
-        if (!isCleanedUp() && !stopped) {
-          markReady()
-        }
+        // After this run's fail(), markReady() does nothing.
+        markReady()
       }
 
-      // Whether this sync run stopped: a reload runs `sync` again while the
-      // Collection still shows the previous run's status. Core ignores a
-      // later fail() in the same run.
-      let stopped = false
+      // Core ignores a later fail() in the same run.
       function stop(error: unknown) {
         stopOngoingFetch()
-        stopped = true
         fail(error)
       }
       void start().catch(stop)

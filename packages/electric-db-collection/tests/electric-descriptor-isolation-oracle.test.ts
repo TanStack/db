@@ -1114,7 +1114,12 @@ fixedCase(`rejects a demand after provider-session restart fails`, async () => {
   const options = descriptor(`original`, false, `on-demand`)
   const rotationError = new Error(`cache rotation failed`)
   const params = {
-    collection: { utils: {}, getKeyFromItem: (row: TestRow) => row.id },
+    collection: {
+      utils: {},
+      getKeyFromItem: (row: TestRow) => row.id,
+      // A fresh Collection holds no synced rows.
+      _state: { acceptedSyncedEntries: () => new Map().entries() },
+    },
     begin: () => {},
     write: () => {},
     commit: () => true,
@@ -1186,7 +1191,10 @@ fixedCase.each([`resolves`, `rejects`] as const)(
       collection: {
         utils: {},
         getKeyFromItem: (row: TestRow) => row.id,
-        _state: { syncedData: new Map() },
+        _state: {
+          syncedData: new Map(),
+          acceptedSyncedEntries: () => new Map().entries(),
+        },
         get status() {
           return status
         },
@@ -1267,7 +1275,12 @@ fixedCase(
   async () => {
     const options = descriptor(`original`, false, `on-demand`)
     const params = {
-      collection: { utils: {}, getKeyFromItem: (row: TestRow) => row.id },
+      collection: {
+        utils: {},
+        getKeyFromItem: (row: TestRow) => row.id,
+        // A fresh Collection holds no synced rows.
+        _state: { acceptedSyncedEntries: () => new Map().entries() },
+      },
       begin: () => {},
       write: () => {},
       commit: () => true,
@@ -1342,7 +1355,10 @@ fixedCase(
       collection: {
         utils: {},
         getKeyFromItem: (row: TestRow) => row.id,
-        _state: { syncedData: new Map() },
+        _state: {
+          syncedData: new Map(),
+          acceptedSyncedEntries: () => new Map().entries(),
+        },
       },
       begin: () => {},
       write,

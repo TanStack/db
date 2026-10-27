@@ -25,6 +25,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryHookConfig,
   LiveQueryObserver,
+  LiveQueryStatusFlags,
   NonSingleResult,
   PooledLiveQueries,
   QueryBuilder,
@@ -40,26 +41,12 @@ export * from '@tanstack/db'
  * The result of calling `injectLiveQuery`.
  * Contains reactive signals for the query state and data.
  */
-/** Status, persistence, and health signals every `injectLiveQuery` result has. */
-export interface InjectLiveQueryFlags {
+/** The status and flag signals every `injectLiveQuery` result has. */
+export type InjectLiveQueryFlags = {
   /** A signal containing the current status of the collection */
   status: Signal<CollectionStatus | `disabled`>
-  /** A signal indicating whether the collection is currently loading */
-  isLoading: Signal<boolean>
-  /** A signal indicating whether the collection is ready */
-  isReady: Signal<boolean>
-  /** A signal indicating whether the collection is idle */
-  isIdle: Signal<boolean>
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: Signal<boolean>
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: Signal<boolean>
-  /** A signal indicating whether the collection has been cleaned up */
-  isCleanedUp: Signal<boolean>
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: Signal<boolean>
-  /** A signal containing the health tree for the query and its dependencies */
-  health: Signal<HealthNode | undefined>
+} & {
+  [K in keyof LiveQueryStatusFlags]: Signal<LiveQueryStatusFlags[K]>
 }
 
 export interface InjectLiveQueryResult<
@@ -222,6 +209,7 @@ export function injectLiveQuery(opts: any) {
     return value === `idle` && !collection() ? `disabled` : value
   })
   const health = signal<HealthNode | undefined>(undefined)
+  const isSyncError = signal(false)
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -246,6 +234,7 @@ export function injectLiveQuery(opts: any) {
     const snapshot = observer.getSnapshot()
     statusValue.set(snapshot.status)
     health.set(snapshot.health)
+    isSyncError.set(snapshot.isSyncError)
   }
 
   let unsub: (() => void) | null = null
@@ -261,6 +250,7 @@ export function injectLiveQuery(opts: any) {
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
       health.set(undefined)
+      isSyncError.set(false)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -309,9 +299,7 @@ export function injectLiveQuery(opts: any) {
     isLoadingError: computed(() => status() === `error`),
     isCrashed: computed(() => status() === `crashed`),
     isCleanedUp: computed(() => status() === `cleaned-up`),
-    isSyncError: computed(
-      () => status() === `ready` && health()?.hasErrors === true,
-    ),
+    isSyncError,
     health,
   }
 }

@@ -7,7 +7,7 @@ import {
   transactionScopedScheduler,
   withPublicationContext,
 } from '../src/scheduler.js'
-import { resetCleanupQueue } from './utils'
+import { captureMicrotaskErrors, resetCleanupQueue } from './utils'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -724,12 +724,13 @@ describe(`Collection Lifecycle Management`, () => {
         expectedFirstReadyCalls: 1,
         invalid: false,
       },
-      // An initial error is final for its sync attempt.
+      // An initial error is final for its sync attempt: a later markReady()
+      // in it does nothing (maintainer decision).
       {
         from: `error`,
         expectedStatus: `error`,
         expectedFirstReadyCalls: 0,
-        invalid: true,
+        invalid: false,
       },
       {
         from: `idle`,
@@ -1450,6 +1451,8 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
+    // The throw reaches no caller of preload(), so core reports it uncaught
+    // (maintainer decision) and the Collection stays ready.
     it(`resolves a pending preload after a ready callback failure alone`, async () => {
       let syncContinued = false
       const collection = createCollection<{ id: string; name: string }>({
@@ -1466,11 +1469,16 @@ describe(`Collection Lifecycle Management`, () => {
         throw undefined
       })
 
+      const uncaught = captureMicrotaskErrors()
       try {
         await expect(collection.preload()).resolves.toBeUndefined()
+        // The report is a microtask; this describe uses fake timers.
+        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+        expect(uncaught.errors).toEqual([undefined])
         expect(syncContinued).toBe(true)
         expect(collection.status).toBe(`ready`)
       } finally {
+        uncaught.restore()
         await collection.cleanup()
       }
     })

@@ -449,12 +449,13 @@ export interface SyncConfig<
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
     /**
-     * Begin a new sync transaction. `direct: true` marks a direct write: an
-     * edit of the rows on screen, not part of the sync run's snapshot. During
-     * a reload it applies to the kept rows, and the reload's replacement of
-     * every row waits for the run's next transaction.
+     * Begin a new sync transaction. Its writes apply on the rows the
+     * Collection holds, also during a reload. `snapshot: true` declares that
+     * the transaction carries every row: its commit replaces every synced
+     * row, as `truncate({ markReady: false })` at its start does. A reload's
+     * new run replaces the kept rows only with a snapshot or `truncate()`.
      */
-    begin: (options?: { direct?: boolean }) => void
+    begin: (options?: { snapshot?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
      * Commit the active sync transaction in FIFO order. Core accepts it at
@@ -467,7 +468,11 @@ export interface SyncConfig<
      * named `AbortError`. Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
-    /** Signal that a usable initial snapshot is available for this attempt. */
+    /**
+     * Signal that the sync run's initial data is available. During a reload
+     * it completes the reload and keeps the rows unless a snapshot replaced
+     * them. A second call in the run, or one after `fail()`, does nothing.
+     */
     markReady: () => void
     /**
      * Report a problem after the first ready while the sync adapter keeps
@@ -1298,7 +1303,8 @@ export interface SubscribeChangesOptions<
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
   /** Lets a live-query graph retain its last publication during replay. @internal */
   truncateReplayPublication?: {
-    readonly start: () => void
+    /** `retired`: a reload retired the sync run, and no truncate came. */
+    readonly start: (retired: boolean) => void
     readonly succeed: () => void
     /** The replay could not load every active demand again: its failures, in failure order. */
     readonly fail?: (errors: Array<Error>) => void

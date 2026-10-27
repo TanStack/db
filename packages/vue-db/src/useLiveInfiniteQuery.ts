@@ -9,7 +9,6 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryWindowBinding,
@@ -17,6 +16,7 @@ import type {
   QueryBuilder,
   UtilsRecord,
 } from '@tanstack/db'
+import type { UseLiveQueryFlags } from './useLiveQuery'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 type InfiniteQueryOptions = {
@@ -34,56 +34,32 @@ export type UseLiveInfiniteQueryConfig<
 
 export interface UseLiveInfiniteQueryReturn<
   TContext extends Context & NonSingleResult,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<string | number, GetResult<TContext>>>
   data: ComputedRef<InferResultType<TContext>>
   collection: ComputedRef<
     Collection<GetResult<TContext>, string | number, UtilsRecord>
   >
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  isIdle: ComputedRef<boolean>
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: ComputedRef<boolean>
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<InferResultType<TContext>[number]>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  health: ComputedRef<HealthNode | undefined>
 }
 
 export interface UseLiveInfiniteQueryReturnWithCollection<
   TResult extends object,
   TKey extends string | number,
   TUtils extends UtilsRecord,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<TKey, TResult>>
   data: ComputedRef<Array<TResult>>
   collection: ComputedRef<Collection<TResult, TKey, TUtils>>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  isIdle: ComputedRef<boolean>
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: ComputedRef<boolean>
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<TResult>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  health: ComputedRef<HealthNode | undefined>
 }
 
 /**

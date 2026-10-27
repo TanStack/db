@@ -1770,15 +1770,10 @@ function createElectricSync<T extends Row<unknown>>(
       ready = true
       params.markReady()
     }
-    // The stream can give up from several places; the first one stops this
-    // sync run. Core ignores a later fail() in the same run, so the first
-    // error stays. `stopped` keeps a late first-snapshot acceptance from
-    // marking a stopped run ready.
-    let stopped = false
-    const giveUp = (error: unknown) => {
-      stopped = true
-      fail(error)
-    }
+    // The stream can give up (fail()) from several places; the first one
+    // stops this sync run. Core ignores a later fail() in the same run, so
+    // the first error stays, and a later markReady(), such as a late
+    // snapshot acceptance, does nothing.
     let commitSequence = 0
     const pendingAppliedReceipts = new Map<number, Promise<void>>()
     const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
@@ -1900,14 +1895,17 @@ function createElectricSync<T extends Row<unknown>>(
       syncMode !== `on-demand` &&
       (canUsePersistedResume ||
         (hasExplicitResumeOffset && !receivesCompleteRows))
-    // A fresh snapshot replaces its hydrated cache; omitting the old offset
-    // alone would merge rows that no longer exist on the server.
+    // A fresh snapshot replaces the rows the Collection holds: its hydrated
+    // cache, or a reload's kept rows. Omitting the old offset alone would
+    // merge rows that no longer exist on the server. A resumed stream sends
+    // no snapshot, so its changes apply on the rows the Collection holds.
     let freshSnapshotPending =
       (syncMode === `eager` ||
         (requiresFreshSourceEvidence && !scopedRecovery)) &&
       !canUsePersistedResume &&
       !hasExplicitResumeOffset &&
-      hydrateBaseline !== undefined
+      (hydrateBaseline !== undefined ||
+        !collection._state.acceptedSyncedEntries().next().done)
 
     // Wrap markReady to wait for test hook in progressive mode
     let progressiveReadyGate: Promise<void> | null = null
@@ -1955,13 +1953,13 @@ function createElectricSync<T extends Row<unknown>>(
     const failInitialSync = (cause: unknown) => {
       if (firstSnapshotCommitted) return
       initialSyncFailedFinally = true
-      giveUp(cause)
+      fail(cause)
     }
     const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
-      if (sessionCleanedUp || ready || stopped) return
+      if (sessionCleanedUp || ready) return
       if (failure !== undefined) {
         initialSyncFailedFinally = true
-        giveUp(failure)
+        fail(failure)
       } else if (isActiveLifecycle()) {
         wrappedMarkReady(isBuffering, streamErrorVersion)
       } else markReady()
@@ -2120,7 +2118,11 @@ function createElectricSync<T extends Row<unknown>>(
     // When multiple subset queries return the same row, the server sends `insert`
     // for each response. We convert subsequent inserts to updates to avoid
     // duplicate key errors when the row's data has changed between requests.
-    const syncedKeys = new Set<string | number>()
+    // A reload keeps the retired run's rows, and an insert of a kept key
+    // edits it the same way.
+    const syncedKeys = new Set<string | number>(
+      Array.from(collection._state.acceptedSyncedEntries(), ([key]) => key),
+    )
     let resumeInvalid = false
 
     const stageResumeMetadata = () => {
@@ -2267,7 +2269,18 @@ function createElectricSync<T extends Row<unknown>>(
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
       waitForEstablishedSnapshot: () => fullSnapshotReady,
       begin,
-      write,
+      // A subset snapshot row is a full row. It edits a row the Collection
+      // holds, such as a reload's kept row before the atomic swap.
+      write: (mutation) =>
+        write({
+          ...mutation,
+          type:
+            collection._state.getAcceptedSyncedRow(
+              collection.getKeyFromItem(mutation.value),
+            ) === undefined
+              ? `insert`
+              : `update`,
+        }),
       commit,
       getCommitCursor: () => commitSequence,
       waitForCommitsAfter,
@@ -2334,7 +2347,7 @@ function createElectricSync<T extends Row<unknown>>(
       streamErrorVersion++
       stream.unsubscribeAll()
       abortController.abort()
-      giveUp(
+      fail(
         new Error(
           `Electric resume state referenced an unseen row; a full snapshot is required`,
         ),
@@ -2667,7 +2680,7 @@ function createElectricSync<T extends Row<unknown>>(
               streamErrorVersion++
               stream.unsubscribeAll()
               abortController.abort()
-              giveUp(error)
+              fail(error)
             },
           )
         }
@@ -2726,7 +2739,7 @@ function createElectricSync<T extends Row<unknown>>(
         rejectFullSnapshot(error)
         if (isActiveLifecycle() && !abortController.signal.aborted) {
           if (!ready) failInitialSync(error)
-          else giveUp(error)
+          else fail(error)
         }
       },
     )
@@ -2751,7 +2764,7 @@ function createElectricSync<T extends Row<unknown>>(
           streamErrorVersion++
           stream.unsubscribeAll()
           abortController.abort()
-          giveUp(error)
+          fail(error)
         },
       )
     }

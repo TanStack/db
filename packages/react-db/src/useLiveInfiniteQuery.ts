@@ -31,10 +31,10 @@ import type {
   CollectionStatus,
   Context,
   DbClient,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQuerySourceIdClaims,
+  LiveQueryStatusFlags,
   LiveQueryWindowBinding,
   NonSingleResult,
   QueryBuilder,
@@ -73,28 +73,17 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
-> = {
+> = LiveQueryStatusFlags & {
   data: Array<TResult>
   state: Map<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & NonSingleResult
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: boolean
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: boolean
-  isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed page load is in `health`. */
-  isSyncError: boolean
   isEnabled: true
   pages: Array<Array<TResult>>
   pageParams: Array<number>
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  health: HealthNode | undefined
 }
 
 type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<

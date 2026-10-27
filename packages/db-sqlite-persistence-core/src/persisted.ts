@@ -946,6 +946,17 @@ const TARGETED_INVALIDATION_KEY_LIMIT = 128
 const DEFAULT_DB_NAME = `tanstack-db`
 const REMOTE_ENSURE_RETRY_DELAY_MS = 50
 
+// An adapter contract breach, such as an unloadSubset that rejects, surfaces
+// uncaught as core reports it, and changes no result.
+const reportUncaught = (error: unknown): void =>
+  queueMicrotask(() => {
+    throw error
+  })
+
+// A remote subset request failure that no sync run can carry.
+const warnRemoteFailure = (error: unknown): void =>
+  console.warn(`Persisted remote subset request failed:`, error)
+
 type SyncControlFns<T extends object, TKey extends string | number> = {
   begin: (() => void) | null
   write:
@@ -1301,6 +1312,10 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   // Set just before the transaction is handed to the Collection; from then
   // on core holds its keys itself.
   handedToCollection?: boolean
+  // The source's own begin and truncate options, forwarded to core as given:
+  // only the source declares a transaction that replaces every synced row.
+  beginOptions?: { snapshot?: boolean }
+  truncateOptions?: { markReady?: boolean }
 }
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
@@ -1897,30 +1912,45 @@ class PersistedCollectionRuntime<
   }
 
   /**
-   * Reports one failure for the current sync run. The wrapped sync adapter's
-   * own fail() keeps core's meaning: a failed first load before Collection
-   * readiness, a stopped sync with the rows kept after it. A failure raised by persistence itself means
-   * the Collection can no longer serve reads or admit writes, so it crashes.
+   * Reports one failure to the sync run that made the failed request; a
+   * reload's retired run reaches no run. The wrapped sync adapter's own
+   * fail() keeps core's meaning: a failed first load before Collection
+   * readiness, a stopped sync with the rows kept after it. A failure raised
+   * by local persistence means the Collection can no longer serve reads or
+   * admit writes, so it crashes. A remote request of the wrapper's own (a
+   * coordinator acquisition or release) is a network failure while the
+   * source keeps syncing: a ready Collection's failure reason. Before the
+   * first ready it reaches no run: core forbids the report, the first load
+   * does not wait on it, and a load that did wait received its rejection.
    */
   reportSyncError(
     error: unknown,
-    origin: `persistence` | `sync adapter` = `persistence`,
+    origin: `persistence` | `sync adapter` | `remote` = `persistence`,
+    lifecycleGeneration = this.lifecycleGeneration,
   ): unknown {
     const fail = this.syncControls.fail
+    const ready = this.collection?.status === `ready`
+    if (lifecycleGeneration !== this.lifecycleGeneration) return error
     if (this.syncErrorReported) return this.reportedSyncError
     if (!fail) return error
+    if (origin === `remote` && !ready) {
+      warnRemoteFailure(error)
+      return error
+    }
 
     // After readiness the sync adapter's fail() keeps the rows and the run
     // continues, so only a failure that ends the run latches.
-    if (origin === `persistence` || this.collection?.status !== `ready`) {
+    if (origin === `persistence` || (origin === `sync adapter` && !ready)) {
       this.syncErrorReported = true
       this.reportedSyncError = error
     }
     try {
-      if (origin === `sync adapter`) fail(error)
+      if (origin === `remote`) this.collection?._lifecycle.reportError(error)
+      else if (origin === `sync adapter`) fail(error)
       else this.collection?._lifecycle.crash(error)
     } catch {
-      // Reporting must not replace the original asynchronous failure.
+      // Reporting must not replace the original asynchronous failure. A
+      // sync adapter that already stopped takes no further report.
     }
     return error
   }
@@ -2568,7 +2598,9 @@ class PersistedCollectionRuntime<
             rotatedOptions,
           )
           this.rotatedEnsures.set(options, ensure)
-          void ensure.catch((error) => this.reportSyncError(error))
+          void ensure.catch((error) =>
+            this.reportSyncError(error, `remote`, lifecycleGeneration),
+          )
         } else {
           this.refreshScopedSubsets()
           break
@@ -2966,26 +2998,22 @@ class PersistedCollectionRuntime<
     )
     if (!stillActive) this.hydratedDemands.delete(demandKey)
     if (this.mode === `sync-present`) {
+      const lifecycleGeneration = this.lifecycleGeneration
       void this.persistence.coordinator
         .requestReleaseRemoteSubset(this.storageCollectionId, remoteOptions)
         .catch((error) => {
-          this.reportSyncError(error)
+          this.reportSyncError(error, `remote`, lifecycleGeneration)
         })
     }
-    if (upstreamUnloadSubset) {
-      try {
-        const result = (
-          upstreamUnloadSubset as unknown as (
-            options: LoadSubsetOptions,
-          ) => unknown
-        )(options)
-        void Promise.resolve(result).catch((error) => {
-          this.reportSyncError(error)
-        })
-      } catch (error) {
-        this.reportSyncError(error)
-      }
-    }
+    // The adapter's own unloadSubset, called as core calls it: a throw
+    // reaches core, which reports the contract breach uncaught. A returned
+    // rejection is the same breach.
+    void Promise.resolve(
+      (
+        upstreamUnloadSubset as
+          ((options: LoadSubsetOptions) => unknown) | undefined
+      )?.(options),
+    ).catch(reportUncaught)
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
@@ -3166,9 +3194,10 @@ class PersistedCollectionRuntime<
                 this.storageCollectionId,
                 this.rotatedAcquisitions.get(options) ?? options,
               )
-              .catch((error) => {
-                this.reportSyncError(error)
-              }),
+              // The retired run's release reaches no run, and a remote
+              // failure must not fail the cleanup: a reload crashes a
+              // Collection whose retired run's cleanup rejects.
+              .catch(warnRemoteFailure),
           )
         })
       }
@@ -3196,10 +3225,9 @@ class PersistedCollectionRuntime<
     this.rotatedAcquisitions.clear()
     for (const [options, storageId] of this.scopedRefreshes) {
       remoteReleases.push(
-        this.persistence.coordinator.requestReleaseRemoteSubset(
-          storageId,
-          options,
-        ),
+        this.persistence.coordinator
+          .requestReleaseRemoteSubset(storageId, options)
+          .catch(warnRemoteFailure),
       )
     }
     this.scopedRefreshes.clear()
@@ -4929,22 +4957,16 @@ class PersistedCollectionRuntime<
           )
         })
         .catch((error: unknown) => {
-          if (
-            lifecycleGeneration === this.lifecycleGeneration &&
-            !options.signal?.aborted
-          ) {
-            this.reportSyncError(error)
-          }
+          if (!options.signal?.aborted)
+            this.reportSyncError(error, `remote`, lifecycleGeneration)
         })
         .finally(() => {
           if (!this.scopedRefreshes.delete(refreshOptions)) return
           void this.persistence.coordinator
             .requestReleaseRemoteSubset(storageId, refreshOptions)
-            .catch((error: unknown) => {
-              if (lifecycleGeneration === this.lifecycleGeneration) {
-                this.reportSyncError(error)
-              }
-            })
+            .catch((error: unknown) =>
+              this.reportSyncError(error, `remote`, lifecycleGeneration),
+            )
         })
     }
   }
@@ -5841,8 +5863,9 @@ function createWrappedSyncConfig<
           }
           transaction.deferredHydrationMetadataDeleteKeys.clear()
 
-          params.begin()
-          if (transaction.truncate) params.truncate()
+          params.begin(transaction.beginOptions)
+          if (transaction.truncateOptions)
+            params.truncate(transaction.truncateOptions)
           for (const operation of transaction.operations) {
             if (operation.type === `delete`) {
               params.write({ type: `delete`, key: operation.key })
@@ -5993,8 +6016,11 @@ function createWrappedSyncConfig<
             if (isCleanedUp() || getTerminalFailure()) return
             markCoreReady()
           }),
-        begin: () => {
+        begin: (options?: { snapshot?: boolean }) => {
           if (startupState.cleanedUp) return undefined
+          // A snapshot replaces every synced row, durable ones included, as a
+          // truncate at its start does.
+          if (options?.snapshot) runtime.noteSourceTruncate()
           const terminalFailure = getTerminalFailure()
           const internal = runtime.isApplyingInternally()
           const transaction: OpenSyncTransaction<T, TKey> = {
@@ -6003,7 +6029,8 @@ function createWrappedSyncConfig<
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
             deferredHydrationMetadataDeleteKeys: new Set(),
-            truncate: false,
+            truncate: options?.snapshot === true,
+            beginOptions: options,
             internal,
             lifecycleGeneration: runtime.getLifecycleGeneration(),
             operationKeys: new Set(),
@@ -6194,7 +6221,7 @@ function createWrappedSyncConfig<
               },
             }
           : undefined,
-        truncate: () => {
+        truncate: (options?: { markReady?: boolean }) => {
           if (startupState.cleanedUp) return
           runtime.noteSourceTruncate()
           const openTransaction = getOpenTransaction()
@@ -6213,6 +6240,7 @@ function createWrappedSyncConfig<
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
           openTransaction.truncate = true
+          openTransaction.truncateOptions = options ?? {}
         },
         commit: (signal?: AbortSignal) => {
           if (startupState.cleanedUp) return true
@@ -6357,14 +6385,14 @@ function createWrappedSyncConfig<
           reportHealthy: (error?: unknown) => {
             if (active()) wrappedParams.reportHealthy(error)
           },
-          begin: () => {
-            if (active()) wrappedParams.begin()
+          begin: (options?: { snapshot?: boolean }) => {
+            if (active()) wrappedParams.begin(options)
           },
           write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
             if (active()) wrappedParams.write(message)
           },
-          truncate: () => {
-            if (active()) wrappedParams.truncate()
+          truncate: (options?: { markReady?: boolean }) => {
+            if (active()) wrappedParams.truncate(options)
           },
           invalidateLoadedSubsets: () => {
             if (active()) wrappedParams.invalidateLoadedSubsets()
@@ -6447,6 +6475,7 @@ function createWrappedSyncConfig<
       let customRestartSequence = 0
       const enterSourceSession = (): void => {
         const session = ++sourceSession
+        const lifecycleGeneration = runtime.getLifecycleGeneration()
         let settleSourceSyncEntry!: () => void
         activeSourceSyncEntry = new Promise<void>((resolve) => {
           settleSourceSyncEntry = resolve
@@ -6479,8 +6508,16 @@ function createWrappedSyncConfig<
                   ownerSource.unloadSubset?.(
                     options as unknown as LoadSubsetOptions,
                   ),
+                // The coordinator reports a failed remote request of this
+                // owner. The source keeps syncing; the request's own caller
+                // received the rejection.
                 onError: (error: unknown) => {
-                  if (session === sourceSession) reportUpstreamError(error)
+                  if (session === sourceSession)
+                    runtime.reportSyncError(
+                      error,
+                      `remote`,
+                      lifecycleGeneration,
+                    )
                 },
               }),
             )

@@ -57,13 +57,9 @@ interface PendingSyncedTransaction<
   applicationStarted: boolean
   layoutChanged: boolean
   operations: Array<PendingSyncOperation<T, TKey>>
+  // The transaction replaces every row: the adapter began it as a snapshot
+  // or called truncate() in it.
   truncate?: boolean
-  // Why the transaction replaces every row. A reload's first transaction
-  // replaces them, and the adapter's own truncate() can too, in the same
-  // transaction. A reload that ends early drops only its own replacement; a
-  // canceled one moves to the run's next transaction.
-  reloadReplacement?: boolean
-  adapterTruncate?: boolean
   truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   /** The last explicit write per key, after `position` operations. */
@@ -121,15 +117,6 @@ export class CollectionStateManager<
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
-  /** A reload armed its truncate for the new run's next transaction. */
-  public reloadTruncatePending = false
-  // The truncate event being emitted is a reload's own first-commit truncate.
-  private emittingReloadTruncate = false
-
-  /** @internal The truncate event being emitted is a reload's own. */
-  public isEmittingReloadTruncate(): boolean {
-    return this.emittingReloadTruncate
-  }
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
@@ -885,15 +872,10 @@ export class CollectionStateManager<
   }
 
   /**
-   * The rows a sync run's snapshot builds on: none while a reload's next
-   * transaction replaces every synced row, so a diffing adapter writes every
-   * row it has as an insert. Otherwise the accepted synced rows.
+   * Every synced row once every accepted sync transaction applies: the
+   * baseline a diffing adapter writes against, also during a reload. Inside
+   * an open snapshot or truncate, only that transaction's writes.
    */
-  *replacementBaseline(): IterableIterator<[TKey, TOutput]> {
-    if (!this.reloadTruncatePending) yield* this.acceptedSyncedEntries()
-  }
-
-  /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
     const { states, truncated } = this.pendingSyncedProjection
     if (!truncated) {
@@ -1219,16 +1201,12 @@ export class CollectionStateManager<
             currentVisibleState.delete(key)
           }
 
-          // Emit truncate event so subscriptions can reset their cursor tracking state
-          this.emittingReloadTruncate = transaction.reloadReplacement === true
-          try {
-            this._events.emit(`truncate`, {
-              type: `truncate`,
-              collection: this.collection,
-            })
-          } finally {
-            this.emittingReloadTruncate = false
-          }
+          // Emit truncate event so subscriptions reset their tracking state
+          // and replay their on-demand demand.
+          this._events.emit(`truncate`, {
+            type: `truncate`,
+            collection: this.collection,
+          })
         }
 
         // Attribution belongs to the whole atomic batch. A repeated write must
@@ -1436,12 +1414,11 @@ export class CollectionStateManager<
       // callbacks run, so their writes follow the batch they describe.
       // During a reload, that is the reload's completion.
       if (truncateMarksReady && this.lifecycle.status !== `ready`)
-        capture(() =>
-          this.lifecycle.reloading
-            ? this.lifecycle.completeReload(emit)
-            : this.lifecycle.markReady(emit),
-        )
+        capture(() => this.lifecycle.markReady(emit))
       if (!emitted) emit()
+      // A replacement that applies completes a reload of a ready Collection.
+      if (hasTruncateSync && this.lifecycle.status === `ready`)
+        capture(() => this.lifecycle.completeReload())
 
       if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()

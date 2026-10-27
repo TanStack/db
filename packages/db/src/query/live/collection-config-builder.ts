@@ -129,6 +129,10 @@ export class CollectionConfigBuilder<
   // The sync function is running: a failure there fails the query's start.
   private starting = false
   private lastSubsetError: unknown | undefined
+  // The query's own reload: its new run publishes nothing until its graph
+  // result is complete (law 9), then commits that result as the snapshot
+  // that replaces the kept rows and completes the reload.
+  private reloadSnapshotPending = false
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
@@ -824,8 +828,9 @@ export class CollectionConfigBuilder<
         if (!isCurrentSyncRun()) return
 
         // On the initial run, we may need to do an empty commit to ensure that
-        // the collection is initialized
-        if (syncState.messagesCount === 0) {
+        // the collection is initialized. A reload's run commits its snapshot
+        // instead.
+        if (syncState.messagesCount === 0 && !this.reloadSnapshotPending) {
           begin()
           commit()
         }
@@ -892,6 +897,7 @@ export class CollectionConfigBuilder<
     const syncRunGeneration = ++this.syncRunGeneration
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
+    this.reloadSnapshotPending = config.collection._lifecycle.reloading
     // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.fatalQueryError = false
     this.lastSubsetError = undefined
@@ -975,9 +981,17 @@ export class CollectionConfigBuilder<
     this.currentSyncState = undefined
     this.maybeRunGraphFn = undefined
     this.loadMoreFn = undefined
-    this.currentWindow = undefined
-    this.settledWindow = this.initialWindow
+    // The query's own reload retries its data, not the window the app chose:
+    // the new run starts from the settled window, and a pending move ends
+    // with the retired run. Cleanup discards the window.
+    if (this.liveQueryCollection?._lifecycle.reloading)
+      this.currentWindow = this.settledWindow
+    else {
+      this.currentWindow = undefined
+      this.settledWindow = this.initialWindow
+    }
     this.fatalQueryError = false
+    this.reloadSnapshotPending = false
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -1119,8 +1133,13 @@ export class CollectionConfigBuilder<
     syncState.flushPendingChanges = () => {
       const hasParentChanges = pendingChanges.size > 0
       const hasChildChanges = bucketFacades?.hasPendingChanges() ?? false
+      // A reload's run holds its result until it is complete, then commits
+      // it as a snapshot, also an empty one.
+      const snapshot = this.reloadSnapshotPending
+      if (snapshot && !this.isResultComplete()) return
+      const writesRoot = hasParentChanges || snapshot
 
-      if (!hasParentChanges && !hasChildChanges) {
+      if (!writesRoot && !hasChildChanges) {
         return
       }
 
@@ -1157,7 +1176,7 @@ export class CollectionConfigBuilder<
         ReturnType<Collection[`_deferPublication`]> | undefined
       try {
         facadePublication = bucketFacades?.flush()
-        rootPublication = hasParentChanges
+        rootPublication = writesRoot
           ? config.collection._deferPublication()
           : undefined
         const changesToApply: Map<unknown, Changes<TResult>> = bucketFacades
@@ -1180,10 +1199,10 @@ export class CollectionConfigBuilder<
         // make them ready first. A facade failure then leaves the root intact,
         // and the root commit is the final state change before publication.
         facadePublication?.prepare()
-        if (hasParentChanges) {
-          begin()
-          // A reload's first transaction replaces every row, so no earlier
-          // row exists for the batch it holds.
+        if (writesRoot) {
+          begin(snapshot ? { snapshot } : undefined)
+          // A snapshot replaces every row, so no earlier row exists for the
+          // batch it holds.
           const replaces = config.collection._state.openTransactionReplaces()
           let lookup: ((key: string | number) => boolean) | undefined
           const hasSyncedKey = (key: string | number) => {
@@ -1198,6 +1217,7 @@ export class CollectionConfigBuilder<
             markLayoutChange(config.collection)
           }
           commit()
+          this.reloadSnapshotPending = false
         }
       } catch (error) {
         rootPublication?.discard()
@@ -1357,13 +1377,16 @@ export class CollectionConfigBuilder<
    * Update the live query status based on source collection statuses
    */
   private updateLiveQueryStatus(config: SyncMethods<TResult>) {
-    const { markReady } = config
-
     // Don't update status if already in error
-    if (this.fatalQueryError) {
-      return
-    }
+    if (this.fatalQueryError || !this.isResultComplete()) return
+    // A reload's run commits its complete result as its snapshot first.
+    if (this.reloadSnapshotPending)
+      this.currentSyncState?.flushPendingChanges?.()
+    config.markReady()
+  }
 
+  /** Whether the current run's graph result is complete. */
+  private isResultComplete(): boolean {
     const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
     const allReady = this.allRequiredSourcesReady()
     const allDemandsSettled = [...this.activeDemands.values()].every(
@@ -1378,15 +1401,13 @@ export class CollectionConfigBuilder<
     // 5. No source reload's replay is still loading the demand again
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (
-      subscribedToAll &&
+    return (
+      subscribedToAll === true &&
       allReady &&
       allDemandsSettled &&
-      !isLoading &&
+      isLoading !== true &&
       !this.hasPendingSourceRecovery()
-    ) {
-      markReady()
-    }
+    )
   }
 
   /**

@@ -16,6 +16,7 @@ const staticOracleProperties = [
   `pooled-live-query.late-cleanup`,
   `pooled-live-query.bootstrap-ownership`,
   `pooled-live-query.cleanup-peers`,
+  `pooled-live-query.cleanup-admission`,
   `live-query-observer.partial-attach`,
   `live-query-observer.release-failure`,
   `live-query-observer.hydration-error-timing`,

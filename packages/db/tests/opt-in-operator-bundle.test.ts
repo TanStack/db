@@ -108,6 +108,7 @@ const adapterValues = [
   `fetchNextLiveQueryWindowPage`,
   `getLiveQueryHash`,
   `getLiveQueryKey`,
+  `getLiveQueryStatusFlags`,
   `getPreparedLiveQueryIdentity`,
   `getPreparedLiveQuerySources`,
   `getPublicCollection`,

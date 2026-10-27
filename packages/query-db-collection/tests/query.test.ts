@@ -11794,9 +11794,10 @@ describe(`reload settles on the new run's first result`, () => {
     },
   )
 
-  // A direct write during a reload edits the rows on screen; it is not the
-  // new run's snapshot. Model: the other rows stay, the write applies, and
-  // the reload stays in flight. When the new run's result lands, it settles
+  // A direct write during a reload edits the rows on screen; it is not a
+  // snapshot, so it applies on the kept rows (maintainer decision F19).
+  // Model: the other rows stay, the write applies, and the reload stays in
+  // flight. When the new run's result lands, it settles
   // the write as a refetch in flight during a direct write does (the
   // ownership oracle owns that rule), so the two end with the same rows.
   it.each([`insert`, `update`, `delete`] as const)(
@@ -11885,8 +11886,95 @@ describe(`reload settles on the new run's first result`, () => {
     },
   )
 
+  // A reload of a ready Collection whose backend changed meanwhile. Model,
+  // from the reload law (maintainer decision F19, a reload keeps the rows
+  // until it completes, and the new run replaces rows only with a snapshot
+  // or its own truncate) and the maintainer decision that a reload ends as a
+  // refetch does: until the new run's result lands, the rows on screen are
+  // the first run's; after it, they equal those of the same history with
+  // `utils.refetch()` in place of `reload()`, and the reload has settled.
+  // An eager run fetches its own Query; an on-demand run serves the live
+  // query's demand replayed into it.
+  it.each([`eager`, `on-demand`] as const)(
+    `a reload of a ready %s Collection keeps its rows and ends as a refetch does`,
+    async (syncMode) => {
+      type Row = { id: number; v: string }
+      const run = async (via: `reload` | `refetch`) => {
+        let backend: Array<Row> = [
+          { id: 1, v: `a` },
+          { id: 2, v: `b` },
+          { id: 3, v: `c` },
+        ]
+        let held: Promise<void> | undefined
+        let release = () => {}
+        const client = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })
+        const collection = createCollection(
+          queryCollectionOptions({
+            id: `reload-ready-${syncMode}-${via}`,
+            queryKey: [`reload-ready`, syncMode, via],
+            queryClient: client,
+            syncMode,
+            getKey: (row: Row) => row.id,
+            queryFn: async () => {
+              const rows = backend
+              await held
+              return rows
+            },
+          }),
+        )
+        const live = createLiveQueryCollection({
+          query: (q) => q.from({ row: collection }),
+        })
+        const rows = () =>
+          new Map(collection.toArray.map((row) => [row.id, row.v]))
+        try {
+          await live.preload()
+          const before = rows()
+          backend = [
+            { id: 1, v: `a2` },
+            { id: 3, v: `c` },
+            { id: 4, v: `d` },
+          ]
+          held = new Promise((resolve) => (release = resolve))
+          const pending =
+            via === `reload`
+              ? collection.reload()
+              : collection.utils.refetch().then(() => undefined)
+          await flushPromises()
+          const during = rows()
+          release()
+          await pending
+          await flushPromises()
+          return { before, during, final: rows() }
+        } finally {
+          release()
+          await live.cleanup()
+          await collection.cleanup()
+          client.clear()
+        }
+      }
+      const reload = await run(`reload`)
+      expect(reload.during, `the rows stay until the result lands`).toEqual(
+        reload.before,
+      )
+      const refetch = await run(`refetch`)
+      expect(reload.final, `the reload ends as a refetch does`).toEqual(
+        refetch.final,
+      )
+      expect(refetch.final).toEqual(
+        new Map([
+          [1, `a2`],
+          [3, `c`],
+          [4, `d`],
+        ]),
+      )
+    },
+  )
+
   /**
-   * A housekeeping transaction is not the new run's snapshot either. Query
+   * A housekeeping transaction is not a snapshot either. Query
    * Collection's retention maintenance commits one: it removes an expired
    * persisted retention entry (`queryCollection:gc:<hash>`) that a released
    * subset left. During a reload of an eager persisted Collection it commits
@@ -11898,9 +11986,10 @@ describe(`reload settles on the new run's first result`, () => {
    *   between the runs, as another tab's release writes it, already expired,
    *   so the new run's startup maintenance removes it.
    *
-   * Model, from ARCHITECTURE law 16 and docs/guides/error-handling.md
-   * ("Reloading": nothing visible changes until the new run's first commit)
-   * and the maintainer decision that a reload ends as a refetch does: while
+   * Model, from ARCHITECTURE law 16, the reload law (maintainer decision
+   * F19: only a snapshot or the run's own truncate replaces the kept rows,
+   * and every other write applies on them) and the maintainer decision that
+   * a reload ends as a refetch does: while
    * the fetch is held, the rows stay (the expired entry owns no row) and the
    * reload stays in flight. After the fetch lands, the rows equal those of
    * the same history with `utils.refetch()` in place of `reload()`.
@@ -11908,10 +11997,11 @@ describe(`reload settles on the new run's first result`, () => {
    * Reach: a history checks the law only if the new run begins a transaction
    * while the reload waits for its Query result. Every such transaction is
    * housekeeping, since the fetch is held. The driver counts those begins
-   * through the current run's sync parameters, whether or not they pass
-   * `direct`, so the reach does not depend on the repair; a retired run's
-   * begin does nothing in core, so it does not count. Each kind must reach
-   * that state.
+   * through the current run's sync parameters, whatever options they pass,
+   * so the reach does not depend on the repair; a retired run's begin does
+   * nothing in core, so it does not count. Each kind must reach that state.
+   * A housekeeping begin marked `snapshot: true` is the hostile mutant: it
+   * replaces the kept rows with none.
    *
    * A third kind, `release-at-startup`, reaches the other housekeeping
    * transaction a reload can meet: writing a retention entry when a subset
@@ -11919,9 +12009,9 @@ describe(`reload settles on the new run's first result`, () => {
    * its driver below.
    *
    * Limits: releasing a Query's rows (`cleanupQueryInternal`) begins a
-   * direct transaction too, but no legal history begins it in the new run
-   * while the reload's replacement is armed, so a plain `begin()` there is
-   * an equivalent mutant for this lane. Its callers are the run's own
+   * housekeeping transaction too, but no legal history begins it in the new
+   * run while the reload is in flight, so a snapshot there is an equivalent
+   * mutant for this lane. Its callers are the run's own
    * cleanup and the fallback of a subset release. Core invokes a run's
    * cleanup (on cleanup, on a reload's retirement, or after sync entry) only
    * after it has retired that run's callbacks, so that begin does nothing.
@@ -11932,8 +12022,8 @@ describe(`reload settles on the new run's first result`, () => {
    * Without persistence, the Collection's metadata is its own, and Query
    * Collection writes no retention entry there (only a persisted release
    * writes one), so a new on-demand run finds none, has no startup maintenance to
-   * wait for, and calls `markReady()` inside `sync()`, which commits the
-   * reload's empty replacement before any release can reach the run. An
+   * wait for, and calls `markReady()` inside `sync()`, which completes the
+   * reload before any release can reach the run. An
    * eager Collection has no release path: it has no `unloadSubset`, and it
    * does not clean up a Query that Query Core removes.
    */
@@ -12076,19 +12166,18 @@ describe(`reload settles on the new run's first result`, () => {
     /**
      * `release-at-startup`: a subset released during the reload of an
      * on-demand persisted Collection writes its retention entry in the new
-     * run. An on-demand run has no Query of its own, so the reload's first
-     * commit is the empty replacement that the run's `markReady()` commits
-     * (core replaces the rows with none there; the replayed demand loads them
-     * again). The run calls `markReady()` once its startup retention
-     * maintenance settles. Until then a subset request waits for that
+     * run. An on-demand run has no Query of its own and sends no snapshot,
+     * so the reload completes at the run's `markReady()` and keeps the rows;
+     * the replayed demand's results then apply on them. The run calls
+     * `markReady()` once its startup retention maintenance settles. Until then a subset request waits for that
      * maintenance and its release only withdraws the request, so it commits
      * nothing. In the turns after the maintenance settles and before
      * `markReady()`, a request creates an observed Query, and its release
      * writes the retention entry in a housekeeping transaction while the
-     * reload's replacement is armed.
+     * reload is in flight.
      *
      * Model, as for the other kinds: in every turn before the new run's
-     * first commit, the rows equal the kept rows and the reload stays in
+     * `markReady()`, the rows equal the kept rows and the reload stays in
      * flight. A retention entry owns no row. After the held fetch lands, the
      * rows equal those of the same history with `utils.refetch()` in place of
      * `reload()`.
@@ -12105,7 +12194,7 @@ describe(`reload settles on the new run's first result`, () => {
      * Reach: a turn reaches the law if its release begins a transaction in
      * the current run before that run's `markReady()`, and the released
      * subset's retention entry then exists. The driver counts those begins
-     * whether or not they pass `direct`.
+     * whatever options they pass.
      */
     const runRelease = async (
       via: `reload` | `refetch`,

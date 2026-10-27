@@ -54,7 +54,7 @@ export interface SyncContext<
   queryClient: QueryClient
   queryKey: Array<unknown>
   getKey: (item: TRow) => TKey
-  begin: (options?: { direct?: boolean }) => void
+  begin: () => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
   commit: () => SyncAppliedReceipt
   /**
@@ -227,9 +227,9 @@ function applyWriteOperations<
   )
 
   // While an optimistic transaction persists, this sync transaction waits
-  // and applies when that transaction settles. A direct write is not the
-  // run's snapshot, so during a reload it applies to the kept rows.
-  ctx.begin({ direct: true })
+  // and applies when that transaction settles. A direct write is not a
+  // snapshot, so during a reload it applies to the kept rows.
+  ctx.begin()
 
   for (const op of normalized) {
     switch (op.type) {

@@ -17,6 +17,7 @@ import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
 import { withAcceptedReceipt } from '../sync-receipt'
 import { isPromiseLike } from '../utils/type-guards'
+import { reportUncaught } from '../utils/callbacks'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import { automaticRowMetadataWrite } from './state'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -204,14 +205,17 @@ export class CollectionSyncManager<
     const syncCallbackEpoch = ++this.syncCallbackEpoch
     this.lifecycle.setStatus(`loading`)
     if (syncCallbackEpoch !== this.syncCallbackEpoch) return
-    this.enterSync(syncCallbackEpoch)
+    const readyFailure = this.enterSync(syncCallbackEpoch)
+    if (readyFailure) throw readyFailure.error
   }
 
   /**
-   * Start a new sync run while everything visible stays, like a sync-side
-   * truncate: the run's first commit replaces every synced row at once, or
-   * its first `markReady()` replaces them with none. A reload in flight
-   * returns its promise; a crashed Collection cannot reload.
+   * Start a new sync run while everything visible stays: the rows, the
+   * status, and the node's problems. The new run replaces the rows only with
+   * a snapshot or its own truncate, and every other write applies on the
+   * kept rows. The reload completes when a replacement applies, or at the
+   * run's `markReady()`. A reload in flight returns its promise; a crashed
+   * Collection cannot reload.
    */
   public reload(): Promise<void> {
     const status = this.lifecycle.status
@@ -230,27 +234,33 @@ export class CollectionSyncManager<
     }
     // Listeners run while the reload announces itself, retires the run, and
     // detaches subscription demand. A cleanup one of them runs ends the
-    // reload with its run, so the epoch and the truncate are set before any
-    // of them, and the epoch is checked once they have all run.
+    // reload with its run, so the epoch is set before any of them, and it is
+    // checked once they have all run.
     const syncCallbackEpoch = ++this.syncCallbackEpoch
-    this.state.reloadTruncatePending = true
     const reload = this.lifecycle.beginReload()
     // A retired run whose cleanup fails broke the adapter contract.
     const retired = this.retireSyncRun()
     void retired.catch((error: unknown) => this.lifecycle.crash(error))
-    // Subscriptions detach demand from the retired run; the reload's
-    // truncate replays it through the new run's loader.
+    // Subscriptions detach demand from the retired run and replay on-demand
+    // demand through the new run's loader.
     this.lifecycle.retireSubscriptionDemand()
     if (syncCallbackEpoch !== this.syncCallbackEpoch) return reload
     try {
-      this.enterSync(syncCallbackEpoch)
+      // A ready callback that throws reaches no caller: the reload settles
+      // with the status, which stays ready, so the throw is reported.
+      const readyFailure = this.enterSync(syncCallbackEpoch)
+      if (readyFailure) reportUncaught(readyFailure.error)
     } catch (error) {
       this.lifecycle.abandonReload(error)
     }
     return reload
   }
 
-  private enterSync(syncCallbackEpoch: number): void {
+  /**
+   * Run the sync function. A sync function that throws crashes the run and
+   * rethrows; a ready callback that throws while it runs is returned.
+   */
+  private enterSync(syncCallbackEpoch: number): { error: unknown } | undefined {
     const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
     let loadedSubsetsInvalidationQueued = false
     const finishReadyFailures = this.lifecycle.deferReadyFailures()
@@ -268,6 +278,9 @@ export class CollectionSyncManager<
             // becoming an unhandled rejection while preserving the original
             // promise's rejection for callers that do await it.
             void applied.promise.catch(() => undefined)
+            // A snapshot carries every row, so its commit replaces them, as a
+            // truncate that does not mark ready.
+            const snapshot = options?.snapshot === true
             this.state.pendingSyncedTransactions.push({
               committed: false,
               applicationStarted: false,
@@ -278,15 +291,10 @@ export class CollectionSyncManager<
               collectionMetadataWrites: new Map(),
               applied,
               duplicateKeyError: (key) => this.createDuplicateKeyError(key),
+              truncate: snapshot,
+              truncateMarkReady: false,
             })
-            // A direct write edits the rows on screen; the reload's
-            // replacement waits for the run's own next transaction.
-            if (
-              !options?.direct &&
-              this.state.reloadTruncatePending &&
-              this.lifecycle.reloading
-            )
-              this.markReloadTruncate(applied)
+            if (snapshot) this.state.refreshPendingSyncedProjection()
           },
           write: (
             messageWithOptionalKey: ChangeMessageOrDeleteKeyMessage<
@@ -357,12 +365,12 @@ export class CollectionSyncManager<
             }
 
             if (signal?.aborted) {
-              this.cancelSyncTransaction(pendingTransaction)
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
               return pendingTransaction.applied.promise
             }
 
             if (pendingTransaction.invalidationError !== undefined) {
-              this.cancelSyncTransaction(
+              this.state.cancelPendingSyncedTransaction(
                 pendingTransaction,
                 pendingTransaction.invalidationError,
               )
@@ -379,21 +387,9 @@ export class CollectionSyncManager<
             return withAcceptedReceipt(pendingTransaction.applied.promise, true)
           },
           markReady: () => {
-            if (!isCurrentSync()) return
-            if (this.lifecycle.reloading) {
-              // A reload that has not committed replaces the rows with none.
-              if (this.state.reloadTruncatePending)
-                this.commitEmptyReloadTruncate()
-              // A reload of a ready Collection completes when its commit
-              // applies; one that starts from `loading` or `error` becomes
-              // ready here, as a first load does.
-              if (this.lifecycle.status !== `ready`)
-                this.lifecycle.completeReload()
-              return
-            }
             // Readiness counts accepted rows. Rows a persisting optimistic
             // transaction holds still publish with the drop of its state.
-            this.lifecycle.markReady()
+            if (isCurrentSync()) this.lifecycle.markReady()
           },
           fail: (error: unknown) => {
             if (isCurrentSync()) this.lifecycle.fail(error)
@@ -407,8 +403,6 @@ export class CollectionSyncManager<
           truncate: (options) => {
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
-            // The adapter's own truncate stays even if a reload ends early.
-            pendingTransaction.adapterTruncate = true
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
@@ -453,8 +447,7 @@ export class CollectionSyncManager<
           this.registerPendingSyncEntryCleanup(syncRes.cleanup)
         }
         this.completePendingSyncEntryCleanup()
-        if (readyFailure) throw readyFailure.error
-        return
+        return readyFailure
       }
 
       // Store cleanup function if provided
@@ -492,7 +485,7 @@ export class CollectionSyncManager<
         this.lifecycle.crash(error)
       throw error
     }
-    if (readyFailure) throw readyFailure.error
+    return readyFailure
   }
 
   public deferStart(): boolean {
@@ -555,90 +548,6 @@ export class CollectionSyncManager<
         deferred.reject(error)
       }
     }
-  }
-
-  /**
-   * A reload ended without its first commit, by a failure, a crash, or
-   * cleanup: its rows stay the baseline, and a transaction it began no longer
-   * replaces them, so its writes apply on the kept rows.
-   */
-  public dropReloadReplacement(): void {
-    this.state.reloadTruncatePending = false
-    const open = this.state.pendingSyncedTransactions.find(
-      (transaction) => !transaction.committed && transaction.reloadReplacement,
-    )
-    if (!open) return
-    open.reloadReplacement = false
-    if (open.adapterTruncate) {
-      this.state.refreshPendingSyncedProjection()
-      return
-    }
-    open.truncate = false
-    // The run wrote against no rows; on the kept rows, an insert of a kept
-    // key replaces that row.
-    const kept = this.state.createSyncedKeyLookup()
-    open.operations = open.operations.flatMap((operation) =>
-      operation.originalSyncType === `insert` && kept(operation.key as TKey)
-        ? [
-            { ...operation, type: `delete`, originalSyncType: undefined },
-            operation,
-          ]
-        : [operation],
-    )
-    this.state.refreshPendingSyncedProjection()
-  }
-
-  /** The reload's first transaction replaces every synced row. */
-  private markReloadTruncate(applied: { promise: Promise<void> }): void {
-    this.state.reloadTruncatePending = false
-    const transaction = this.state.pendingSyncedTransactions.at(-1)!
-    transaction.reloadReplacement = true
-    transaction.truncate = true
-    transaction.truncateMarkReady = false
-    this.state.refreshPendingSyncedProjection()
-    const syncRunGeneration = this.syncRunGeneration
-    void applied.promise.then(
-      () => {
-        if (
-          syncRunGeneration === this.syncRunGeneration &&
-          this.lifecycle.status === `ready`
-        )
-          this.lifecycle.completeReload()
-      },
-      // A canceled commit moved the truncate to the run's next commit, and
-      // cleanup already ended the reload with its run: a rejected commit
-      // ends no reload itself.
-      () => {},
-    )
-  }
-
-  /** A canceled commit never happened, so a reload's truncate moves on. */
-  private cancelSyncTransaction(
-    transaction: (typeof this.state.pendingSyncedTransactions)[number],
-    reason?: Error,
-  ): void {
-    this.state.cancelPendingSyncedTransaction(transaction, reason)
-    if (transaction.reloadReplacement && this.lifecycle.reloading)
-      this.state.reloadTruncatePending = true
-  }
-
-  private commitEmptyReloadTruncate(): void {
-    const applied = createDeferred<void>()
-    void applied.promise.catch(() => undefined)
-    this.state.pendingSyncedTransactions.push({
-      committed: false,
-      applicationStarted: false,
-      layoutChanged: false,
-      operations: [],
-      rowMetadataWrites: new Map(),
-      explicitRowMetadataWrites: new Map(),
-      collectionMetadataWrites: new Map(),
-      applied,
-      duplicateKeyError: (key) => this.createDuplicateKeyError(key),
-    })
-    this.markReloadTruncate(applied)
-    this.state.pendingSyncedTransactions.at(-1)!.committed = true
-    this.state.commitPendingTransactions()
   }
 
   private getActivePendingSyncTransaction() {
@@ -874,8 +783,11 @@ export class CollectionSyncManager<
           rejectError(this.getPreloadError())
         } else if (syncStartState.ready) {
           // A first-ready listener can throw after readiness is established.
-          // That failure still escapes direct startSync(), but preload follows
-          // the final collection state after synchronous adapter entry.
+          // That failure still escapes direct startSync(). Preload follows the
+          // final collection state after synchronous adapter entry, so it
+          // reports the throw, which reaches no caller (the Collection stays
+          // ready).
+          if (startFailure) reportUncaught(startFailure.error)
           resolveReady()
         } else if (startFailure) {
           rejectError(startFailure.error)
@@ -1236,7 +1148,6 @@ export class CollectionSyncManager<
     // before invoking adapter cleanup or allowing a new sync run to start.
     ++this.syncCallbackEpoch
     this.syncRunGeneration++
-    this.state.reloadTruncatePending = false
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
     this.syncCleanupFn = null

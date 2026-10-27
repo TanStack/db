@@ -87,7 +87,20 @@ The same interpreter runs a fixed corpus and generated histories.
   provider. A mutant that reports the end as a `failureReason` fails 29
   lifecycle cells. A separate lane checks that a reload after a failed startup
   settles on the new subscription's outcome while the Collection still shows
-  `error`. Two histories make this limit
+  `error`. Another, `a reload of a ready eager Collection`, enumerates 10
+  histories (one or two pages; no change, an update, a delete, or an insert
+  between the runs, or an insert whose event arrives while the reload's last
+  page is held). The reload keeps the rows (maintainer decision F19: only a
+  snapshot or the run's own truncate replaces them), so the pages update the
+  kept rows and the eager load then deletes every held row that it did not
+  list and that no change event touched. While the last page is held, no
+  kept row the service still has disappears; after it, the reload resolves
+  and the rows equal the service's. On the parent core, whose reload replaced
+  every row at the new run's first commit, the two-page histories fail (the
+  second page's rows vanish while it is held). Mutants that skip the sweep or
+  let it delete an event-touched row fail the `delete` and `insert-event`
+  histories. On-demand reload replays partial subset pages, which cannot say
+  a row is gone; that limit has no lane. Two histories make this limit
   executable; they do not claim it is the right product behavior. They pin
   one stream end followed by one change and one load. A page whose newer
   event never arrives because the stream ended keeps the value the fence

@@ -2,7 +2,6 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { createOracleReach } from './oracle-reach.js'
@@ -3056,8 +3055,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(loads).toEqual([])
       expect.soft(observed).toEqual([expect.any(Promise)])
 
-      // The initial error is final for this attempt.
-      expect(() => recover()).toThrow(InvalidCollectionStatusTransitionError)
+      // The initial error is final for this attempt: its markReady() does
+      // nothing (maintainer decision).
+      expect(() => recover()).not.toThrow()
       await flushPromises()
       expect(collection.status).toBe(`error`)
       expect(loads).toEqual([])
@@ -3293,7 +3293,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
 
     fail(new Error(`initial sync failed`))
-    expect(() => markReady()).toThrow(InvalidCollectionStatusTransitionError)
+    // The initial error is final for this attempt: its markReady() does
+    // nothing (maintainer decision).
+    expect(() => markReady()).not.toThrow()
     subscription.requestSnapshot({ where })
     await flushPromises()
 
@@ -3390,7 +3392,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(collection.status).toBe(`error`)
       expect.soft(loads.map(({ where }) => where)).toEqual([oldWhere])
 
-      expect(() => markReady()).toThrow(InvalidCollectionStatusTransitionError)
+      expect(() => markReady()).not.toThrow()
       expect(collection.status).toBe(`error`)
 
       // A restart begins a new attempt, which acquires the surviving demand.

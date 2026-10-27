@@ -93,7 +93,8 @@ type CollectionSubscriptionOptions = {
 }
 
 type TruncateReplayPublicationControl = Readonly<{
-  start: () => void
+  // `retired`: a reload retired the sync run and no truncate came.
+  start: (retired: boolean) => void
   succeed: () => void
   // The replay could not load every active demand again; a live query
   // reports each failure on its node, in failure order.
@@ -223,9 +224,6 @@ export class CollectionSubscription
   // One replay state owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplayState: TruncateReplayState | undefined
-  // The reload that last retired the sync run started this subscription's
-  // replay; that reload's own truncate does not start another.
-  private reloadReplayed = false
   private replacements = 0
   private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
@@ -285,20 +283,13 @@ export class CollectionSubscription
           return true
         }
 
-    // Listen for truncate events to re-request data after must-refetch
-    // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
-    // We need to re-request all previously loaded subsets to repopulate the data.
-    this.truncateCleanup = this.collection.on(`truncate`, () => {
-      // A reload that replays on-demand demand started its replay when it
-      // retired the run, and its own first-commit truncate is part of that
-      // replay. Every other truncate replays again.
-      const reloadTruncate = this.collection._state.isEmittingReloadTruncate()
-      if (reloadTruncate && this.reloadReplayed) {
-        this.reloadReplayed = false
-        return
-      }
-      this.handleTruncate()
-    })
+    // A truncate or a snapshot (for example a 409 must-refetch) clears every
+    // row, so every one re-requests the loaded subsets, also one that a
+    // reload's new run sends after the reload's replay began or settled: the
+    // replacement deleted what that replay loaded.
+    this.truncateCleanup = this.collection.on(`truncate`, () =>
+      this.handleTruncate(),
+    )
     this.collectionCleanup = this.collection._onCleanupStart(() => {
       this.handleCollectionCleanup()
     })
@@ -351,22 +342,16 @@ export class CollectionSubscription
 
   /**
    * @internal A reload retired the sync run. Its demand detaches from the
-   * retired run. A live query's on-demand demand replays through the new run
-   * at once, as after a truncate, so a consumer of an aborted load follows
-   * that replay. Every other subscription keeps its rows published until the
-   * reload's first commit truncates them, and replays then.
+   * retired run, and on-demand demand replays through the new run at once,
+   * as after a truncate, so a consumer of an aborted load follows that
+   * replay. The rows stay: the new run's writes apply on them.
    */
   public retireSyncRun(): void {
-    // A subscription that buffers a private replacement would publish it
-    // before the reload's truncate applies; it replays at that truncate.
-    this.reloadReplayed =
-      this.options.truncateReplayPublication !== undefined &&
-      this.replaysDemand() &&
-      this.subsetDemands.length > 0
+    const replays = this.replaysDemand() && this.subsetDemands.length > 0
     // The replacement stays pending from the old replay to the new one, so
     // nothing that runs during the detach sees a settled source.
-    this.handleCollectionCleanup(true, this.reloadReplayed)
-    if (this.reloadReplayed) this.handleTruncate()
+    this.handleCollectionCleanup(true, replays)
+    if (replays) this.handleTruncate(true)
   }
 
   /** Whether a truncate acquires this subscription's demand again. */
@@ -379,18 +364,23 @@ export class CollectionSubscription
     )
   }
 
-  /** Detach logical demand from work owned by a discarded sync run. */
+  /**
+   * Detach logical demand from work owned by a discarded sync run. A reload
+   * keeps waiting callers for its replay, and the rows.
+   */
   private handleCollectionCleanup(
-    keepWaitingCallers = false,
+    reload = false,
     holdReplacement = false,
   ): void {
     this.discardTruncateReplay()
     this.truncateReplacementPending = holdReplacement
-    this.stalePublishedRows = new Map(this.publishedRows)
+    // Cleanup discards the rows without publishing deletes, so the published
+    // rows go stale. A reload keeps the rows: only rows already stale stay so.
+    if (!reload) this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
 
     for (const demand of [...this.subsetDemands]) {
-      if (!keepWaitingCallers || demand.acquisitionState === `starting`) {
+      if (!reload || demand.acquisitionState === `starting`) {
         demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
       }
       cancelAcquisition(demand.acquisition)
@@ -477,10 +467,11 @@ export class CollectionSubscription
    * A failed replay keeps the last published snapshot private until a later
    * authoritative replay succeeds.
    */
-  private handleTruncate() {
+  private handleTruncate(retired = false) {
     this.replacements++
-    // A reload's truncate can apply inside the new run's `sync()`, before it
-    // returns its loader; the requests below start after it has.
+    // A reload's replay, or a snapshot, can start inside the new run's
+    // `sync()`, before it returns its loader; the requests below start after
+    // it has.
     const demandsToReload = this.replaysDemand() ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
@@ -516,7 +507,7 @@ export class CollectionSubscription
 
     if (this.options.truncateReplayPublication) {
       this.truncateReplacementPending = true
-      this.options.truncateReplayPublication.start()
+      this.options.truncateReplayPublication.start(retired)
     }
 
     // A newer replay replaces every prior acquisition for these demands. Abort

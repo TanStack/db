@@ -604,8 +604,11 @@ class PooledLiveQuery {
     registerPooledSource(this, source)
   }
 
+  // Cleanup discards a view's state, as it does any Collection's (law 14).
   get status(): CollectionStatus {
-    return this.partition.terminated ?? this.source.status
+    return this.released
+      ? `cleaned-up`
+      : (this.partition.terminated ?? this.source.status)
   }
 
   private endedProblem: HealthProblem | undefined
@@ -650,15 +653,18 @@ class PooledLiveQuery {
     return this.partition.peek(this.groupKey)
   }
 
+  // A cleaned-up view's revisions never match a group's, which start at 0,
+  // so a reader that cached its rows reads them again.
   get _stateRevision(): number {
-    return this.group.revision
+    return this.released ? -1 : this.group.revision
   }
 
   get _layoutRevision(): number {
-    return this.group.layoutRevision
+    return this.released ? -1 : this.group.layoutRevision
   }
 
   entries(): Iterable<[string | number, Row]> {
+    if (this.released) return []
     const rows = this.group.rows.entries()
     const passes = this.passes
     return passes ? [...rows].filter(([, row]) => passes(row)) : rows
@@ -756,7 +762,12 @@ class PooledLiveQuery {
 
   cleanup(options?: { dependents?: boolean }): Promise<void> {
     const cleanup = this.collection?.cleanup(options) ?? Promise.resolve()
-    if (!this.released) {
+    // A cleanup that a live query reading the built Collection refuses
+    // changes nothing (law 14): the view keeps its share of the partition.
+    if (
+      !this.released &&
+      (this.collection?._lifecycle.hasStartedCleanup() ?? true)
+    ) {
       this.released = true
       this.partition.releaseView()
     }

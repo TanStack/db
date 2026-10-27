@@ -32,7 +32,6 @@ import type {
   Context,
   DbClient,
   GetResult,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -314,13 +313,6 @@ export function prepareDerivedQuery(
   }
 }
 
-/** Status and error fields every `useLiveQuery` result has. */
-type UseLiveQueryFlags = LiveQueryStatusFlags & {
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: boolean
-  health: HealthNode | undefined
-}
-
 /**
  * Create a live query using a query function.
  * @param queryFn - Query function that defines what data to fetch
@@ -400,7 +392,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isEnabled: true // Always true if always returns QueryBuilder
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 2: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -414,7 +406,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isEnabled: boolean
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 3: Accept query function that can return LiveQueryCollectionConfig
 export function useLiveQuery<TContext extends Context>(
@@ -428,7 +420,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isEnabled: boolean
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 4: Accept query function that can return Collection
 export function useLiveQuery<
@@ -446,7 +438,7 @@ export function useLiveQuery<
   collection: Collection<TResult, TKey, TUtils> | undefined
   status: UseLiveQueryStatus
   isEnabled: boolean
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 5: Accept query function that can return all types
 export function useLiveQuery<
@@ -474,7 +466,7 @@ export function useLiveQuery<
     | undefined
   status: UseLiveQueryStatus
   isEnabled: boolean
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 /**
  * Create a live query using configuration object
@@ -520,7 +512,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled when query always returns a builder
   isEnabled: true // Always true when query always returns a builder
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 7: Accept config object with a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -531,7 +523,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isEnabled: boolean
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 8: Accept config object with legacy deps
 export function useLiveQuery<TContext extends Context>(
@@ -543,7 +535,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled when query always returns a builder
   isEnabled: true // Always true when query always returns a builder
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 9: Accept config object with legacy deps and a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -555,7 +547,7 @@ export function useLiveQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isEnabled: boolean
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 /**
  * Subscribe to an existing live query collection
@@ -599,7 +591,7 @@ export function useLiveQuery<
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isEnabled: true // Always true for pre-created live query collections
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 10: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -614,7 +606,7 @@ export function useLiveQuery<
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isEnabled: true // Always true for pre-created live query collections
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(

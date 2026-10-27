@@ -6130,12 +6130,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  // A sync adapter that gives up after Collection readiness sets the
-  // Collection's `crashed`, and the sync run continues. A later persistence failure
-  // must still crash the Collection, so the first-error latch may hold only
-  // failures that end the sync run.
+  // An adapter's unloadSubset that rejects broke its contract. Core reports a
+  // throwing unloadSubset uncaught and fails no load, replay, or caller
+  // (subscription.ts, releaseAcquisition); the wrapper forwards the call as
+  // core makes it, so a rejection surfaces uncaught once and changes neither
+  // the status nor the node, whether or not the sync adapter gave up first.
+  // The supplemental witness for the persisted sync-run oracle's
+  // `unload-reject` site.
   it.each([false, true])(
-    `reports one fail-stop lifecycle error when a single-process async unload rejects (sync adapter gave up first: %s)`,
+    `reports a single-process async unload rejection uncaught without changing the Collection (sync adapter gave up first: %s)`,
     async (gaveUpFirst) => {
       const unloadError = new Error(`remote owner unload failed`)
       const gaveUp = new Error(`sync adapter gave up`)
@@ -6182,6 +6185,19 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const unhandled: Array<unknown> = []
       const captureUnhandled = (error: unknown) => unhandled.push(error)
       process.on(`unhandledRejection`, captureUnhandled)
+      const uncaught: Array<unknown> = []
+      const queue = globalThis.queueMicrotask.bind(globalThis)
+      const microtasks = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((task) =>
+          queue(() => {
+            try {
+              task()
+            } catch (error) {
+              uncaught.push(error)
+            }
+          }),
+        )
 
       try {
         collection.startSyncImmediate()
@@ -6200,26 +6216,31 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
         expect({
           status: collection.status,
-          error: collection._lifecycle.getSyncError(),
+          error: collection.health.error?.cause,
+          failureReason: collection.health.failureReason,
           unloadThenCalls,
           unloadOptions: sourceUnloadMock.mock.calls.map(
             ([options]) => options,
           ),
           lifecycleErrors: crash.mock.calls.map(([error]) => error),
+          uncaught,
           unhandled,
         }).toEqual({
-          status: `crashed`,
-          error: unloadError,
+          status: `ready`,
+          error: gaveUpFirst ? gaveUp : undefined,
+          failureReason: null,
           unloadThenCalls: 1,
           unloadOptions: [failing, sibling],
-          lifecycleErrors: [unloadError],
+          lifecycleErrors: [],
+          uncaught: [unloadError],
           unhandled: [],
         })
 
         await flushAsyncWork()
         expect(sourceUnloadMock).toHaveBeenCalledTimes(2)
-        expect(crash).toHaveBeenCalledTimes(1)
+        expect(crash).not.toHaveBeenCalled()
       } finally {
+        microtasks.mockRestore()
         process.off(`unhandledRejection`, captureUnhandled)
         await collection.cleanup()
       }
@@ -26659,7 +26680,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * arrived while the reacquisitions were settling. If any fails, the
    * follower stays in scoped recovery, shows no row from the incomplete
    * generation, and the source reports the failure as soon as that
-   * reacquisition settles.
+   * reacquisition settles. A reacquisition is a remote request, so the
+   * failure is the ready source's failure reason (`reportError()`: the source
+   * keeps syncing), never a crash; a crash is only for local storage or an
+   * internal invariant (glossary "crash"; maintainer decision for PR #2168).
    *
    * A demand that the caller releases or aborts while it reacquires no longer
    * needs the new generation's rows: its aborted ensure is neither a failure
@@ -26717,7 +26741,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     rows: Record<`a` | `b` | `c`, number | undefined>
     // The new demand's load, when the history has one.
     newLoad?: `pending` | `fulfilled` | `rejected`
-    status: `crashed` | `healthy`
+    // `retrying`: ready, with a failure reason.
+    status: `crashed` | `retrying` | `healthy`
   }
   const expectedReacquisition = (
     history: RotatedReacquisitionHistory,
@@ -26748,7 +26773,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 : (`rejected` as const),
           }
         : {}),
-      status: failed ? `crashed` : `healthy`,
+      status: failed ? `retrying` : `healthy`,
     }
   }
 
@@ -26925,6 +26950,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         sync: {
           sync: (params) => {
             sourceParams = params
+            // A ready source: only a ready Collection can carry the failed
+            // reacquisition as its failure reason.
+            params.markReady()
             return {
               loadSubset: () => Promise.resolve(),
               restartAfterScopedRecovery: () => {},
@@ -26942,7 +26970,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         c: source.get(`c-row`)?.v,
       },
       ...(history.newDemand ? { newLoad } : {}),
-      status: source.status === `crashed` ? `crashed` : `healthy`,
+      status:
+        source.status === `crashed`
+          ? `crashed`
+          : source.health.failureReason
+            ? `retrying`
+            : `healthy`,
     })
     const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
     const settle = async () => {

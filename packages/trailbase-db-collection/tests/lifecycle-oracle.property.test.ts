@@ -1319,6 +1319,110 @@ it.each([`listens`, `rejects`] as const)(
 )
 
 /**
+ * ## Does a reload of a ready Collection end with the service's rows?
+ *
+ * Law (the reload contract, maintainer decision F19): a reload keeps the rows
+ * on screen until it completes. The new run's writes apply on the kept rows,
+ * and only a snapshot or the run's own truncate replaces them; a run that
+ * sends neither completes the reload at its `markReady()`. Once the reload
+ * settles, an eager Collection holds the service's current rows, so a row
+ * the service deleted between the runs is gone.
+ *
+ * Reference: the service is a key/value relation that `list` reads at the
+ * moment it is called, in key order, 256 rows to a page with a cursor. The
+ * expected rows never come from the adapter.
+ *
+ * Grammar (exhaustive, 10 histories): the service holds 3 rows (one page)
+ * or 258 rows (two pages); between the runs it changes nothing, updates row
+ * 1, deletes row 2, or inserts a new row; or, while the reload's last page
+ * is held, it inserts a new row that page does not list and the listener
+ * delivers its `Insert` event (`insert-event`). Checkpoints: while the
+ * reload's last page is held, every row the Collection showed before the
+ * reload that the service still has is still shown, and the reload has not
+ * settled; after the page is released, the reload resolves, the status is
+ * `ready`, and the rows equal the service's.
+ */
+it.each(
+  [3, 258].flatMap((size) =>
+    ([`none`, `update`, `delete`, `insert`, `insert-event`] as const).map(
+      (change) => ({
+        size,
+        change,
+      }),
+    ),
+  ),
+)(
+  `a reload of a ready eager Collection over $size rows ends with the service's rows after a $change`,
+  async ({ size, change }) => {
+    const service = new Map<number, RaceRow>()
+    for (let id = 1; id <= size; id++) service.set(id, { id, data: `v1` })
+    const api = new MockRecordApi<RaceRow>()
+    let listener: WritableStreamDefaultWriter<Event> | undefined
+    api.subscribe.mockImplementation(() => {
+      const stream = new TransformStream<Event>()
+      listener = stream.writable.getWriter()
+      return Promise.resolve(stream.readable)
+    })
+    let holdLastPage: Promise<void> | undefined
+    api.list.mockImplementation(async (options) => {
+      const after = Number(options?.pagination?.cursor ?? 0)
+      const records = [...service.values()]
+        .sort((a, b) => a.id - b.id)
+        .filter((row) => row.id > after)
+        .slice(0, 256)
+      if (records.length < 256) await holdLastPage
+      return { records, cursor: String(records.at(-1)?.id ?? after) }
+    })
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi: api,
+        getKey: (row: RaceRow) => row.id,
+        startSync: true,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    try {
+      await collection.preload()
+      const before = sortedRows(collection.toArray)
+      expect(before).toEqual(sortedRows(service.values()))
+
+      if (change === `update`) service.set(1, { id: 1, data: `v2` })
+      else if (change === `delete`) service.delete(2)
+      else if (change === `insert`)
+        service.set(size + 1, { id: size + 1, data: `v1` })
+
+      let releaseLastPage!: () => void
+      holdLastPage = new Promise((resolve) => (releaseLastPage = resolve))
+      const reload = observe(collection.reload())
+      await turn()
+      if (change === `insert-event`) {
+        const row = { id: size + 1, data: `v1` }
+        service.set(row.id, row)
+        await listener!.write({ Insert: row })
+        await turn()
+      }
+      const shown = new Set(collection.toArray.map((row) => row.id))
+      expect(
+        before.filter((row) => service.has(row.id) && !shown.has(row.id)),
+        `kept rows the service still has stay while the reload runs`,
+      ).toEqual([])
+      expect(reload.result).toBe(`pending`)
+
+      releaseLastPage()
+      for (let i = 0; i < 5 && reload.result === `pending`; i++) await turn()
+      expect(reload.result).toBe(`fulfilled`)
+      expect(collection.status).toBe(`ready`)
+      expect(sortedRows(collection.toArray)).toEqual(
+        sortedRows(service.values()),
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
+
+/**
  * ## Do several pages, several changes, and overlapping loads still converge?
  *
  * Law: the same one as the page-event lane. Once every page and every change

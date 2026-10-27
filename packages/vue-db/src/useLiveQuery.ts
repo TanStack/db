@@ -27,6 +27,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryHookConfig,
   LiveQueryObserver,
+  LiveQueryStatusFlags,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -53,20 +54,11 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isLoadingError - True when the first load failed
  * @property isCleanedUp - True when query has been cleaned up
  */
-/** Status, persistence, and error refs every `useLiveQuery` result has. */
-export interface UseLiveQueryFlags {
+/** The status and flag refs every `useLiveQuery` result has. */
+export type UseLiveQueryFlags = {
   status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  isIdle: ComputedRef<boolean>
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: ComputedRef<boolean>
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: ComputedRef<boolean>
-  health: ComputedRef<HealthNode | undefined>
+} & {
+  [K in keyof LiveQueryStatusFlags]: ComputedRef<LiveQueryStatusFlags[K]>
 }
 
 export interface UseLiveQueryReturn<
@@ -380,6 +372,7 @@ export function useLiveQuery(
     collection.value ? collection.value.status : (`disabled` as const),
   )
   const health = shallowRef<HealthNode | undefined>(undefined)
+  const isSyncError = ref(false)
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -389,6 +382,7 @@ export function useLiveQuery(
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
     health.value = snapshot.health
+    isSyncError.value = snapshot.isSyncError
     internalData.value = snapshotRows(snapshot.data)
   }
 
@@ -411,6 +405,7 @@ export function useLiveQuery(
     if (!currentCollection) {
       status.value = `disabled` as const
       health.value = undefined
+      isSyncError.value = false
       return
     }
 
@@ -473,9 +468,7 @@ export function useLiveQuery(
     isLoadingError: computed(() => status.value === `error`),
     isCrashed: computed(() => status.value === `crashed`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
-    isSyncError: computed(
-      () => status.value === `ready` && health.value?.hasErrors === true,
-    ),
+    isSyncError: computed(() => isSyncError.value),
     health: computed(() => health.value),
   }
 }

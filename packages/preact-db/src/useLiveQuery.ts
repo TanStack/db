@@ -14,7 +14,6 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
@@ -69,24 +68,13 @@ export type ConditionalUseLiveQueryConfig<TContext extends Context> =
         ) => ConfiguredQueryBuilder<TContext> | undefined | null)
   }
 
-/** Status and error fields every `useLiveQuery` result has. */
-interface LiveQueryResultFlags extends LiveQueryStatusFlags {
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: boolean
-  /**
-   * The health tree for the query and every Collection it depends on, or
-   * `undefined` for a disabled query.
-   */
-  health: HealthNode | undefined
-}
-
 /** The result of a live query that is always enabled. */
 export interface UseLiveQueryResult<
   TResult extends object,
   TKey extends string | number,
   TData,
   TCollection,
-> extends LiveQueryResultFlags {
+> extends LiveQueryStatusFlags {
   state: ReadonlyMap<TKey, TResult>
   data: TData
   collection: TCollection
@@ -100,7 +88,7 @@ export interface UseConditionalLiveQueryResult<
   TKey extends string | number,
   TData,
   TCollection,
-> extends LiveQueryResultFlags {
+> extends LiveQueryStatusFlags {
   state: ReadonlyMap<TKey, TResult> | undefined
   data: TData | undefined
   collection: TCollection | undefined

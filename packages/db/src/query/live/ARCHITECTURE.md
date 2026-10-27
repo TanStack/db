@@ -1807,10 +1807,17 @@ every row before the top-K (a recorded limit).
     load or a root Collection's load that fails after initial-query readiness
     is an `error` on the query's own node. A lazy demand's error clears when
     that demand settles or is released; a root Collection's error clears when
-    a later load of that Collection settles. A source reload starts a live
-    query's replay when it retires the sync run, as a truncate does. A
-    direct subscriber or an Effect keeps its rows until the reload's first
-    commit truncates them, and replays then. The replay decides every load
+    a later load of that Collection settles. A source reload starts the
+    replay of every subscription's on-demand demand (a live query's, an
+    Effect's, or a direct subscriber's) when it retires the sync run, as a
+    truncate does, and the rows stay: the new run's writes apply on them.
+    Only the new run's snapshot (`begin({ snapshot: true })`) or its own
+    `truncate()` replaces them, and that replacement replays the demand
+    again, also after the reload's replay settled. A live query's own reload
+    keeps its rows and its node until its new run's graph result is
+    complete (law 9), then commits that result as its snapshot; the node
+    then drops the retired run's request errors and keeps the new run's.
+    The replay decides every load
     it replaces: a replaced load's own outcome decides
     nothing, even when it settles after the replay. A load that fails while
     the replay is in flight fails with its own error once the replay

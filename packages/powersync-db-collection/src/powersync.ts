@@ -424,6 +424,9 @@ function createPowerSyncCollectionConfig<
       async function createDiffTrigger(
         options: {
           setupContext?: LockContext
+          // The load reads every row and replaces the rows the Collection
+          // holds.
+          snapshot?: boolean
           when: Record<DiffTriggerOperation, string>
           writeType: (rowId: string) => OperationType
           batchQuery: (
@@ -434,7 +437,7 @@ function createPowerSyncCollectionConfig<
         },
         appliedReceipts: Array<SyncAppliedReceipt>,
       ) {
-        const { setupContext, when, writeType, batchQuery } = options
+        const { setupContext, snapshot, when, writeType, batchQuery } = options
 
         return await database.triggers.createDiffTrigger({
           source: viewName,
@@ -444,10 +447,14 @@ function createPowerSyncCollectionConfig<
           when,
           hooks: {
             beforeCreate: async (context) => {
+              // A load of every row is one snapshot transaction: during a
+              // reload it replaces the kept rows, so a row the table no
+              // longer has goes. A subset load commits each batch.
+              if (snapshot) begin({ snapshot })
               let currentBatchCount = syncBatchSize
               let cursor = 0
               while (currentBatchCount == syncBatchSize) {
-                begin()
+                if (!snapshot) begin()
 
                 const batchItems = await batchQuery(
                   context,
@@ -462,8 +469,9 @@ function createPowerSyncCollectionConfig<
                     value: deserializeSyncRow(row),
                   })
                 }
-                appliedReceipts.push(commit())
+                if (!snapshot) appliedReceipts.push(commit())
               }
+              if (snapshot) appliedReceipts.push(commit())
               database.logger.log({
                 level: LogLevels.info,
                 message: `Sync is ready for ${viewName} into ${trackedTableName}`,
@@ -612,6 +620,9 @@ function createPowerSyncCollectionConfig<
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
             {
+              // When the Collection holds rows, such as a reload's kept rows,
+              // the load of every row replaces them.
+              snapshot: !collection._state.acceptedSyncedEntries().next().done,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,
                 [DiffTriggerOperation.UPDATE]: `TRUE`,

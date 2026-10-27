@@ -376,6 +376,69 @@ describe(`Sync Streams`, () => {
     },
   )
 
+  // Receiving witness for the reload law (owner: the source-health oracle;
+  // maintainer decision F19): a reload keeps the rows on screen until it
+  // completes and then ends with the table's current rows. The reload's
+  // load hook is held, and while it is held the table changes: an update, a
+  // delete, and an insert. The retired run no longer applies them, so only
+  // the new run's initial load can. Until the hook resolves the rows stay;
+  // after the reload they equal the table, so the deleted row is gone. A
+  // batch size of 2 spreads the initial load over three batches.
+  it(`eager mode: a reload of a ready Collection keeps its rows and ends with the table`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    let holdLoad: Promise<void> | undefined
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncBatchSize: 2,
+        onLoad: () => holdLoad,
+      }),
+    )
+    const rows = () =>
+      new Map(collection.toArray.map((row) => [row.id, row.name]))
+    const table = async () =>
+      new Map(
+        (
+          await db.getAll<{ id: string; name: string }>(
+            `SELECT id, name FROM products`,
+          )
+        ).map((row) => [row.id, row.name]),
+      )
+    try {
+      await collection.preload()
+      const before = rows()
+      expect(before).toEqual(await table())
+
+      let releaseLoad!: () => void
+      holdLoad = new Promise((resolve) => (releaseLoad = resolve))
+      let settled = false
+      const reload = collection.reload().then(() => (settled = true))
+      await db.execute(`UPDATE products SET name = 'Edited' WHERE name = ?`, [
+        `Product A`,
+      ])
+      await db.execute(`DELETE FROM products WHERE name = ?`, [`Product B`])
+      await db.execute(
+        `INSERT INTO products (id, name, price, category) VALUES (uuid(), 'Product F', 1, 'new')`,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(rows(), `the rows stay until the new run loads`).toEqual(before)
+      expect(settled).toBe(false)
+
+      releaseLoad()
+      await Promise.race([
+        reload,
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ])
+      expect(settled).toBe(true)
+      expect(collection.status).toBe(`ready`)
+      expect(rows()).toEqual(await table())
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`eager mode: releases a load hook that resolves after cleanup`, async () => {
     const db = await createDatabase()
     const releaseLoad = pDefer<void>()

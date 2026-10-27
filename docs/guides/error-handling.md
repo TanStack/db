@@ -407,16 +407,23 @@ const { data, health, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
 
 ### Reloading
 
-`collection.reload()` starts a new sync run for a Collection. It works like a
-sync-side truncate: nothing visible changes until the new run's first commit.
+`collection.reload()` starts a new sync run for a Collection. Nothing
+visible changes until the reload completes.
 
 - The current rows, `status`, and any `error` stay on screen. The node shows
   `reloading: true`.
-- When the new run commits, its rows replace the old rows in one change, and
-  the node's problem clears. A Collection in `error` becomes `ready` when the
-  new run calls `markReady()`.
+- The new run's writes apply on the rows the Collection keeps. The new run
+  replaces every row only with a snapshot, a transaction its sync adapter
+  begins with `begin({ snapshot: true })`, or with the adapter's own
+  `truncate()`. Then the new rows replace the old rows in one change.
+- The reload completes when that replacement applies, or when the new run
+  calls `markReady()`. A reload without a snapshot keeps the rows. At
+  completion the node drops the old run's problems. A Collection in `error`
+  becomes `ready` when the new run calls `markReady()`.
 - If the new run fails, the old rows and status stay, the node shows the new
   `error`, and the `reload()` promise rejects.
+- A live query's own reload keeps its rows until its new run has a complete
+  result, then shows that result in one change.
 
 On a live query, `reload()` reloads each of its sources that has an `error`,
 then the query itself if its own node has an `error`: its first load failed,
@@ -483,6 +490,16 @@ syncs. By default it becomes `ready` only through its sync adapter. With
 make it `ready` once the deadline passes or the remote fails its first load. An
 empty restore keeps it `loading`, and a failed restore crashes it. See
 [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore).
+
+Only a local storage failure crashes a persisted Collection. A remote subset
+request that the persistence layer makes for the sync adapter can also fail:
+acquiring, releasing, refreshing, or reacquiring a subset through the
+coordinator. The source keeps syncing, so on a `ready` Collection the failure
+shows as `health.failureReason`, and the status and rows do not change. Before
+the first ready it is only logged, and a load that waited on the request
+rejects with its error. An `unloadSubset` that throws or rejects is reported
+uncaught, as it is without persistence. After `reload()`, a late failure of
+the retired sync run's requests does not reach the new run.
 
 ### Effects
 
@@ -562,7 +579,9 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
   let ready = false
   const stream = connect({
     onData: (rows) => {
-      begin()
+      // The run's first batch is all of its rows: a snapshot replaces
+      // the rows that a reload keeps.
+      begin(ready ? undefined : { snapshot: true })
       rows.forEach((row) => write({ type: "insert", value: row }))
       commit()
       if (ready) reportHealthy()
@@ -581,9 +600,9 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 - Retry inside the first load before calling `fail`. While you retry before
   the first ready, call nothing; the Collection stays `loading`.
 - These calls follow the Collection's state machine, and a call that does not
-  fit it throws: `reportError` or `reportHealthy` before the first ready,
-  `markReady` after a failed first load, and any call after `fail`. Calls
-  after a crash do nothing. `reportHealthy` when nothing is wrong changes
+  fit it throws: `reportError` or `reportHealthy` before the first ready, or
+  after `fail`. `markReady` after the run is ready, or after its `fail`, does
+  nothing. Calls after a crash do nothing. `reportHealthy` when nothing is wrong changes
   nothing, so you can call it after every commit.
 - When several parts of your source can fail at the same time, such as
   separate requests, report each part's own error and call
@@ -595,6 +614,13 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 - Keep the run's readiness in your `sync` function, as `ready` above does.
   Do not read `collection.status` to learn whether this run is ready: during
   a reload it still shows the previous run's status.
+- During a reload, your `sync` function runs again while the Collection still
+  holds the previous run's rows. Send the new run's full state as one
+  snapshot (`begin({ snapshot: true })`), or write against the kept rows:
+  `update` a row the Collection holds, `delete` a row that is gone, then call
+  `markReady()`. An `insert` of a kept row with a different value throws. An
+  on-demand Collection's `loadSubset` result is partial, so never mark it as
+  a snapshot.
 
 ### Migrating
 
@@ -607,6 +633,9 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 | node `phase`, `final`, `isError` | node `failureReason` or `error` |
 | node `instances` | removed |
 | `cleanup()` then `preload()` to recover | `reload()` |
+| `begin({ direct: true })` | `begin()`: every write applies on the kept rows |
+| a reload's first commit replaced every row | `begin({ snapshot: true })` or `truncate()` replaces them |
+| `markReady()` after `fail()` threw | it does nothing |
 | `cleanup()` with live queries mounted | rejects; unmount first or `cleanup({ dependents: true })` |
 | `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()` | `status` and `health` |
 | query-db `utils.lastError`, `isError`, `errorCount`, `clearError()` | `health`, `reload()` |
@@ -724,7 +753,17 @@ and the transaction remains completed. This is not a persistence failure.
 
 ### Invalid Collection State
 
-Collections in an `error` state, after an initial error or a crash, cannot perform operations and must be restarted:
+A Collection whose first load failed (status `error`) or that crashed (status
+`crashed`) rejects writes with `CollectionInErrorStateError`. Recover by
+status:
+
+- `error`: call `reload()`. It starts a new sync run, and live queries over the
+  Collection follow it. See [Reloading](#reloading).
+- `crashed`: a crash cannot be recovered in place, and `reload()` rejects.
+  Clean up the Collection together with everything that reads from it, then
+  start it again. Plain `cleanup()` rejects with `CollectionHasSubscribersError`
+  while a live query or an Effect reads the Collection. See
+  [When a Collection crashes](#when-a-collection-crashes).
 
 ```ts
 import { CollectionInErrorStateError } from "@tanstack/db"
@@ -733,18 +772,19 @@ try {
   todoCollection.insert(newTodo)
 } catch (error) {
   if (error instanceof CollectionInErrorStateError) {
-    // Collection needs to be cleaned up and restarted
-    await todoCollection.cleanup()
-    await todoCollection.preload()
-    
+    if (todoCollection.status === "crashed") {
+      // Ends its live queries and Effects first; mount them again afterward.
+      await todoCollection.cleanup({ dependents: true })
+      await todoCollection.preload() // a fresh start
+    } else {
+      await todoCollection.reload() // the first load failed: try again
+    }
+
     // Now retry the operation
     todoCollection.insert(newTodo)
   }
 }
 ```
-
-If a live query depends on this Collection, restart both Collections as shown
-in [Collection Cleanup and Restart](#collection-cleanup-and-restart).
 
 ### Missing Mutation Handlers
 

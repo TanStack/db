@@ -10,6 +10,7 @@ import { ReactiveMap } from '@solid-primitives/map'
 import {
   BaseQueryBuilder,
   createLiveQueryObserver,
+  getLiveQueryStatusFlags,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
@@ -41,13 +42,6 @@ type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
     ? InferResultType<TContext> | []
     : InferResultType<TContext>
-
-/** Status and error fields every `useLiveQuery` result has. */
-type UseLiveQueryFlags = LiveQueryStatusFlags & {
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: boolean
-  health: HealthNode | undefined
-}
 
 /**
  * Create a live query using a query function
@@ -131,7 +125,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -147,7 +141,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 /**
  * Create a live query using configuration object
@@ -201,7 +195,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 /**
  * Subscribe to an existing live query collection
@@ -256,7 +250,7 @@ export function useLiveQuery<
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -276,7 +270,7 @@ export function useLiveQuery<
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus
-} & UseLiveQueryFlags
+} & LiveQueryStatusFlags
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
@@ -340,6 +334,7 @@ export function useLiveQuery(
     },
   )
   const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
+  const [isSyncError, setSyncError] = createSignal(false)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -404,6 +399,12 @@ export function useLiveQuery(
       }
       setStatus(currentCollection.status)
       setHealth(currentCollection.health)
+      setSyncError(
+        getLiveQueryStatusFlags(
+          currentCollection.status,
+          currentCollection.health,
+        ).isSyncError,
+      )
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWait = {
@@ -439,6 +440,7 @@ export function useLiveQuery(
         if (generation !== resourceGeneration) return data
         // A crashed Collection also rejects preload; keep its crash visible.
         setStatus(currentCollection.status === `crashed` ? `crashed` : `error`)
+        setSyncError(false)
         throw toBoundaryError(error)
       }
       if (generation !== resourceGeneration) {
@@ -453,6 +455,12 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         setStatus(currentCollection.status)
         setHealth(currentCollection.health)
+        setSyncError(
+          getLiveQueryStatusFlags(
+            currentCollection.status,
+            currentCollection.health,
+          ).isSyncError,
+        )
       })
       return data
     },
@@ -468,6 +476,7 @@ export function useLiveQuery(
     if (!currentCollection) {
       setStatus(`disabled` as const)
       setHealth(undefined)
+      setSyncError(false)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -515,6 +524,7 @@ export function useLiveQuery(
           const snapshot = observer.getSnapshot()
           setStatus(snapshot.status)
           setHealth(snapshot.health)
+          setSyncError(snapshot.isSyncError)
         })
       },
     )
@@ -530,6 +540,7 @@ export function useLiveQuery(
       const snapshot = observer.getSnapshot()
       setStatus(snapshot.status)
       setHealth(snapshot.health)
+      setSyncError(snapshot.isSyncError)
     })
 
     onCleanup(() => {
@@ -607,7 +618,7 @@ export function useLiveQuery(
     },
     isSyncError: {
       get() {
-        return status() === `ready` && health()?.hasErrors === true
+        return isSyncError()
       },
     },
     health: {

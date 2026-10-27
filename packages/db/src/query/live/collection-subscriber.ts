@@ -1,5 +1,6 @@
 import { normalizeExpressionPaths } from '../compiler/expressions.js'
 import { LoadOrder } from '../../collection/lifecycle.js'
+import { LoadSubsetOperationAbortedError } from '../../errors.js'
 import { OrderedSourceLoader } from './ordered-source-loader.js'
 import {
   computeSubscriptionOrderByHints,
@@ -351,18 +352,39 @@ export class CollectionSubscriber<
       onLoadSubsetError,
       deferAcquisition: this.defersAcquisition(),
       owner: this.owner(),
-      truncateReplayPublication: this.truncateReplayPublicationControl(() => {
-        // Recovery favors a simple, authoritative rebuild over resuming a
-        // fragile cursor. The retained full-source demand is replayed on later
-        // truncates, so this adds at most one demand per subscription.
-        // Queue startup inside the publication barrier too: a synchronous
-        // throw establishes no acquisition for the replay to wait on.
-        const loader = this.orderedLoader
-        this.collectionConfigBuilder.trackOrderedLoadPromise(
-          Promise.resolve().then(() => loader?.loadFullSource()),
-          true,
-        )
-      }),
+      truncateReplayPublication: this.truncateReplayPublicationControl(
+        (retired) => {
+          // Recovery favors a simple, authoritative rebuild over resuming a
+          // fragile cursor. The retained full-source demand is replayed on later
+          // truncates, so this adds at most one demand per subscription.
+          // Queue startup inside the publication barrier too: a synchronous
+          // throw establishes no acquisition for the replay to wait on.
+          // A truncate resets the cursor below; a reload's replay has no
+          // truncate, and the retired run's ordered loads are obsolete.
+          const loader = this.orderedLoader
+          if (retired) loader?.resetCursor()
+          // A window move in flight follows the replay that replaces its
+          // loads: it fails when the replay fails, without advancing the
+          // window (Atomic window publication, law 16). An aborted replay
+          // decides nothing: the replay that replaced it joins the move too.
+          const replay = subscriptionHolder.current?.pendingTruncateReplacement
+          if (replay) {
+            const decided = replay.catch((error: unknown) => {
+              if (!(error instanceof LoadSubsetOperationAbortedError))
+                throw error
+            })
+            // With no move in flight, nothing waits for the verdict.
+            void decided.catch(() => undefined)
+            this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
+              decided,
+            )
+          }
+          this.collectionConfigBuilder.trackOrderedLoadPromise(
+            Promise.resolve().then(() => loader?.loadFullSource()),
+            true,
+          )
+        },
+      ),
     })
     subscriptionHolder.current = subscription
     this.registerSubscriptionCleanup(subscription)
@@ -427,14 +449,18 @@ export class CollectionSubscriber<
   }
 
   private truncateReplayPublicationControl(
-    onStart?: () => void,
+    onStart?: (retired: boolean) => void,
   ): TruncateReplayPublicationControl {
     const syncRunGeneration =
       this.collectionConfigBuilder.getSyncRunGeneration()
+    // The replay replaced a retry of a failed root load, so its verdict
+    // decides that failure too (law 16).
+    let replacedRetry = false
     return {
-      start: () => {
+      start: (retired) => {
         this.demand.startReplay()
-        onStart?.()
+        replacedRetry = this.loadOrder.replace()
+        onStart?.(retired)
       },
       succeed: () => {
         if (
@@ -459,6 +485,8 @@ export class CollectionSubscriber<
           this.collectionConfigBuilder.getSyncRunGeneration()
         )
           return
+        if (replacedRetry)
+          this.collectionConfigBuilder.settleRootLoad(this.sourceId)
         this.collectionConfigBuilder.failReplay(this.sourceId, errors)
         this.demand.failReplay()
       },

@@ -463,19 +463,12 @@ describe(`persisted readiness oracle`, () => {
 
   // The wrapper delivers the adapter's calls after startup, so a contract
   // violation cannot throw back at the adapter. It crashes the Collection
-  // with the violation as its cause, as a throwing sync function does. A
-  // throw from markReady() after a ready Collection's fail() is such a
-  // violation, not a ready effect, so it crashes too.
+  // with the violation as its cause, as a throwing sync function does.
   it.each([
     {
       violation: `reportError() before markReady()`,
       calls: [`report`] as const,
       cause: /reportError/,
-    },
-    {
-      violation: `markReady() after fail() on a ready Collection`,
-      calls: [`ready`, `fail`, `ready`] as const,
-      cause: /markReady/,
     },
   ])(`crashes on $violation`, async ({ violation, calls, cause }) => {
     const source = networkFirst(`contract-violation ${violation}`, false)
@@ -490,6 +483,25 @@ describe(`persisted readiness oracle`, () => {
       expect(source.collection.health.error?.message).toMatch(cause)
     } finally {
       consoleError.mockRestore()
+      await source.collection.cleanup({ dependents: true })
+    }
+  })
+
+  // A run's markReady() after its fail() does nothing (core API decision
+  // F18/F6): the stopped Collection stays ready with its error.
+  it(`ignores markReady() after fail() on a ready Collection`, async () => {
+    const source = networkFirst(`mark-ready-after-fail`, false)
+    try {
+      void source.collection.preload().catch(() => undefined)
+      source.restore(`empty`)
+      await vi.advanceTimersByTimeAsync(0)
+      for (const call of [`ready`, `fail`, `ready`] as const) source.call(call)
+      await vi.advanceTimersByTimeAsync(0)
+      expect({
+        status: source.collection.status,
+        error: source.collection.health.error?.message,
+      }).toEqual({ status: `ready`, error: REMOTE_FAILURE })
+    } finally {
       await source.collection.cleanup({ dependents: true })
     }
   })

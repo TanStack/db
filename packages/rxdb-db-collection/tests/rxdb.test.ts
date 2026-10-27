@@ -243,6 +243,83 @@ describe(`RxDB Integration`, () => {
       },
     )
 
+    // Receiving witness for the reload law (owner: the source-health oracle;
+    // maintainer decision F19): a reload keeps the rows on screen until it
+    // completes and then ends with the source's current rows. The first run
+    // listens to a change stream that never emits, so it misses an update, a
+    // delete, and an insert in RxDB and the Collection holds stale rows, one
+    // of them a row RxDB deleted. The reload's run listens to RxDB's own
+    // stream, and its initial fetch is held: until the fetch lands the stale
+    // rows stay; after it the rows equal RxDB's documents, so the deleted
+    // row is gone. The documents span two fetch batches.
+    it(`a reload of a ready Collection keeps its rows and ends with the documents`, async () => {
+      const db = await getDatababase(getTestData(12))
+      const rxCollection: RxCollection<TestDocType> = db.test
+      const silent = new Subject<never>()
+      const stream = vi
+        .spyOn(rxCollection, `$`, `get`)
+        .mockReturnValueOnce(silent.asObservable() as never)
+      const collection = createCollection(
+        rxdbCollectionOptions({
+          rxCollection,
+          startSync: true,
+          syncBatchSize: 10,
+        }),
+      )
+      const rows = () =>
+        new Map(collection.toArray.map((row) => [row.id, row.name]))
+      const documents = async () =>
+        new Map(
+          (await rxCollection.find().exec()).map((doc) => [doc.id, doc.name]),
+        )
+      const releaseFetch = createDeferred<void>()
+      const storageQuery = rxCollection.storageInstance.query.bind(
+        rxCollection.storageInstance,
+      )
+      let query: { mockRestore: () => void } | undefined
+      try {
+        await collection.preload()
+        // Only the first run listens to the silent stream.
+        stream.mockRestore()
+        await (await rxCollection.findOne(`1`).exec())!.incrementalPatch({
+          name: `edited`,
+        })
+        await (await rxCollection.findOne(`2`).exec())!.remove()
+        await rxCollection.insert({ id: `new`, name: `new` })
+        await flushPromises()
+        const stale = rows()
+        expect(stale.has(`2`)).toBe(true)
+        expect(stale).not.toEqual(await documents())
+
+        query = vi
+          .spyOn(rxCollection.storageInstance, `query`)
+          .mockImplementationOnce(async (preparedQuery) => {
+            await releaseFetch.promise
+            return storageQuery(preparedQuery)
+          })
+        let settled = false
+        const reload = collection.reload().then(() => (settled = true))
+        await flushPromises()
+        expect(rows(), `the rows stay until the fetch lands`).toEqual(stale)
+        expect(settled).toBe(false)
+
+        releaseFetch.resolve()
+        await Promise.race([
+          reload,
+          new Promise((resolve) => setTimeout(resolve, 500)),
+        ])
+        expect(settled).toBe(true)
+        expect(collection.status).toBe(`ready`)
+        expect(rows()).toEqual(await documents())
+      } finally {
+        releaseFetch.resolve()
+        query?.mockRestore()
+        stream.mockRestore()
+        await collection.cleanup()
+        await db.remove()
+      }
+    })
+
     it(`marks initial sync ready only after its rows are applied`, async () => {
       const db = await getDatababase([{ id: `server`, name: `Server` }])
       const rxCollection: RxCollection<TestDocType> = db.test
@@ -349,7 +426,11 @@ describe(`RxDB Integration`, () => {
         commit,
         markReady,
         fail,
-        collection: { status: `loading` },
+        // A first load: the Collection holds no synced rows.
+        collection: {
+          status: `loading`,
+          _state: { acceptedSyncedEntries: () => new Map().entries() },
+        },
       } as never)
 
       try {

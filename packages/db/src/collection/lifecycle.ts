@@ -66,17 +66,20 @@ export class CollectionLifecycleManager<
   // cannot clear the sync adapter's problem. The failure reason lists every
   // reportError() of its sync run since it began.
   private failureReason: HealthProblem | null = null
-  // A reload's new run reported the failure reason, so its first commit keeps it.
+  // A reload's new run reported the failure reason, so its completion keeps it.
   private failureReasonFromReload = false
   private stoppedError: HealthProblem | null = null
   // The cause of status `error` or `crashed`, kept so readers see the same
   // object until the sync run ends.
   private statusError: HealthProblem | null = null
   private requestErrors = new RequestErrors()
+  // A reload's new run reported the request errors, so its completion keeps
+  // them.
+  private requestErrorsFromReload = false
   // fail() ends the sync adapter's reporting for its sync run; a reload or
   // cleanup starts a new one.
   private adapterStopped = false
-  // A reload's new sync run, until its first commit or its failure.
+  // A reload's new sync run, until it completes or fails.
   private reloadRun: Deferred<void> | undefined
   // A reload is moving the Collection out of `error`.
   private recovering = false
@@ -212,17 +215,14 @@ export class CollectionLifecycleManager<
    * listeners and ready callbacks, so their writes follow it.
    */
   public markReady(beforeEffects?: () => void): void {
-    // A crash ended the sync run from core's side; the adapter is not at fault.
-    if (this.status === `crashed`) return
-    if (this.adapterStopped) {
-      // A failed first load is final for its sync run.
-      if (this.status === `error`)
-        throw new InvalidCollectionStatusTransitionError(
-          this.status,
-          `ready`,
-          this.id,
-        )
-      this.assertAdapterActive(`markReady`)
+    // A crash ended the sync run from core's side, and fail() from the
+    // adapter's: after either, and once the run is ready, markReady() does
+    // nothing.
+    if (this.status === `crashed` || this.adapterStopped) return
+    // A reload's new run is ready: the reload completes.
+    if (this.reloadRun) {
+      this.completeReload(beforeEffects)
+      return
     }
     const failure = this.applyReadyTransition(beforeEffects)
     if (!failure) return
@@ -300,7 +300,6 @@ export class CollectionLifecycleManager<
     this.adapterStopped = true
     const reload = this.reloadRun
     this.reloadRun = undefined
-    if (reload) this.sync.dropReloadReplacement()
     if (this.status === `ready`) {
       // The rows stay; a reload that failed shows its new error instead.
       this.failureReason = null
@@ -350,13 +349,15 @@ export class CollectionLifecycleManager<
     void run.promise.catch(() => undefined)
     this.reloadRun = run
     this.failureReasonFromReload = false
+    this.requestErrorsFromReload = false
     this.adapterStopped = false
     this.events.emitHealthChange()
     return run.promise
   }
 
   /**
-   * The reload's first commit replaced the rows: its problems clear, and a
+   * The reload's new run replaced the rows with a snapshot or a truncate, or
+   * marked ready: the retired run's problems clear, the new run's stay, and a
    * failed first load becomes ready.
    */
   public completeReload(beforeEffects?: () => void): void {
@@ -365,7 +366,7 @@ export class CollectionLifecycleManager<
     this.reloadRun = undefined
     if (!this.failureReasonFromReload) this.failureReason = null
     this.stoppedError = null
-    this.requestErrors = new RequestErrors()
+    if (!this.requestErrorsFromReload) this.requestErrors = new RequestErrors()
     if (this.status === `ready`) this.events.emitHealthChange()
     else {
       // A failed first load, or a reload during the first load, becomes
@@ -404,7 +405,6 @@ export class CollectionLifecycleManager<
     const run = this.reloadRun
     if (!run) return false
     this.reloadRun = undefined
-    this.sync.dropReloadReplacement()
     run.reject(error)
     return true
   }
@@ -489,6 +489,12 @@ export class CollectionLifecycleManager<
    * with each of its failures in failure order.
    */
   public reportRequestError(key: string, errors: Array<unknown>): void {
+    // A reload's new run that reports starts its own list: the retired run's
+    // request errors leave with that run.
+    if (this.reloading && !this.requestErrorsFromReload) {
+      this.requestErrors = new RequestErrors()
+      this.requestErrorsFromReload = true
+    }
     if (this.requestErrors.fail(key, errors)) this.events.emitHealthChange()
   }
 
@@ -801,53 +807,53 @@ export class CollectionLifecycleManager<
 
 /** @internal Requests that failed after initial-query readiness, by issuer. */
 export class RequestErrors {
-  // Each failed request's failures, each with the number that orders it
-  // among the failures. Two requests that failed with one error share one
-  // entry value.
-  private readonly failed = new Map<
-    string,
-    Array<[CollectionErrorInfo, number]>
+  // Each failed request's errors.
+  private readonly failed = new Map<string, Array<unknown>>()
+  // Each failure still failing, by its error, with how many failed requests
+  // list it. Two requests that failed with one error share one failure, and
+  // it keeps its place among the failures: insertion order is failure order.
+  private readonly open = new Map<
+    unknown,
+    { failure: CollectionErrorInfo; requests: number }
   >()
-  private failures = 0
   problem: HealthProblem | null = null
 
   /** Returns whether the problem changed. */
   fail(key: string, errors: Array<unknown>): boolean {
-    this.failed.delete(key)
-    // Two requests that failed with one error are one failure, and it keeps
-    // its place among the failures.
-    const entries: Array<[CollectionErrorInfo, number]> = []
-    for (const error of errors)
-      entries.push(
-        [...this.failed.values(), entries]
-          .flat()
-          .find(([failure]) => failure.cause === error) ?? [
-          describeProblem(error),
-          ++this.failures,
-        ],
-      )
-    this.failed.set(key, entries)
-    return this.show()
+    let changed = this.release(key)
+    for (const error of errors) {
+      const entry = this.open.get(error)
+      if (entry) entry.requests++
+      else {
+        this.open.set(error, { failure: describeProblem(error), requests: 1 })
+        changed = true
+      }
+    }
+    this.failed.set(key, errors)
+    return changed && this.show()
   }
 
   /** Returns whether the problem changed. */
   settle(key: string): boolean {
-    return this.failed.delete(key) && this.show()
+    return this.release(key) && this.show()
+  }
+
+  // Removes a request's failures; returns whether one stopped failing.
+  private release(key: string): boolean {
+    let changed = false
+    for (const error of this.failed.get(key) ?? []) {
+      const entry = this.open.get(error)!
+      if (--entry.requests === 0) changed = this.open.delete(error)
+    }
+    this.failed.delete(key)
+    return changed
   }
 
   // The newest failure still failing shows, and the problem lists every
-  // failure still failing, oldest first. It stays the same object until
-  // that list changes.
-  private show(): boolean {
-    const errors = [...new Set([...this.failed.values()].flat())]
-      .sort((a, b) => a[1] - b[1])
-      .map(([failure]) => failure)
-    const shown = this.problem?.errors ?? []
-    if (
-      errors.length === shown.length &&
-      errors.every((failure, index) => failure === shown[index])
-    )
-      return false
+  // failure still failing, oldest first. It is a new object only when that
+  // list changed.
+  private show(): true {
+    const errors = Array.from(this.open.values(), ({ failure }) => failure)
     this.problem = errors.length > 0 ? problemOf(errors) : null
     return true
   }
@@ -856,23 +862,40 @@ export class RequestErrors {
 /**
  * @internal Orders one source's loads: a request error clears only when a
  * load started after the failure succeeds. A load already in flight cannot
- * cover the data whose request failed.
+ * cover the data whose request failed, and a load a replay replaced decides
+ * nothing: the replay decides it (law 16).
  */
 export class LoadOrder {
   private started = 0
-  // Loads started before the latest failure; their success clears nothing.
-  private startedBeforeFailure = 0
+  // Loads started up to here decide nothing: a later failure or a replay
+  // decides their data.
+  private decided = 0
+  private readonly pending = new Set<number>()
 
   track(result: unknown, settle: () => void): void {
     const order = ++this.started
+    this.pending.add(order)
     void Promise.resolve(result).then(
       () => {
-        if (order > this.startedBeforeFailure) settle()
+        this.pending.delete(order)
+        if (order > this.decided) settle()
       },
       () => {
-        this.startedBeforeFailure = this.started
+        this.pending.delete(order)
+        if (order > this.decided) this.decided = this.started
       },
     )
+  }
+
+  /**
+   * A replay replaced every load started so far. Returns whether one was
+   * still pending and not yet replaced, such as the retry of a failed load:
+   * the replay's verdict then decides that failure too.
+   */
+  replace(): boolean {
+    const retried = [...this.pending].some((order) => order > this.decided)
+    this.decided = this.started
+    return retried
   }
 }
 

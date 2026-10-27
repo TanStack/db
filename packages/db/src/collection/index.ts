@@ -1301,10 +1301,12 @@ export class CollectionImpl<
   /**
    * Start a new sync run while everything visible stays: the rows, the
    * status, and the current error, with `reloading` on this Collection's
-   * health node. The new run's first commit replaces the rows at once and
-   * clears the node's problem; a `status` of `error` becomes `ready`. If the
-   * new run fails first, the rows and status stay and the node shows the new
-   * error. On a live query, it reloads each of its sources that has an
+   * health node. The new run's writes apply on the kept rows; its snapshot
+   * (`begin({ snapshot: true })`) or truncate replaces them at once. The
+   * reload completes when that replacement applies, or at the new run's
+   * `markReady()`, and the node drops the old run's problems; a `status` of
+   * `error` becomes `ready` at `markReady()`. If the new run fails first, the
+   * rows and status stay and the node shows the new error. On a live query, it reloads each of its sources that has an
    * `error`, and then the query itself if its own node has an `error`: a
    * failed first load or a failed request for more data.
    *

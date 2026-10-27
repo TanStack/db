@@ -4,8 +4,11 @@ import {
   CollectionImpl,
   IR,
   createCollection,
+  createLiveQueryCollection,
   createTransaction,
+  gt,
   resetWarnings,
+  withAcceptedReceipt,
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
@@ -287,6 +290,414 @@ describe(`Electric Integration`, () => {
       }
     },
   )
+
+  // Receiving witness for the reload law (owner: the source-health oracle).
+  // A reload keeps the rows on screen until it completes and then ends with
+  // the source's current rows. The new run replaces rows only with a
+  // snapshot transaction or its own truncate; every other write applies on
+  // the kept rows, and a run that sends no snapshot completes the reload at
+  // its markReady (maintainer decision F19, /tmp/unify/snapshot-api.md §2–3).
+  //
+  // The fake source is the model: a table and a log of its changes. A stream
+  // that starts from a stored offset and handle gets the log after that
+  // offset, then up-to-date; one that starts without them gets every row,
+  // then up-to-date. A must-refetch makes the stream start over with every
+  // row. Electric stores the offset and handle of its last up-to-date only
+  // when the server sent a handle, so `handle: false` reaches a reload that
+  // cannot resume.
+  describe(`reload of a ready Collection`, () => {
+    type SourceChange = {
+      operation: `insert` | `update` | `delete`
+      value: Row
+    }
+    const initialRows: Array<Row> = [
+      { id: 1, name: `one` },
+      { id: 2, name: `two` },
+      { id: 3, name: `three` },
+    ]
+    const changesDuringReload: Array<SourceChange> = [
+      { operation: `update`, value: { id: 1, name: `one, edited` } },
+      { operation: `delete`, value: { id: 2 } },
+      { operation: `insert`, value: { id: 4, name: `four` } },
+    ]
+
+    it.each([
+      { stream: `resumes with no changes`, handle: true, changes: [] },
+      {
+        stream: `resumes with changes`,
+        handle: true,
+        changes: changesDuringReload,
+      },
+      {
+        stream: `cannot resume and sends every row`,
+        handle: false,
+        changes: changesDuringReload,
+      },
+      {
+        stream: `resumes and gets a must-refetch`,
+        handle: true,
+        changes: changesDuringReload,
+        mustRefetch: true,
+      },
+    ])(
+      `keeps its rows until it completes and ends with the source's rows: the new stream $stream`,
+      async ({ handle, changes, mustRefetch }) => {
+        const table = new Map(initialRows.map((row) => [row.id, row]))
+        const log: Array<SourceChange> = []
+        const changeMessage = ({ operation, value }: SourceChange) => ({
+          key: String(value.id),
+          value,
+          headers: { operation },
+        })
+        const upToDate = () => {
+          mockStream.shapeHandle = handle ? `shape-1` : undefined
+          mockStream.lastOffset = `${log.length}_0`
+          return { headers: { control: `up-to-date` as const } }
+        }
+        const sendEveryRow = () =>
+          subscriber([
+            ...Array.from(table.values(), (value) =>
+              changeMessage({ operation: `insert`, value }),
+            ),
+            upToDate(),
+          ])
+        const rows = () =>
+          new Map(
+            Array.from(collection.state.values(), (row) => [
+              row.id,
+              stripVirtualProps(row),
+            ]),
+          )
+        const streamStart = () =>
+          vi.mocked(ShapeStream).mock.calls.at(-1)![0] as unknown as {
+            offset?: string
+            handle?: string
+          }
+
+        sendEveryRow()
+        expect(collection.status).toBe(`ready`)
+        const shownBeforeReload = rows()
+        expect(shownBeforeReload).toEqual(new Map(table))
+
+        for (const change of changes) {
+          log.push(change)
+          if (change.operation === `delete`) table.delete(change.value.id)
+          else table.set(change.value.id, change.value)
+        }
+
+        const reload = collection.reload().then(
+          () => `resolved`,
+          (error: unknown) => error,
+        )
+        // The reach of this case: the new stream resumes exactly when the
+        // retired one stored a handle.
+        const start = streamStart()
+        expect(start.handle !== undefined).toBe(handle)
+        expect(rows()).toEqual(shownBeforeReload)
+
+        if (mustRefetch) {
+          subscriber([{ headers: { control: `must-refetch` } }])
+          expect(rows()).toEqual(shownBeforeReload)
+          sendEveryRow()
+        } else if (start.offset !== undefined && start.offset !== `-1`) {
+          const after = Number(start.offset.split(`_`)[0])
+          subscriber([...log.slice(after).map(changeMessage), upToDate()])
+        } else {
+          sendEveryRow()
+        }
+
+        const settled = await Promise.race([
+          reload,
+          new Promise((resolve) => setTimeout(() => resolve(`pending`), 200)),
+        ])
+        expect(settled).toBe(`resolved`)
+        expect(collection.status).toBe(`ready`)
+        expect(collection.health.reloading).toBe(false)
+        expect(rows()).toEqual(new Map(table))
+      },
+    )
+  })
+
+  // The same law for an on-demand Collection, whose rows come from subset
+  // snapshots that a subscription's demand requests. The reload's new run
+  // sends no snapshot of the whole shape, so it completes at its
+  // markReady() and keeps the rows; core then replays the demand, and the
+  // replayed subset snapshot's rows apply on the kept rows. The fake source
+  // answers every subset request with its current rows. A resumed stream
+  // delivers its changes after the stored offset; a stream that cannot
+  // resume starts at `now` and delivers none of them. Afterwards a row the
+  // source holds shows its current value. A row the source deleted while no
+  // stream listened stays: no subset snapshot can say a row is gone, so
+  // only the resumed history checks the full row set.
+  it.each([true, false])(
+    `an on-demand reload keeps its rows and ends with the source's rows (resumes: %s)`,
+    async (handle) => {
+      const table = new Map<number, Row>([
+        [1, { id: 1, name: `one` }],
+        [2, { id: 2, name: `two` }],
+        [3, { id: 3, name: `three` }],
+      ])
+      const log: Array<Message<Row>> = []
+      mockRequestSnapshot.mockImplementation(() => {
+        subscriber([
+          ...Array.from(table.values(), (value) => ({
+            key: String(value.id),
+            value,
+            headers: { operation: `insert` as const },
+          })),
+          { headers: { control: `subset-end` } } as Message<Row>,
+        ])
+        return Promise.resolve()
+      })
+      const upToDate = () => {
+        mockStream.shapeHandle = handle ? `shape-1` : undefined
+        mockStream.lastOffset = `${log.length}_0`
+        return { headers: { control: `up-to-date` as const } }
+      }
+      const onDemand = createCollection(
+        electricCollectionOptions({
+          id: `on-demand-reload-of-ready`,
+          shapeOptions: { url: `http://test-url`, params: { table: `t` } },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      const rows = () =>
+        new Map(
+          Array.from(onDemand.state.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      const subscription = onDemand.subscribeChanges(() => {}, {
+        includeInitialState: true,
+      })
+      try {
+        subscriber([upToDate()])
+        await vi.waitFor(() => expect(rows()).toEqual(new Map(table)))
+        const before = rows()
+
+        const edited = { id: 1, name: `one, edited` }
+        table.set(1, edited)
+        log.push({
+          key: `1`,
+          value: edited,
+          headers: { operation: `update` },
+        })
+        table.delete(2)
+        log.push({
+          key: `2`,
+          value: { id: 2 },
+          headers: { operation: `delete` },
+        })
+
+        const reload = onDemand.reload().then(
+          () => `resolved`,
+          (error: unknown) => error,
+        )
+        expect(rows()).toEqual(before)
+        const start = vi
+          .mocked(ShapeStream)
+          .mock.calls.at(-1)![0] as unknown as {
+          offset?: string
+          handle?: string
+        }
+        // The reach of this case: the new stream resumes exactly when the
+        // retired one stored a handle.
+        expect(start.handle !== undefined).toBe(handle)
+        const resumedChanges = handle
+          ? log.slice(Number(start.offset!.split(`_`)[0]))
+          : []
+        subscriber([...resumedChanges, upToDate()])
+
+        expect(await reload).toBe(`resolved`)
+        const expected = new Map(handle ? table : [...before, ...table])
+        await vi.waitFor(() => expect(rows()).toEqual(expected))
+        expect(onDemand.status).toBe(`ready`)
+      } finally {
+        subscription.unsubscribe()
+        await onDemand.cleanup()
+      }
+    },
+  )
+
+  // The same law for a progressive Collection whose reload cannot resume.
+  // Its new stream starts over, so it buffers the full log until its first
+  // up-to-date, and only that atomic swap replaces the kept rows. Before the
+  // swap, a live query's replayed subset load fetches a subset snapshot,
+  // whose rows apply on the kept rows: a kept key takes the source's current
+  // value and no kept row vanishes. After the swap the rows equal the
+  // source's, the reload has settled, and the live query shows them with no
+  // error.
+  it(`a progressive reload that cannot resume keeps its rows through a subset load`, async () => {
+    const table = new Map<number, Row>([
+      [1, { id: 1, name: `one` }],
+      [2, { id: 2, name: `two` }],
+      [3, { id: 3, name: `three` }],
+    ])
+    mockFetchSnapshot.mockImplementation(() =>
+      Promise.resolve({
+        metadata: {},
+        data: Array.from(table.values(), (value) => ({
+          key: String(value.id),
+          value,
+          headers: { operation: `insert` },
+        })),
+      }),
+    )
+    const sendEveryRow = () => {
+      mockStream.shapeHandle = undefined
+      mockStream.lastOffset = `1_0`
+      subscriber([
+        ...Array.from(table.values(), (value) => ({
+          key: String(value.id),
+          value,
+          headers: { operation: `insert` as const },
+        })),
+        { headers: { control: `up-to-date` } },
+      ])
+    }
+    const progressive = createCollection(
+      electricCollectionOptions({
+        id: `progressive-reload-of-ready`,
+        shapeOptions: { url: `http://test-url`, params: { table: `t` } },
+        syncMode: `progressive`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }),
+    )
+    const rowsOf = (collection: { values: () => Iterable<Row> }) =>
+      new Map(
+        Array.from(collection.values(), (row) => [
+          row.id as number,
+          stripVirtualProps(row),
+        ]),
+      )
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ row: progressive }).where(({ row }) => gt(row.id, 0)),
+    })
+    try {
+      const preload = live.preload()
+      sendEveryRow()
+      await preload
+      expect(rowsOf(progressive)).toEqual(new Map(table))
+      const before = rowsOf(progressive)
+      const fetchesBefore = mockFetchSnapshot.mock.calls.length
+
+      table.set(1, { id: 1, name: `one, edited` })
+      table.delete(2)
+      const reload = progressive.reload().then(
+        () => `resolved`,
+        (error: unknown) => error,
+      )
+      const start = vi.mocked(ShapeStream).mock.calls.at(-1)![0] as unknown as {
+        handle?: string
+      }
+      // The reach of this case: the new stream cannot resume, and the live
+      // query's replayed demand fetches a subset snapshot while it buffers.
+      expect(start.handle).toBeUndefined()
+      await vi.waitFor(() =>
+        expect(mockFetchSnapshot.mock.calls.length).toBeGreaterThan(
+          fetchesBefore,
+        ),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const buffering = rowsOf(progressive)
+      expect(
+        [...before.keys()].filter((key) => !buffering.has(key)),
+        `no kept row vanishes before the swap`,
+      ).toEqual([])
+      expect(live.health.error).toBeNull()
+      expect(buffering.get(1)).toEqual(table.get(1))
+
+      sendEveryRow()
+      expect(await reload).toBe(`resolved`)
+      expect(rowsOf(progressive)).toEqual(new Map(table))
+      await vi.waitFor(() => expect(rowsOf(live)).toEqual(new Map(table)))
+      expect(live.health.error).toBeNull()
+      expect(live.status).toBe(`ready`)
+    } finally {
+      await live.cleanup()
+      await progressive.cleanup()
+    }
+  })
+
+  // A run's markReady() after its fail() does nothing (maintainer decision
+  // F18/F6, /tmp/unify/snapshot-api.md §4). Electric reaches it when the SDK
+  // gives up while a ready run's up-to-date commit waits for acceptance by a
+  // wrapping sync, as persistence accepts after its durable step: the
+  // acceptance then marks the run ready after its fail(). That late ready
+  // must change nothing and must not reject.
+  it(`a ready after the stream gave up changes nothing`, async () => {
+    let giveUpStream!: (error: unknown) => void
+    mockSubscribe.mockImplementation((callback, onError) => {
+      subscriber = callback
+      giveUpStream = onError
+      return () => {}
+    })
+    const acceptance = createDeferred<void>()
+    let holdAcceptance = false
+    const options = electricCollectionOptions({
+      id: `late-ready-after-give-up`,
+      shapeOptions: { url: `http://test-url`, params: { table: `t` } },
+      getKey: (item: Row) => item.id as number,
+    })
+    const held = createCollection({
+      ...options,
+      startSync: true,
+      sync: {
+        ...options.sync,
+        sync: (params: Parameters<typeof options.sync.sync>[0]) =>
+          options.sync.sync({
+            ...params,
+            commit: (signal) => {
+              const applied = params.commit(signal)
+              if (!holdAcceptance) return applied
+              return withAcceptedReceipt(
+                applied === true ? Promise.resolve() : applied,
+                acceptance.promise,
+              )
+            },
+          }),
+      },
+    })
+    const unhandled: Array<unknown> = []
+    const recordUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on(`unhandledRejection`, recordUnhandled)
+    try {
+      subscriber([
+        { key: `1`, value: { id: 1 }, headers: { operation: `insert` } },
+        { headers: { control: `up-to-date` } },
+      ])
+      expect(held.status).toBe(`ready`)
+
+      holdAcceptance = true
+      subscriber([
+        { key: `3`, value: { id: 3 }, headers: { operation: `insert` } },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      const gaveUp = new Error(`the SDK gave up`)
+      giveUpStream(gaveUp)
+      expect(held.health.error?.cause).toBe(gaveUp)
+      const changes: Array<string> = []
+      held.on(`status:change`, ({ status }) => changes.push(status))
+      held.on(`health:change`, () => changes.push(`health`))
+
+      // The reach of this case: the acceptance arrives after the give-up.
+      acceptance.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(unhandled).toEqual([])
+      expect(changes).toEqual([])
+      expect(held.status).toBe(`ready`)
+      expect(held.health.error?.cause).toBe(gaveUp)
+    } finally {
+      process.off(`unhandledRejection`, recordUnhandled)
+    }
+  })
 
   it(`reports an initial stream error instead of publishing an empty ready snapshot`, async () => {
     const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})

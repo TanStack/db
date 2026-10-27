@@ -18,7 +18,6 @@
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }
@@ -105,8 +104,11 @@ it.each(cells)(
   },
 )
 
+// After the initial error, the run's markReady() does nothing (maintainer
+// decision), so a replacement that promises readiness still applies its rows
+// and leaves the attempt in error.
 it.each(intents)(
-  'rejects a ready-promising replacement after the initial error: markReady %s',
+  'keeps the initial error under a ready-promising replacement: markReady %s',
   async (markReady) => {
     let sync!: Sync
     const c = createCollection<Row, number>({
@@ -124,15 +126,9 @@ it.each(intents)(
       sync.begin()
       sync.truncate(markReady === undefined ? undefined : { markReady })
       sync.write({ type: 'insert', value: { id: 1, value: 'late' } })
-      if (markReady === false) {
-        // A replacement that keeps the status leaves the attempt in error.
-        sync.commit()
-      } else {
-        expect(() => sync.commit()).toThrow(
-          InvalidCollectionStatusTransitionError,
-        )
-      }
+      expect(() => sync.commit()).not.toThrow()
       expect(c.status).toBe('error')
+      expect([...c.keys()]).toEqual([1])
     } finally {
       await c.cleanup()
     }

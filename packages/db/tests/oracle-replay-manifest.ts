@@ -370,6 +370,10 @@ const replayTestNames = new Map([
     `cleanup status reaches every observer.*random`,
   ],
   [
+    `pooled-live-query.cleanup-admission`,
+    `matches a live-query Collection's cleanup admission \\(random\\)`,
+  ],
+  [
     `live-query-observer.partial-attach`,
     `releases every acquired channel before retry.*random`,
   ],

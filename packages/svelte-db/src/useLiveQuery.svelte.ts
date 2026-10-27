@@ -33,6 +33,7 @@ import type {
   LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
+  LiveQueryStatusFlags,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -60,22 +61,14 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isSyncError - True when data is shown and `health` has a problem
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
+export interface UseLiveQueryReturn<
+  T extends object,
+  TData = Array<T>,
+> extends LiveQueryStatusFlags {
   state: Map<string | number, T>
   data: TData
   collection: Collection<T, string | number, {}>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: boolean
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: boolean
-  isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: boolean
-  health: HealthNode | undefined
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -96,22 +89,11 @@ export interface UseLiveQueryReturnWithCollection<
   TKey extends string | number,
   TUtils extends Record<string, any>,
   TData = Array<T>,
-> {
+> extends LiveQueryStatusFlags {
   state: Map<TKey, T>
   data: TData
   collection: Collection<T, TKey, TUtils>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  /** The first load failed: there is nothing to show. */
-  isLoadingError: boolean
-  /** Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover. */
-  isCrashed: boolean
-  isCleanedUp: boolean
-  /** The data is shown, and a sync problem or failed request is in `health`. */
-  isSyncError: boolean
-  health: HealthNode | undefined
 }
 
 type MaybeGetter<T> = T | (() => T)
@@ -517,6 +499,7 @@ export function useLiveQuery(
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
   let health = $state.raw<HealthNode | undefined>(initialSnapshot.health)
+  let isSyncError = $state(initialSnapshot.isSyncError)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,
@@ -525,6 +508,7 @@ export function useLiveQuery(
     const snapshot = observer.getSnapshot()
     status = snapshot.status as CollectionStatus
     health = snapshot.health
+    isSyncError = snapshot.isSyncError
     untrack(() => {
       if (changes && changes.length > 0) {
         for (const change of changes) {
@@ -635,7 +619,7 @@ export function useLiveQuery(
     },
     get isSyncError() {
       readResolved()
-      return status === `ready` && health?.hasErrors === true
+      return isSyncError
     },
     get health() {
       readResolved()
