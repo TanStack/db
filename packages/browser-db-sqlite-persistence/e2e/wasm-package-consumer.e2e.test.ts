@@ -21,8 +21,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { build, createServer, preview } from 'vite'
+import { createServer, preview } from 'vite'
 import {
+  buildForProduction,
   createPackagedConsumer,
   packageDirectory,
   probeWorkers,
@@ -46,7 +47,7 @@ const developmentServerOptions = {
 
 beforeAll(async () => {
   createPackagedConsumer(consumerDirectory)
-  await build({
+  await buildForProduction({
     configFile: false,
     root: consumerDirectory,
     base: consumerBase,
@@ -74,6 +75,16 @@ it(`includes a separately loadable WASM asset in a consumer build`, () => {
   expect(
     readFileSync(join(assetsDirectory, workerFile!), `utf8`),
   ).not.toContain(`data:application/wasm;base64,`)
+  // The production build drops the Vite dev-server lookup.
+  expect(
+    assets
+      .filter((name) => name.endsWith(`.js`))
+      .some((name) =>
+        readFileSync(join(assetsDirectory, name), `utf8`).includes(
+          `/@vite/client`,
+        ),
+      ),
+  ).toBe(false)
 })
 
 // The package exports its two runtime assets under fixed names, so a release

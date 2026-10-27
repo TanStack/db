@@ -7,6 +7,8 @@ export type BrowserOPFSWorkerInitRequest = {
   databaseName: string
   vfsName: string
   wasmUrl: string
+  // The opener's build; see package-version.ts.
+  packageVersion: string
 }
 
 export type BrowserOPFSWorkerExecuteRequest = {

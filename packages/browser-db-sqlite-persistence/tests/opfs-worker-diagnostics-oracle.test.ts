@@ -109,6 +109,7 @@ async function initialize(
       databaseName: `locked.sqlite`,
       vfsName: `opfs`,
       wasmUrl: `https://example.test/wa-sqlite.wasm`,
+      packageVersion: `source`,
     },
   } as MessageEvent<BrowserOPFSWorkerRequest>)
 

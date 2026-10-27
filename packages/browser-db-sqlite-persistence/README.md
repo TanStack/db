@@ -174,12 +174,15 @@ duplicates inside that horizon remain idempotent.
   webpack include both automatically, with no asset copying or WASM URL
   configuration required.
 - In Vite development, a pre-bundled copy of this package asks the dev server
-  for its assets by package name, from the app root:
+  for its assets by package name, from the app root. Production builds drop
+  this lookup:
   - If the app reaches the package only through another library or through an
     npm alias, the root cannot resolve that name. The open rejects with
     `PersistenceUnavailableError`.
   - If more than one copy is installed, the pre-bundled copy loads the assets
-    of the copy that the root resolves, which can be another version.
+    of the copy that the root resolves. When that copy is another version, its
+    worker refuses the opener and the open rejects with
+    `PersistenceUnavailableError`.
   - The copy finds the dev server through the page's Vite client script. If
     the database opens inside a worker, or the page loads the Vite client
     without a script `src`, the copy cannot find its assets and the open

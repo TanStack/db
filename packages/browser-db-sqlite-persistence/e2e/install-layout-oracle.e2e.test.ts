@@ -16,13 +16,15 @@
  *   importer uses, which is the alias name for an npm alias.
  * - A moved copy opens when the app root resolves the package name, and rejects
  *   with `PersistenceUnavailableError` when it does not. When the root resolves
- *   another installed copy, the moved copy loads that copy's assets.
+ *   another installed copy, the moved copy loads that copy's assets. A worker
+ *   from another version refuses the opener, so that open rejects with
+ *   `PersistenceUnavailableError` after the worker starts.
  *
  * The model below states those rules over install layout, cache directory,
- * exclusion, and server. It reads two facts from each installed tree rather
- * than from a table per layout: the specifier that the opened copy's importer
- * uses, and the copy that Node resolution finds for the package name from the
- * app root. The driver installs the built package in each layout, opens and
+ * exclusion, and server. It reads facts from each installed tree rather than
+ * from a table per layout: the specifier that the opened copy's importer uses,
+ * the copy that Node resolution finds for the package name from the app root,
+ * and the version of each of those copies. The driver installs the built package in each layout, opens and
  * queries it in Chromium, and records the outcome, the number of workers, and
  * which copy's worker started. The model does not predict which copy a
  * production build emits; the copies are identical, so the driver does not
@@ -34,6 +36,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -44,7 +47,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { build, createServer, preview } from 'vite'
+import { createServer, preview } from 'vite'
+import { buildForProduction } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { BrowserWASQLiteDatabase } from '../src'
 
@@ -53,7 +57,13 @@ const packageName = `@tanstack/browser-db-sqlite-persistence`
 const aliasName = `sqlite-alias`
 
 type Layout =
-  `direct` | `hoisted` | `pnpm` | `transitive` | `alias` | `two copies`
+  | `direct`
+  | `hoisted`
+  | `pnpm`
+  | `transitive`
+  | `alias`
+  | `two copies`
+  | `two versions`
 type Cache = `default` | `custom` | `dist`
 type Exclusion = `none` | `import name` | `package name`
 type Server = `development` | `production`
@@ -64,7 +74,7 @@ type LayoutCase = {
   server: Server
 }
 type LayoutOutcome =
-  | { opens: false; workers: 0 }
+  | { opens: false; workers: 0 | 1 }
   | { opens: true; workers: 1; worker?: `imported copy` | `other copy` }
 
 /** Facts read from an installed tree; see `installLayout`. */
@@ -76,6 +86,9 @@ type InstallFacts = {
   importSpecifier: string
   // The real directory that the package name resolves to from the app root.
   rootResolvedCopy: string | undefined
+  // The package version that each of those copies was built as.
+  importedVersion: string
+  rootResolvedVersion: string | undefined
 }
 
 // Node resolution: the nearest node_modules/<name> from a directory upward.
@@ -102,14 +115,14 @@ function expectedOutcome(
     return { opens: true, workers: 1, worker: `imported copy` }
   }
   if (!install.rootResolvedCopy) return { opens: false, workers: 0 }
-  return {
-    opens: true,
-    workers: 1,
-    worker:
-      install.rootResolvedCopy === install.importedCopy
-        ? `imported copy`
-        : `other copy`,
+  if (install.rootResolvedCopy === install.importedCopy) {
+    return { opens: true, workers: 1, worker: `imported copy` }
   }
+  // The moved copy starts the root copy's worker, which refuses an opener
+  // built as another version.
+  return install.rootResolvedVersion === install.importedVersion
+    ? { opens: true, workers: 1, worker: `other copy` }
+    : { opens: false, workers: 1 }
 }
 
 /*
@@ -125,6 +138,7 @@ const layouts: Array<Layout> = [
   `transitive`,
   `alias`,
   `two copies`,
+  `two versions`,
 ]
 const layoutCases: Array<LayoutCase> = [
   ...layouts.flatMap((layout) =>
@@ -188,6 +202,7 @@ it(`covers every promised layout outcome`, () => {
   expect([...coveredOutcomes].sort()).toEqual(
     [
       { opens: false, workers: 0 },
+      { opens: false, workers: 1 },
       { opens: true, workers: 1 },
       { opens: true, workers: 1, worker: `imported copy` },
       { opens: true, workers: 1, worker: `other copy` },
@@ -197,7 +212,11 @@ it(`covers every promised layout outcome`, () => {
   )
 })
 
-// Copies the built package to a directory, as an install would.
+/**
+ * Copies the built package to a directory, as an install would. With
+ * `version`, the copy is a build of that version: its manifest and the
+ * version that its opener and worker carry both change.
+ */
 function copyPackage(destination: string, version?: string): void {
   mkdirSync(destination, { recursive: true })
   cpSync(join(packageDirectory, `dist`), join(destination, `dist`), {
@@ -205,11 +224,35 @@ function copyPackage(destination: string, version?: string): void {
   })
   const manifest = JSON.parse(
     readFileSync(join(packageDirectory, `package.json`), `utf8`),
-  ) as Record<string, unknown>
+  ) as { version: string } & Record<string, unknown>
   writeFileSync(
     join(destination, `package.json`),
     JSON.stringify(version ? { ...manifest, version } : manifest),
   )
+  if (!version) return
+  const builtMarker = `${packageName}@${manifest.version}`
+  for (const file of readdirSync(join(destination, `dist`), {
+    recursive: true,
+  }) as Array<string>) {
+    if (!/\.(c?js)$/.test(file)) continue
+    const path = join(destination, `dist`, file)
+    const source = readFileSync(path, `utf8`)
+    if (source.includes(builtMarker)) {
+      writeFileSync(
+        path,
+        source.replaceAll(builtMarker, `${packageName}@${version}`),
+      )
+    }
+  }
+}
+
+function installedVersion(directory: string | undefined): string | undefined {
+  if (!directory) return undefined
+  return (
+    JSON.parse(readFileSync(join(directory, `package.json`), `utf8`)) as {
+      version: string
+    }
+  ).version
 }
 
 // Links the package's workspace dependencies into a node_modules scope.
@@ -280,12 +323,16 @@ function installLayout(root: string, layout: Layout): InstallFacts {
       break
     }
     case `transitive`:
-    case `two copies`: {
+    case `two copies`:
+    case `two versions`: {
       const wrapper = writeWrapper(appModules)
       importedCopy = join(wrapper, `node_modules`, packageName)
-      copyPackage(importedCopy, `0.0.0-nested`)
+      copyPackage(
+        importedCopy,
+        layout === `two versions` ? `0.0.0-nested` : undefined,
+      )
       linkDependencies(join(appModules, `@tanstack`))
-      if (layout === `two copies`) copyPackage(join(appModules, packageName))
+      if (layout !== `transitive`) copyPackage(join(appModules, packageName))
       entry = `wrapper`
       break
     }
@@ -310,6 +357,8 @@ globalThis.openDatabase = () => openBrowserWASQLiteOPFSDatabase({ databaseName: 
     importedCopy: realpathSync(importedCopy),
     importSpecifier: layout === `alias` ? aliasName : packageName,
     rootResolvedCopy: resolveFrom(appDirectory, root),
+    importedVersion: installedVersion(importedCopy)!,
+    rootResolvedVersion: installedVersion(resolveFrom(appDirectory, root)),
   }
 }
 
@@ -342,7 +391,10 @@ async function openInLayout(
   let developmentServer: Awaited<ReturnType<typeof createServer>> | undefined
   let productionServer: Awaited<ReturnType<typeof preview>> | undefined
   if (layoutCase.server === `production`) {
-    await build({ ...config, build: { outDir: join(appDirectory, `dist`) } })
+    await buildForProduction({
+      ...config,
+      build: { outDir: join(appDirectory, `dist`) },
+    })
     productionServer = await preview({
       ...config,
       preview: { host: `127.0.0.1`, port: 0 },

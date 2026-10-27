@@ -1965,7 +1965,10 @@ importer's specifier and the Node resolution of the package name from each
 installed tree rather than from a table per layout. A pre-bundled copy
 opens when the app root resolves the package name and otherwise reports
 `PersistenceUnavailableError`; with two copies it loads the copy that the root
-resolves. Excluding the specifier that the importer uses serves the copy in
+resolves, and when that copy is another version its worker refuses the opener
+and the open reports `PersistenceUnavailableError` after one worker starts. The
+two-version layout rewrites the nested copy's built version marker, so the
+opener and the root copy's worker really come from different builds. Excluding the specifier that the importer uses serves the copy in
 place with its own worker. The README states these rules. A mutant that always
 runs the lookup fails the three excluded transitive, alias, and two-copy
 cases. Its dev servers do not watch files, because a late watcher event
@@ -1982,7 +1985,9 @@ install the built workspace packages as published packages in a webpack 5 app
 (production and development builds) and a Next.js app (Turbopack and webpack,
 each under `next build` with `next start` and under `next dev`). Each opens and
 queries SQLite in Chromium, starts one classic worker, loads one
-`200 application/wasm` response, and makes no Vite lookup request. A module
+`200 application/wasm` response, and makes no Vite lookup request. Each
+production build, and the Vite consumer's production build, ships none of the
+lookup's code. A module
 worker fails all six; a lookup that runs without a Vite client fails the four
 Next.js cases and is equivalent under webpack, which emits the worker and WASM
 in one directory. These owners do not cover webpack-dev-server, Rspack, Parcel,

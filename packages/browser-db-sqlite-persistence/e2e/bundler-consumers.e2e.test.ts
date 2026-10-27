@@ -8,7 +8,9 @@
  * - the query returns its row;
  * - one worker starts, as a classic script;
  * - the browser loads one `200 application/wasm` response;
- * - the Vite dev-server lookup never runs, because no Vite client is present.
+ * - the Vite dev-server lookup never runs, because no Vite client is present;
+ * - a production build ships none of that lookup's code, because the bundler
+ *   removes it with `process.env.NODE_ENV`.
  *
  * Cases: webpack 5 production and development builds served as static files,
  * and Next.js with Turbopack and with webpack, each under `next build` plus
@@ -27,6 +29,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -48,6 +51,22 @@ import type { ProbeGlobal } from './packaged-consumer'
 const appsDirectory = join(packageDirectory, `.cache/bundler-consumers`)
 const require = createRequire(import.meta.url)
 const nextBin = require.resolve(`next/dist/bin/next`)
+
+type StartedApp = {
+  url: string
+  close: () => void
+  // The emitted client code, for a production build.
+  productionOutput?: string
+}
+
+// Whether any emitted script contains the Vite dev-server lookup.
+function shipsViteLookup(directory: string): boolean {
+  return (readdirSync(directory, { recursive: true }) as Array<string>).some(
+    (file) =>
+      /\.(c?js)$/.test(file) &&
+      readFileSync(join(directory, file), `utf8`).includes(`/@vite/client`),
+  )
+}
 
 type BundlerCase =
   | { bundler: `webpack`; mode: `production` | `development` }
@@ -161,7 +180,7 @@ async function serveStatic(directory: string): Promise<{
 async function startWebpackApp(
   appDirectory: string,
   mode: `production` | `development`,
-): Promise<{ url: string; close: () => void }> {
+): Promise<StartedApp> {
   writeFileSync(join(appDirectory, `tsconfig.json`), `{}`)
   writeFileSync(join(appDirectory, `main.js`), openDatabaseModule)
   const outputDirectory = join(appDirectory, `dist`)
@@ -187,7 +206,10 @@ async function startWebpackApp(
     join(outputDirectory, `index.html`),
     `<script src="/main.js"></script>`,
   )
-  return serveStatic(outputDirectory)
+  const app = await serveStatic(outputDirectory)
+  return mode === `production`
+    ? { ...app, productionOutput: outputDirectory }
+    : app
 }
 
 function runNext(
@@ -237,7 +259,7 @@ async function startNextApp(
   appDirectory: string,
   compiler: `turbopack` | `webpack`,
   server: `build and start` | `dev`,
-): Promise<{ url: string; close: () => void }> {
+): Promise<StartedApp> {
   writeFileSync(join(appDirectory, `jsconfig.json`), `{}`)
   mkdirSync(join(appDirectory, `app`))
   writeFileSync(
@@ -284,7 +306,13 @@ export default function Page() {
     started.child.kill()
     throw new Error(`${String(error)}\n${started.output.join(``)}`)
   }
-  return { url, close: () => started.child.kill() }
+  return {
+    url,
+    close: () => started.child.kill(),
+    ...(server === `build and start`
+      ? { productionOutput: join(appDirectory, `.next/static`) }
+      : {}),
+  }
 }
 
 function describeCase(bundlerCase: BundlerCase): string {
@@ -356,11 +384,15 @@ it.each(cases.map((bundlerCase) => [describeCase(bundlerCase), bundlerCase]))(
           wasm: contentType?.includes(`application/wasm`) ?? false,
         })),
         lookupRequests,
+        ...(app.productionOutput
+          ? { shipsViteLookup: shipsViteLookup(app.productionOutput) }
+          : {}),
       }).toEqual({
         rows: [{ value: 42 }],
         workerTypes: [`classic`],
         wasmResponses: [{ status: 200, wasm: true }],
         lookupRequests: [],
+        ...(app.productionOutput ? { shipsViteLookup: false } : {}),
       })
     } catch (error) {
       throw new Error(`${String(error)}\n${diagnostics.join(`\n`)}`, {

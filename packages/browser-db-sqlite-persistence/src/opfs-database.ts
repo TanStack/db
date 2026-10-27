@@ -5,6 +5,7 @@ import {
 } from '@tanstack/db-sqlite-persistence-core'
 import wasmUrl from '@journeyapps/wa-sqlite/dist/wa-sqlite.wasm?url&no-inline'
 import workerUrl from './opfs-worker?worker&url'
+import { packageVersion } from './package-version'
 import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 import type {
   BrowserOPFSWorkerErrorCode,
@@ -132,6 +133,17 @@ function getOpenAbortError(signal: AbortSignal): Error {
         `Opening browser OPFS database was aborted`,
         `AbortError`,
       )
+}
+
+// Bundlers inline `process.env.NODE_ENV`; the probe keeps an unbundled page,
+// which has no `process`, from throwing.
+/* @__NO_SIDE_EFFECTS__ */
+function devBuild(): boolean {
+  try {
+    return process.env.NODE_ENV !== `production`
+  } catch {
+    return false
+  }
 }
 
 type OPFSAssetUrls = {
@@ -287,7 +299,12 @@ export async function openBrowserWASQLiteOPFSDatabase(
       wasmFileUrl: new URL(wasmUrl, pageUrl),
       workerFileUrl: new URL(workerUrl, pageUrl),
     }
-    const viteUrls = resolveViteAssetUrls(bundledUrls)
+    // Bundlers inline the NODE_ENV comparison, so a production build drops the
+    // dev-server lookup.
+    const viteUrls =
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? resolveViteAssetUrls(bundledUrls)
+        : undefined
     return await openOPFSWorkerDatabase(
       viteUrls ? await Promise.race([viteUrls, openFailure]) : bundledUrls,
       databaseName,
@@ -420,6 +437,7 @@ async function openOPFSWorkerDatabase(
         databaseName,
         vfsName,
         wasmUrl: wasmFileUrl.href,
+        packageVersion,
       }),
       openFailure,
     ])

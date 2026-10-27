@@ -5,6 +5,7 @@ import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
 } from '@tanstack/db-sqlite-persistence-core'
+import { packageVersion } from './package-version'
 import type {
   BrowserOPFSWorkerErrorCode,
   BrowserOPFSWorkerRequest,
@@ -138,7 +139,13 @@ async function initializeWorkerDatabase(request: {
   databaseName: string
   vfsName: string
   wasmUrl: string
+  packageVersion: string
 }): Promise<void> {
+  if (request.packageVersion !== packageVersion) {
+    throw new PersistenceUnavailableError(
+      `The OPFS worker is ${packageVersion}, but its opener is ${request.packageVersion}. Install one copy of the package, or exclude it from Vite pre-bundling.`,
+    )
+  }
   if (!hasWorkerOPFSSyncAccessSupport(workerGlobal)) {
     throw new PersistenceUnavailableError(
       `Browser OPFS sync access is not available in this worker runtime`,

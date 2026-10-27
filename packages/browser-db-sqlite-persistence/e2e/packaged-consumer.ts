@@ -13,12 +13,29 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { build } from 'vite'
+import type { InlineConfig } from 'vite'
 import type {
   BrowserWASQLiteDatabase,
   OpenBrowserWASQLiteOPFSDatabaseOptions,
 } from '../src'
 
 export const packageDirectory = fileURLToPath(new URL(`../`, import.meta.url))
+
+/**
+ * Runs `vite build` as an app's build script does. That runs with NODE_ENV
+ * unset, which Vite treats as production; Vitest sets it to `test`, which
+ * would keep development-only code in the bundle.
+ */
+export async function buildForProduction(config: InlineConfig): Promise<void> {
+  const nodeEnv = process.env.NODE_ENV
+  process.env.NODE_ENV = `production`
+  try {
+    await build(config)
+  } finally {
+    process.env.NODE_ENV = nodeEnv
+  }
+}
 
 export function createPackagedConsumer(consumerDirectory: string): void {
   mkdirSync(consumerDirectory)

@@ -61,6 +61,8 @@ diff, not a timeout.
 | Lookup runs even when the copy is served in place | Install layout | Assertion failure in exactly the excluded transitive, alias, and two-copy cases |
 | Built package starts a module worker | Bundler consumers | Assertion failure in all six webpack and Next.js cases (`workerTypes`) |
 | Lookup runs without a Vite client on the page | Bundler consumers | Assertion failure in the four Next.js cases; equivalent within the two webpack cases, because webpack emits the worker and WASM into one directory and the moved-code check skips the lookup |
+| Production builds keep the dev-only lookup (the code before the production gate) | Bundler consumers, Vite consumer | Assertion failure in the webpack production and both Next.js production cases and in the Vite consumer's production build (`shipsViteLookup`) |
+| Worker accepts an opener from another version (the code before the version check) | Install layout | Assertion failure in the three pre-bundled two-version cases: the open succeeded with the other copy's worker |
 
 The reject-before-lookup control shows why the observation records reach.
 Without `reached`, that history would have passed.
@@ -97,6 +99,11 @@ production, as fixed receiving witnesses. Nothing covers webpack-dev-server,
 Rspack, Parcel, esbuild, other browsers, an open from inside a worker, or a
 Vite client injected without a script `src`. The README states the last two as
 cases that need the exclusion.
+
+The Vite production builds in these tests run with `NODE_ENV=production`.
+Vitest sets `NODE_ENV=test`, and a Vite build under it keeps development code,
+so the Vite consumer check first reported a lookup that a real `vite build`
+drops.
 
 While the bundler checks were written, webpack and Turbopack first resolved
 the workspace packages to their sources through each package's tsconfig
