@@ -681,7 +681,8 @@ export class OrderedSourceLoader {
   revalidateLoadedCoverage(): void {
     // A `requiresFullSource` plan's coverage is its full-source read: nothing
     // has settled before it. Coverage that one full-source read completed
-    // owes an ordering invalidation nothing, so it reads nothing below.
+    // owes an ordering invalidation nothing, so the invalidation below starts
+    // no request for it, and the loader ignores the report (ARCHITECTURE.md).
     if (!this.hasSettledSourceRequest) return
     const end = this.ownPrefixEnd()
     // An installed row past the page proves the source's next row only when

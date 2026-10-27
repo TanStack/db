@@ -342,6 +342,10 @@ export class CollectionConfigBuilder<
       limit: options.limit ?? baseWindow?.limit,
     }
     const request = ++this.windowRequestGeneration
+    // This call supersedes every older one. Until it records its own
+    // settlement, they have nothing newer to wait on, even if it throws
+    // before it does; none of them can wait on itself.
+    this.latestWindowRequest = undefined
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
       const syncRunGeneration = this.syncRunGeneration
@@ -435,17 +439,14 @@ export class CollectionConfigBuilder<
       this.latestWindowRequest = undefined
       return true
     }
-    const settled: Promise<void> = settlement.then(
+    return (this.latestWindowRequest = settlement.then(
       () => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
           this.settledWindow = requestedWindow
         }
-        // A newer call wins; one that threw while it started left this one
-        // latest, and a promise cannot settle on behalf of itself.
-        const latest = this.latestWindowRequest
-        return request === this.windowRequestGeneration || latest === settled
+        return request === this.windowRequestGeneration
           ? undefined
-          : latest
+          : this.latestWindowRequest
       },
       (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
@@ -454,8 +455,7 @@ export class CollectionConfigBuilder<
         }
         throw error
       },
-    )
-    return (this.latestWindowRequest = settled)
+    ))
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
