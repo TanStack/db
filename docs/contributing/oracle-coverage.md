@@ -2713,11 +2713,14 @@ the review record:
   transaction: invalidation removes the whole transaction, row 1's writes
   included (decision 7).
 
-The persisted test adapter stores no rows of its own, so reloads within one
-run are not exercised. A storage read marks a row a seed unless core holds it
-as a source row or a peer's notice named it as written in this run; the
-persisted oracle's receiving witnesses cover peer writes, and the session
-drivers have one tab. Restart and resume reads belong to the
+The session drivers have one tab, so reloads within a run come only from
+the `persisted-reads` lane's storage reads, whose adapter keeps durable rows.
+A storage read marks a row a seed unless core holds it as a source row or a
+peer's notice named it as written in this run. A reload that a peer's notice
+causes is a storage read too: while the run's writes are known it validates
+rows in place, so rows no source wrote keep their seed status (decisions 9
+and 11). The persisted oracle's receiving witnesses cover peer writes and
+those reload routes; no grammar dimension generates a peer. Restart and resume reads belong to the
 SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
 with one sync run.
 ## Deferred contracts and evidence

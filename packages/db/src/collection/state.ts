@@ -47,8 +47,6 @@ type PendingSyncedProjection<T extends object, TKey extends string | number> = {
   truncated: boolean
   /** Keys a queued source operation writes; seeds do not count. */
   sourceKeys: Set<TKey>
-  /** The keys among them that an accepted transaction writes. */
-  acceptedSourceKeys: Set<TKey>
 }
 
 type PendingInsertDisposition = `insert` | `update` | `duplicate`
@@ -139,7 +137,6 @@ export class CollectionStateManager<
     states: new Map(),
     truncated: false,
     sourceKeys: new Set(),
-    acceptedSourceKeys: new Set(),
   }
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
@@ -1063,8 +1060,9 @@ export class CollectionStateManager<
       states: new Map(),
       truncated: false,
       sourceKeys: new Set(),
-      acceptedSourceKeys: new Set(),
     }
+    // The source keys that an accepted transaction writes.
+    const acceptedSourceKeys = new Set<TKey>()
 
     for (const transaction of this.pendingSyncedTransactions) {
       if (transaction.invalidationError !== undefined) continue
@@ -1095,7 +1093,7 @@ export class CollectionStateManager<
           !(
             this.hydrationSeedKeys.has(key) &&
             projection.sourceKeys.has(key) &&
-            !projection.acceptedSourceKeys.has(key)
+            !acceptedSourceKeys.has(key)
           )
         ) {
           const disposition = this.classifyProjectedInsert(
@@ -1112,7 +1110,7 @@ export class CollectionStateManager<
         this.applyPendingSyncOperation(projection, operation)
         if (!transaction.preserveHydrationSeedKeys?.has(key)) {
           projection.sourceKeys.add(key)
-          if (transaction.committed) projection.acceptedSourceKeys.add(key)
+          if (transaction.committed) acceptedSourceKeys.add(key)
         }
       }
       if (invalidKey !== undefined) {

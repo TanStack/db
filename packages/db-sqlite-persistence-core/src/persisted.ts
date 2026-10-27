@@ -1634,8 +1634,11 @@ class PersistedCollectionRuntime<
   private runWrittenMetadataKeys = new Set<TKey>()
   private runWritesUnknown = false
   // Judges the open source transactions' inserts again after an internal
-  // write lands rows ahead of them.
-  private internalApplyListener: (() => void) | undefined
+  // write lands rows ahead of them, on the keys it wrote (every key after a
+  // truncate, as undefined).
+  private internalApplyListener:
+    ((keys: Iterable<TKey> | undefined) => void) | undefined
+  private internalApplyKeys: Set<TKey> | undefined
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
@@ -1922,7 +1925,15 @@ class PersistedCollectionRuntime<
     this.syncControls = {
       ...syncControls,
       commit: commit
-        ? (signal) => this.trackAppliedReceipt(commit(signal))
+        ? (signal) => {
+            const transaction =
+              this.collection?._state.pendingSyncedTransactions.at(-1)
+            if (transaction?.truncate) this.internalApplyKeys = undefined
+            else
+              for (const operation of transaction?.operations ?? [])
+                this.internalApplyKeys?.add(operation.key as TKey)
+            return this.trackAppliedReceipt(commit(signal))
+          }
         : null,
     }
   }
@@ -3297,7 +3308,9 @@ class PersistedCollectionRuntime<
     for (const key of metadataKeys) this.runWrittenMetadataKeys.add(key)
   }
 
-  setInternalApplyListener(listener: (() => void) | undefined): void {
+  setInternalApplyListener(
+    listener: ((keys: Iterable<TKey> | undefined) => void) | undefined,
+  ): void {
     this.internalApplyListener = listener
   }
 
@@ -3313,12 +3326,13 @@ class PersistedCollectionRuntime<
   }
 
   private withInternalApply<TResult>(task: () => TResult): TResult {
-    this.internalApplyDepth++
+    if (this.internalApplyDepth++ === 0) this.internalApplyKeys = new Set()
     try {
       return task()
     } finally {
       this.internalApplyDepth--
-      if (this.internalApplyDepth === 0) this.internalApplyListener?.()
+      if (this.internalApplyDepth === 0)
+        this.internalApplyListener?.(this.internalApplyKeys)
     }
   }
 
@@ -5387,15 +5401,24 @@ class PersistedCollectionRuntime<
           await whenSyncAccepted(applied)
         }
       } else {
-        const applied = this.replaceCollectionSnapshot(
-          Array.from(mergedRows.entries()).map(([key, row]) => ({
-            key,
-            value: row.value,
-            metadata: row.metadata,
-          })),
-          collectionMetadata,
-          replayDemand,
-        )
+        const rows = Array.from(mergedRows, ([key, row]) => ({
+          key,
+          value: row.value,
+          metadata: row.metadata,
+        }))
+        // A reload is a storage read, not a source write. While this run's
+        // source writes are known, it validates the rows in place, so a row
+        // no source wrote keeps its seed status (decisions 9 and 11). A
+        // reset replays demand, and unknown writes count every stored row
+        // as a source write (decision 13); both replace the snapshot.
+        const applied =
+          replayDemand || this.runWritesUnknown
+            ? this.replaceCollectionSnapshot(
+                rows,
+                collectionMetadata,
+                replayDemand,
+              )
+            : this.applyRowsToCollection(rows, rows, collectionMetadata)
         await whenSyncAccepted(applied)
       }
     } finally {
@@ -5749,7 +5772,9 @@ function createWrappedSyncConfig<
         // its writes are judged again without them.
         if (!transaction.handedToCollection) {
           params.collection._state.recomputeOptimisticState(false)
-          rejudgeEnclosing(transaction)
+          rejudgeEnclosing(
+            transaction.truncate ? undefined : transaction.operationKeys,
+          )
         }
       }
       // Committed source transactions not yet handed to the Collection. Core
@@ -5833,14 +5858,11 @@ function createWrappedSyncConfig<
       // on no row. An insert replaces the row it lands on (decision C1), so
       // the enclosing transaction stays valid, but whether its insert clears
       // metadata follows the row it now lands on, as in core.
-      // With no transaction, an internal write may have landed any key's row
-      // ahead of the open transactions, so every key is judged again.
-      const rejudgeEnclosing = (committed?: OpenSyncTransaction<T, TKey>) => {
+      // Only the keys that landed ahead are judged again; without keys, as
+      // after a truncate, every key is.
+      const rejudgeEnclosing = (written?: Iterable<TKey>) => {
         for (const transaction of transactionStack) {
-          const keys =
-            committed && !committed.truncate
-              ? committed.operationKeys
-              : transaction.implicitMetadata.keys()
+          const keys = written ?? transaction.implicitMetadata.keys()
           // An insert without metadata clears it unless it now re-inserts;
           // when every one re-inserts, the write before them stands.
           for (const key of keys) {
@@ -6090,7 +6112,7 @@ function createWrappedSyncConfig<
       )
       // Rows a storage read or a peer's notice lands in the Collection come
       // ahead of the open source transactions (decisions 7, 10, and 11).
-      runtime.setInternalApplyListener(() => rejudgeEnclosing())
+      runtime.setInternalApplyListener(rejudgeEnclosing)
 
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
         protocol: SYNC_PERSISTENCE_PROTOCOL,
@@ -6502,7 +6524,9 @@ function createWrappedSyncConfig<
           }
           openTransaction.signal = signal
           pendingPublicationTransactions.push(openTransaction)
-          rejudgeEnclosing(openTransaction)
+          rejudgeEnclosing(
+            openTransaction.truncate ? undefined : openTransaction.operationKeys,
+          )
           if (
             openTransaction.queuedBecauseHydrating &&
             runtime.isHydratingNow()

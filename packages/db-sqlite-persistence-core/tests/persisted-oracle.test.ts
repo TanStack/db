@@ -32635,3 +32635,150 @@ it.each([
     }
   },
 )
+
+// A peer's notice can make this tab reload its demand from storage instead of
+// applying the notice's rows: when it names a row this tab shows, names a
+// key no demand has seen, or names more keys than a targeted update allows.
+// A reload is how this tab reads storage again; it is not a source write. A
+// stored row from a previous run that no source wrote in this run stays a
+// seed across it, so a later `DbClient` seed still replaces it (decision 9),
+// while a row the notice names is a source write that the seed cannot
+// replace (decision 11). A key that storage never held is no source's
+// write either, so a seed supplies it. After a full-reload notice this tab
+// cannot tell which stored rows a source wrote, or whether a peer truncated,
+// so every stored row and the truncate count as source writes (decision 13:
+// the rule the code already followed). Each variant reloads through a different branch: no
+// `DbClient` seed held (the reload truncates core), a held seed (it deletes
+// and rewrites in place), and a notice over the key limit. Recorded in
+// docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
+it.each([
+  `notice naming a shown row`,
+  `notice naming a shown row while a seed is held`,
+  `notice over the targeted key limit`,
+  `full-reload notice`,
+] as const)(
+  `keeps previous-run rows seeds across a reload a peer's notice causes (%s)`,
+  async (variant) => {
+    const adapter = createRecordingAdapter([
+      { id: `cached`, title: `previous run` },
+      { id: `shown`, title: `previous run` },
+    ])
+    adapter.rowMetadata.set(`cached`, { cached: true })
+    adapter.rowMetadata.set(`shown`, { cached: true })
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `reload-route-${variant.replace(/ /g, `-`)}`
+    const client = new DbClient()
+    let source!: TodoSyncParams
+    const collection = client.collection(
+      collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      ),
+    )
+    const seed = (key: string) =>
+      client.hydrate({
+        collections: [
+          {
+            collectionId,
+            rows: [
+              {
+                key,
+                value: { id: key, title: `later seed` },
+                metadata: { seeded: true },
+              },
+            ],
+          },
+        ],
+      })
+    const observe = (key: string) => ({
+      title: collection.get(key)?.title,
+      metadata: source.metadata?.row.get(key),
+    })
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({})),
+        `demand loaded`,
+      )
+      await vi.waitFor(() =>
+        expect(collection.get(`cached`)?.title).toBe(`previous run`),
+      )
+      if (variant === `notice naming a shown row while a seed is held`) {
+        seed(`held`)
+        await flushAsyncWork()
+      }
+      adapter.rows.set(`shown`, { id: `shown`, title: `written by a peer` })
+      adapter.rowMetadata.set(`shown`, { peer: true })
+      const unseen = Array.from({ length: 129 }, (_, index) => ({
+        key: `unseen-${index}`,
+        value: { id: `unseen-${index}`, title: `written by a peer` },
+      }))
+      if (variant === `notice over the targeted key limit`)
+        for (const row of unseen) adapter.rows.set(row.key, row.value)
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `peer-write`,
+          latestRowVersion: 1,
+          ...(variant === `full-reload notice`
+            ? { requiresFullReload: true as const }
+            : {
+                requiresFullReload: false as const,
+                changedRows: [
+                  {
+                    key: `shown`,
+                    value: { id: `shown`, title: `written by a peer` },
+                  },
+                  ...(variant === `notice over the targeted key limit`
+                    ? unseen
+                    : []),
+                ],
+                deletedKeys: [],
+                rowMetadataMutations: [
+                  { type: `set` as const, key: `shown`, value: { peer: true } },
+                ],
+              }),
+        },
+        `peer`,
+        collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(collection.get(`shown`)?.title).toBe(`written by a peer`),
+      )
+      await flushAsyncWork()
+      seed(`cached`)
+      seed(`shown`)
+      seed(`fresh`)
+      await flushAsyncWork()
+      const unknownAuthorship = variant === `full-reload notice`
+      expect({
+        cached: observe(`cached`),
+        shown: observe(`shown`),
+        fresh: observe(`fresh`),
+      }).toEqual({
+        cached: unknownAuthorship
+          ? { title: `previous run`, metadata: { cached: true } }
+          : { title: `later seed`, metadata: { seeded: true } },
+        shown: { title: `written by a peer`, metadata: { peer: true } },
+        fresh: unknownAuthorship
+          ? { title: undefined, metadata: undefined }
+          : { title: `later seed`, metadata: { seeded: true } },
+      })
+    } finally {
+      await client.cleanup()
+    }
+  },
+)

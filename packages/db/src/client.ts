@@ -364,17 +364,16 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
       if (!transaction.preserveHydrationSeedKeys?.has(key))
         metadataKeys.add(key)
   }
-  const deleted = (key: TKey) => state.appliedAdapterKeys?.get(key) === true
   return {
     rows: (key) =>
       truncated ||
       rowKeys.has(key) ||
-      deleted(key) ||
+      state.appliedAdapterKeys?.get(key) === true ||
       (state.syncedData.has(key) && !state.hydrationSeedKeys.has(key)),
+    // A key whose row an applied adapter write deleted is in the map too.
     metadata: (key) =>
       truncated ||
       metadataKeys.has(key) ||
-      deleted(key) ||
       state.appliedAdapterKeys?.has(key) === true,
   }
 }

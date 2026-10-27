@@ -523,6 +523,12 @@ for the per-object record of writes in this run, judging open inserts
 again after internal writes, and the `begin` guard. `app` did not change
 in the third.
 
+The seventh round, against `6c1ca8f8f`: `app` grows 124 bytes, two fewer
+than before, because the projection's accepted-source key set became a local
+of its rebuild. Persistence grows to 933 bytes (84 more): the reload's choice
+between validating in place and replacing the snapshot, and the internal
+apply's written keys.
+
 Earlier rounds: the private-member mangle cache now
 covers the branch's new private methods. Removing Query's owner supplement
 saved 9 bytes, and tracking peer writes and judging enclosing inserts again
@@ -701,10 +707,47 @@ lane's read hold, with reach `storage read of a stored row`.
 | H8: re-judgment scanned every implicit insert on each inner commit | Fixed: it looks up the inner transaction's keys |
 | H9: `syncWriteNamesWholeRow` was exported without `@internal` | Fixed |
 
+## Seventh review round (fourth high review)
+
+A high review of `e4b81558b` raised ten items. The oracle change came first:
+a reload-route grid in the persisted oracle, `keeps previous-run rows seeds
+across a reload a peer's notice causes`, which crosses the three reloads a
+named-key notice can cause (no `DbClient` seed held, so the reload
+truncates core; a held seed, so it rewrites rows in place; more keys than a
+targeted update allows) with a full-reload neighbour, and observes a later
+seed of a previous run's row, of the row the notice named, and of a key
+storage never held.
+
+| Finding | Disposition |
+|---|---|
+| F1: a follower merges a targeted insert's row over its own and keeps a removed field | Refuted on the same path: a follower that shows the key reloads it from storage, and `follows durable same-key order for targeted insert replacement` (active and retired demand) passes |
+| F2: an inner insert is judged against the enclosing open transaction's row, though it commits ahead onto another | Awaiting the maintainer (see "Open"). Production and the model agree (`nested`, `nested-conflicts`) |
+| F3: reloads a peer's notice causes rewrote previous-run rows as source writes, and the reload's truncate counted as a source truncate | Fixed while the run's writes are known: such a reload validates rows in place through the storage-read path, so unchanged rows keep their status and new rows are marked as seeds (decisions 9 and 11). The grid failed three of four variants on `5013e5aba`; a later seed of a never-stored key was ignored after the truncating variant. A mutant that validates in place also under unknown writes fails the full-reload variant; one that only skips the truncate fails the other three. Unknown writes: awaiting the maintainer |
+| F4: every internal apply re-judged every open implicit insert | Fixed: the runtime passes the keys the internal apply's transaction wrote (every key after a truncate). Ten storage reads beside 4000 open inserts re-judged 40000 times, now none. A mutant that re-judges no keys fails `… (peer row during an open insert)`; no generated lane catches it |
+| F5: staging adds a storage read's seed keys to the source-key set that a rebuild excludes | Refuted as unobservable, as R7: a mutant that always rebuilds at acceptance changes no persisted session lane, persisted-oracle case, or core session lane; the wrapper's only classifier call skips keys no source wrote in this run |
+| F6: metadata reads scan every pending transaction | Accepted cost of read-your-writes: 10000 reads take 0.7 ms with no held transaction and 4.2 ms with 100 |
+| F7: the run's written-key sets grow, and the internal-apply listener outlives cleanup | No action: the sets keep deleted keys because D4 and decision 11 need them, as H; cleanup empties the arrays the listener reads, and the next run replaces it |
+| F8: a redundant deleted-key check, and a stored `acceptedSourceKeys` only the rebuild reads | Fixed |
+| F9: state internals are public for `client.ts` | Duplicate of round 4's G (accepted design); `any` follows `client.ts`'s own `AnyCollection` convention |
+| F10: seed keys are marked before the read's commit | Refuted: the read's begin, writes, and commit run synchronously, its commit takes no signal, a retired run's `begin` opens no transaction to mark (H6), and an accepted transaction always applies |
+
 ## Open
 
-Nothing in this bug class is known to be open. The limits in the evidence
-block still apply.
+Two questions for the maintainer from the seventh round:
+
+- **F2.** When an inner transaction commits ahead of an enclosing one whose
+  open write it read, is its insert's kind the one it had against that
+  write (the model and production; `30175be48` already let an inner insert
+  over an enclosing open truncate replace the row it lands on), or the one
+  it has against the row it lands on (core would reject the commit as a
+  duplicate; the wrapper would clear metadata)?
+- **F3, unknown writes.** After a full-reload notice or a missed notice, the
+  replace path counts every stored row and the reload's truncate as source
+  writes, so later seeds are ignored for the rest of the run; the
+  validation path, used when no demand is active, leaves unchanged rows'
+  status alone. Which rule holds?
+
+The limits in the evidence block still apply.
 
 ## Oracle guide requirements
 
