@@ -849,10 +849,22 @@ const extraLanes: Array<{
  * row that held transactions wrote, metadata of a missing row, a write over a
  * seed that must store the seed's row, a seed's metadata that a later seed
  * replaced, a row a held delete already removed, and a full reload's staged
- * writes beneath an open re-insert. Recorded in
+ * writes beneath an open re-insert, and a notice whose row keeps a held
+ * row's value while dropping its other fields: the campaigns almost never
+ * hold an absent row's insert when such a notice arrives. Recorded in
  * docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
  */
 const peerReplays: Array<[string, Array<SessionAction>]> = [
+  [
+    `a notice whose row keeps a held row's value still replaces it`,
+    [
+      { type: `hold` },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: true },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `row`, keepsValue: true },
+    ],
+  ],
   [
     `a reload keeps a seed accepted during a hold`,
     [

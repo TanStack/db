@@ -129,7 +129,17 @@ export type SessionAction =
   | { type: `seed`; key: SessionRowKey; narrow?: boolean; bare?: boolean }
   | { type: `insertOverSeed`; key: SessionRowKey; metadata: boolean }
   | { type: `conflictingInsert`; key: SessionRowKey; metadata: boolean }
-  | { type: `peer`; key: SessionRowKey; notice: PeerNotice }
+  | {
+      type: `peer`
+      key: SessionRowKey
+      notice: PeerNotice
+      /**
+       * A row notice whose row keeps the `v` this tab's accepted row has and
+       * drops its other fields, so merging it over that row changes nothing
+       * while the whole row replaces it.
+       */
+      keepsValue?: boolean
+    }
 
 /**
  * How another tab's source write reaches this tab: a notice that names the
@@ -467,8 +477,14 @@ export function sessionActionArbitrary(
           .tuple(
             rowKeyArbitrary,
             fc.constantFrom<PeerNotice>(`row`, `metadata`, `delete`, `reload`),
+            fc.integer({ min: 0, max: 2 }),
           )
-          .map(([key, notice]) => ({ type: `peer` as const, key, notice })),
+          .map(([key, notice, roll]) => ({
+            type: `peer` as const,
+            key,
+            notice,
+            ...(notice === `row` && roll === 0 ? { keepsValue: true } : {}),
+          })),
       ),
     )
   // A fresh insert over a row the source wrote names a different row. Core
@@ -989,8 +1005,13 @@ export class SessionModel {
    * other row or metadata that storage holds differently from this tab
    * becomes a source write of the stored value (decision 15).
    */
-  peer(key: SessionRowKey, notice: PeerNotice, value: unknown): void {
-    const row: ModelValue = { present: true, value: { id: key, v: value } }
+  peer(
+    key: SessionRowKey,
+    notice: PeerNotice,
+    value: unknown,
+    rowValue: unknown = value,
+  ): void {
+    const row: ModelValue = { present: true, value: { id: key, v: rowValue } }
     const metadata: ModelValue = { present: true, value: { peer: value } }
     if (notice !== `reload`) {
       const previous = this.storage.get(key) ?? {
@@ -1097,6 +1118,17 @@ export class SessionModel {
     return this.events.some(
       (event) => open.has(event.frame) && isInsert(event) && event.key === key,
     )
+  }
+
+  /** The `v` of the row this tab has accepted, if the row has one. */
+  acceptedValue(key: SessionRowKey): { value: unknown } | undefined {
+    const row = this.fold(`row`, key, this.acceptedEntries())
+    return row.present &&
+      typeof row.value === `object` &&
+      row.value !== null &&
+      `v` in row.value
+      ? { value: (row.value as { v: unknown }).v }
+      : undefined
   }
 
   /** The row storage holds; peer actions that name a stored row need one. */
@@ -2048,12 +2080,15 @@ function planAction(
       return (driver) => driver.insert(action.key, row, metadata)
     }
     case `peer`: {
-      model.peer(action.key, action.notice, value)
+      const kept =
+        action.keepsValue === true ? model.acceptedValue(action.key) : undefined
+      const rowValue = kept ? kept.value : value
+      model.peer(action.key, action.notice, value, rowValue)
       return (driver) =>
         driver.peer!(
           action.key,
           action.notice,
-          { id: action.key, v: value },
+          { id: action.key, v: rowValue },
           { peer: value },
         )
     }
@@ -2158,7 +2193,7 @@ export function describeMismatch(
       action.type === `seed`
         ? `seed(${[action.key, action.narrow === true ? `narrow` : ``, action.bare === true ? `bare` : ``].filter(Boolean).join(`,`)})`
         : action.type === `peer`
-          ? `peer(${action.key},${action.notice})`
+          ? `peer(${action.key},${action.notice}${action.keepsValue === true ? `,keeps` : ``})`
           : `key` in action
             ? `${action.type}(${action.key})`
             : action.type === `hold` && action.store === true

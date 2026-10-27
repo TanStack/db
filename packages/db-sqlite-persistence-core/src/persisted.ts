@@ -5228,14 +5228,13 @@ class PersistedCollectionRuntime<
       changedKeys.has(key),
     )
     // A row that held transactions write is ambiguous in the same way while
-    // consumers still see the earlier row, unless the notice leaves it as it
-    // is: a commit this tab already knows rereads nothing.
+    // consumers still see the earlier row, unless the notice carries exactly
+    // that row: a commit this tab already knows rereads nothing.
     const hasChangedPublicKey = txCommitted.changedRows.some((row) => {
       if (this.collection?.base.has(row.key as TKey)) return true
       const held = this.collection?._state.getAcceptedSyncedRow(row.key as TKey)
       return (
-        held !== undefined &&
-        !equalPersistedSnapshotValues(held, { ...held, ...row.value })
+        held !== undefined && !equalPersistedSnapshotValues(held, row.value)
       )
     })
     const hasUnseenDemandedKey =
