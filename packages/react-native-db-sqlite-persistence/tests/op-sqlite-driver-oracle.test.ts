@@ -3,6 +3,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
+import {
+  oracleRandomParameters,
+  oracleReplayTest,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
@@ -133,7 +139,8 @@ async function withColumnarDriver<T>(
  * adapter. Named empty, reordered, duplicated, missing-key, and swapped-value
  * wrong answers challenge the checker. Normal execution runs the same alias
  * properties and budgets in retained fixed-seed and seedless-random lanes.
- * Seed, numeric shrink path, and property coordinates select one exact replay.
+ * TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY
+ * select one exact replay.
  * Real-provider refinement: frozen receipts from the published 15.2.7 Native
  * and Node sources, plus forward receipts from 18.2.1 Native, Node, and browser
  * sources, prove the shim's accepted envelopes match provider output.
@@ -503,127 +510,61 @@ const writeResultFieldNames = [
   `lastInsertRowId`,
 ] as const
 
-const aliasOracleProperties = [
-  `write-marker-aliases`,
-  `result-carrier-equivalence`,
-  `columnar-sql-aliases`,
-] as const
-
-type AliasOracleProperty = (typeof aliasOracleProperties)[number]
+type AliasOracleProperty =
+  | `op-sqlite.write-marker-aliases`
+  | `op-sqlite.result-carrier-equivalence`
+  | `op-sqlite.columnar-sql-aliases`
 type AliasOracleEnvironment = Record<string, string | undefined>
-type AliasOracleConfig = {
-  runs: number
-  replaySeed: number | undefined
-  replayPath: string | undefined
-  replayProperty: AliasOracleProperty | undefined
-}
-type AliasOracleCampaign = {
-  name: `fixed` | `random` | `replay`
+type AliasOracleParameters = {
   numRuns: number
-  seed: number | undefined
-  path: string | undefined
+  seed?: number
+  path?: string
 }
 
 const FIXED_ALIAS_ORACLE_SEED = 165903
 
-function isAliasOracleProperty(value: string): value is AliasOracleProperty {
-  return aliasOracleProperties.some((property) => property === value)
-}
-
-function readAliasOracleConfig(
+function readAliasOracleRuns(
   environment: AliasOracleEnvironment = process.env,
-): AliasOracleConfig {
-  const runsText = environment.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ?? `50`
+): number {
+  // A run-count control, not a replay coordinate. Its default is the shared
+  // base count, so TANSTACK_DB_ORACLE_RUNS_MULTIPLIER still scales it.
+  const runsText =
+    environment.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ?? String(oracleRuns(50))
   const runs = Number(runsText)
   if (runsText.trim() === `` || !Number.isSafeInteger(runs) || runs < 1) {
     throw new Error(
       `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS must be a positive integer`,
     )
   }
-
-  const seedText = environment.TANSTACK_DB_OP_SQLITE_ORACLE_SEED
-  const path = environment.TANSTACK_DB_OP_SQLITE_ORACLE_PATH
-  const propertyText = environment.TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY
-  if (
-    seedText === undefined &&
-    path === undefined &&
-    propertyText === undefined
-  ) {
-    return {
-      runs,
-      replaySeed: undefined,
-      replayPath: undefined,
-      replayProperty: undefined,
-    }
-  }
-
-  if (seedText === undefined) {
-    throw new Error(
-      `TANSTACK_DB_OP_SQLITE_ORACLE_PATH and PROPERTY require SEED`,
-    )
-  }
-  const replaySeed = Number(seedText)
-  if (seedText.trim() === `` || !Number.isSafeInteger(replaySeed)) {
-    throw new Error(`TANSTACK_DB_OP_SQLITE_ORACLE_SEED must be an integer`)
-  }
-  if (path === undefined || !/^\d+(?::\d+)*$/.test(path)) {
-    throw new Error(
-      `TANSTACK_DB_OP_SQLITE_ORACLE_PATH must be a numeric shrink path`,
-    )
-  }
-  if (propertyText === undefined || !isAliasOracleProperty(propertyText)) {
-    throw new Error(
-      `TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY must name a generated property`,
-    )
-  }
-
-  return {
-    runs,
-    replaySeed,
-    replayPath: path,
-    replayProperty: propertyText,
-  }
+  return runs
 }
 
-function aliasOracleCampaigns(
+const aliasOracleRuns = readAliasOracleRuns()
+// Replay coordinates come from the shared TANSTACK_DB_ORACLE_* variables.
+const aliasOracleReplay = readOracleRunConfig()
+
+/**
+ * Registers a property's two campaigns. The fixed campaign pins its seed and
+ * stands aside on every path replay. The random campaign runs in ordinary and
+ * seed-only runs, and as the replay of its property, where the shared helper
+ * returns the recorded path.
+ */
+function registerAliasOracle(
   property: AliasOracleProperty,
-  config: AliasOracleConfig,
-): ReadonlyArray<AliasOracleCampaign> {
-  if (config.replayProperty !== undefined) {
-    if (config.replayProperty !== property) return []
-    return [
-      {
-        name: `replay`,
-        numRuns: 1,
-        seed: config.replaySeed,
-        path: config.replayPath,
-      },
-    ]
-  }
-
-  return [
-    {
-      name: `fixed`,
-      numRuns: config.runs,
-      seed: FIXED_ALIAS_ORACLE_SEED,
-      path: undefined,
-    },
-    {
-      name: `random`,
-      numRuns: config.runs,
-      seed: undefined,
-      path: undefined,
-    },
-  ]
-}
-
-function aliasOracleParameters(campaign: AliasOracleCampaign) {
-  return {
-    numRuns: campaign.numRuns,
-    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-    ...(campaign.path === undefined ? {} : { path: campaign.path }),
-    ...(campaign.name === `replay` ? { endOnFailure: true } : {}),
-  }
+  title: string,
+  check: (parameters: AliasOracleParameters) => Promise<void>,
+): void {
+  const randomParameters = oracleRandomParameters(
+    aliasOracleRuns,
+    aliasOracleReplay,
+    property,
+  )
+  oracleReplayTest(it)(`${title} [fixed]`, () =>
+    check({ numRuns: aliasOracleRuns, seed: FIXED_ALIAS_ORACLE_SEED }),
+  )
+  oracleReplayTest(it, property)(`${title} [random]`, () =>
+    check(randomParameters),
+  )
 }
 
 const writeResultAliasesArbitrary = fc.uniqueArray(
@@ -695,99 +636,88 @@ function expectAliasGrammar<TAlias extends string>(
 }
 
 it(`configures identical fixed and seedless-random alias campaigns`, () => {
-  const config = readAliasOracleConfig({})
-  expect(aliasOracleCampaigns(`write-marker-aliases`, config)).toEqual([
-    {
-      name: `fixed`,
-      numRuns: 50,
-      seed: FIXED_ALIAS_ORACLE_SEED,
-      path: undefined,
-    },
-    {
-      name: `random`,
-      numRuns: 50,
-      seed: undefined,
-      path: undefined,
-    },
-  ])
+  const runs = readAliasOracleRuns({})
+  expect(runs).toBe(oracleRuns(50))
+  expect(
+    oracleRandomParameters(runs, undefined, `op-sqlite.write-marker-aliases`),
+  ).toEqual({ numRuns: runs })
+})
+
+it(`reseeds the random alias campaigns from a seed-only replay`, () => {
+  expect(
+    oracleRandomParameters(
+      50,
+      readOracleRunConfig({ TANSTACK_DB_ORACLE_SEED: `271828` }),
+      `op-sqlite.write-marker-aliases`,
+    ),
+  ).toEqual({ numRuns: 50, seed: 271828 })
 })
 
 it(`selects exactly one alias property and shrink path for replay`, () => {
-  const config = readAliasOracleConfig({
-    TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `271828`,
-    TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0:1`,
-    TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `columnar-sql-aliases`,
+  const replay = readOracleRunConfig({
+    TANSTACK_DB_ORACLE_SEED: `271828`,
+    TANSTACK_DB_ORACLE_PATH: `0:1`,
+    TANSTACK_DB_ORACLE_PROPERTY: `op-sqlite.columnar-sql-aliases`,
   })
 
-  expect(aliasOracleCampaigns(`write-marker-aliases`, config)).toEqual([])
-  expect(aliasOracleCampaigns(`result-carrier-equivalence`, config)).toEqual([])
-  const [replay] = aliasOracleCampaigns(`columnar-sql-aliases`, config)
-  expect(replay).toEqual({
-    name: `replay`,
-    numRuns: 1,
-    seed: 271828,
-    path: `0:1`,
-  })
-  expect(aliasOracleParameters(replay!)).toEqual({
-    numRuns: 1,
-    seed: 271828,
-    path: `0:1`,
-    endOnFailure: true,
-  })
+  expect(
+    oracleRandomParameters(50, replay, `op-sqlite.write-marker-aliases`),
+  ).toEqual({ numRuns: 50, seed: 271828 })
+  expect(
+    oracleRandomParameters(50, replay, `op-sqlite.columnar-sql-aliases`),
+  ).toMatchObject({ numRuns: 1, seed: 271828, path: `0:1` })
 })
 
 it.each([
   {
     name: `path without seed`,
-    environment: { TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0` },
+    environment: { TANSTACK_DB_ORACLE_PATH: `0` },
   },
   {
     name: `property without seed`,
     environment: {
-      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `write-marker-aliases`,
+      TANSTACK_DB_ORACLE_PROPERTY: `op-sqlite.write-marker-aliases`,
     },
-  },
-  {
-    name: `seed without path`,
-    environment: { TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1` },
   },
   {
     name: `seed and path without property`,
     environment: {
-      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0`,
+      TANSTACK_DB_ORACLE_SEED: `1`,
+      TANSTACK_DB_ORACLE_PATH: `0`,
     },
   },
   {
     name: `non-integer seed`,
     environment: {
-      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1.5`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `write-marker-aliases`,
+      TANSTACK_DB_ORACLE_SEED: `1.5`,
+      TANSTACK_DB_ORACLE_PATH: `0`,
+      TANSTACK_DB_ORACLE_PROPERTY: `op-sqlite.write-marker-aliases`,
     },
-  },
-  {
-    name: `non-integer run budget`,
-    environment: { TANSTACK_DB_OP_SQLITE_ORACLE_RUNS: `1.5` },
   },
   {
     name: `invalid shrink path`,
     environment: {
-      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `first`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `write-marker-aliases`,
+      TANSTACK_DB_ORACLE_SEED: `1`,
+      TANSTACK_DB_ORACLE_PATH: `first`,
+      TANSTACK_DB_ORACLE_PROPERTY: `op-sqlite.write-marker-aliases`,
     },
   },
   {
     name: `unknown property`,
     environment: {
-      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0`,
-      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `unknown`,
+      TANSTACK_DB_ORACLE_SEED: `1`,
+      TANSTACK_DB_ORACLE_PATH: `0`,
+      TANSTACK_DB_ORACLE_PROPERTY: `unknown`,
     },
   },
 ])(`rejects incomplete alias replay coordinates: $name`, ({ environment }) => {
-  expect(() => readAliasOracleConfig(environment)).toThrow()
+  expect(() => readOracleRunConfig(environment)).toThrow()
+})
+
+it(`rejects a non-integer alias run budget`, () => {
+  expect(() =>
+    readAliasOracleRuns({ TANSTACK_DB_OP_SQLITE_ORACLE_RUNS: `1.5` }),
+  ).toThrow(`TANSTACK_DB_OP_SQLITE_ORACLE_RUNS must be a positive integer`)
 })
 
 it(`controls alias grammar reconstruction, ablation, range, and exclusion`, () => {
@@ -795,13 +725,10 @@ it(`controls alias grammar reconstruction, ablation, range, and exclusion`, () =
   expectAliasGrammar(statementResultAliasesArbitrary, statementResultAliasNames)
 })
 
-const aliasOracleConfig = readAliasOracleConfig()
-
-for (const campaign of aliasOracleCampaigns(
-  `write-marker-aliases`,
-  aliasOracleConfig,
-)) {
-  it(`preserves generated single-row write-marker aliases in direct row arrays [${campaign.name}]`, async () => {
+registerAliasOracle(
+  `op-sqlite.write-marker-aliases`,
+  `preserves generated single-row write-marker aliases in direct row arrays`,
+  async (parameters) => {
     await fc.assert(
       fc.asyncProperty(writeResultAliasesArbitrary, async (aliases) => {
         const row = Object.fromEntries(
@@ -811,22 +738,19 @@ for (const campaign of aliasOracleCampaigns(
         expectExactAliasRows(actual, [row])
       }),
       {
-        ...aliasOracleParameters(campaign),
-        ...(campaign.name === `replay`
-          ? {}
-          : {
-              examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]],
-            }),
+        ...parameters,
+        ...(parameters.path === undefined
+          ? { examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]] }
+          : { endOnFailure: true }),
       },
     )
-  })
-}
+  },
+)
 
-for (const campaign of aliasOracleCampaigns(
-  `result-carrier-equivalence`,
-  aliasOracleConfig,
-)) {
-  it(`returns the same rows across equivalent documented result carriers [${campaign.name}]`, async () => {
+registerAliasOracle(
+  `op-sqlite.result-carrier-equivalence`,
+  `returns the same rows across equivalent documented result carriers`,
+  async (parameters) => {
     await fc.assert(
       fc.asyncProperty(statementResultAliasesArbitrary, async (aliases) => {
         const { expected } = aliasQueryCase(aliases)
@@ -872,19 +796,19 @@ for (const campaign of aliasOracleCampaigns(
         }
       }),
       {
-        ...aliasOracleParameters(campaign),
-        ...(campaign.name === `replay`
-          ? {}
-          : {
+        ...parameters,
+        ...(parameters.path === undefined
+          ? {
               examples: [
                 [[`rowsAffected`]],
                 [[`rows`, `rawRows`, `columnNames`, `ordinary_name`]],
               ],
-            }),
+            }
+          : { endOnFailure: true }),
       },
     )
-  })
-}
+  },
+)
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll(`"`, `""`)}"`
@@ -965,11 +889,10 @@ it(`preserves statement-result field names in direct row arrays`, async () => {
   )
 })
 
-for (const campaign of aliasOracleCampaigns(
-  `columnar-sql-aliases`,
-  aliasOracleConfig,
-)) {
-  it(`preserves generated legal SQL aliases through v14 columnar rows [${campaign.name}]`, async () => {
+registerAliasOracle(
+  `op-sqlite.columnar-sql-aliases`,
+  `preserves generated legal SQL aliases through v14 columnar rows`,
+  async (parameters) => {
     await withColumnarDriver(async ({ driver, queryExecutions }) => {
       await fc.assert(
         fc.asyncProperty(statementResultAliasesArbitrary, async (aliases) => {
@@ -986,15 +909,15 @@ for (const campaign of aliasOracleCampaigns(
           expectExactAliasRows(actual, expected)
         }),
         {
-          ...aliasOracleParameters(campaign),
-          ...(campaign.name === `replay`
-            ? {}
-            : { examples: [[[...statementResultFieldNames]]] }),
+          ...parameters,
+          ...(parameters.path === undefined
+            ? { examples: [[[...statementResultFieldNames]]] }
+            : { endOnFailure: true }),
         },
       )
     })
-  })
-}
+  },
+)
 
 it(`returns an exact empty row set for an empty columnar SELECT`, async () => {
   await withColumnarDriver(async ({ driver, queryExecutions }) => {

@@ -54,6 +54,11 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { Index } from '../src/indexes.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 
 type Prefix = number | string | bigint
 type Value = [Prefix, number | string] | number | string
@@ -228,58 +233,45 @@ function expectRefinement(
 
 // ---------------------------------------------------------------------------
 // Campaigns. The fixed and random campaigns run the same property, grammar,
-// check, and budget. `TANSTACK_DB_IVM_INDEX_SEED` and
-// `TANSTACK_DB_IVM_INDEX_PATH` select a direct replay.
+// check, and budget. A seed alone reseeds the random campaign. A path replay
+// of INDEX_REFINEMENT_PROPERTY runs its recorded history, and every other
+// test in this file stands aside.
 
-const replaySeed = process.env.TANSTACK_DB_IVM_INDEX_SEED
-const replayPath = process.env.TANSTACK_DB_IVM_INDEX_PATH
-const campaigns =
-  replaySeed === undefined && replayPath === undefined
-    ? [
-        { name: `20260930`, seed: 20260930 as number | undefined },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed: replaySeed === undefined ? undefined : Number(replaySeed),
-        },
-      ]
+const INDEX_REFINEMENT_PROPERTY = `ivm.index-refinement`
 
 describe(`Index refinement oracle`, () => {
-  if (replaySeed === undefined && replayPath === undefined) {
-    for (const { name, additions } of pinnedHistories) {
-      it(`matches the multiset model when ${name}`, () => {
-        expectRefinement(additions)
-        expectRefinement(additions, `prefixIdentity`)
-      })
-    }
+  for (const { name, additions } of pinnedHistories) {
+    oracleReplayTest(it)(`matches the multiset model when ${name}`, () => {
+      expectRefinement(additions)
+      expectRefinement(additions, `prefixIdentity`)
+    })
   }
 
-  for (const { name, seed } of campaigns) {
-    it(`matches the multiset model across generated additions (${name})`, () => {
-      if (replayPath !== undefined && replaySeed === undefined)
-        throw new Error(`TANSTACK_DB_IVM_INDEX_PATH requires a seed`)
-      if (
-        replaySeed !== undefined &&
-        (replaySeed.trim() === `` ||
-          typeof seed !== `number` ||
-          !Number.isSafeInteger(seed))
-      )
-        throw new Error(`TANSTACK_DB_IVM_INDEX_SEED must be an integer`)
+  oracleReplayTest(it)(
+    `matches the multiset model across generated additions (20260930)`,
+    () => {
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
           expectRefinement(additions, `prefixIdentity`)
         }),
-        {
-          numRuns: 300,
-          ...(seed === undefined ? {} : { seed }),
-          ...(replayPath === undefined ? {} : { path: replayPath }),
-        },
+        { numRuns: oracleRuns(300), seed: 20260930 },
       )
-    })
-  }
+    },
+  )
+
+  oracleReplayTest(it, INDEX_REFINEMENT_PROPERTY)(
+    `matches the multiset model across generated additions (random or replayed)`,
+    () => {
+      fc.assert(
+        fc.property(historyArbitrary, (additions) => {
+          expectRefinement(additions)
+          expectRefinement(additions, `prefixIdentity`)
+        }),
+        oraclePropertyOptions(300, INDEX_REFINEMENT_PROPERTY),
+      )
+    },
+  )
 
   // Positive execution witness: generated histories reach a NaN prefix that
   // cancels after another value joined its key.

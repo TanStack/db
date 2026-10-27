@@ -15,8 +15,8 @@ import { electricCollectionOptions } from '../src/electric'
 import { StreamAbortedError } from '../src/errors'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { atCheckpoint } from './electric-oracle-lifecycle'
 import { storageTargetId, tagPersistence } from './electric-persistence-fixture'
@@ -51,9 +51,9 @@ import type { ElectricCollectionUtils } from '../src/electric'
  * framing or service behavior; those have separate owners.
  */
 
-const { replayPath, replayProperty } = readOracleRunConfig()
-const fixedCase = replayPath === undefined ? it : it.skip
-const fixedDescribe = replayPath === undefined ? describe : describe.skip
+// Ordinary tests stand aside during any path replay, which runs one property.
+const fixedCase = oracleReplayTest(it)
+const fixedDescribe = oracleReplayTest(describe)
 
 // The durable fixture is a driver, not the independent tag model. It must
 // preserve the SQLite adapter's mutation algebra: an insert replaces the old
@@ -617,32 +617,25 @@ fixedCase.each([
   },
 )
 
-// The two campaigns use the same grammar, checker, and budget. An explicit
-// replay registers only its selected property. Reproduce a saved failure with:
+// The two campaigns use the same grammar, checker, and budget. A path replay
+// of the property runs only the random campaign. Reproduce a saved failure with:
 // TANSTACK_DB_ORACLE_PROPERTY=electric.persisted-tag-history
 // TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path>
 // pnpm exec vitest run tests/electric-descriptor-isolation-oracle.test.ts
-if (replayPath === undefined) {
-  fcTest.prop([tagHistory], { seed: 42712, numRuns: oracleRuns(10) })(
-    `persisted tag histories preserve membership across warm and cold restart (fixed)`,
-    (history) => runTagHistory(history),
-  )
-  fcTest.prop(
-    [tagHistory],
-    oraclePropertyOptions(10, `electric.persisted-tag-history`),
-  )(
-    `persisted tag histories preserve membership across warm and cold restart (random)`,
-    (history) => runTagHistory(history),
-  )
-} else if (replayProperty === `electric.persisted-tag-history`) {
-  fcTest.prop(
-    [tagHistory],
-    oraclePropertyOptions(10, `electric.persisted-tag-history`),
-  )(
-    `persisted tag histories preserve membership across warm and cold restart (replay)`,
-    (history) => runTagHistory(history),
-  )
-}
+oracleReplayTest(fcTest).prop([tagHistory], {
+  seed: 42712,
+  numRuns: oracleRuns(10),
+})(
+  `persisted tag histories preserve membership across warm and cold restart (fixed)`,
+  (history) => runTagHistory(history),
+)
+oracleReplayTest(fcTest, `electric.persisted-tag-history`).prop(
+  [tagHistory],
+  oraclePropertyOptions(10, `electric.persisted-tag-history`),
+)(
+  `persisted tag histories preserve membership across warm and cold restart (random)`,
+  (history) => runTagHistory(history),
+)
 
 beforeEach(() => {
   streams.length = 0
@@ -1774,27 +1767,20 @@ async function runOwnerHistory(history: {
   }
 }
 
-if (replayPath === undefined) {
-  fcTest.prop([ownerHistory], { seed: 42711, numRuns: oracleRuns(12) })(
-    `config derivation preserves independent owner histories (fixed)`,
-    runOwnerHistory,
-  )
-  fcTest.prop(
-    [ownerHistory],
-    oraclePropertyOptions(20, `electric.bound-descriptor-history`),
-  )(
-    `config derivation preserves independent owner histories (random)`,
-    runOwnerHistory,
-  )
-} else if (replayProperty === `electric.bound-descriptor-history`) {
-  fcTest.prop(
-    [ownerHistory],
-    oraclePropertyOptions(20, `electric.bound-descriptor-history`),
-  )(
-    `config derivation preserves independent owner histories (replay)`,
-    runOwnerHistory,
-  )
-}
+oracleReplayTest(fcTest).prop([ownerHistory], {
+  seed: 42711,
+  numRuns: oracleRuns(12),
+})(
+  `config derivation preserves independent owner histories (fixed)`,
+  runOwnerHistory,
+)
+oracleReplayTest(fcTest, `electric.bound-descriptor-history`).prop(
+  [ownerHistory],
+  oraclePropertyOptions(20, `electric.bound-descriptor-history`),
+)(
+  `config derivation preserves independent owner histories (random)`,
+  runOwnerHistory,
+)
 
 // The Electric descriptor may be reused across independent persisted wrappers.
 // The wrappers may address the same or different durable Collection IDs; that

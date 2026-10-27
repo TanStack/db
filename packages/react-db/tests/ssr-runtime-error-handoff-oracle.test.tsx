@@ -27,6 +27,7 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -291,33 +292,37 @@ describe(`runtime errors across SSR hydration`, () => {
         `${hook} runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
         () => checkRuntimeHistory(hook, history, runtimeReach(hook)),
       )
-    for (const campaign of [`fixed`, `random`] as const) {
-      const run = campaign === `fixed` ? it.skipIf(oracleReplayRequested()) : it
-      run(
-        `${hook} preserves runtime error hydration views (${campaign})`,
-        async () => {
-          const reach = runtimeReach(hook)
-          try {
-            await fc.assert(
-              fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
-                checkRuntimeHistory(hook, history, reach),
-              ),
-              {
-                ...(campaign === `fixed`
-                  ? { numRuns: oracleRuns(64), seed: 2229 }
-                  : oraclePropertyOptions(64, runtimeProperties[hook])),
-                examples: ssrRuntimeErrorExamples.map((history) => [history]),
-              },
-            )
-            reach.assertReached()
-          } finally {
-            console.info(
-              `react-ssr-runtime ${hook} ${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
-          }
-        },
-      )
+    const runCampaign = async (campaign: `fixed` | `random`) => {
+      const reach = runtimeReach(hook)
+      try {
+        await fc.assert(
+          fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
+            checkRuntimeHistory(hook, history, reach),
+          ),
+          {
+            ...(campaign === `fixed`
+              ? { numRuns: oracleRuns(64), seed: 2229 }
+              : oraclePropertyOptions(64, runtimeProperties[hook])),
+            examples: ssrRuntimeErrorExamples.map((history) => [history]),
+          },
+        )
+        reach.assertReached()
+      } finally {
+        console.info(
+          `react-ssr-runtime ${hook} ${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
     }
+    // The fixed campaign stands aside during every replay; the random campaign
+    // runs as this property's replay.
+    oracleReplayTest(it)(
+      `${hook} preserves runtime error hydration views (fixed)`,
+      () => runCampaign(`fixed`),
+    )
+    oracleReplayTest(it, runtimeProperties[hook])(
+      `${hook} preserves runtime error hydration views (random)`,
+      () => runCampaign(`random`),
+    )
   }
 })

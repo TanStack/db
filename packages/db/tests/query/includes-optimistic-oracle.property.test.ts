@@ -14,7 +14,7 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
+import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
@@ -646,22 +646,17 @@ function optimisticProperty(
   name: string,
   run: (routes: RouteValues) => Promise<void>,
 ): void {
-  const { replayPath, replayProperty } = readOracleRunConfig()
-  if (replayPath !== undefined && replayProperty !== property) return
-
   const options = oraclePropertyOptions(12, property)
-  // Both normal campaigns use the same arbitrary, driver, checker, and budget.
-  // A seed-and-path replay registers only its requested property and lane.
-  if (replayPath !== undefined) {
-    fcTest.prop([routeValuesArbitrary], options)(name, run)
-    return
-  }
-
-  fcTest.prop([routeValuesArbitrary], { ...options, seed: 1_658_013 })(
-    `${name} (fixed seed)`,
+  // Both campaigns use the same arbitrary, driver, checker, and budget. A path
+  // replay of this property runs only the random campaign, from its path.
+  oracleReplayTest(fcTest).prop([routeValuesArbitrary], {
+    ...options,
+    seed: 1_658_013,
+  })(`${name} (fixed seed)`, run)
+  oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
+    `${name} (random seed)`,
     run,
   )
-  fcTest.prop([routeValuesArbitrary], options)(`${name} (random seed)`, run)
 }
 
 describe(`optimistic relationship-transition oracle`, () => {

@@ -723,8 +723,12 @@ example or fixed campaign.
 
 [`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
 shows this shape. Its fixed run preserves one scheduler campaign. Its second
-campaign uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
-`OFFLINE_ORACLE_PATH` for replay.
+campaign uses a random seed by default. To replay its recorded failure, set
+`TANSTACK_DB_ORACLE_PROPERTY=offline.fifo-retry` with
+`TANSTACK_DB_ORACLE_SEED` and `TANSTACK_DB_ORACLE_PATH`. The fixed run stands
+aside, and the random campaign runs the recorded path once. The offline
+owners' other properties use the same variables and name their own properties,
+such as `offline.leadership.stale-read` and `offline.settlement.retry-decision`.
 
 Do not use a larger random run count as a substitute for structural reach.
 Pinned examples force rare boundaries. Bounded enumeration proves small finite

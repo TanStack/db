@@ -621,7 +621,7 @@ does not award oracle credit for a filename alone.
 | [#1833](https://github.com/TanStack/db/pull/1833) | Explicit oracle                  | `packages/db/tests/query/pagination-oracle.property.test.ts` owns inherited collection collation, actual `item2`/`item10` order, exact request options, hostile lexical/numeric controls, and both scan and auto-index paths. It runs in `@tanstack/db`'s `test:oracles` campaign.                                                                                                               |
 | [#1834](https://github.com/TanStack/db/pull/1834) | Explicit oracle                  | `packages/db/tests/query/cold-join-reconciliation-oracle.test.ts` owns join/predicate equality equivalence across the established value domains, binary/string and nullish controls, replacement histories, raw lazy demand, and scan/auto-index paths. It runs in `@tanstack/db`'s `test:oracles` campaign.                                                                                     |
 | [#1835](https://github.com/TanStack/db/pull/1835) | Explicit oracle                  | The existing `packages/db/tests/collection-state-retention-oracle.property.test.ts` and `packages/db/tests/optimistic-transaction-oracle.property.test.ts` owners cover separate collection-state and transaction-history laws. Both were already registered in `@tanstack/db`'s `test:oracles` campaign; focused storage/local-only tests remain collateral.                                    |
-| [#1837](https://github.com/TanStack/db/pull/1837) | Explicit oracle                  | The offline scheduler, leadership replay, and serializer owners cover selective replay retirement, durable per-ID settlement, stale-read fencing, lifecycle recovery, native scalar encoding, and prior wire compatibility. They run in the package test campaign; generated owners expose `OFFLINE_ORACLE_{SEED,PATH,RUNS}` or the scheduler's `TANSTACK_DB_OFFLINE_ORACLE_*` replay interface. |
+| [#1837](https://github.com/TanStack/db/pull/1837) | Explicit oracle                  | The offline scheduler, leadership replay, and serializer owners cover selective replay retirement, durable per-ID settlement, stale-read fencing, lifecycle recovery, native scalar encoding, and prior wire compatibility. They run in the package test campaign. Every generated campaign in these owners uses the shared `TANSTACK_DB_ORACLE_{SEED,PATH,PROPERTY}` replay interface, with one property per campaign (`offline.fifo-retry`, `offline.leadership.*`, `offline.serializer.*`, `offline.settlement.*`). |
 | [#1842](https://github.com/TanStack/db/pull/1842) | No shipped-law case              | The PR changed only focused observer tests and introduced no production behavior. `packages/db/tests/live-query-observer.test.ts` remains the correct evidence; no synthetic oracle or campaign claim is added.                                                                                                                                                                                  |
 
 [PR #1816](https://github.com/TanStack/db/pull/1816) preserves existing witnesses,
@@ -2702,11 +2702,12 @@ properties have separate environment variables; inspect their test headers.
 Do not assume the core multiplier reaches them.
 
 The Node expression-index oracle runs matching fixed-seed and seedless-random
-campaigns by default. Supplying both replay values selects only the requested
-seed and shrink path:
+campaigns by default. A path replay of its property selects only the
+requested seed and shrink path:
 
 ```sh
-TANSTACK_DB_WS5A_SEED=1659005 TANSTACK_DB_WS5A_PATH=0 \
+TANSTACK_DB_ORACLE_SEED=1659005 TANSTACK_DB_ORACLE_PATH=0 \
+TANSTACK_DB_ORACLE_PROPERTY=sqlite-persistence.expression-index \
 pnpm --filter @tanstack/node-db-sqlite-persistence test:oracles
 ```
 

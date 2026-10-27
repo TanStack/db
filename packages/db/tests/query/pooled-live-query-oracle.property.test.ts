@@ -93,8 +93,9 @@ import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import {
@@ -107,7 +108,6 @@ import type { Collection } from '../../src/collection/index.js'
 import type { ChangeMessage } from '../../src/types.js'
 
 const property = `pooled-live-query.publication`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 // A detached reader distinguishes a view that empties at cleanup from one
 // whose rows stay readable only if it held rows when the cleanup started.
@@ -1040,7 +1040,17 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
 }
 
 describe(`pooled live query oracle`, () => {
-  if (requestedReplayProperty === undefined) {
+  // The pinned histories and the fixed campaign stand aside during any path
+  // replay. The random campaign below is the one that a replay of this
+  // property selects.
+  // Only generated histories count toward reach; a replay asserts nothing.
+  const reach = createOracleReach(property, reachStates)
+  let generatedRan = false
+  const runGenerated = (history: History) => {
+    generatedRan = true
+    return runHistory(history, reach)
+  }
+  if (!oracleReplayRequested()) {
     // Generated fields are plain values; this pins a field whose getter
     // throws, which both paths treat as a row that does not match.
     it(`matches the live-query Collection when an eq path getter throws`, async () => {
@@ -1082,30 +1092,17 @@ describe(`pooled live query oracle`, () => {
       it(`matches the live-query Collection when ${name}`, () =>
         runHistory(history))
     }
-    // Only generated histories count toward reach.
-    const reach = createOracleReach(property, reachStates)
-    let generatedRan = false
-    const runGenerated = (history: History) => {
-      generatedRan = true
-      return runHistory(history, reach)
-    }
     fcTest.prop([historyArbitrary], {
       seed: 44_502_001,
       numRuns: oracleRuns(80),
     })(`matches the live-query Collection (fixed)`, runGenerated)
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(80, property))(
-      `matches the live-query Collection (random)`,
-      runGenerated,
-    )
     afterAll(() => {
       if (generatedRan) reach.assertReached()
     })
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(80, property))(
-      `matches the live-query Collection (replay)`,
-      runHistory,
-    )
-  } else {
-    it.skip(`runs only when its replay property is selected`, () => {})
   }
+
+  oracleReplayTest(fcTest, property).prop(
+    [historyArbitrary],
+    oraclePropertyOptions(80, property),
+  )(`matches the live-query Collection (random)`, runGenerated)
 })

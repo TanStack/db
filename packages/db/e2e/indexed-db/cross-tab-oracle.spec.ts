@@ -22,6 +22,11 @@ import {
   assertStatuses,
 } from '../../tests/indexed-db/cross-tab-oracle'
 import { runCampaign } from '../../tests/indexed-db/campaign'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../tests/oracle-config'
 import { retainedDocument } from './browser-evidence-oracle'
 import type { BrowserContext, Page } from '@playwright/test'
 import type { BrowserEvidence } from './browser'
@@ -399,46 +404,62 @@ async function nativeHistoryRun(
   }
 }
 
-const replaySeed = process.env.TANSTACK_INDEXEDDB_BROWSER_SEED
-const replayPath = process.env.TANSTACK_INDEXEDDB_BROWSER_PATH
-for (const seed of replaySeed ? [Number(replaySeed)] : [1179, undefined])
-  test(`native authored histories preserve every publication (${seed === undefined ? 'fresh' : 'fixed'})`, async ({
-    context,
-  }) => {
-    await withPages(context, async (events, database) => {
-      let count = 0
-      await runCampaign(
-        `native-${test.info().project.name}`,
-        nativeHistory,
-        async (steps, receipt) => {
-          let primary: unknown
-          try {
-            await nativeHistoryRun(
-              context,
-              events,
-              `${database}-${count++}`,
-              steps,
-              receipt.reach,
-            )
-          } catch (error) {
-            primary = error
-          }
-          const cleanup = await closePages(context)
-          if (cleanup.length)
-            throw new AggregateError(cleanup, 'Native history cleanup failed', {
-              cause: primary,
-            })
-          if (primary !== undefined) throw primary
-        },
-        {
-          runs: 10,
-          seed,
-          path: replayPath,
-          environment: `${test.info().project.name} ${context.browser()!.version()}`,
-        },
-      )
-    })
+// The fixed campaign stands aside during every path replay. A path replay of
+// `indexeddb.browser-native-history` runs only the fresh campaign, from its
+// recorded seed and path.
+const nativeHistoryProperty = `indexeddb.browser-native-history`
+async function nativeHistoryCampaign(
+  context: BrowserContext,
+  options: { numRuns: number; seed?: number; path?: string },
+) {
+  await withPages(context, async (events, database) => {
+    let count = 0
+    await runCampaign(
+      `native-${test.info().project.name}`,
+      nativeHistory,
+      async (steps, receipt) => {
+        let primary: unknown
+        try {
+          await nativeHistoryRun(
+            context,
+            events,
+            `${database}-${count++}`,
+            steps,
+            receipt.reach,
+          )
+        } catch (error) {
+          primary = error
+        }
+        const cleanup = await closePages(context)
+        if (cleanup.length)
+          throw new AggregateError(cleanup, 'Native history cleanup failed', {
+            cause: primary,
+          })
+        if (primary !== undefined) throw primary
+      },
+      {
+        runs: options.numRuns,
+        seed: options.seed,
+        path: options.path,
+        environment: `${test.info().project.name} ${context.browser()!.version()}`,
+      },
+    )
   })
+}
+
+oracleReplayTest(test)(
+  `native authored histories preserve every publication (fixed)`,
+  ({ context }) =>
+    nativeHistoryCampaign(context, { seed: 1179, numRuns: oracleRuns(10) }),
+)
+oracleReplayTest(test, nativeHistoryProperty)(
+  `native authored histories preserve every publication (fresh)`,
+  ({ context }) =>
+    nativeHistoryCampaign(
+      context,
+      oraclePropertyOptions(10, nativeHistoryProperty),
+    ),
+)
 
 // Explicit manual acceptance creates ordered storage transactions before either
 // notification can run. Automatic write ordering has a separate native witness.

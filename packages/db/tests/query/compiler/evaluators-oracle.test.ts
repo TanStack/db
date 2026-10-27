@@ -5,6 +5,11 @@ import {
   compileSingleRowExpression,
 } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../oracle-config.js'
 import type { NamespacedRow } from '../../../src/types.js'
 
 /**
@@ -44,12 +49,8 @@ type LikeMismatch = LikeCase & {
 }
 
 const FIXED_LIKE_ORACLE_SEED = 0x1745
-const likeReplaySeedText = process.env.TANSTACK_DB_LIKE_ORACLE_SEED
-const likeReplaySeed =
-  likeReplaySeedText === undefined ? undefined : Number(likeReplaySeedText)
-const LIKE_ORACLE_RUNS = Number(
-  process.env.TANSTACK_DB_LIKE_ORACLE_RUNS ?? 10_000,
-)
+const likeProperty = `evaluators.like`
+const LIKE_ORACLE_RUNS = oracleRuns(10_000)
 const likeCalibrationCases: Array<LikeCase> = [
   { value: ``, pattern: ``, caseInsensitive: false },
   { value: `A`, pattern: `a`, caseInsensitive: true },
@@ -58,31 +59,23 @@ const likeCalibrationCases: Array<LikeCase> = [
   { value: `100% done`, pattern: `100%done`, caseInsensitive: false },
 ]
 
-if (
-  likeReplaySeedText !== undefined &&
-  (likeReplaySeedText.trim() === `` ||
-    !Number.isSafeInteger(likeReplaySeed) ||
-    likeReplaySeed! < 0 ||
-    likeReplaySeed! > 0xffff_ffff)
-) {
-  throw new Error(`TANSTACK_DB_LIKE_ORACLE_SEED must be a uint32 integer`)
-}
-if (
-  !Number.isSafeInteger(LIKE_ORACLE_RUNS) ||
-  LIKE_ORACLE_RUNS < likeCalibrationCases.length
-) {
-  throw new Error(
-    `TANSTACK_DB_LIKE_ORACLE_RUNS must be an integer of at least ${likeCalibrationCases.length}`,
-  )
-}
-
-const likeOracleCampaigns =
-  likeReplaySeed === undefined
-    ? [
-        { name: `fixed`, seed: FIXED_LIKE_ORACLE_SEED },
-        { name: `random`, seed: Math.floor(Math.random() * 0x1_0000_0000) },
-      ]
-    : [{ name: `replay`, seed: likeReplaySeed }]
+// The fixed campaign stands aside during a path replay. The random campaign uses
+// the seed of a replay of this property, when TANSTACK_DB_ORACLE_SEED supplies
+// one. This generator has no shrink path, so a path replay only reseeds it.
+const likeOracleCampaigns = [
+  {
+    name: `fixed`,
+    test: oracleReplayTest(it),
+    seed: FIXED_LIKE_ORACLE_SEED,
+  },
+  {
+    name: `random`,
+    test: oracleReplayTest(it, likeProperty),
+    seed:
+      oraclePropertyOptions(10_000, likeProperty).seed ??
+      Math.floor(Math.random() * 0x1_0000_0000),
+  },
+]
 
 function referenceLike(
   value: string,
@@ -548,49 +541,51 @@ describe(`evaluators`, () => {
           })
         })
 
-        it.each(likeOracleCampaigns)(
-          `matches the LIKE law in the $name campaign`,
-          ({ seed }) => {
-            let mismatchCount = 0
-            const mismatchSamples: Array<LikeMismatch> = []
-            const reach = {
-              caseSensitive: 0,
-              caseInsensitive: 0,
-              percentPattern: 0,
-              underscorePattern: 0,
-              literalPattern: 0,
-            }
+        for (const campaign of likeOracleCampaigns)
+          campaign.test(
+            `matches the LIKE law in the ${campaign.name} campaign`,
+            () => {
+              const { seed } = campaign
+              let mismatchCount = 0
+              const mismatchSamples: Array<LikeMismatch> = []
+              const reach = {
+                caseSensitive: 0,
+                caseInsensitive: 0,
+                percentPattern: 0,
+                underscorePattern: 0,
+                literalPattern: 0,
+              }
 
-            for (const testCase of seededLikeCases(LIKE_ORACLE_RUNS, seed)) {
-              reach[
-                testCase.caseInsensitive ? `caseInsensitive` : `caseSensitive`
-              ]++
-              if (testCase.pattern.includes(`%`)) reach.percentPattern++
-              if (testCase.pattern.includes(`_`)) reach.underscorePattern++
-              if (/[^%_]/u.test(testCase.pattern)) reach.literalPattern++
+              for (const testCase of seededLikeCases(LIKE_ORACLE_RUNS, seed)) {
+                reach[
+                  testCase.caseInsensitive ? `caseInsensitive` : `caseSensitive`
+                ]++
+                if (testCase.pattern.includes(`%`)) reach.percentPattern++
+                if (testCase.pattern.includes(`_`)) reach.underscorePattern++
+                if (/[^%_]/u.test(testCase.pattern)) reach.literalPattern++
 
-              const mismatch = findLikeMismatch(
-                testCase,
-                evaluateLikeWithProduction(testCase),
-              )
-              if (mismatch !== undefined) {
-                mismatchCount++
-                if (mismatchSamples.length < 5) {
-                  mismatchSamples.push(mismatch)
+                const mismatch = findLikeMismatch(
+                  testCase,
+                  evaluateLikeWithProduction(testCase),
+                )
+                if (mismatch !== undefined) {
+                  mismatchCount++
+                  if (mismatchSamples.length < 5) {
+                    mismatchSamples.push(mismatch)
+                  }
                 }
               }
-            }
 
-            expect({ seed, mismatchCount, mismatchSamples }).toEqual({
-              seed,
-              mismatchCount: 0,
-              mismatchSamples: [],
-            })
-            expect(
-              Object.entries(reach).filter(([, count]) => count === 0),
-            ).toEqual([])
-          },
-        )
+              expect({ seed, mismatchCount, mismatchSamples }).toEqual({
+                seed,
+                mismatchCount: 0,
+                mismatchSamples: [],
+              })
+              expect(
+                Object.entries(reach).filter(([, count]) => count === 0),
+              ).toEqual([])
+            },
+          )
 
         it(`handles like where _ must match exactly one character`, () => {
           const func = new Func(`like`, [new Value(`hell`), new Value(`hell_`)])
