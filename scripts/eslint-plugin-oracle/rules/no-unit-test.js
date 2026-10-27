@@ -146,6 +146,8 @@ class OracleModule {
     this.file = file
     this.scopeManager = scopeManager
     this.reach = new Map()
+    // Reach of a binding seen from another module, which ignores parameters.
+    this.exportedReach = new Map()
     // Resolved references in source order, so a node's references are one
     // contiguous range.
     this.references = scopeManager.scopes
@@ -261,22 +263,27 @@ class OracleModule {
     return this.declared.size > 0
   }
 
-  /** Whether a binding is a declared part, or uses one. */
-  variableReaches(variable) {
+  /**
+   * Whether a binding is a declared part, or uses one. Seen from another
+   * module (`local` false), a parameter reaches nothing: the importer passes
+   * its own arguments, so this module's call sites say nothing about it.
+   */
+  variableReaches(variable, local = true) {
     if (variable === undefined) return false
     if (this.declared.has(variable)) return true
-    const known = this.reach.get(variable)
+    const cache = local ? this.reach : this.exportedReach
+    const known = cache.get(variable)
     if (known !== undefined) return known
     // A binding that uses itself does not reach a part through that use.
-    this.reach.set(variable, false)
+    cache.set(variable, false)
     const reaches = variable.defs.some((definition) =>
-      this.#definitionReaches(definition),
+      this.#definitionReaches(definition, local),
     )
-    this.reach.set(variable, reaches)
+    cache.set(variable, reaches)
     return reaches
   }
 
-  #definitionReaches(definition) {
+  #definitionReaches(definition, local) {
     switch (definition.type) {
       case `ImportBinding`: {
         if (definition.node.type !== `ImportSpecifier`) return false
@@ -286,14 +293,14 @@ class OracleModule {
       }
       case `FunctionName`:
       case `ClassName`:
-        return this.nodeReaches(definition.node)
+        return this.nodeReaches(definition.node, local)
       case `Variable`:
         return (
           definition.node.init !== null &&
-          this.nodeReaches(definition.node.init)
+          this.nodeReaches(definition.node.init, local)
         )
       case `Parameter`:
-        return this.#parameterReaches(definition)
+        return local && this.#parameterReaches(definition)
       default:
         return false
     }
@@ -350,7 +357,7 @@ class OracleModule {
   exportReaches(name) {
     const entry = this.exported.get(name)
     if (entry?.variable !== undefined)
-      return this.variableReaches(entry.variable)
+      return this.variableReaches(entry.variable, false)
     if (entry !== undefined)
       return this.#importReaches(entry.source, entry.imported)
     return this.starSources.some((source) => this.#importReaches(source, name))
@@ -452,7 +459,7 @@ class OracleModule {
   }
 
   /** Whether code uses a declared part, directly or through a binding. */
-  nodeReaches(node) {
+  nodeReaches(node, local = true) {
     if (this.containsProperty(node)) return true
     const [start, end] = node.range
     let low = 0
@@ -465,7 +472,7 @@ class OracleModule {
     for (let index = low; index < this.references.length; index++) {
       const reference = this.references[index]
       if (reference.identifier.range[0] >= end) break
-      if (this.variableReaches(reference.resolved)) return true
+      if (this.variableReaches(reference.resolved, local)) return true
     }
     return false
   }

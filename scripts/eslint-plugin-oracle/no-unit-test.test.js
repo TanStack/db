@@ -23,6 +23,10 @@ declareOracle({ check: [checkHistory], model: [modelHistory] })
 export async function runHistory(history) { return checkHistory(history) }
 export function fixture() { return [] }
 export { modelHistory }
+// Every caller here passes work that runs the check, but an importer passes
+// its own work.
+export async function withCleanup(work) { return work() }
+it('checks with cleanup', () => withCleanup(() => runHistory([])))
 `,
 )
 writeFileSync(
@@ -354,6 +358,14 @@ declareOracle({ check: [checkHistory], grammar: [cells] })
 it.each(cells)('handles $a', ({ a }) => expect(compile(a)).toBe(1))`,
       filename,
       errors: [{ messageId: `unitTest` }],
+    },
+    // An imported helper that reaches a part only through its home module's
+    // arguments does not reach one for the importer.
+    {
+      code: `import { withCleanup } from './history-oracle.js'
+it('compiles', () => withCleanup(() => expect(compile(1)).toBe(1)))`,
+      filename,
+      errors: [{ messageId: `undeclared` }],
     },
     // A test inside a suite and a test passed a timeout are still tests.
     {
