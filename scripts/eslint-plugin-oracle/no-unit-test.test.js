@@ -190,6 +190,11 @@ fcTest.prop(arbitraries)('publishes generated commits', checkCampaign)
 fcTest.prop(arbitraries)('persists generated commits', checkPolicy)`,
       filename,
     },
+    // A table row that calls a declared check.
+    {
+      code: `${header}it.each([{ name: 'stale', reject: () => checkHistory(stale) }])('rejects $name', ({ reject }) => expect(reject).toThrow())`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,
@@ -333,6 +338,12 @@ it('checks', () => checkHistory([]))`,
 fcTest.prop([fc.integer()])('encodes a date', encodesDate)`,
       filename,
       errors: [{ messageId: `undeclared` }],
+    },
+    // A table of written values reaches nothing.
+    {
+      code: `${header}it.each([[1, 2]])('adds %i', (a, b) => expect(add(a, b)).toBe(3))`,
+      filename,
+      errors: [{ messageId: `unitTest` }],
     },
     // A test inside a suite and a test passed a timeout are still tests.
     {

@@ -396,7 +396,7 @@ class OracleModule {
    * every call of its helper.
    */
   propRegistrationGenerates(registration, body, sourceCode) {
-    const prop = calleeProp(registration.callee)
+    const prop = calleeCall(registration.callee, `prop`)
     if (prop === undefined) return false
     const [arbitraries] = prop.arguments
     const values =
@@ -493,14 +493,14 @@ function walk(node, visit) {
   }
 }
 
-/** The `.prop([...])` call in a registration's callee chain, if any. */
-function calleeProp(callee) {
+/** The `.<name>(...)` call in a registration's callee chain, if any. */
+function calleeCall(callee, name) {
   for (let node = callee; node;) {
     if (
       node.type === `CallExpression` &&
       node.callee.type === `MemberExpression` &&
       !node.callee.computed &&
-      node.callee.property.name === `prop`
+      node.callee.property.name === name
     ) {
       return node
     }
@@ -550,8 +550,12 @@ export default {
       CallExpression(node) {
         const test = registeredTest(node, sourceCode)
         if (test === undefined || isPlaceholder(test.body)) return
+        // An `.each(table)` row is input to the test body, so a row that
+        // uses a declared part makes the test use it.
+        const table = calleeCall(node.callee, `each`)
         const reaches =
           module.propRegistrationGenerates(node, test.body, sourceCode) ||
+          (table?.arguments.some((row) => module.nodeReaches(row)) ?? false) ||
           (test.body.type === `Identifier`
             ? module.variableReaches(
                 findVariable(sourceCode.getScope(test.body), test.body.name),
