@@ -12,6 +12,7 @@ import {
   persistedFlatLane,
   persistedNestedLane,
   persistedNestedSeedLane,
+  persistedPeerLane,
   persistedReadLane,
   persistedSeedLane,
   runSessionHistory,
@@ -24,15 +25,16 @@ import {
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
-import { persistedCollectionOptions } from '../src'
+import { SingleProcessCoordinator, persistedCollectionOptions } from '../src'
 import type { CollectionConfig, SyncConfig } from '@tanstack/db'
 import type {
+  PeerNotice,
   ReceiptState,
   SessionAction,
   SessionDriver,
   SessionLane,
 } from '../../db/tests/sync-metadata-session-oracle'
-import type { PersistedTx, PersistenceAdapter } from '../src'
+import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
 
 /**
  * The persisted wrapper is a second production path for the sync metadata
@@ -58,9 +60,20 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * `persisted-cached` (row 1 is in storage when the run starts),
  * `persisted-conflicts` (inner writes that land ahead of enclosing ones), and
  * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
- * row, and `persisted-reads`, whose read hold keeps an on-demand storage
- * read in flight. Seeds use a `DbClient` that owns the persisted Collection. The adapter ignores
- * stored metadata, so restart and resume reads are outside these lanes.
+ * row, `persisted-reads`, whose read hold keeps an on-demand storage
+ * read in flight, and `persisted-peers`, where another tab's source writes
+ * storage and sends its notices through the persistence coordinator. Seeds
+ * use a `DbClient` that owns the persisted Collection. Restart and resume
+ * reads are outside these lanes.
+ *
+ * A peer is a second writer the driver plays. It writes the stored row and
+ * metadata directly, takes the next stream position after this tab's
+ * durable commits, and emits the `tx:committed` notice that the Browser and
+ * Electron coordinators send: changed rows with their metadata, metadata
+ * alone, a deleted key, or a notice that requires a full reload. The model
+ * makes a peer action legal only when no store hold or read hold is active,
+ * so every accepted transaction of this tab is durable and the notice is the
+ * next one in the stream.
  */
 
 type Row = { id: number; v: unknown }
@@ -80,25 +93,30 @@ function createHoldingAdapter(cached = false, stores = false) {
   let cachedRows = cached
     ? [{ key: 1, value: cachedRow, metadata: cachedMetadata }]
     : []
-  const stored = new Map<number, { value: Row; metadata?: unknown }>()
+  const stored = new Map<number, { value: Row; metadata?: unknown }>(
+    stores && cached
+      ? [[1, { value: cachedRow as Row, metadata: cachedMetadata }]]
+      : [],
+  )
+  const storedRows = () =>
+    stores ? Array.from(stored, ([key, row]) => ({ key, ...row })) : cachedRows
+  // A reload restores collection metadata from storage, so storage keeps it.
+  const storedCollectionMetadata = new Map<string, unknown>()
+  const collectionMetadata = () =>
+    Array.from(storedCollectionMetadata, ([key, value]) => ({ key, value }))
   const adapter: PersistenceAdapter = {
-    loadSubset: () =>
-      Promise.resolve(
-        stores
-          ? Array.from(stored, ([key, row]) => ({ key, ...row }))
-          : cachedRows,
-      ),
+    loadSubset: () => Promise.resolve(storedRows()),
     loadResumeSnapshot: () =>
       Promise.resolve({
-        rows: cachedRows,
+        rows: storedRows(),
         keySet: { status: `consistent` },
-        collectionMetadata: [],
+        collectionMetadata: collectionMetadata(),
         latestTerm: latest.term,
         latestSeq: latest.seq,
         latestRowVersion: latest.rowVersion,
         resetEpoch: 0,
       }),
-    loadCollectionMetadata: () => Promise.resolve([]),
+    loadCollectionMetadata: () => Promise.resolve(collectionMetadata()),
     applyCommittedTx: async (_target, tx: PersistedTx) => {
       cachedRows = []
       if (holdNext) {
@@ -126,11 +144,32 @@ function createHoldingAdapter(cached = false, stores = false) {
         if (row)
           row.metadata = mutation.type === `delete` ? undefined : mutation.value
       }
+      for (const mutation of tx.collectionMetadataMutations ?? [])
+        if (mutation.type === `delete`)
+          storedCollectionMetadata.delete(mutation.key)
+        else storedCollectionMetadata.set(mutation.key, mutation.value)
     },
     ensureIndex: () => Promise.resolve(),
   }
   return {
     adapter,
+    /** A peer's durable write at the next stream position. */
+    peerWrite: (
+      key: number,
+      notice: PeerNotice,
+      row: Row,
+      metadata: unknown,
+    ): typeof latest => {
+      if (notice === `delete`) stored.delete(key)
+      else if (notice === `metadata`) stored.get(key)!.metadata = metadata
+      else stored.set(key, { value: row, metadata })
+      latest = {
+        term: Math.max(latest.term, 1),
+        seq: latest.seq + 1,
+        rowVersion: latest.rowVersion + 1,
+      }
+      return latest
+    },
     holdNextStore: () => {
       holdNext = true
     },
@@ -153,8 +192,25 @@ async function createPersistedDriver(
   withClient = false,
   cached = false,
   reads = false,
+  peers = false,
 ): Promise<SessionDriver> {
-  const store = createHoldingAdapter(cached, reads)
+  const store = createHoldingAdapter(cached, reads || peers)
+  // The local coordinator persists this tab's commits through the adapter;
+  // `deliver` hands it a peer's notice.
+  let deliver: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  const coordinator = peers
+    ? Object.assign(new SingleProcessCoordinator(), {
+        subscribe: (
+          _collectionId: string,
+          onMessage: (message: ProtocolEnvelope<unknown>) => void,
+        ) => {
+          deliver = onMessage
+          return () => {
+            deliver = undefined
+          }
+        },
+      })
+    : undefined
   const id = `sync-metadata-session-persisted-${run++}`
   let sync!: SyncActions
   let resolveMutation: (() => void) | undefined
@@ -177,7 +233,7 @@ async function createPersistedDriver(
       new Promise<void>((resolve) => {
         resolveMutation = resolve
       }),
-    persistence: { adapter: store.adapter },
+    persistence: { adapter: store.adapter, coordinator },
   } as CollectionConfig<Row, number> & {
     persistence: { adapter: PersistenceAdapter }
   })
@@ -322,6 +378,50 @@ async function createPersistedDriver(
           },
         ],
       }),
+    peer: async (key, notice, row, metadata) => {
+      const position = store.peerWrite(key, notice, row as Row, metadata)
+      const named =
+        notice === `row`
+          ? {
+              changedRows: [{ key, value: row as Record<string, unknown> }],
+              deletedKeys: [],
+              rowMetadataMutations: [
+                { type: `set` as const, key, value: metadata },
+              ],
+            }
+          : notice === `metadata`
+            ? {
+                changedRows: [],
+                deletedKeys: [],
+                rowMetadataMutations: [
+                  { type: `set` as const, key, value: metadata },
+                ],
+              }
+            : { changedRows: [], deletedKeys: [key] }
+      deliver?.({
+        v: 1,
+        dbName: `sync-metadata-session`,
+        collectionId: id,
+        senderId: `peer-tab`,
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: position.term,
+          seq: position.seq,
+          txId: `peer-${position.seq}`,
+          latestRowVersion: position.rowVersion,
+          ...(notice === `reload`
+            ? { requiresFullReload: true }
+            : { requiresFullReload: false, ...named }),
+        },
+      })
+      // The wrapper handles a notice under its apply lock and may reload
+      // storage first. A notice it never handled leaves the peer's write
+      // invisible, which the comparison reports, because every peer action
+      // the model allows changes a read except a full reload that a held
+      // seed keeps (decision 13).
+      await drainTurns()
+    },
     observe: () => ({
       rowMetadata: {
         1: read(metadata().row.get(1)),
@@ -373,6 +473,7 @@ async function assertPersistedHistory(
       lane.seeds,
       lane.cached === true,
       lane.readHold === true,
+      lane.peers === true,
     ),
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
@@ -703,6 +804,26 @@ const extraLanes: Array<{
       `store hold`,
     ],
   },
+  // Another tab's source writes reach this tab through its notices: a named
+  // write is a source write that lands beneath open transactions and over
+  // seeds (decision 11); a full reload keeps a held seed and makes every
+  // changed stored row a source write (decisions 13 and 15).
+  {
+    lane: persistedPeerLane,
+    property: `sync-metadata-session.persisted-peers`,
+    seed: 2_220_018,
+    runs: 150,
+    reach: [
+      `peer row notice`,
+      `peer metadata notice`,
+      `peer delete notice`,
+      `peer reload notice`,
+      `named peer write over a held seed`,
+      `full reload over a held seed`,
+      `peer write during an open insert`,
+      `peer write during a hold`,
+    ],
+  },
   // A seed's metadata still governs a row whose metadata an accepted
   // re-insert kept, here also when the re-insert committed ahead of the
   // enclosing transaction whose row it re-inserted.
@@ -720,6 +841,96 @@ const extraLanes: Array<{
     ],
   },
 ]
+
+/**
+ * Shrunk peer-lane counterexamples, replayed through the same model, driver,
+ * and comparison as the campaigns. Each reached a defect that the fixed and
+ * random campaigns rarely generate: a held seed that a reload must keep, a
+ * row that held transactions wrote, metadata of a missing row, a write over a
+ * seed that must store the seed's row, a seed's metadata that a later seed
+ * replaced, a row a held delete already removed, and a full reload's staged
+ * writes beneath an open re-insert. Recorded in
+ * docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
+ */
+const peerReplays: Array<[string, Array<SessionAction>]> = [
+  [
+    `a reload keeps a seed accepted during a hold`,
+    [
+      { type: `hold` },
+      { type: `seed`, key: 2 },
+      { type: `peer`, key: 1, notice: `row` },
+    ],
+  ],
+  [
+    `a notice for a row held transactions wrote reloads it`,
+    [
+      { type: `hold` },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: true },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `row` },
+    ],
+  ],
+  [
+    `a reload keeps metadata of a missing row`,
+    [
+      { type: `begin` },
+      { type: `rowSet`, key: 2 },
+      { type: `commit` },
+      { type: `peer`, key: 1, notice: `row` },
+    ],
+  ],
+  [
+    `a write over a seed stores the seed's row`,
+    [
+      { type: `seed`, key: 1, narrow: true, bare: true },
+      { type: `begin` },
+      { type: `seed`, key: 2 },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `row` },
+    ],
+  ],
+  [
+    `a reload after a named notice keeps a later seed's metadata`,
+    [
+      { type: `seed`, key: 2, narrow: true },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: false },
+      { type: `commit` },
+      { type: `seed`, key: 2 },
+      { type: `peer`, key: 1, notice: `row` },
+    ],
+  ],
+  [
+    `a reload does not delete a row a held delete removed`,
+    [
+      { type: `peer`, key: 2, notice: `row` },
+      { type: `hold` },
+      { type: `begin` },
+      { type: `peer`, key: 2, notice: `delete` },
+      { type: `rowSet`, key: 2 },
+      { type: `commit` },
+      { type: `peer`, key: 1, notice: `reload` },
+    ],
+  ],
+  [
+    `a held reload's writes stay beneath an open re-insert`,
+    [
+      { type: `seed`, key: 2, bare: true },
+      { type: `begin` },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `hold` },
+      { type: `peer`, key: 2, notice: `reload` },
+    ],
+  ],
+]
+
+describe(`sync metadata session oracle through the persisted wrapper: peer replays`, () => {
+  it.each(peerReplays)(`replays: %s`, (_name, history) =>
+    assertPersistedHistory(history, persistedPeerLane),
+  )
+})
 
 describe(`sync metadata session oracle through the persisted wrapper: nesting and seeds`, () => {
   for (const {

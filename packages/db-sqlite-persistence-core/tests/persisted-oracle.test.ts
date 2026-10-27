@@ -1324,10 +1324,11 @@ it(`does not request a rotated in-flight subset twice`, async () => {
 // checks the persisted wrapper and mounted dependent graph, not SQLite or a
 // browser transport. The notification's explicit flag reaches the equal-seq
 // branch that ordinary tx deduplication would skip. An orphan row-metadata
-// entry is not part of the loaded row snapshot; an unchanged-row shortcut
-// must still remove it, as an ordinary full replacement does. The held subset
-// read exposes the pending cut; the final comparison waits for the public
-// metadata cleanup and checks that neither Collection published a row event.
+// entry is not part of the loaded row snapshot; this tab keeps it until a
+// source deletes the row (decision 16 in docs/contributing/oracle-reviews/
+// 2026-10-22-sync-metadata-session.md; this test cleared it before). The held
+// subset read exposes the pending cut; the final comparison follows the
+// read's return and checks that neither Collection published a row event.
 it(`does not republish unchanged rows for a repeated reconciliation notice`, async () => {
   const adapter = createRecordingAdapter([{ id: `crossing`, title: `settled` }])
   const coordinator = createCoordinatorHarness()
@@ -1370,10 +1371,13 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
     })
     try {
       const loadSubset = adapter.loadSubset
+      const reloadReturned = createDeferred()
       adapter.loadSubset = async (...args) => {
         reloadEntered.resolve()
         await releaseReload.promise
-        return loadSubset(...args)
+        const rows = await loadSubset(...args)
+        reloadReturned.resolve()
+        return rows
       }
       coordinator.emit(
         {
@@ -1399,8 +1403,9 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
         liveEvents: [],
       })
       releaseReload.resolve()
-      await vi.waitFor(() =>
-        expect(source.metadata?.row.get(`ghost`)).toBeUndefined(),
+      await atPersistedOracleCheckpoint(
+        reloadReturned.promise,
+        `reconciliation reload returned`,
       )
       await flushAsyncWork()
       expect({
@@ -1416,7 +1421,7 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
         liveEvents: [],
         sourceIds: [`crossing`],
         liveIds: [`crossing`],
-        orphanMetadata: undefined,
+        orphanMetadata: { stale: true },
         status: `ready`,
         liveStatus: `ready`,
       })
@@ -15757,14 +15762,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  // A full-reload notice makes row metadata for absent public keys obsolete,
-  // even when no subset demand remains. The reference snapshot has zero orphan
-  // metadata keys; a public row's presence changes whether the wrapper reads
-  // a durable row snapshot, but not that judgment. The sync metadata API is
-  // the observable boundary at the settled notice checkpoint. A source
-  // metadata-only transaction establishes the orphan through the real path.
+  // Row metadata of a key with no row is not durable, but this tab keeps it
+  // until a source deletes the row (decision 16 in docs/contributing/
+  // oracle-reviews/2026-10-22-sync-metadata-session.md; a full-reload notice
+  // cleared it before). That holds when no subset demand remains: a public
+  // row's presence changes whether the wrapper reads a durable row snapshot,
+  // not that judgment. The sync metadata API is the observable boundary at
+  // the settled notice checkpoint. A source metadata-only transaction
+  // establishes the orphan through the real path.
   it.each([false, true])(
-    `clears orphan row metadata after a no-demand peer reload (public row=%s)`,
+    `keeps orphan row metadata after a no-demand peer reload (public row=%s)`,
     async (hasPublicRow) => {
       const row = { id: `visible`, title: `Visible row` }
       const adapter = createRecordingAdapter(hasPublicRow ? [row] : [])
@@ -15827,7 +15834,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           orphan: source.metadata?.row.get(`ghost`),
           publicRow: stripVirtualProps(collection.get(row.id)),
         }).toEqual({
-          orphan: undefined,
+          orphan: { obsolete: true },
           publicRow: hasPublicRow ? row : undefined,
         })
       } catch (error) {

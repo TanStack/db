@@ -937,12 +937,17 @@ export class CollectionStateManager<
     }
   }
 
-  /** Extend the queued projection after admitting one sync operation. */
+  /**
+   * Extend the queued projection after admitting one sync operation. A key
+   * its transaction keeps as a seed's is no source write, as in the rebuild.
+   */
   stagePendingSyncOperation(
     operation: PendingSyncOperation<TOutput, TKey>,
+    preserved?: boolean,
   ): void {
     this.applyPendingSyncOperation(this.pendingSyncedProjection, operation)
-    this.pendingSyncedProjection.sourceKeys.add(operation.key as TKey)
+    if (!preserved)
+      this.pendingSyncedProjection.sourceKeys.add(operation.key as TKey)
   }
 
   private rebuildAutomaticRowMetadataWrites(
@@ -1201,10 +1206,11 @@ export class CollectionStateManager<
           // Keep active local mutations for later source transactions on keys
           // this truncate does not write. Completed attribution is one-use.
           this.syncedData.clear()
-          this.syncedMetadata.clear()
           // A wrapping sync's storage read that keeps seed keys replaces
-          // rows without truncating the source's authority over them.
+          // rows without truncating the source's authority over them or
+          // their metadata.
           if (!transaction.preserveHydrationSeedKeys) {
+            this.syncedMetadata.clear()
             this.hydrationSeedKeys.clear()
             this.hydratedKeys.clear()
             if (this.appliedAdapterKeys) {

@@ -191,6 +191,34 @@ encoding the author had extended without asking. Three more followed on
     differs from the one this tab holds was written; an unchanged seed stays
     one; a dropped row is a source's delete; and a reload's truncate is not a
     source truncate. A reset still is.
+16. **Row metadata of a missing row stays until a source deletes the row
+    (2026-10-27).** The peer lane found `begin rowSet(2) commit
+    peer(1,row)`: SQLite stores row metadata on its row, so metadata a source
+    writes for a row that does not exist is not durable, and a reload
+    deleted it. Whether a notice reloaded decided whether it survived. The
+    maintainer chose option C: this tab keeps such metadata for the rest of
+    the run unless a source deletes the row; a restart loses it, as it was
+    never durable. Three persisted-oracle cases that pinned the deletion
+    (`… orphan row metadata after a no-demand peer reload`, twice, and the
+    orphan check of `does not republish unchanged rows for a repeated
+    reconciliation notice`) were rewritten.
+17. **A write over a `DbClient` seed stores the row this tab shows
+    (2026-10-27).** `seed(2) begin upsert(2) commit peer(1,row)`: seeds never
+    reach storage, so an update merged over a seed stored only its own
+    fields, and a reload or restart dropped the seed's fields. The
+    maintainer chose option B: the first update a transaction makes to a row
+    a `DbClient` seed holds stores the seed's row merged with the update.
+18. **A reload after a named notice keeps a seed's metadata (2026-10-27).**
+    `seed(2,narrow) begin upsert(2) commit seed(2) peer(1,row)`: the update
+    kept the first seed's metadata, and a later seed replaced it in this tab
+    (decision 9), but storage cannot follow a seed, so a reload put the
+    first seed's metadata back. The maintainer chose option B: metadata no
+    source wrote in this run stays as this tab shows it across reloads, and
+    decision 17 stores only the row. Asked whether that holds after a
+    full-reload notice too, where two `main` cases expect stored metadata to
+    win, the maintainer chose the scoped form, B′: decision 18 governs
+    reloads after notices that name their keys; when this run's writes are
+    unknown, stored metadata that differs is a source write (decision 15).
 
 ## Laws and sources
 
@@ -518,14 +546,22 @@ The repair keeps the existing structures and changes these rules.
 - **Limits:** under partial row updates the seed-order property drops
   `reinsert` from both runs, because decision "b" lets a moved seed change a
   re-insert's planned row. Key independence skips histories that invalidate
-  a transaction. The persisted test adapter stores no rows: its cached row is
-  readable only until the run's first durable commit, so reloads within a run
-  are not exercised. Decision 9's storage-read rule has receiving witnesses
-  for rows that peers wrote in this run, not a grammar dimension: the
-  session drivers have one tab. The error an invalid commit rejects with, and restart
-  and resume, stay outside this oracle.
+  a transaction. The `persisted-reads` and `persisted-peers` lanes' adapter
+  keeps durable rows, so storage reads and reloads within a run are
+  exercised there; the other persisted lanes' cached row is readable only
+  until the run's first durable commit. Since the eighth round, a peer is a
+  grammar dimension of `persisted-peers`, played by the driver through the
+  coordinator (see "Eighth round"). The error an invalid commit rejects
+  with, and restart and resume, stay outside this oracle.
 
 ### Code weight
+
+Eighth round, against `7e46f81ad`: `app` grows 125 bytes, 20 fewer than
+before, because `_syncedRowMetadataKeysOutsideBase` left the Collection
+class; the staging check for preserved keys and the metadata reader's check
+for a status-keeping truncate cost less than it saved. Persistence reaches
++1,206 (204 more): the stored-row status rule, whole-row reload writes, the
+seed bases that decision 17 stores, and the held-row checks.
 
 `pnpm size:compare` against `427a7c31e` (`origin/main` after the second
 merge): the typical `app` scenario grows 126 bytes gzip. The second high
@@ -756,6 +792,80 @@ storage never held.
 | F8: a redundant deleted-key check, and a stored `acceptedSourceKeys` only the rebuild reads | Fixed |
 | F9: state internals are public for `client.ts` | Duplicate of round 4's G (accepted design); `any` follows `client.ts`'s own `AnyCollection` convention |
 | F10: seed keys are marked before the read's commit | Refuted: the read's begin, writes, and commit run synchronously, its commit takes no signal, a retired run's `begin` opens no transaction to mark (H6), and an accepted transaction always applies |
+
+## Eighth round (the peer dimension)
+
+After the fourth high review, the maintainer asked for the next oracle
+improvement before another review: a peer in the persisted session grammar.
+Every real finding since the fifth round had sat on a peer or reload route
+that only pinned grids covered.
+
+- **Law.** A peer's write in this run is a source write, accepted when this
+  tab applies its notice, after every accepted transaction and beneath the
+  open ones (decision 11). A full-reload notice keeps a held `DbClient` seed
+  (decision 13) and makes stored rows and metadata that differ source
+  writes (decisions 15 and 18). Reloads keep metadata of a missing row
+  (decision 16); a write over a seed stores the row this tab shows
+  (decision 17).
+- **Grammar and model.** The `peer` action sends one of four notices: a
+  named row with its metadata, metadata alone, a delete, or a full reload.
+  It is legal only when no store hold or read hold is active, so every
+  accepted transaction of this tab is durable and the notice is the next in
+  the stream. The model tells cached rows from `DbClient` seeds and keeps
+  what a reload restores per row: storage's row and metadata, which each of
+  this tab's commits sets to what this tab shows (decisions 16 to 18).
+- **Driver.** A `SingleProcessCoordinator` that delivers the `tx:committed`
+  shapes the Browser and Electron coordinators send; the holding adapter
+  keeps rows and collection metadata.
+- **Lane and reach.** `persisted-peers` (seeds, the cached row, nesting to
+  depth 2, store holds, 150 fixed histories). A 150-history sample with the
+  fixed seed reaches each named notice kind 44 to 69 times, a named write
+  over a held seed 42, a full reload over a held seed 19, a peer write during
+  a hold 46, and during an open insert 17; the declared minimum is 5. A
+  declared state for a full reload that reveals a hidden peer write was
+  dropped: a write of the row by this tab stores its row over the peer's
+  (decision 17), so only a named notice reveals it, which `named peer write
+  over a held seed` covers.
+
+| Finding | Disposition |
+|---|---|
+| P1: a reload's held-seed set came from `base`, so it truncated over a seed accepted during a hold (`hold seed(2) peer(1,row)`) | Fixed: held seeds come from core's hydrated keys |
+| P2: a named notice for a row only held transactions wrote merged the peer's whole row over this tab's held row (`hold begin upsert(2) commit peer(2,row)`) | Fixed: a row in `base` counts as ambiguous, and so does a held row that the notice would change, so the notice reloads. The first fix checked held rows only and regressed `begin remove(1) hold commit peer(1,row)`; the lane found it at once. The second counted every held row and broke the real-host reload-class oracle's law (e), "a commit the tab already knows never makes it reread rows", on its Browser and Electron drivers: the notices it rerouted carried exactly the held row. Limit: a peer's whole-row insert that equals a held row on every field it names, beside held fields it omits, keeps those fields; the lane's peer values are always fresh, so it cannot reach that case |
+| An in-place reload merged a stored row over a held seed (`hold seed(2) seed(1,narrow) peer(2,row)`) | Fixed: reloads write each stored row whole |
+| A reload deleted again a row a held delete removed, dropping metadata written after it | Fixed: a dropped row is deleted only while core holds it, judged before the reload's truncate |
+| F5 (seventh round, refuted as unobservable): staging counted a reload's preserved keys as source writes | Reachable after all: `seed(2,bare) begin reinsert(1) hold peer(2,reload)` judged the open re-insert equal. Fixed in core: staging skips preserved keys, as the rebuild does |
+| L1, L2, and the later-seed metadata case | Decisions 16, 17, and 18 (B′) |
+| A reload counted unchanged rows' writes as source writes, so metadata a seed governs lost that status | Fixed: a reload's write of an unchanged row keeps its status. A truncate in a storage read that keeps statuses keeps row metadata in core, and `metadata.row.get` reads through it; `_syncedRowMetadataKeysOutsideBase` left core |
+| A named row notice did not mark its metadata as written in this run, so decision 18 kept a held seed's metadata over the peer's | Fixed: a peer's row comes with its metadata (decision 11) |
+| Driver: the holding adapter dropped collection metadata, and cleared it on truncate | Fixed in the test adapter |
+
+Evidence:
+
+- **RED.** Each shrunk history above failed on the production before its
+  fix; the survey of 2,000 generated histories before any fix found P1 in
+  22 and P2 in 9.
+- **GREEN.** Four surveys of 1,000 generated histories (seeds 77, 91, 105,
+  133) find no mismatch; the fixed and random `persisted-peers` campaigns
+  and the shrunk histories, kept as replays through the same model, pass.
+- **Mutants.** P1 reverted fails both peer campaigns; P2 reverted fails the
+  fixed one; B′ collapsed to B fails seven cases, two `main` full-reload
+  cases among them; decision 11's metadata keys removed fails `treats a row
+  a peer wrote this run as a source row (replaces a held seed)`. Three
+  mutants survive every campaign and fail only their replay: no seed base
+  (decision 17), storage metadata always winning (decision 18), and a
+  dropped-row delete without the held check. The campaigns reach their
+  premises too rarely; the replays keep them. In core, staging that counts
+  preserved keys (F5) fails its replay; a status-keeping truncate that
+  clears row metadata fails nine cases, both peer campaigns among them; and
+  a metadata reader that stops at such a truncate fails two `replaces a
+  hydrated seed and metadata with a peer's targeted …` cases.
+- **Limits.** The peer is the driver; no second Collection or real
+  coordinator delivers its notices, so the claim stops at the controlled
+  coordinator (ORC-014). The next receiving witness is a second production
+  driver of this oracle with two coordinators over a real channel. Missed
+  notices and notices over the targeted key limit are not generated; the
+  persisted oracle's grids cover them. The adapter is in memory, and restart
+  stays outside this oracle.
 
 ## Open
 

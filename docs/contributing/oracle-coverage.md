@@ -3023,12 +3023,14 @@ peer's notice of a write in this run counts as a source write, and writes
 during a storage read follow the same rules, the last write for a key
 winning. When a stored row's author is unknown, a seed this tab holds stays
 unless storage changed it, and other stored rows count as source writes
-(decisions 13 and 15).
+(decisions 13 and 15). Reloads keep metadata of a missing row (decision 16),
+a write over a seed stores the row this tab shows (decision 17), and a
+reload after a named notice keeps a seed's metadata (decision 18).
 
 | Owner | Production paths | Observations and checkpoint |
 |---|---|---|
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup | the same source reads after every action; `collection.base` and receipts after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-peers`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup | the same source reads after every action; `collection.base` and receipts after settlement |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested lanes | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
 | [hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts) | `DbClient` initialData, hydration chunks, and an adapter sync transaction (inserts, updates, deletes, truncates, and metadata-only writes) in full and partial row modes | public rows, the synced store, and row metadata through `client.dehydrate()` after each action; D5 per object |
@@ -3057,14 +3059,17 @@ the review record:
   transaction: invalidation removes the whole transaction, row 1's writes
   included (decision 7).
 
-The session drivers have one tab, so reloads within a run come only from
-the `persisted-reads` lane's storage reads, whose adapter keeps durable rows.
-A storage read marks a row a seed unless core holds it as a source row or a
-peer's notice named it as written in this run. A reload that a peer's notice
-causes is a storage read too: its truncate replaces rows without
-truncating source authority, so rows no source wrote keep their seed status
-(decisions 9, 11, and 15). The persisted oracle's receiving witnesses cover peer writes and
-those reload routes; no grammar dimension generates a peer. Two held-cleanup
+The `persisted-peers` lane plays a second tab's source through the
+persistence coordinator: named row, metadata-only, delete, and full-reload
+notices, crossed with seeds, the cached row, nesting, and holds. A reload
+that a notice causes is a storage read: its truncate replaces rows without
+truncating source authority or row metadata, an unchanged row keeps its
+status, and a seed's metadata survives a reload after a named notice
+(decisions 9, 11, and 15 to 18). The peer is the driver, not a second
+Collection, so the claim stops at the controlled coordinator; a second
+production driver with two real coordinators is the open receiving
+witness. Missed notices and notices over the targeted key limit are not
+generated; the persisted oracle's grids cover them. Two held-cleanup
 Query retention witnesses race on CI; the maintainer deferred the race until
 a failure reports the timer trace these witnesses now print, and the review
 record's "Open" section holds the evidence. Restart and resume reads belong to the

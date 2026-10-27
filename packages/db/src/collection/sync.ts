@@ -292,7 +292,10 @@ export class CollectionSyncManager<
               originalSyncType?: `insert`
             }
             pendingTransaction.operations.push(message)
-            this.state.stagePendingSyncOperation(message)
+            this.state.stagePendingSyncOperation(
+              message,
+              pendingTransaction.preserveHydrationSeedKeys?.has(key),
+            )
 
             const metadataWrite = automaticRowMetadataWrite(message)
             if (metadataWrite) {
@@ -535,14 +538,16 @@ export class CollectionSyncManager<
           if (!isCurrentSync()) return undefined
           // A source reads its own session: every accepted or open sync
           // transaction that no invalidation ended, newest first, then
-          // applied state. A truncate hides older row metadata.
+          // applied state. A truncate hides older row metadata, except a
+          // wrapping sync's storage read, which keeps it.
           const pending = this.state.pendingSyncedTransactions
           for (let index = pending.length - 1; index >= 0; index--) {
             const transaction = pending[index]!
             if (transaction.invalidationError !== undefined) continue
             const write = transaction.rowMetadataWrites.get(key)
             if (write) return write.type === `delete` ? undefined : write.value
-            if (transaction.truncate) return undefined
+            if (transaction.truncate && !transaction.preserveHydrationSeedKeys)
+              return undefined
           }
           return this.state.syncedMetadata.get(key)
         },
