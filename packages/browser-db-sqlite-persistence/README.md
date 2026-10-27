@@ -170,8 +170,9 @@ duplicates inside that horizon remain idempotent.
 - `openBrowserWASQLiteOPFSDatabase(...)` starts a dedicated Web Worker and
   routes SQL operations through it. OPFS sync access handle APIs are used in
   that worker context. The package includes the worker and a separate
-  `wa-sqlite.wasm` asset. Vite includes both automatically, with no asset
-  copying or WASM URL configuration required.
+  `wa-sqlite.wasm` asset. Vite, webpack 5, and Next.js with Turbopack or
+  webpack include both automatically, with no asset copying or WASM URL
+  configuration required.
 - In Vite development, a pre-bundled copy of this package asks the dev server
   for its assets by package name, from the app root:
   - If the app reaches the package only through another library or through an

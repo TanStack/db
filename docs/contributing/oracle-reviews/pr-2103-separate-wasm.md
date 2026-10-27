@@ -11,7 +11,8 @@
   - The install-layout oracle,
     `packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts`.
 - Supporting checks: `e2e/wasm-package-consumer.e2e.test.ts` (build output,
-  export map, classic worker, `about:srcdoc`, cross-origin page) and
+  export map, classic worker, `about:srcdoc`, cross-origin page),
+  `e2e/bundler-consumers.e2e.test.ts` (webpack 5 and Next.js consumers), and
   `tests/opfs-database.test.ts`.
 
 ## Contract and evidence
@@ -58,6 +59,8 @@ diff, not a timeout.
 | Refused Worker constructor's error escapes unclassified | Open outcome, Chromium and jsdom | Assertion failure in the refused-worker history, in both drivers |
 | Rejects before making the asset lookup | Open outcome, Chromium | Assertion failure on `reached.lookup` only (inspected); settlement and worker counts matched. The first attempt was a setup failure: an unconditional `throw` did not compile, so the old build ran |
 | Lookup runs even when the copy is served in place | Install layout | Assertion failure in exactly the excluded transitive, alias, and two-copy cases |
+| Built package starts a module worker | Bundler consumers | Assertion failure in all six webpack and Next.js cases (`workerTypes`) |
+| Lookup runs without a Vite client on the page | Bundler consumers | Assertion failure in the four Next.js cases; equivalent within the two webpack cases, because webpack emits the worker and WASM into one directory and the moved-code check skips the lookup |
 
 The reject-before-lookup control shows why the observation records reach.
 Without `reached`, that history would have passed.
@@ -88,10 +91,17 @@ round. Production passed it unchanged, and a control that ignores the Worker
 
 ## Limits
 
-Both oracles cover Vite only, in Chromium. They do not cover webpack or
-Turbopack development, other browsers, an open from inside a worker, or a Vite
-client injected without a script `src`. The README states the last two as
+Both oracles cover Vite only, in Chromium. The bundler consumer checks add
+webpack 5 builds and Next.js with Turbopack and webpack, in development and
+production, as fixed receiving witnesses. Nothing covers webpack-dev-server,
+Rspack, Parcel, esbuild, other browsers, an open from inside a worker, or a
+Vite client injected without a script `src`. The README states the last two as
 cases that need the exclusion.
+
+While the bundler checks were written, webpack and Turbopack first resolved
+the workspace packages to their sources through each package's tsconfig
+paths. Published packages ship no tsconfig, so the checks install the built
+workspace packages as published packages instead.
 
 Open questions that need a product decision: no law orders an interruption
 against a step that fails in the same turn, and two installed copies of

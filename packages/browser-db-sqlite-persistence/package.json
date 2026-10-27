@@ -66,6 +66,10 @@
     "@tanstack/query-db-collection": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.6.2",
+    "next": "^16.3.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "webpack": "^5.102.0"
   }
 }

@@ -1976,9 +1976,18 @@ The packaged-consumer
 cover the build output and export map, a classic worker in development and
 production, an `about:srcdoc` frame, and a page on another origin than the
 Vite server, where the Worker constructor throws `SecurityError` and the open
-reports `PersistenceUnavailableError`. These owners cover Vite only, not
-webpack or Turbopack development, an open from inside a worker, a Vite client
-injected without a script `src`, or browsers other than Chromium. The
+reports `PersistenceUnavailableError`. The
+[bundler consumer checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/bundler-consumers.e2e.test.ts)
+install the built workspace packages as published packages in a webpack 5 app
+(production and development builds) and a Next.js app (Turbopack and webpack,
+each under `next build` with `next start` and under `next dev`). Each opens and
+queries SQLite in Chromium, starts one classic worker, loads one
+`200 application/wasm` response, and makes no Vite lookup request. A module
+worker fails all six; a lookup that runs without a Vite client fails the four
+Next.js cases and is equivalent under webpack, which emits the worker and WASM
+in one directory. These owners do not cover webpack-dev-server, Rspack, Parcel,
+esbuild, an open from inside a worker, a Vite client injected without a script
+`src`, or browsers other than Chromium. The
 [PR #2103 review record](oracle-reviews/pr-2103-separate-wasm.md) classifies
 each calibration control and records every applicable requirement.
 
