@@ -105,7 +105,12 @@ it.each([1, 2, 3, 4])(
         }
       },
       () => hook.unmount(),
-      () => hook.result.current.collection.cleanup(),
+      () => {
+        const collection = hook.result.current.collection
+        if (collection === undefined)
+          throw new Error(`React lazy paging Collection missing at cleanup`)
+        return collection.cleanup()
+      },
       () => f.source.cleanup(),
     )
   },
