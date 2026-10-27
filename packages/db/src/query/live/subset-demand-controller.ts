@@ -65,9 +65,22 @@ export class SubsetDemandController {
    * the subscription still holds.
    */
   startReplay(): void {
-    for (const state of this.states.values())
+    this.replaced.clear()
+    for (const [planId, state] of this.states) {
       state.segments = state.segments.filter((segment) => !segment.thrown)
+      this.replaced.set(
+        planId,
+        state.segments.flatMap((segment) =>
+          segment.state === `pending` ? [...segment.keys.keys()] : [],
+        ),
+      )
+    }
   }
+
+  // The keys whose loads were pending when the open replay started, by plan.
+  // The replay replaced those loads, so it decides their keys even when a
+  // later demand change retires the loads before its verdict (law 16).
+  private readonly replaced = new Map<string, Array<string>>()
 
   /** A source reload's replay loaded every segment the subscription holds again. */
   settleReplay(): void {
@@ -96,10 +109,13 @@ export class SubsetDemandController {
    * joined the replay settled before its verdict.
    */
   failReplay(): void {
-    for (const [planId, state] of this.states)
+    for (const [planId, state] of this.states) {
       for (const segment of state.segments)
         if (segment.state === `pending`)
           this.recordOutcome(planId, segment, undefined, true)
+      for (const key of this.replaced.get(planId) ?? [])
+        if (state.keys.has(key)) this.onKeyOutcome?.(planId, key)
+    }
   }
 
   /** Whether any plan still holds demand. */

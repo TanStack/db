@@ -9,6 +9,7 @@ import { normalizeError } from '../utils/error.js'
 import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
+import { isFailedStatus } from '../live-query-primitives.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import {
   createFilterFunctionFromExpression,
@@ -410,8 +411,7 @@ export class CollectionSubscription
       return
     }
     if (
-      this.collection.status === `error` ||
-      this.collection.status === `crashed` ||
+      isFailedStatus(this.collection.status) ||
       (this.collection.config.syncMode === `on-demand` &&
         this.collection._sync.syncLoadSubsetFn === null)
     ) {
@@ -436,21 +436,31 @@ export class CollectionSubscription
       return
     }
 
-    const replayState = this.createTruncateReplayState(
-      syncRunGeneration,
-      () => {
-        const currentRows = this.collection.currentStateAsChanges({
-          optimizedOnly: false,
+    // A failed replay still open in this sync run keeps its failures: the
+    // demand it failed for is still held, so the detached demand joins it as
+    // a new attempt instead of replacing it (laws 9 and 16).
+    const open = this.truncateReplayState
+    const joins = open?.failed && open.syncRunGeneration === syncRunGeneration
+    const replayState = joins
+      ? open
+      : this.createTruncateReplayState(syncRunGeneration, () => {
+          const currentRows = this.collection.currentStateAsChanges({
+            optimizedOnly: false,
+          })
+          return new Map(
+            // The API returns void for unavailable snapshots, not just undefined.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            (currentRows ?? [])
+              .filter((change) => change.type !== `delete`)
+              .map((change) => [change.key, change.value]),
+          )
         })
-        return new Map(
-          // The API returns void for unavailable snapshots, not just undefined.
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          (currentRows ?? [])
-            .filter((change) => change.type !== `delete`)
-            .map((change) => [change.key, change.value]),
-        )
-      },
-    )
+    if (joins) {
+      if (!open.completion.isPending())
+        open.completion = createReplayCompletion()
+      open.pendingSetups++
+      open.currentAttempt = { pendingCount: 0, setupComplete: false }
+    }
     const attempt = replayState.currentAttempt
     this.truncateReplayState = replayState
     this.setStatus(`loadingSubset`)
@@ -1146,8 +1156,7 @@ export class CollectionSubscription
       // Ready/error callbacks can run before sync returns its loader. Idle
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&
-        (this.collection.status === `error` ||
-          this.collection.status === `crashed` ||
+        (isFailedStatus(this.collection.status) ||
           (this.collection.status !== `idle` &&
             this.collection._sync.syncLoadSubsetFn === null)))
     ) {

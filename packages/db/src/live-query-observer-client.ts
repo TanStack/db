@@ -1,6 +1,7 @@
 import { codedMessage, devBuild } from './error-message.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-source.js'
+import { isFailedStatus } from './live-query-primitives.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type {
@@ -226,8 +227,7 @@ export class LiveQueryObserverClient<
       !collection ||
       !this.seed ||
       // A failure ends the sync run whose result the seed stood in for.
-      (collection.status !== `error` &&
-        collection.status !== `crashed` &&
+      (!isFailedStatus(collection.status) &&
         (collection.status !== `ready` || collection.isLoadingSubset))
     )
       return

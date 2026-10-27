@@ -265,7 +265,7 @@ function TodosView() {
   return (
     <>
       {isSyncError && <p>Showing saved todos. Sync is having trouble.</p>}
-      <ul>{data.map((todo) => <li key={todo.id}>{todo.title}</li>)}</ul>
+      <ul>{data.map((todo: Todo) => <li key={todo.id}>{todo.title}</li>)}</ul>
     </>
   )
 }

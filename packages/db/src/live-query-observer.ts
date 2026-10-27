@@ -3,6 +3,7 @@ import { runAllCallbacks } from './utils/callbacks.js'
 import {
   getLiveQueryStatusFlags,
   getPublicCollection,
+  isFailedStatus,
   isSingleResultCollection,
 } from './live-query-primitives.js'
 import { describeProblem } from './collection/lifecycle.js'
@@ -10,10 +11,6 @@ import type { Collection } from './collection/index.js'
 import type { LiveQueryObserverClient } from './live-query-observer-client.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
-
-/** `error` and `crashed` end a sync run before it can serve its result. */
-const isFailure = (status: CollectionStatus): boolean =>
-  status === `error` || status === `crashed`
 
 /**
  * The canonical, adapter-agnostic view of a live query at a point in time.
@@ -253,7 +250,7 @@ class LiveQueryObserverImpl<
     if (
       this.cachedServerView !== forServerSnapshot &&
       this.clientBinding?.seed &&
-      isFailure(this.visibleStatus ?? collection.status)
+      isFailedStatus(this.visibleStatus ?? collection.status)
     ) {
       this.snapshotDirty = true
     }
@@ -269,7 +266,7 @@ class LiveQueryObserverImpl<
       const status = this.clientBinding?.failed
         ? (`error` as const)
         : this.clientBinding?.seed &&
-            (forServerSnapshot || !isFailure(liveStatus))
+            (forServerSnapshot || !isFailedStatus(liveStatus))
           ? (this.clientBinding.seed.snapshot.status ?? `ready`)
           : liveStatus
       this.cachedServerView = forServerSnapshot
@@ -310,10 +307,8 @@ class LiveQueryObserverImpl<
         collection: getPublicCollection(collection),
         layoutRevision: this.layoutRevision,
         status,
-        ...getLiveQueryStatusFlags(status),
+        ...getLiveQueryStatusFlags(status, health),
         isEnabled: true,
-        isSyncError: status === `ready` && health?.hasErrors === true,
-        health,
       }
       this.snapshotDirty = false
     }
@@ -542,9 +537,9 @@ class LiveQueryObserverImpl<
         // Startup remains behind the hydration cut. A later failure ends the
         // sync run whose result the seed stood in for, and is already an
         // owned publication, so it must be visible synchronously.
-        if (isFailure(status) && !this.blockDelivery)
+        if (isFailedStatus(status) && !this.blockDelivery)
           this.clientBinding.handoff()
-        else if (status === `ready` || isFailure(status))
+        else if (status === `ready` || isFailedStatus(status))
           this.clientBinding.scheduleHandoff()
         return
       }
@@ -667,7 +662,7 @@ class LiveQueryObserverImpl<
     }
     if (this.clientBinding?.seed) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
-      if (collection.status === `ready` || isFailure(collection.status)) {
+      if (collection.status === `ready` || isFailedStatus(collection.status)) {
         this.clientBinding.scheduleHandoff()
       }
     }

@@ -89,7 +89,7 @@ const { data } = useLiveQuery({
 })
 
 // Pre-created collection (from route loader)
-const { data } = useLiveQuery(preloadedCollection)
+const { data } = useLiveQuery(preloadedTodos)
 
 // Conditional query — derived identity handles enabled/disabled transitions
 const { data, status } = useLiveQuery({

@@ -35,8 +35,10 @@ function TaskList() {
     collection,
   } = useLiveQuery((q) =>
     q
-      .from({ task: tasks })
-      .join({ user: users }, ({ task, user }) => eq(task.assigneeId, user.id)),
+      .from({ task: taskCollection })
+      .join({ user: userCollection }, ({ task, user }) =>
+        eq(task.assigneeId, user.id),
+      ),
   )
 
   if (isLoading) return <Spinner />
@@ -84,7 +86,7 @@ Two rules make `status` predictable:
 order. The tree's shape is fixed by the query, so you can render, log, or send it to
 monitoring.
 
-```ts
+```ts nocheck
 {
   alias: 'root', kind: 'live-query', status: 'ready', hasErrors: true,
   failureReason: null, error: null, reloading: false,
@@ -158,7 +160,13 @@ the data loads, or when the query no longer needs it, for example after the user
 back.
 
 ```tsx
-const { data, health, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
+const { data, health, fetchNextPage } = useLiveInfiniteQuery(
+  (q) =>
+    q
+      .from({ post: postCollection })
+      .orderBy(({ post }) => post.createdAt, 'desc'),
+  { pageSize: 20 },
+)
 
 {
   health?.error && (

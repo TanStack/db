@@ -1,5 +1,5 @@
 import { LogLevels, sanitizeSQL } from '@powersync/common'
-import { LoadSubsetOperationAbortedError } from '@tanstack/db'
+import { LoadSubsetOperationAbortedError, isFailedStatus } from '@tanstack/db'
 import DebugModule from 'debug'
 import { PendingOperationStore } from './PendingOperationStore'
 import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
@@ -108,8 +108,7 @@ export class PowerSyncTransactor {
               unsubscribe()
               resolve()
             } else if (
-              collection.status === `error` ||
-              collection.status === `crashed` ||
+              isFailedStatus(collection.status) ||
               collection.status === `cleaned-up`
             ) {
               unsubscribe()

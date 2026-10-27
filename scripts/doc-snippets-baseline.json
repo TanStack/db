@@ -89,11 +89,9 @@
     "699b7c7f0952cfb2",
     "8f931d6f08c9b84e",
     "acc6b4f0b6366b01",
-    "b87d5fdbe30413e0",
     "c1a0fb0441cd511f",
     "d0aa6010f82c4b43",
-    "f78881b9544ee2bd",
-    "fff65b827da09907"
+    "f78881b9544ee2bd"
   ],
   "docs/guides/live-queries.md": [
     "074c637c9ae5e2fd",
@@ -181,7 +179,6 @@
   ],
   "docs/guides/sqlite-persistence.md": [
     "2af364f3dda7e7dd",
-    "6049b3d5eea161a5",
     "94579648caa852b3",
     "dca3677993dbb9f8"
   ],
@@ -333,8 +330,7 @@
     "60f0cc2b9131c0ec",
     "96fe86d3776c3201",
     "d325bbb39b22b6ba",
-    "d46ac926a7047ee3",
-    "f30c15c0b300cba9"
+    "d46ac926a7047ee3"
   ],
   "packages/solid-db/skills/solid-db/SKILL.md": [
     "b79087983dcdcdab",

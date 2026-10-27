@@ -47,7 +47,7 @@ they get older. The problem appears in `health` instead.
 > **Important:** `isError` only describes the initial load. To show a
 > "data may be out of date" banner, check `health.hasErrors`.
 
-```tsx
+```tsx nocheck
 function TaskList() {
   const { data, isLoading, isError, health } = useLiveQuery((q) =>
     q
@@ -190,6 +190,7 @@ Your sync function receives two new callbacks:
 
 ```ts
 sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy }) => {
+  let readyOnce = false
   const stream = connect({
     onData: (rows) => {
       begin()

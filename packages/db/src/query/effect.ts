@@ -6,6 +6,7 @@ import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
+import { isFailedStatus } from '../live-query-primitives.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -674,7 +675,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       // A source that stopped before this Effect sends no status change. End
       // the Effect before any subscription or load reaches that source.
-      if (collection.status === `crashed` || collection.status === `error`) {
+      if (isFailedStatus(collection.status)) {
         this.onSourceError(stoppedSourceError(collectionId, collection.status))
         this.starting = false
         return

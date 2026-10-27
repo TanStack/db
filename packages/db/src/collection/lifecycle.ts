@@ -11,6 +11,7 @@ import {
 import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
+import { isFailedStatus } from '../live-query-primitives.js'
 import { CleanupQueue, cleanupNow } from './cleanup-queue'
 import type { Deferred } from '../deferred'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -388,11 +389,16 @@ export class CollectionLifecycleManager<
     run.resolve()
   }
 
-  /** A reload retired the sync run; subscriptions detach its demand. */
-  public retireSubscriptionDemand(): void {
-    for (const subscription of this.changes.changeSubscriptions) {
+  /**
+   * A reload retired the sync run; subscriptions detach its demand. Returns
+   * the replays they started.
+   */
+  public retireSubscriptionDemand(): Array<Promise<void>> {
+    return [...this.changes.changeSubscriptions].flatMap((subscription) => {
       subscription.retireSyncRun()
-    }
+      const replay = subscription.pendingTruncateReplacement
+      return replay ? [replay] : []
+    })
   }
 
   /** The reload ended without a commit, for example by cleanup. */
@@ -430,7 +436,7 @@ export class CollectionLifecycleManager<
     failureReason: HealthProblem | null
     error: HealthProblem | null
   } {
-    const error = this.statusAllowsError()
+    const error = isFailedStatus(this.status)
       ? this.statusError
       : (this.stoppedError ?? this.requestErrors.problem)
     return { failureReason: error ? null : this.failureReason, error }
@@ -438,11 +444,7 @@ export class CollectionLifecycleManager<
 
   /** The cause of status `error` or `crashed`, as health tree detail. */
   public get statusProblem(): HealthProblem | null {
-    return this.statusAllowsError() ? this.statusError : null
-  }
-
-  private statusAllowsError(): boolean {
-    return this.status === `error` || this.status === `crashed`
+    return isFailedStatus(this.status) ? this.statusError : null
   }
 
   /** The sync adapter still tries after a problem. Status and rows do not change. */

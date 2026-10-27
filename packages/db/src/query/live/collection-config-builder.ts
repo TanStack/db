@@ -16,6 +16,7 @@ import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import { collectSourceRefs } from '../ir.js'
 import { findProblems } from '../../collection/health-tree.js'
+import { isFailedStatus } from '../../live-query-primitives.js'
 import { reducePublicKeys } from './public-key-reduction.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
@@ -1515,7 +1516,7 @@ export class CollectionConfigBuilder<
       // The source may have failed before this live query subscribed. Register
       // the listener first, then reconcile that current state so no transition
       // can be missed between observation and subscription.
-      if (collection.status === `error` || collection.status === `crashed`) {
+      if (isFailedStatus(collection.status)) {
         this.handleSourceStatusChange(config, sourceId, collectionId, {
           type: `status:change`,
           collection,

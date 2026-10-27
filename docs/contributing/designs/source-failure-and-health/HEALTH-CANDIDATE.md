@@ -68,7 +68,7 @@ heals an attempt; recovery is app-level (`cleanup()` then `preload()`).
 
 ### Adapter API (sync function params)
 
-```ts
+```ts nocheck
 sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy }) => { ... }
 ```
 
@@ -85,7 +85,7 @@ sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy 
 
 ### Collection surface
 
-```ts
+```ts nocheck
 collection.health // { isError: boolean, error: CollectionErrorInfo | null }
 collection.on('health:change', (event) => { ... })
 

@@ -61,6 +61,9 @@ interface PendingSyncedTransaction<
   // or called truncate() in it.
   truncate?: boolean
   truncateMarkReady?: boolean
+  // The rows a reload's retired run left that this transaction was first to
+  // write; a canceled transaction gives them back.
+  leftoversTaken?: Set<TKey>
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   /** The last explicit write per key, after `position` operations. */
   explicitRowMetadataWrites: Map<

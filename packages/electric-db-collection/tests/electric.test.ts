@@ -422,13 +422,14 @@ describe(`Electric Integration`, () => {
   // snapshots that a subscription's demand requests. The reload's new run
   // sends no snapshot of the whole shape, so it completes at its
   // markReady() and keeps the rows; core then replays the demand, and the
-  // replayed subset snapshot's rows apply on the kept rows. The fake source
-  // answers every subset request with its current rows. A resumed stream
-  // delivers its changes after the stored offset; a stream that cannot
-  // resume starts at `now` and delivers none of them. Afterwards a row the
-  // source holds shows its current value. A row the source deleted while no
-  // stream listened stays: no subset snapshot can say a row is gone, so
-  // only the resumed history checks the full row set.
+  // replayed subset snapshot's rows apply on the kept rows (an insert of a
+  // kept key replaces it). The fake source answers every subset request
+  // with its current rows. A resumed stream delivers its changes after the
+  // stored offset; a stream that cannot resume starts at `now` and delivers
+  // none of them. Once every replay succeeds, core sweeps each kept row the
+  // new run did not write (snapshot-api §7), so a row the source deleted
+  // while no stream listened goes too. Afterwards the rows equal the
+  // source's rows in both histories.
   it.each([true, false])(
     `an on-demand reload keeps its rows and ends with the source's rows (resumes: %s)`,
     async (handle) => {
@@ -512,7 +513,7 @@ describe(`Electric Integration`, () => {
         subscriber([...resumedChanges, upToDate()])
 
         expect(await reload).toBe(`resolved`)
-        const expected = new Map(handle ? table : [...before, ...table])
+        const expected = new Map(table)
         await vi.waitFor(() => expect(rows()).toEqual(expected))
         expect(onDemand.status).toBe(`ready`)
       } finally {

@@ -376,7 +376,6 @@
   "assertAdapterActive": "bI",
   "statusError": "cI",
   "stoppedError": "eN",
-  "statusAllowsError": "gI",
   "enterErrorState": "gM",
   "crashQuery": "gN",
   "failQuery": "gW",
@@ -441,5 +440,7 @@
   "reloadSnapshotPending": "al",
   "requestErrorsFromReload": "fs",
   "isResultComplete": "fD",
-  "decided": "gU"
+  "decided": "gU",
+  "reloadLeftovers": "gY",
+  "endReloadLeftovers": "g1"
 }

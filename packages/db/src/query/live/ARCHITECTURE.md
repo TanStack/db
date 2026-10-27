@@ -1813,10 +1813,18 @@ every row before the top-K (a recorded limit).
     truncate does, and the rows stay: the new run's writes apply on them.
     Only the new run's snapshot (`begin({ snapshot: true })`) or its own
     `truncate()` replaces them, and that replacement replays the demand
-    again, also after the reload's replay settled. A live query's own reload
-    keeps its rows and its node until its new run's graph result is
-    complete (law 9), then commits that result as its snapshot; the node
-    then drops the retired run's request errors and keeps the new run's.
+    again, also after the reload's replay settled. From the reload's
+    start until its sweep, or until it ends without one, the new run's
+    insert of a row the retired run left, and has not written, replaces it,
+    also from a replayed load after the reload completed.
+    When the reload completed and every replay it started succeeded, an
+    on-demand Collection deletes, in one transaction, each row its new run
+    did not write (the reload sweep); a failed replay or a failed reload
+    sweeps nothing. A live query's own reload keeps its rows, its node, and
+    its settled window until its new run's graph result is complete (law
+    9), then commits that result as its snapshot; the node then drops the
+    retired run's request errors and keeps the new run's, and a window move
+    still waiting for a replay ends with the retired run.
     The replay decides every load
     it replaces: a replaced load's own outcome decides
     nothing, even when it settles after the replay. A load that fails while

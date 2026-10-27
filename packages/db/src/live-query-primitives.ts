@@ -47,6 +47,11 @@ export function isSingleResultCollection(
   )
 }
 
+/** `error` and `crashed` end a sync run before it can serve its result. */
+export function isFailedStatus(status: CollectionStatus): boolean {
+  return status === `error` || status === `crashed`
+}
+
 /**
  * The derived flags and health every adapter exposes for a query, besides
  * `status`, which each adapter reports as its own field.

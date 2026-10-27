@@ -1,6 +1,7 @@
 import { codedMessage, devBuild } from './error-message.js'
 import { UnhashableQueryIRError } from './errors.js'
 import { getLiveQueryHash } from './live-query-options.js'
+import { isFailedStatus } from './live-query-primitives.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
   assertLiveQueryWindowManyResult,
@@ -180,8 +181,7 @@ export function bindLiveQueryWindow(
       uncommitted?.ownsCollection &&
       !compareUpdate(uncommitted, update, dependencies).recompile &&
       uncommitted.collection.status !== `cleaned-up` &&
-      uncommitted.collection.status !== `error` &&
-      uncommitted.collection.status !== `crashed` &&
+      !isFailedStatus(uncommitted.collection.status) &&
       liveQueryWindowMatches(uncommitted.collection, requiredLimit)
     ) {
       // Nothing has taken effect since the earlier update built this

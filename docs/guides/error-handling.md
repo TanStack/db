@@ -89,7 +89,7 @@ const syncedCollection = createCollection(
     queryClient,
     queryKey: ["synced-data"],
     queryFn: fetchData,
-    getKey: (item) => item.id,
+    getKey: (item: Item) => item.id,
     retry: 3,
   })
 )
@@ -212,8 +212,10 @@ function TaskList() {
     collection,
   } = useLiveQuery((q) =>
     q
-      .from({ task: tasks })
-      .join({ user: users }, ({ task, user }) => eq(task.assigneeId, user.id))
+      .from({ task: taskCollection })
+      .join({ user: userCollection }, ({ task, user }) =>
+        eq(task.assigneeId, user.id)
+      )
   )
 
   if (isLoading) return <Spinner />
@@ -263,7 +265,7 @@ query, in query order. The tree's shape is fixed by the query, so you can
 render, log, or send it to monitoring. A disabled query has no query
 definition, so its `health` is `undefined`.
 
-```ts
+```ts nocheck
 {
   alias: "root", kind: "live-query", status: "ready", hasErrors: true,
   failureReason: null, error: null, reloading: false,
@@ -396,7 +398,13 @@ needs it, for example after the user scrolls back. When several requests fail,
 the node shows the newest, and its `errors` lists every request still failing.
 
 ```tsx
-const { data, health, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
+const { data, health, fetchNextPage } = useLiveInfiniteQuery(
+  (q) =>
+    q
+      .from({ post: postCollection })
+      .orderBy(({ post }) => post.createdAt, "desc"),
+  { pageSize: 20 }
+)
 
 {
   health?.error && (
@@ -422,8 +430,18 @@ visible changes until the reload completes.
   becomes `ready` when the new run calls `markReady()`.
 - If the new run fails, the old rows and status stay, the node shows the new
   `error`, and the `reload()` promise rejects.
-- A live query's own reload keeps its rows until its new run has a complete
-  result, then shows that result in one change.
+- From the reload's start until its sweep, or until it ends without one, the
+  new run's `insert` of a row the old run left and the new run has not
+  written replaces that row, also from a replayed load after the reload
+  completed. Any other duplicate `insert` still throws.
+- On an on-demand Collection, once the reload completed and every replay of
+  the current demand succeeded, core deletes in one change each row the new
+  run did not write: a row the backend deleted while no stream told the
+  Collection, or one that no demand loads any more. A failed replay deletes
+  nothing.
+- A live query's own reload keeps its rows and its window (the offset and
+  limit it settled on) until its new run has a complete result, then shows
+  that result in one change.
 
 On a live query, `reload()` reloads each of its sources that has an `error`,
 then the query itself if its own node has an `error`: its first load failed,
@@ -618,9 +636,10 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
   holds the previous run's rows. Send the new run's full state as one
   snapshot (`begin({ snapshot: true })`), or write against the kept rows:
   `update` a row the Collection holds, `delete` a row that is gone, then call
-  `markReady()`. An `insert` of a kept row with a different value throws. An
-  on-demand Collection's `loadSubset` result is partial, so never mark it as
-  a snapshot.
+  `markReady()`. An `insert` of a row the old run left replaces it, until
+  the reload's sweep. An on-demand Collection's `loadSubset` result is
+  partial, so never mark it as a snapshot; core deletes the kept rows the new
+  run did not write once its replay succeeds.
 
 ### Migrating
 
@@ -1006,6 +1025,7 @@ sync adapter is still trying:
 
 ```tsx
 import { findProblems } from "@tanstack/db"
+import { useLiveQuery } from "@tanstack/react-db"
 
 const TodoApp = () => {
   const { data, health, collection } = useLiveQuery((query) =>
@@ -1262,7 +1282,7 @@ const TodoApp = () => {
       } else if (error instanceof DuplicateKeyError) {
         alert("A todo with this ID already exists")
       } else {
-        alert(`Failed to add todo: ${error.message}`)
+        alert(`Failed to add todo: ${String(error)}`)
       }
     }
   }
