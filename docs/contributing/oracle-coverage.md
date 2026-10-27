@@ -1933,6 +1933,13 @@ drivers; the same seam rejects a statement above 100 bindings. The original
 transaction driver exceeded the cap at 101. This Node SQLite seam does not
 execute in Workers or prove native JSON-function support.
 
+The [worker diagnostics oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts)
+drives the real worker module and also classifies a refused OPFS storage
+root, as in a private window or a browser without OPFS storage: the worker
+answers `PERSISTENCE_UNAVAILABLE` with the browser's error name and message
+before SQLite opens, and a `PersistenceUnavailableError` response carries only
+its details, which the opener prefixes once.
+
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,
 ignores a late response, and releases the deadline and abort listener after a
@@ -1944,6 +1951,73 @@ the lock. This controlled lock holder does not
 reproduce a frozen tab or establish behavior in other browsers.
 The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
 preserves the exact-head unit and Chromium evidence and the queued-lock mutant.
+The jsdom open cases start after asset resolution. The
+[OPFS open outcome oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.ts)
+owns how an open settles across its four steps: the Vite asset lookup, worker
+start, WASM load, and initialization. One module holds the law, the history
+grammar, the model, and the comparison; neither driver states expected
+results. A history fixes each step (the lookup resolves, is held, or fails;
+the worker starts or is refused; the WASM loads or fails; initialization
+answers or stays silent; the worker script can also fail to load) and pairs
+every pending step with a deadline or an abort. The model predicts the
+settlement, started and terminated workers, the steps that production reached,
+and a later open after an interruption. The
+[jsdom driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts)
+reaches worker start, initialization, and the worker's WASM failure response.
+The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
+reaches the lookup, the real worker's WASM fetch, and worker start against a
+Vite dev server that pre-bundles the built package. It holds back only the
+opener's deadline timer and fires it explicitly, interrupts only after the
+server holds the lookup, and reads the settlement and worker counts one task
+after each event, so no observation depends on elapsed time. Each driver checks that its
+history product covers the outcomes it declares; the `reached` observation is
+the production reach witness. Mutants that leave the lookup outside
+the deadline and abort, start a worker after a late lookup, report a WASM
+failure as an internal error, or let a refused Worker constructor's error
+escape each fail the driver that reaches that step, and a mutant that rejects
+before making the lookup fails only on `reached`. The grammar does not
+interrupt an open in the same turn as a failing step, because no law orders
+those causes yet.
+
+The
+[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
+models which installs open in Vite development and production: direct,
+hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
+directories, and exclusion by import name or package name. It reads the
+importer's specifier and the Node resolution of the package name from each
+installed tree rather than from a table per layout. A pre-bundled copy
+opens when the app root resolves the package name and otherwise reports
+`PersistenceUnavailableError`; with two copies it loads the copy that the root
+resolves, and when that copy is another version its worker refuses the opener
+and the open reports `PersistenceUnavailableError` after one worker starts. The
+two-version layout rewrites the nested copy's built version marker, so the
+opener and the root copy's worker really come from different builds. Excluding the specifier that the importer uses serves the copy in
+place with its own worker. The README states these rules. A mutant that always
+runs the lookup fails the three excluded transitive, alias, and two-copy
+cases. Its dev servers do not watch files, because a late watcher event
+reloaded pages during an open.
+
+The packaged-consumer
+[checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
+cover the build output and export map, a classic worker in development and
+production, an `about:srcdoc` frame, and a page on another origin than the
+Vite server, where the Worker constructor throws `SecurityError` and the open
+reports `PersistenceUnavailableError`. The
+[bundler consumer checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/bundler-consumers.e2e.test.ts)
+install the built workspace packages as published packages in a webpack 5 app
+(production and development builds) and a Next.js app (Turbopack and webpack,
+each under `next build` with `next start` and under `next dev`). Each opens and
+queries SQLite in Chromium, starts one classic worker, loads one
+`200 application/wasm` response, and makes no Vite lookup request. Each
+production build, and the Vite consumer's production build, ships none of the
+lookup's code. A module
+worker fails all six; a lookup that runs without a Vite client fails the four
+Next.js cases and is equivalent under webpack, which emits the worker and WASM
+in one directory. These owners do not cover webpack-dev-server, Rspack, Parcel,
+esbuild, an open from inside a worker, a Vite client injected without a script
+`src`, or browsers other than Chromium. The
+[PR #2103 review record](oracle-reviews/pr-2103-separate-wasm.md) classifies
+each calibration control and records every applicable requirement.
 
 The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how

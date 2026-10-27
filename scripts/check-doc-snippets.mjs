@@ -67,6 +67,12 @@ const markdown = [
 // Map each workspace package and its subpath exports to source. CI does not
 // build the packages, so an export that falls through to dist/ is missing.
 const paths = {}
+const declaresTypes = (target) =>
+  typeof target === `object` &&
+  target !== null &&
+  Object.entries(target).some(
+    ([condition, value]) => condition === `types` || declaresTypes(value),
+  )
 for (const pkg of readdirSync(join(root, `packages`))) {
   const manifest = join(root, `packages`, pkg, `package.json`)
   if (!existsSync(manifest)) continue
@@ -77,8 +83,11 @@ for (const pkg of readdirSync(join(root, `packages`))) {
   } = JSON.parse(readFileSync(manifest, `utf8`))
   // Examples document published packages only.
   if (unpublished) continue
-  for (const subpath of Object.keys(exports)) {
-    if (subpath === `./package.json`) continue
+  for (const [subpath, target] of Object.entries(exports)) {
+    // A typed snippet can import only an export that declares types. Untyped
+    // exports, such as package.json, a WASM file, or a worker script, are
+    // runtime assets with no source to map.
+    if (!declaresTypes(target)) continue
     // `.` is src/index; `./x` is src/x.ts or src/x/index.ts.
     const stem = subpath === `.` ? `index` : subpath.slice(2)
     const entry = [`${stem}.ts`, `${stem}.tsx`, `${stem}/index.ts`]
