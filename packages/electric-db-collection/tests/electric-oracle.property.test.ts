@@ -1342,12 +1342,20 @@ function expectedInitialMoveOutSnapshots(
 ): Array<TraceResult[`snapshots`][number]> {
   const initialRows: TraceResult[`rows`] =
     removals === 0 ? [[id, `snapshot`, `stable-${id}`]] : []
+  const liveRows: TraceResult[`rows`] = [
+    ...initialRows,
+    [id + 1, `live`, `stable-${id + 1}`],
+  ]
+  const updatedRows: TraceResult[`rows`] = [
+    ...initialRows,
+    [id + 1, updated, `stable-${id + 1}`],
+  ]
   return [
-    [...initialRows, [id + 1, `live`, `stable-${id + 1}`]].sort(
-      ([left], [right]) => String(left).localeCompare(String(right)),
+    liveRows.sort(([left], [right]) =>
+      String(left).localeCompare(String(right)),
     ),
-    [...initialRows, [id + 1, updated, `stable-${id + 1}`]].sort(
-      ([left], [right]) => String(left).localeCompare(String(right)),
+    updatedRows.sort(([left], [right]) =>
+      String(left).localeCompare(String(right)),
     ),
   ]
 }
