@@ -115,10 +115,6 @@ function registrationCondition(callee) {
   return undefined
 }
 
-/**
- * A call to one of the shared oracle-config helpers in `names`. The binding
- * must be the import, not a local function with the same name.
- */
 /** Exactly `.skipIf(<shared replay condition>)`, not negated. */
 function isReplaySelection({ name, args }, sourceCode) {
   return (
