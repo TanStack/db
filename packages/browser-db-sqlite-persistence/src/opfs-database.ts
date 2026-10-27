@@ -160,7 +160,7 @@ function resolveViteAssetUrls({
     return undefined
   }
 
-  // The build emits dist/wa-sqlite.wasm and dist/assets/<worker>, at different
+  // The build emits dist/wa-sqlite.wasm and dist/assets/opfs-worker.js, at different
   // depths from the code. In place, as when the package is excluded from
   // pre-bundling, both URLs share dist/. A moved module resolves them to
   // different directories and needs the lookup, which can fail when the app
@@ -168,8 +168,6 @@ function resolveViteAssetUrls({
   if (new URL(`../`, workerFileUrl).href === new URL(`./`, wasmFileUrl).href) {
     return undefined
   }
-  const { pathname } = workerFileUrl
-  const workerFile = pathname.slice(pathname.lastIndexOf(`/`) + 1)
 
   // Ask Vite to resolve the package exports instead of guessing install paths.
   const packageUrl = new URL(
@@ -185,7 +183,7 @@ function resolveViteAssetUrls({
     ) as Promise<{ default: string }>,
     import(
       /* @vite-ignore */ /* webpackIgnore: true */ new URL(
-        `assets/${workerFile}?url`,
+        `opfs-worker.js?url`,
         packageUrl,
       ).href
     ) as Promise<{ default: string }>,

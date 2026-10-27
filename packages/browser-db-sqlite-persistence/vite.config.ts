@@ -68,7 +68,7 @@ function preserveWaSqliteWasmUrl(): Plugin {
 
 const config = defineConfig({
   // Build with relative paths so the ?worker&url and WASM URL imports emit
-  // new URL("../assets/opfs-worker-<hash>.js", import.meta.url) and
+  // new URL("../assets/opfs-worker.js", import.meta.url) and
   // new URL("../../wa-sqlite.wasm", import.meta.url) instead of absolute
   // "/assets/..." paths that break for library consumers. opfs-database.ts
   // relies on the two depths differing to tell a pre-bundled copy of this
@@ -78,6 +78,9 @@ const config = defineConfig({
   worker: {
     // opfs-database.ts starts the built worker as a classic script.
     format: `iife`,
+    // A fixed name lets package.json export the worker as one file. Consumer
+    // bundlers emit it under their own hashed name.
+    rollupOptions: { output: { entryFileNames: `assets/[name].js` } },
     plugins: () => [preserveWaSqliteWasmUrl()],
   },
   test: {

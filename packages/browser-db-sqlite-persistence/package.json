@@ -44,7 +44,7 @@
       }
     },
     "./wa-sqlite.wasm": "./dist/wa-sqlite.wasm",
-    "./assets/*": "./dist/assets/*",
+    "./opfs-worker.js": "./dist/assets/opfs-worker.js",
     "./package.json": "./package.json"
   },
   "sideEffects": false,

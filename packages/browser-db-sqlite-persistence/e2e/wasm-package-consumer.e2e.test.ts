@@ -8,6 +8,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -104,6 +105,27 @@ it(`includes a separately loadable WASM asset in a consumer build`, () => {
   expect(
     readFileSync(join(assetsDirectory, workerFile!), `utf8`),
   ).not.toContain(`data:application/wasm;base64,`)
+})
+
+// The package exports its two runtime assets under fixed names, so a release
+// does not change their public paths or expose other build files.
+it(`exports only the worker and WASM files as package assets`, () => {
+  const { exports } = JSON.parse(
+    readFileSync(join(packageDirectory, `package.json`), `utf8`),
+  ) as { exports: Record<string, unknown> }
+  const assetExports = Object.entries(exports).filter(
+    ([subpath, target]) =>
+      typeof target === `string` && subpath !== `./package.json`,
+  )
+  expect(assetExports).toEqual([
+    [`./wa-sqlite.wasm`, `./dist/wa-sqlite.wasm`],
+    [`./opfs-worker.js`, `./dist/assets/opfs-worker.js`],
+  ])
+  for (const [, target] of assetExports) {
+    expect(statSync(join(packageDirectory, target as string)).isFile()).toBe(
+      true,
+    )
+  }
 })
 
 it(`opens and queries SQLite under a nested base without asset configuration`, async () => {
@@ -388,7 +410,9 @@ const assetFailures = [
   {
     asset: `worker lookup`,
     fails: (url: string) =>
-      url.includes(`/@id/@tanstack/browser-db-sqlite-persistence/assets/`),
+      url.includes(
+        `/@id/@tanstack/browser-db-sqlite-persistence/opfs-worker.js`,
+      ),
     createdWorkers: 0,
   },
   {
