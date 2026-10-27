@@ -16,6 +16,7 @@ import { StreamBuilder } from '../src/d2.js'
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
@@ -539,6 +540,10 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
     }
     return worlds
   })
+
+// The grammar of legal ordered histories. Its calibration test checks that the
+// generated steps reach row promotions, which the ordered laws need.
+declareOracle({ grammar: [orderedHistory] })
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)
