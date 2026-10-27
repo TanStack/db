@@ -2318,7 +2318,6 @@ function createElectricSync<T extends Row<unknown>>(
           : undefined)
     let areResumeKeysReady = !resumeKeysPromise
     const pendingResumeBatches: Array<Array<Message<T>>> = []
-    let unsubscribeStream: () => void = () => {}
 
     const invalidateResume = () => {
       resumeInvalid = true
@@ -2328,7 +2327,7 @@ function createElectricSync<T extends Row<unknown>>(
       newSnapshots.length = 0
       commitResetResumeMetadataImmediately()
       streamErrorVersion++
-      unsubscribeStream()
+      stream.unsubscribeAll()
       abortController.abort()
       markError(
         new Error(
@@ -2662,7 +2661,7 @@ function createElectricSync<T extends Row<unknown>>(
                 return
               }
               streamErrorVersion++
-              unsubscribeStream()
+              stream.unsubscribeAll()
               abortController.abort()
               if (collection.status !== `error`) markError(error)
             },
@@ -2709,7 +2708,7 @@ function createElectricSync<T extends Row<unknown>>(
       }
     }
 
-    unsubscribeStream = stream.subscribe(
+    stream.subscribe(
       (messages: Array<Message<T>>) => {
         if (!areResumeKeysReady) {
           pendingResumeBatches.push([...messages])
@@ -2752,7 +2751,7 @@ function createElectricSync<T extends Row<unknown>>(
           rejectFullSnapshot(error)
           commitResetResumeMetadataImmediately()
           streamErrorVersion++
-          unsubscribeStream()
+          stream.unsubscribeAll()
           abortController.abort()
           markError(error)
         },
@@ -2768,9 +2767,7 @@ function createElectricSync<T extends Row<unknown>>(
         if (!abortController.signal.aborted && !initialSyncFailedFinally)
           cleanupAbortedStream = true
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
-        // Unsubscribe from the stream
-        unsubscribeStream()
-        // Abort the abort controller to stop the stream
+        stream.unsubscribeAll()
         abortController.abort()
         abandonOpenTransaction()
         pendingResumeBatches.length = 0
