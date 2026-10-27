@@ -455,10 +455,12 @@ export class CollectionSubscriber<
       // request error, or a failed first load before readiness.
       fail: (errors) => {
         if (
-          syncRunGeneration ===
+          syncRunGeneration !==
           this.collectionConfigBuilder.getSyncRunGeneration()
         )
-          this.collectionConfigBuilder.failReplay(this.sourceId, errors)
+          return
+        this.collectionConfigBuilder.failReplay(this.sourceId, errors)
+        this.demand.failReplay()
       },
       holdsDemand: () => this.demand.holdsDemand(),
     }

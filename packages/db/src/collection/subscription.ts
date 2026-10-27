@@ -149,6 +149,12 @@ type TruncateReplayState = {
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
   failures: Map<SubsetDemand, Error>
+  /**
+   * Failed demands of the current attempt that a later replacement asks for
+   * again, by that replacement: while it is held, their failures no longer
+   * count, even if it fails too (law 10: a failed load covers nothing).
+   */
+  retries: Map<SubsetDemand, SubsetDemand>
   /** The current attempt failed, even if its failed demand was released since. */
   failed: boolean
   completion: Deferred<void>
@@ -488,6 +494,7 @@ export class CollectionSubscription
       // before a request returns its promise and joins the pending set.
       replayState.pendingSetups++
       replayState.failures.clear()
+      replayState.retries.clear()
       replayState.failed = false
       replayState.currentAttempt = { pendingCount: 0, setupComplete: false }
     } else {
@@ -701,6 +708,7 @@ export class CollectionSubscription
       .filter(
         ([demand]) =>
           this.subsetDemands.includes(demand) &&
+          !this.subsetDemands.includes(replayState.retries.get(demand)!) &&
           !this.subsetDemands.some(
             (replacement) =>
               replacement.replaces?.includes(demand) &&
@@ -884,6 +892,7 @@ export class CollectionSubscription
       pendingSetups: 1,
       currentAttempt: { pendingCount: 0, setupComplete: false },
       failures: new Map(),
+      retries: new Map(),
       failed: false,
       completion: createReplayCompletion(),
     }
@@ -1426,6 +1435,11 @@ export class CollectionSubscription
       if (demand) demands.push(demand)
     }
     if (demands.length > 0) this.releaseDemands(demands)
+    // A release can retire the owner's last logical demand without a held
+    // acquisition, such as one whose load threw: an open replay then has no
+    // demand left to load.
+    else if (this.options.truncateReplayPublication?.holdsDemand?.() === false)
+      this.retireEmptyReplay()
   }
 
   /**
@@ -1440,10 +1454,14 @@ export class CollectionSubscription
     const replacement = this.subsetDemands.find((demand) =>
       this.requestedWhere(demand, where),
     )
-    if (replacement)
-      replacement.replaces = this.subsetDemands.filter((demand) =>
-        replaced.some((other) => this.requestedWhere(demand, other)),
-      )
+    if (!replacement) return
+    replacement.replaces = this.subsetDemands.filter((demand) =>
+      replaced.some((other) => this.requestedWhere(demand, other)),
+    )
+    const replayState = this.truncateReplayState
+    for (const demand of replacement.replaces)
+      if (replayState?.failures.has(demand))
+        replayState.retries.set(demand, replacement)
   }
 
   private requestedWhere(
