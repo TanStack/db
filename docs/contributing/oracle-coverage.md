@@ -3121,6 +3121,16 @@ an obsolete load record coverage, keep coverage across a truncate, let a
 failed coverage read fail the load, or keep a released load's wait each fail
 it. Its limits: unordered demands only, real timers in session 1, one
 process, and `node:sqlite`.
+A scripted mutation sweep (63 mutants, recorded in the review record) then
+added five fixed histories: an empty covered demand after a rotation, a
+truncate during an empty load's coverage read, a synchronous answer whose
+durable write lands late, claim recovery after an expired claim during the
+check, and a coverage read that outlasts the wait. Open survivors: the clock
+read after a claim wait, and six observer and gate mutants that the
+persisted-readiness owner does not distinguish (the restore check, preload
+registration, and client-stream failure in `isInitialRenderReady`; the
+source taken as the demand owner; and rendering at once on network
+readiness).
 
 Native SQLite receiving witnesses run five of the primary oracle's histories
 (covered settles, never-loaded stays loading, covered then a source delete

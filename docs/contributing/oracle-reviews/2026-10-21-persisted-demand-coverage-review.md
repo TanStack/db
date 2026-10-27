@@ -421,3 +421,45 @@ code.
   OPFS Playwright matrix that CI runs. The OPFS witness also pins the
   guide's statement that a multi-tab coordinator waits for the network.
 - **Mutation sweep**: reported separately below.
+
+### Mutation sweep
+
+A scripted sweep applied 63 semantic mutants to the coverage code in
+`persisted.ts`, the gate in `persisted-readiness.ts`, the builder's
+settlement signal, and the observer's source collection. Each ran against the
+fixed demand coverage oracle and the persisted-readiness oracle, and each
+survivor also ran against the receiving witnesses. Rerun against the
+generated campaign, 24 survivors left 23.
+
+The oracle then gained five histories, and each kills a survivor:
+
+- an empty covered demand after a rotation (the record ignores its cache
+  generation);
+- a truncate during the coverage read of an empty load (no check after the
+  read);
+- a synchronous answer whose durable write lands late (the coverage read
+  does not wait on the apply mutex);
+- claim recovery after an expired claim during the check (recovery not
+  scheduled);
+- a coverage read that outlasts the wait (the deadline runs from the check).
+
+The release sweep also checks that no upstream load starts after a release.
+
+Classified survivors:
+
+- Equivalent: an early `isCurrent` check, rewriting an unchanged record, the
+  on-demand check in `settleCoveredDemand`, the timer clamp, a no-op
+  unsubscribe, re-settling a settled demand, the hydrated path's refetch
+  guard (repeated in `settleCoveredDemand`), the hydrated path's
+  expired-claim guard (a read under an expired claim already proves
+  nothing), and ignoring the lifecycle generation in the reset epoch (a
+  replaced lifecycle's sync callbacks are inert).
+- Not distinguishable here: the forward guard after a release, because
+  hydration checks the abort signal at each step before it forwards a load.
+- Open, outside this owner or needing a new history: the clock read after
+  the claim wait; the hydrated mark after a truncate, which the hydration
+  path owns; and six observer and gate mutants for the persisted-readiness
+  owner. Those six skip the restore check, the preload registration and its
+  check, or the client-stream failure in `isInitialRenderReady`; take the
+  source as the demand owner; or stop rendering at once on network
+  readiness.

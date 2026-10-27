@@ -955,11 +955,14 @@ async function coverD(
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
+// An empty covered demand isolates the generation check: no row count can
+// end its coverage after a rotation, so only the generation does.
 async function runSessionReset(
   kind: `rotation` | `refetch`,
+  rows: ReadonlyArray<Row> = [A1, A2],
 ): Promise<SessionResetObservation> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  const keyD = await coverD(driver)
+  const keyD = await coverD(driver, rows)
   useFakeClock()
   const waitMs = kind === `rotation` ? 0 : 1000
   const { collection, upstream } = onDemandSource(
@@ -1145,7 +1148,10 @@ async function runClaimExpiredBeforeRecord(): Promise<{
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-async function runClaimExpiredBeforeCheck(): Promise<{ status: string }> {
+async function runClaimExpiredBeforeCheck(): Promise<{
+  status: string
+  reacquired: boolean
+}> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   await coverD(driver)
   const clock = { now: Date.now() }
@@ -1182,7 +1188,8 @@ async function runClaimExpiredBeforeCheck(): Promise<{ status: string }> {
     await new Promise((resolve) => setTimeout(resolve, 300))
     // Positive witness: the coverage check read D after the claim expired.
     expect(reads.afterRestore).toBeGreaterThan(0)
-    return { status: query.status }
+    // Claim recovery rotates the cache, so D loads again.
+    return { status: query.status, reacquired: upstream.calls.length > 1 }
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
@@ -1354,6 +1361,25 @@ async function runCoverageReadFailsDuringCheck(): Promise<{
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
+// Each durable write lands a few macrotasks late, as with a worker driver,
+// so a coverage read that does not wait behind it would count too few rows.
+function slowDurableWrites(adapter: SQLiteCorePersistenceAdapter) {
+  return new Proxy(adapter, {
+    get(target, property) {
+      if (property === `applyCommittedTx`) {
+        return async (...args: Parameters<typeof target.applyCommittedTx>) => {
+          for (let i = 0; i < 3; i++) {
+            await new Promise<void>((resolve) => setImmediate(resolve))
+          }
+          return target.applyCommittedTx(...args)
+        }
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === `function` ? value.bind(target) : value
+    },
+  })
+}
+
 async function runSynchronousAnswerThenDelete(
   deleteAfterwards: boolean,
 ): Promise<{ settledOffline: boolean }> {
@@ -1367,7 +1393,11 @@ async function runSynchronousAnswerThenDelete(
         getKey: (row) => row.id,
         syncMode: `on-demand`,
         initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
-        persistence: { adapter: new SQLiteCorePersistenceAdapter({ driver }) },
+        persistence: {
+          adapter: slowDurableWrites(
+            new SQLiteCorePersistenceAdapter({ driver }),
+          ),
+        },
         sync: {
           sync: ({ begin, write, commit }) => {
             handles.remove = (row) => {
@@ -1456,6 +1486,88 @@ async function runUnorderedRowReplaced(): Promise<{
         }
       : { settledOffline: false }
   }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+// A truncate while the coverage read of an empty load is in flight. The
+// load is obsolete when its record would be written, so it records nothing,
+// and an offline load of D waits. Only an empty demand shows a late record:
+// for one with rows, the truncate leaves fewer rows than it would record.
+async function runTruncateDuringCoverageRead(): Promise<{
+  settledOffline: boolean
+  heldReads: number
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const state = { armed: false }
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => state.armed,
+    `hold`,
+  )
+  {
+    const { collection, upstream } = onDemandSource(adapter, 0)
+    const query = filterQuery(collection, `a`)
+    await withCleanup(async () => {
+      void query.preload().catch(() => undefined)
+      await vi.waitFor(() => expect(upstream.pendingCount()).toBe(1))
+      // The next read after the answer is the coverage read.
+      state.armed = true
+      await upstream.answer([])
+      await vi.waitFor(() => expect(reads.held).toBe(1))
+      // The truncate commits behind the held read, so do not await it yet.
+      const truncated = upstream.truncate()
+      reads.release()
+      await truncated
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const query = filterQuery(collection, `a`)
+  const preload = trackPreload(query)
+  return withCleanup(async () => {
+    await vi.waitFor(() => expect(upstream.calls.length).toBeGreaterThan(0))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return { settledOffline: preload() === `resolved`, heldReads: reads.held }
+  }, [() => query.cleanup(), () => collection.cleanup()])
+}
+
+// The wait runs from the load's start, not from the end of the coverage
+// check. A coverage read that outlasts the wait therefore settles D as soon
+// as it returns.
+async function runCoverageReadOutlastsWait(): Promise<{
+  settledWhenReadReturns: boolean
+  heldReads: number
+}> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  await coverD(driver)
+  useFakeClock()
+  const holder: { collection?: Collection<Row, string, any> } = {}
+  const { adapter, reads } = controlledReads(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    () => (holder.collection?.toArray.length ?? 0) > 0,
+    `hold`,
+  )
+  const { collection, upstream } = onDemandSource(adapter, 1000)
+  holder.collection = collection
+  const query = filterQuery(collection, `a`)
+  const preload = trackPreload(query)
+  return withCleanup(async () => {
+    await untilUpstreamCalled(upstream, 1)
+    for (let i = 0; i < 200 && reads.held === 0; i++) await drain()
+    await vi.advanceTimersByTimeAsync(1000)
+    reads.release()
+    await drain()
+    return {
+      settledWhenReadReturns: preload() === `resolved`,
+      heldReads: reads.held,
+    }
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
 }
 
 async function runReleaseDuringCoverageCheck(): Promise<{
@@ -2501,7 +2613,10 @@ describe(`persisted demand coverage oracle`, () => {
 
   it(`waits for the network when the cache claim expires before the coverage check`, async () => {
     quietConsole()
-    expect(await runClaimExpiredBeforeCheck()).toEqual({ status: `loading` })
+    expect(await runClaimExpiredBeforeCheck()).toEqual({
+      status: `loading`,
+      reacquired: true,
+    })
   })
 
   it(`keeps a synchronous answer for an already hydrated demand synchronous`, async () => {
@@ -2552,6 +2667,22 @@ describe(`persisted demand coverage oracle`, () => {
     })
   })
 
+  it(`records nothing for an empty load that a truncate makes obsolete during its coverage read`, async () => {
+    quietConsole()
+    expect(await runTruncateDuringCoverageRead()).toEqual({
+      settledOffline: false,
+      heldReads: 1,
+    })
+  })
+
+  it(`measures the wait from the load's start, not the end of the coverage read`, async () => {
+    quietConsole()
+    expect(await runCoverageReadOutlastsWait()).toEqual({
+      settledWhenReadReturns: true,
+      heldReads: 1,
+    })
+  })
+
   it(`stops loading at release during the coverage check`, async () => {
     quietConsole()
     expect(await runReleaseDuringCoverageCheck()).toEqual({
@@ -2565,6 +2696,7 @@ describe(`persisted demand coverage oracle`, () => {
     async (kind) => {
       quietConsole()
       expect(await runSessionReset(kind)).toEqual(SESSION_RESET_LAW)
+      expect(await runSessionReset(kind, [])).toEqual(SESSION_RESET_LAW)
     },
   )
   it(`distinguishes the window law from "a window counts only rows"`, () => {

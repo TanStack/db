@@ -703,7 +703,8 @@ type FaultReach =
 //
 // - after the release, the source Collection is not loading a subset, and
 //   it stays so when the clock passes the wait;
-// - every upstream load that the release left behind was aborted.
+// - every upstream load that the release left behind was aborted, and no
+//   upstream load starts after the release.
 //
 // Declared reach: a release before the load reached the source, while it
 // waited on the source, and while a coverage read was in flight.
@@ -778,6 +779,7 @@ async function runReleaseAt(
     if (upstream.calls.length === 0) reach(`released before the source load`)
     else reach(`released while the source load waited`)
     if (reads.inFlight > 0) reach(`released during a coverage read`)
+    const callsAtRelease = upstream.calls.length
     await query.cleanup()
     await drain()
     const loadingAfterRelease = collection.isLoadingSubset
@@ -785,6 +787,8 @@ async function runReleaseAt(
     expect(upstream.calls.filter((call) => !call.signal?.aborted)).toEqual([])
     await vi.advanceTimersByTimeAsync(2000)
     await drain()
+    // A released demand starts no upstream load later.
+    expect(upstream.calls.length).toBe(callsAtRelease)
     return { loadingAfterRelease, loadingAfterWait: collection.isLoadingSubset }
   }, [
     () => vi.useRealTimers(),
