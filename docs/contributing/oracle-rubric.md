@@ -416,7 +416,8 @@ or through a driver:
 
 A test that uses none of them compares production with a hand-written value. It
 is a unit test, even when it asserts a contract, and it belongs in an
-ordinary test file beside the oracle. The `oracle/no-unit-test` lint rule
+ordinary test file beside the oracle. A finite table of hand-written expected
+values selected by a test's parameters is not a model. The `oracle/no-unit-test` lint rule
 reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are
 the shared oracle machinery and declare no parts.
 
