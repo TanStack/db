@@ -1,7 +1,12 @@
-// Controlled HTTP provider, deferred promises, and shared response headers for
-// the installed-SDK delivery tests. The oracle in
+// Controlled HTTP provider, deferred promises, shared response headers, and the
+// controlled coordinator for the installed-SDK delivery tests. The oracle in
 // electric-sdk-delivery-oracle.property.test.ts and the hand-written cases in
 // electric-sdk-delivery.test.ts both use them.
+import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
+import type {
+  ProtocolEnvelope,
+  TxCommitted,
+} from '../../db-sqlite-persistence-core/src'
 
 export type Item = { id: number; name: string }
 
@@ -108,3 +113,31 @@ export const headers = (offset: number) => ({
     name: { type: `text` },
   }),
 })
+
+// Deliver a coordinator notification through the same persistence wrapper
+// used by the installed-SDK receiver. The test still controls the provider
+// response independently of this durable-cache notification.
+export function controlledCoordinator(collectionId: string) {
+  let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  return Object.assign(new SingleProcessCoordinator(), {
+    subscribe: (
+      _collectionId: string,
+      onMessage: (message: ProtocolEnvelope<unknown>) => void,
+    ) => {
+      subscriber = onMessage
+      return () => {
+        subscriber = undefined
+      }
+    },
+    emit: (payload: TxCommitted) => {
+      subscriber?.({
+        v: 1,
+        dbName: `sdk-receiver`,
+        collectionId,
+        senderId: `other-tab`,
+        ts: Date.now(),
+        payload,
+      })
+    },
+  })
+}
