@@ -380,8 +380,23 @@ class OracleModule {
     const predicate = node.arguments.at(-1)
     return (
       node.arguments.slice(0, -1).some((value) => !isConstant(value)) &&
-      (predicate?.type === `Identifier` || this.usesInput(predicate))
+      this.#predicateUsesInput(predicate)
     )
+  }
+
+  /**
+   * Whether a property's predicate reads its input. A named predicate is read
+   * at its definition. One passed in as a parameter cannot be seen here, so
+   * it counts.
+   */
+  #predicateUsesInput(predicate) {
+    if (predicate?.type !== `Identifier`) return this.usesInput(predicate)
+    const definition = this.resolvedAt.get(predicate)?.defs[0]
+    if (definition?.type === `FunctionName`)
+      return this.usesInput(definition.node)
+    if (definition?.type === `Variable`)
+      return this.usesInput(definition.node.init)
+    return true
   }
 
   /** A function that reads at least one of its parameters. */

@@ -199,6 +199,12 @@ fcTest.prop(arbitraries)('persists generated commits', checkPolicy)`,
       code: `${header}it.each([{ name: 'stale', reject: () => checkHistory(stale) }])('rejects $name', ({ reject }) => expect(reject).toThrow())`,
       filename,
     },
+    // A named property predicate that reads its input.
+    {
+      code: `${fcImport}function roundTrips(value) { expect(decode(encode(value))).toBe(value) }
+it('round-trips every value', () => fc.assert(fc.property(fc.string(), roundTrips)))`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,
@@ -364,6 +370,15 @@ it.each(cells)('handles $a', ({ a }) => expect(compile(a)).toBe(1))`,
     {
       code: `import { withCleanup } from './history-oracle.js'
 it('compiles', () => withCleanup(() => expect(compile(1)).toBe(1)))`,
+      filename,
+      errors: [{ messageId: `undeclared` }],
+    },
+    // A named property predicate that ignores its input checks one value.
+    {
+      code: `${fcImport}const ignores = () => expect(encode(date)).toBe('x')
+it('encodes a date', () => {
+  fc.assert(fc.property(fc.integer(), ignores))
+})`,
       filename,
       errors: [{ messageId: `undeclared` }],
     },
