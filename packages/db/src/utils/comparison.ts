@@ -224,7 +224,7 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
-function normalizedKey(kind: string, value: string): string {
+export function normalizedKey(kind: string, value: string): string {
   return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
 }
 

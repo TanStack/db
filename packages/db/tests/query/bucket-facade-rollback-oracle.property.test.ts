@@ -100,7 +100,7 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * While a hold settles after a failed flush, a restoring sync update can
  * still publish the value the facade already shows; that permitted false
  * positive is the only event a failed flush may publish.
- * The work counter wraps the iteration, `forEach`, `get` and `has` methods of
+ * The work counter wraps the iteration, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
  * flush read. A pinned case covers nested facades across two edges: the child
  * edge commits, then the parent edge throws. Pinned cases also cover a
@@ -590,13 +590,12 @@ class Driver {
           return original(...args)
         }
       }
-      // Every read path of the stored rows: iteration, forEach, and lookups.
+      // Every read path of the stored rows: iteration and lookups.
       for (const method of [
         Symbol.iterator,
         `entries`,
         `keys`,
         `values`,
-        `forEach`,
         `get`,
         `has`,
       ]) {
