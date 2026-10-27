@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
+import { declareOracle } from '../../db/tests/oracle-config'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 
@@ -38,6 +39,8 @@ function expectedAt(phase: `hidden` | `visible`): {
     ? { providerCalls: 0, outboxEntries: 1, callerState: `pending` }
     : { providerCalls: 1, outboxEntries: 0, callerState: `fulfilled` }
 }
+
+declareOracle({ model: [expectedAt] })
 
 it.each([`visibilitychange`, `explicit retry`] as const)(
   `replays a committed outbox write on %s in a visible tab with a false online hint`,
