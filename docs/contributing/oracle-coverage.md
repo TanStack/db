@@ -2962,8 +2962,9 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Generated histories in the same file interleave server changes,
       deploys, partial and complete deliveries, every stop except resume
       invalidation, restarts, and reloads across two or three eager tabs
-      (fixed seed 952051961 and a random seed, 60 runs each;
-      `TANSTACK_DB_MULTI_TAB_ORACLE_SEED` and `_PATH` replay one). The
+      (fixed seed 952051961 and a random seed, 60 runs each; the shared
+      `TANSTACK_DB_ORACLE_SEED`, `_PATH`, and `_PROPERTY=
+      browser.multi-tab-reserved-history` replay one). The
       model folds committed batches into the expected durable rows. After
       every step it judges the durable rows, every Collection status, and
       the rows of each tab with no open transaction; after every tab catches

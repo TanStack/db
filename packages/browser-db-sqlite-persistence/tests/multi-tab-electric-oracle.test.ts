@@ -86,6 +86,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { createCollection } from '@tanstack/db'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../../electric-db-collection/src/electric'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
@@ -410,45 +415,14 @@ async function openWarmTabs(host: Host, count: number, syncMode: SyncMode) {
   return tabs
 }
 
-// Generated-history campaigns (ORC-007): a fixed seed and a random seed with
-// the same property and budget. TANSTACK_DB_MULTI_TAB_ORACLE_SEED and
-// TANSTACK_DB_MULTI_TAB_ORACLE_PATH replay one recorded counterexample;
-// TANSTACK_DB_MULTI_TAB_ORACLE_RUNS sets the budget.
+// Generated-history campaigns (ORC-007): a fixed seed and a random seed
+// with the same property and budget. TANSTACK_DB_ORACLE_SEED with
+// TANSTACK_DB_ORACLE_PATH and TANSTACK_DB_ORACLE_PROPERTY=
+// browser.multi-tab-reserved-history replays one recorded counterexample;
+// TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the budget.
+const GENERATED_PROPERTY = `browser.multi-tab-reserved-history`
 const GENERATED_FIXED_SEED = 952051961
-function generatedCampaigns(
-  environment: Record<string, string | undefined> = process.env,
-): Array<{
-  mode: `fixed` | `random` | `replay`
-  parameters: { numRuns: number; seed?: number; path?: string }
-}> {
-  const runText = environment.TANSTACK_DB_MULTI_TAB_ORACLE_RUNS ?? `60`
-  const numRuns = Number(runText)
-  if (!/^\d+$/.test(runText) || numRuns < 1) {
-    throw new Error(`Invalid TANSTACK_DB_MULTI_TAB_ORACLE_RUNS`)
-  }
-  const seedText = environment.TANSTACK_DB_MULTI_TAB_ORACLE_SEED
-  const path = environment.TANSTACK_DB_MULTI_TAB_ORACLE_PATH
-  if (seedText === undefined && path === undefined) {
-    return [
-      { mode: `fixed`, parameters: { numRuns, seed: GENERATED_FIXED_SEED } },
-      { mode: `random`, parameters: { numRuns } },
-    ]
-  }
-  const seed = Number(seedText)
-  if (seedText === undefined || !/^-?\d+$/.test(seedText)) {
-    throw new Error(`Invalid TANSTACK_DB_MULTI_TAB_ORACLE_SEED`)
-  }
-  if (path !== undefined && !/^\d+(?::\d+)*$/.test(path)) {
-    throw new Error(`TANSTACK_DB_MULTI_TAB_ORACLE_PATH must be a shrink path`)
-  }
-  return [
-    {
-      mode: `replay`,
-      parameters:
-        path === undefined ? { numRuns, seed } : { numRuns: 1, seed, path },
-    },
-  ]
-}
+const GENERATED_RUNS = 60
 
 async function waitForStream(tab: Tab, count: number) {
   for (let task = 0; task < 400 && tab.streamCount() < count; task++) {
@@ -1261,29 +1235,44 @@ describe(`multi-tab Electric over one persisted database`, () => {
     ])
   let generatedReach = createGeneratedReach()
 
-  it.each(generatedCampaigns())(
-    `keeps reserved commits lawful across generated multi-tab histories ($mode campaign)`,
-    async ({ parameters }) => {
-      generatedReach = createGeneratedReach()
-      await fc.assert(
-        fc.asyncProperty(generatedHistory, async (history) => {
-          try {
-            // fc.pre discards a history that reaches the known gap.
-            await runGeneratedHistory(history, () => fc.pre(false))
-          } finally {
-            await host?.close()
-            host = undefined
-            streams.length = 0
-          }
-        }),
-        parameters,
-      )
-      console.info(
-        `multi-tab generated reach`,
-        Object.fromEntries(generatedReach.counts()),
-      )
-      generatedReach.assertReached()
-    },
+  const runGeneratedCampaign = async (
+    parameters: ReturnType<typeof oraclePropertyOptions>,
+  ) => {
+    generatedReach = createGeneratedReach()
+    await fc.assert(
+      fc.asyncProperty(generatedHistory, async (history) => {
+        try {
+          // fc.pre discards a history that reaches the known gap.
+          await runGeneratedHistory(history, () => fc.pre(false))
+        } finally {
+          await host?.close()
+          host = undefined
+          streams.length = 0
+        }
+      }),
+      parameters,
+    )
+    console.info(
+      `multi-tab generated reach`,
+      Object.fromEntries(generatedReach.counts()),
+    )
+    generatedReach.assertReached()
+  }
+  it.skipIf(oracleReplayRequested())(
+    `keeps reserved commits lawful across generated multi-tab histories (fixed seed)`,
+    () =>
+      runGeneratedCampaign({
+        numRuns: oracleRuns(GENERATED_RUNS),
+        seed: GENERATED_FIXED_SEED,
+      }),
+    600_000,
+  )
+  it(
+    `keeps reserved commits lawful across generated multi-tab histories (random or replayed)`,
+    () =>
+      runGeneratedCampaign(
+        oraclePropertyOptions(GENERATED_RUNS, GENERATED_PROPERTY),
+      ),
     600_000,
   )
 
