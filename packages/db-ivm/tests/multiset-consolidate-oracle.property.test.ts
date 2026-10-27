@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { MultiSet } from '../src/multiset.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
 import type { MultiSetArray } from '../src/multiset.js'
 
 /**
@@ -463,23 +468,14 @@ function expectConsolidation(history: History): void {
 
 // ---------------------------------------------------------------------------
 // Campaigns. The fixed and random campaigns run the same property, grammar,
-// check, and budget. `TANSTACK_DB_IVM_CONSOLIDATE_SEED` and
-// `TANSTACK_DB_IVM_CONSOLIDATE_PATH` select a direct replay.
+// check, and budget. A path replay of `ivm.multiset-consolidate` runs its
+// recorded history once, and every other test stands aside. A seed alone
+// reseeds the random campaign.
 
-const replaySeed = process.env.TANSTACK_DB_IVM_CONSOLIDATE_SEED
-const replayPath = process.env.TANSTACK_DB_IVM_CONSOLIDATE_PATH
-const campaigns =
-  replaySeed === undefined && replayPath === undefined
-    ? [
-        { name: `2026929`, seed: 2026929 as number | undefined },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed: replaySeed === undefined ? undefined : Number(replaySeed),
-        },
-      ]
+const FIXED_SEED = 2026929
+const CONSOLIDATE = `ivm.multiset-consolidate`
+
+const it = oracleReplayTest(vitestIt)
 
 describe(`MultiSet consolidation oracle`, () => {
   it(`detects replacement of an input value with equal contents`, () => {
@@ -542,33 +538,25 @@ describe(`MultiSet consolidation oracle`, () => {
     ],
   ])(`%s`, (_name, records) => expectRecordsConsolidated(records))
 
-  for (const { name, seed } of campaigns) {
-    it(`matches the identity model across generated multisets (${name})`, () => {
-      if (replayPath !== undefined && replaySeed === undefined)
-        throw new Error(`TANSTACK_DB_IVM_CONSOLIDATE_PATH requires a seed`)
-      if (
-        replaySeed !== undefined &&
-        (replaySeed.trim() === `` ||
-          typeof seed !== `number` ||
-          !Number.isSafeInteger(seed))
-      )
-        throw new Error(`TANSTACK_DB_IVM_CONSOLIDATE_SEED must be an integer`)
-      fc.assert(
-        fc.property(historyArb, (history) => expectConsolidation(history)),
-        {
-          numRuns: 300,
-          ...(seed === undefined ? {} : { seed }),
-          ...(replayPath === undefined ? {} : { path: replayPath }),
-        },
-      )
-    })
-  }
+  it(`matches the identity model across generated multisets (${FIXED_SEED})`, () => {
+    fc.assert(
+      fc.property(historyArb, (history) => expectConsolidation(history)),
+      { numRuns: oracleRuns(300), seed: FIXED_SEED },
+    )
+  })
+  oracleReplayTest(fcTest, CONSOLIDATE).prop(
+    [historyArb],
+    oraclePropertyOptions(300, CONSOLIDATE),
+  )(
+    `matches the identity model across generated multisets (random)`,
+    expectConsolidation,
+  )
 
   // Positive execution witness: the fixed campaign reaches every mode, and many
   // histories have fewer result identities than distinct input records. That
   // happens only when records merge or cancel.
   it(`reaches every mode and merges records in the fixed campaign`, () => {
-    const sample = fc.sample(historyArb, { seed: 2026929, numRuns: 300 })
+    const sample = fc.sample(historyArb, { seed: FIXED_SEED, numRuns: 300 })
     const modes = new Set(sample.map((history) => history.mode))
     expect([...modes].sort()).toEqual(
       [

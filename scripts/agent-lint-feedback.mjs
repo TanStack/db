@@ -40,6 +40,11 @@ import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
 import oraclePlugin from './eslint-plugin-oracle/index.js'
+import {
+  describeLoweredRunBudget,
+  loweredRunBudgets,
+  mergeBase,
+} from './check-oracle-run-counts.mjs'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
 
@@ -82,24 +87,11 @@ function trackedOracleFiles() {
 
 /**
  * Every file that the branch adds or changes, including uncommitted work.
- * Without a main branch to compare against, the branch's own commits cannot
- * be found, so this fails instead of linting only the uncommitted work.
+ * `mergeBase` fails without a main branch, instead of linting only the
+ * uncommitted work.
  */
 function changedFiles() {
-  const base = [`origin/main`, `main`]
-    .map((branch) => {
-      try {
-        return git(`merge-base`, `HEAD`, branch)
-      } catch {
-        return undefined
-      }
-    })
-    .find((commit) => commit !== undefined)
-  if (base === undefined) {
-    throw new Error(
-      `Cannot find origin/main or main to compare this branch against. Run \`git fetch origin main\`.`,
-    )
-  }
+  const base = mergeBase()
   return repositoryFiles(
     git(`diff`, `--name-only`, `--diff-filter=ACMR`, base),
     git(`ls-files`, `--others`, `--exclude-standard`),
@@ -262,6 +254,27 @@ function selectFiles(input) {
     : { scope: `changed`, files: changedFiles() }
 }
 
+/**
+ * Lowered run budgets, for a report over the branch's changed files. A
+ * lowered budget can be deliberate, so it is a report for review, not a lint
+ * error.
+ */
+function runBudgetReport(scope) {
+  if (scope !== `changed`) return ``
+  return loweredRunBudgets()
+    .map(
+      (budget) =>
+        `${budget.file}: ${describeLoweredRunBudget(budget)}. Restore it, or explain why in the pull request.`,
+    )
+    .join(`\n`)
+}
+
 const input = readHookInput()
 const { scope, files } = selectFiles(input)
-respond(reportText(await lint(createLinter(), files)), input, scope)
+const report = [
+  reportText(await lint(createLinter(), files)),
+  runBudgetReport(scope),
+]
+  .filter(Boolean)
+  .join(`\n`)
+respond(report, input, scope)

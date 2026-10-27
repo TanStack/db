@@ -46,13 +46,13 @@ import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 const property = `join-result-key.pairs`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 type Key = string | number
 type Row = { id: Key; g: number }
@@ -260,7 +260,10 @@ async function runHistory(history: History): Promise<void> {
 }
 
 describe(`joined result key oracle`, () => {
-  if (requestedReplayProperty === undefined) {
+  // The pinned histories and the fixed campaign stand aside during any path
+  // replay. The random campaign below is the one that a replay of this
+  // property selects.
+  if (!oracleReplayRequested()) {
     for (const history of pinnedHistories) {
       it(`keeps every ${history.join} join pair for ${history.left
         .map((row) =>
@@ -273,17 +276,10 @@ describe(`joined result key oracle`, () => {
       seed: 44_501_962,
       numRuns: oracleRuns(80),
     })(`publishes one row per joined pair (fixed)`, runHistory)
-
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(80, property))(
-      `publishes one row per joined pair (random)`,
-      runHistory,
-    )
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(80, property))(
-      `publishes one row per joined pair (replay)`,
-      runHistory,
-    )
-  } else {
-    it.skip(`runs only when its replay property is selected`, () => {})
   }
+
+  oracleReplayTest(fcTest, property).prop(
+    [historyArbitrary],
+    oraclePropertyOptions(80, property),
+  )(`publishes one row per joined pair (random)`, runHistory)
 })

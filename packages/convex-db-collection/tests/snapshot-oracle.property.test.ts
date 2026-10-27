@@ -27,6 +27,7 @@ import { fc } from '@fast-check/vitest'
 import { makeFunctionReference } from 'convex/server'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexCollectionOptions } from '../src/index'
 import { controlledClient, withTestCleanup } from './helpers'
 import type { Row } from './helpers'
@@ -252,7 +253,7 @@ it(`refines complete snapshots throughout generated histories`, async () => {
           }
         },
       )
-      await fc.assert(property, { numRuns: 150, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(150), ...parameters })
     },
     { fixedSeed: 20261022 },
   )

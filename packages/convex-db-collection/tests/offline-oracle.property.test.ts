@@ -17,6 +17,7 @@ import { NonRetriableError } from '@tanstack/offline-transactions'
 import { makeFunctionReference } from 'convex/server'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexCollectionOptions } from '../src/index'
 import { convexOfflineMutation } from '../src/offline'
 import { controlledClient, query, withTestCleanup } from './helpers'
@@ -104,7 +105,7 @@ it(`preserves ordered replay and retry classification across bridge failures`, a
           }
         },
       )
-      await fc.assert(property, { numRuns: 60, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261022 },
   )
@@ -228,7 +229,7 @@ it(`requires real source acceptance through cold replay histories`, async () => 
           }
         },
       )
-      await fc.assert(property, { numRuns: 60, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261023 },
   )
@@ -404,7 +405,7 @@ it(`keeps rejected source acceptance terminal until a fresh sync run`, async () 
           }
         },
       )
-      await fc.assert(property, { numRuns: 60, ...parameters })
+      await fc.assert(property, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261023 },
   )
